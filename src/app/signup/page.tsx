@@ -3,6 +3,8 @@
 import { useActionState, useState } from "react";
 import { AlertCircle, ArrowRight, Eye, EyeOff, Lock, Mail, ShieldCheck, User } from "lucide-react";
 import { signUpAction, type AuthState } from "@/app/(auth)/actions";
+import { ConstellationField } from "@/components/login/ConstellationField";
+import { LoginCard } from "@/components/login/LoginCard";
 
 export default function SignUpPage() {
   const [showPw, setShowPw] = useState(false);
@@ -27,7 +29,10 @@ export default function SignUpPage() {
         </svg>
       </div>
 
-      <section className="login-card">
+      {/* Interactive layer — drifts on its own, reacts to the cursor. */}
+      <ConstellationField />
+
+      <LoginCard>
         <div className="flex flex-col items-center text-center">
           <svg
             width="56"
@@ -137,7 +142,7 @@ export default function SignUpPage() {
           <ShieldCheck className="h-4 w-4 text-[#5b8dff]" />
           Your data is secure and encrypted
         </div>
-      </section>
+      </LoginCard>
     </main>
   );
 }
