@@ -26,6 +26,10 @@ Open <http://localhost:3000> and sign in with the seeded demo account:
 demo@yourcrm.com / demo1234
 ```
 
+> That password is published in this repo. Harmless on localhost — but the
+> moment the app is on a public URL it is a working login for anyone who finds
+> it. **Change it from Settings → Password immediately after deploying.**
+
 No configuration is needed for local development: data goes to JSON files
 under `.data/`, and the session cookie is signed with a built-in dev key.
 **Neither is safe in production** — see below.

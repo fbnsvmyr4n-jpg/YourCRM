@@ -16,8 +16,12 @@ export type User = {
 export type SafeUser = Omit<User, "passwordHash">;
 
 /**
- * A demo account is seeded so the app is usable immediately.
- * Credentials: demo@yourcrm.com / demo1234
+ * A demo account is seeded so a fresh install is usable with no setup:
+ * demo@yourcrm.com / demo1234
+ *
+ * That is a known password published in source — fine on localhost, not fine
+ * on a public URL. Change it from Settings → Password immediately after the
+ * first deploy. The README says so too.
  */
 const seed: User[] = [
   {
