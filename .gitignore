@@ -32,6 +32,10 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
+
+# local file-backed data store — contains user records incl. password hashes
+/.data/
 
 # vercel
 .vercel
