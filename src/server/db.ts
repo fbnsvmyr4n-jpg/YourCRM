@@ -121,7 +121,33 @@ export async function dbMutate<T>(
   }
 }
 
-/** True when the app is configured to use Postgres. */
+/** True when the app is *configured* to use Postgres. Says nothing about reachability. */
 export function usingPostgres(): boolean {
   return !!process.env.DATABASE_URL;
+}
+
+/**
+ * Actually open a connection and run a query.
+ *
+ * `usingPostgres()` only checks that the env var exists — which is why the
+ * health endpoint once reported "ok: postgres" while the database was in fact
+ * unreachable. A health check that cannot detect a dead database is barely a
+ * health check. This is the real probe.
+ */
+export async function pingDatabase(): Promise<
+  { ok: true; ms: number } | { ok: false; error: string }
+> {
+  const started = Date.now();
+  try {
+    await init();
+    const client = await getPool().connect();
+    try {
+      await client.query("SELECT 1");
+      return { ok: true, ms: Date.now() - started };
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
 }
