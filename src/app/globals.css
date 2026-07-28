@@ -309,126 +309,211 @@ body {
   transform: rotate(-24deg);
 }
 /* ---------------------------------------------------------------------------
-   Auth screens — borderless.
-   There is no card: the content sits directly on the scene, held together by
-   a soft pool of light rather than a box. Everything that used to be chrome
-   (border, panel fill, backdrop blur) is gone, so type and motion carry it.
+   Auth screens — cinematic glass composition.
+
+   The panel is a floating frosted surface inside a staged environment rather
+   than a form on a background: luminous rim, layered shadow, ambient orbs
+   behind it at different depths. Motion is slow and continuous — the panel
+   breathes, the light drifts — so the page feels alive while standing still.
 --------------------------------------------------------------------------- */
-.login-card {
+
+.auth-stage {
   position: relative;
   z-index: 2;
-  width: min(92vw, 400px);
-  padding: 8px 4px;
-  color: #f3f6fc;
+  width: min(94vw, 452px);
+  isolation: isolate;
+}
 
-  /* Pointer position, written by LoginCard. */
+/* Ambient orbs behind the panel. Static blurred gradients rather than live
+   backdrop-filters — a stack of those is far more expensive and, behind an
+   already-frosted panel, indistinguishable. */
+.auth-orb {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: -2;
+  filter: blur(46px);
+  opacity: 0;
+  animation: orbIn 2.4s cubic-bezier(0.16, 1, 0.3, 1) forwards,
+             orbDrift 26s ease-in-out infinite;
+}
+.auth-orb.a {
+  width: 320px; height: 320px; top: -132px; left: -128px;
+  background: radial-gradient(circle, rgba(99,102,241,0.5), transparent 68%);
+  animation-delay: 0.15s, 0s;
+}
+.auth-orb.b {
+  width: 280px; height: 280px; bottom: -110px; right: -104px;
+  background: radial-gradient(circle, rgba(34,211,238,0.42), transparent 68%);
+  animation-delay: 0.3s, -9s;
+}
+.auth-orb.c {
+  width: 240px; height: 240px; top: 46%; right: -122px;
+  background: radial-gradient(circle, rgba(217,70,239,0.3), transparent 70%);
+  animation-delay: 0.45s, -17s;
+}
+@keyframes orbIn { to { opacity: 1; } }
+@keyframes orbDrift {
+  0%, 100% { transform: translate3d(0,0,0) scale(1); }
+  33%      { transform: translate3d(18px,-22px,0) scale(1.07); }
+  66%      { transform: translate3d(-14px,16px,0) scale(0.95); }
+}
+
+/* Glass shards suspended behind the panel — the layered-surface depth from the
+   reference, abstracted. Deliberately faint and rotated off-axis. */
+.auth-shard {
+  position: absolute;
+  z-index: -1;
+  border-radius: 24px;
+  border: 1px solid rgba(255,255,255,0.07);
+  background: linear-gradient(135deg, rgba(255,255,255,0.05), rgba(255,255,255,0.012));
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  pointer-events: none;
+  opacity: 0;
+  animation: shardIn 1.5s cubic-bezier(0.16, 1, 0.3, 1) forwards,
+             shardFloat 18s ease-in-out infinite;
+}
+.auth-shard.one {
+  width: 190px; height: 128px; top: -58px; right: -46px;
+  transform: rotate(9deg); animation-delay: 0.5s, 0s;
+}
+.auth-shard.two {
+  width: 150px; height: 106px; bottom: -44px; left: -52px;
+  transform: rotate(-11deg); animation-delay: 0.68s, -7s;
+}
+@keyframes shardIn { to { opacity: 1; } }
+@keyframes shardFloat {
+  0%, 100% { translate: 0 0; }
+  50%      { translate: 0 -14px; }
+}
+
+/* ---- entrance: the panel resolves out of the scene ---- */
+.auth-enter {
+  opacity: 0;
+  transform: translateY(26px) scale(0.965);
+  filter: blur(9px);
+  animation: panelIn 1.15s cubic-bezier(0.16, 1, 0.3, 1) 0.08s forwards;
+}
+@keyframes panelIn { to { opacity: 1; transform: none; filter: blur(0); } }
+
+/* ---- the panel ---- */
+.auth-panel {
+  position: relative;
+  border-radius: 30px;
+  padding: 42px 36px 32px;
+  color: #f3f6fc;
+  /* A dark base under the white sheen. Frosting alone left the mountains and
+     star field reading straight through the form, which cost legibility —
+     the environment has to sit behind the content, not inside it. The white
+     layer on top is what still makes it read as glass rather than a slab. */
+  background:
+    linear-gradient(160deg, rgba(255,255,255,0.07), rgba(255,255,255,0.02) 42%, rgba(255,255,255,0.042)),
+    linear-gradient(175deg, rgba(9,14,26,0.72), rgba(7,11,20,0.8));
+  backdrop-filter: blur(34px) saturate(150%);
+  -webkit-backdrop-filter: blur(34px) saturate(150%);
+  box-shadow:
+    0 50px 110px -34px rgba(0,0,0,0.9),
+    0 12px 40px -18px rgba(60,110,220,0.4),
+    inset 0 1px 0 rgba(255,255,255,0.16),
+    inset 0 -1px 0 rgba(255,255,255,0.04);
+  /* Slow rise and fall. Uses the standalone translate property, not transform,
+     so it composes with the entrance animation instead of overwriting it. */
+  animation: panelBreathe 11s ease-in-out 1.2s infinite;
   --mx: 50%;
-  --my: 30%;
+  --my: 0%;
   --glow: 0;
 }
-
-/* The only thing standing in for a panel: a wide, soft radial that lifts the
-   text off the starfield for legibility and fades to nothing at the edges —
-   no rim, so it never reads as a container. */
-.login-card::before {
-  content: "";
-  position: absolute;
-  /* Very wide and very gradual. An earlier, tighter version read as a dark
-     ellipse floating behind the text — a container by another name, which is
-     exactly what this design is trying not to have. The falloff has to finish
-     well outside the content for the eye to stop seeing an edge. */
-  inset: -60% -140%;
-  pointer-events: none;
-  z-index: -1;
-  background:
-    radial-gradient(
-      50% 42% at 50% 42%,
-      rgba(6, 10, 18, 0.62),
-      rgba(6, 10, 18, 0.34) 38%,
-      rgba(6, 10, 18, 0.12) 60%,
-      transparent 82%
-    ),
-    radial-gradient(26% 22% at var(--mx) var(--my), rgba(90, 150, 255, calc(0.09 * var(--glow))), transparent 72%);
+@keyframes panelBreathe {
+  0%, 100% { translate: 0 0; }
+  50%      { translate: 0 -9px; }
 }
 
-/* Staggered entrance. Children opt in with .auth-in and set their own --d,
-   so the sequence is declared where the markup is rather than centrally. */
+/* Luminous rim. mask-composite leaves only the border, so the highlight rides
+   the edge the way light catches real glass — the single detail that most
+   separates this from a flat translucent rectangle. */
+.auth-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  background:
+    linear-gradient(150deg, rgba(255,255,255,0.5), rgba(255,255,255,0.06) 34%, rgba(255,255,255,0.03) 62%, rgba(190,220,255,0.34)),
+    radial-gradient(320px circle at var(--mx) var(--my), rgba(170,210,255,calc(0.85 * var(--glow))), transparent 62%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+}
+/* Sheen tracking the cursor across the surface. */
+.auth-panel::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: var(--glow);
+  transition: opacity 0.5s ease;
+  background: radial-gradient(300px circle at var(--mx) var(--my), rgba(140,190,255,0.13), transparent 66%);
+}
+.auth-panel > * { position: relative; z-index: 1; }
+
+/* ---- staggered content ---- */
 .auth-in {
   opacity: 0;
-  transform: translateY(14px);
-  animation: authIn 0.85s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  transform: translateY(12px);
+  animation: authIn 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   animation-delay: var(--d, 0s);
 }
-@keyframes authIn {
-  to { opacity: 1; transform: none; }
-}
+@keyframes authIn { to { opacity: 1; transform: none; } }
 
-/* ---- fields: a rule, not a box ---- */
+/* ---- fields: inset glass ---- */
+.auth-field-wrap { position: relative; }
 .login-field {
   width: 100%;
-  background: transparent;
-  border: 0;
-  border-radius: 0;
+  background: rgba(255,255,255,0.035);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 15px;
   color: #f3f6fc;
-  padding: 14px 40px 14px 34px;
+  padding: 15px 44px 15px 46px;
   font-size: 15px;
   outline: none;
+  transition: border-color 0.35s cubic-bezier(0.16,1,0.3,1), background 0.35s ease, box-shadow 0.35s ease;
 }
-.login-field::placeholder {
-  color: #6f7a8d;
-  transition: color 0.3s ease;
+.login-field::placeholder { color: #6f7a8d; transition: color 0.3s ease; }
+.login-field:hover { border-color: rgba(255,255,255,0.17); }
+.login-field:focus {
+  border-color: rgba(120,175,255,0.62);
+  background: rgba(255,255,255,0.058);
+  box-shadow: 0 0 0 4px rgba(80,140,255,0.13), 0 8px 24px -12px rgba(80,140,255,0.5);
 }
 .login-field:focus::placeholder { color: #8892a5; }
-
-/* The wrapper owns the rule so it can animate independently of the input. */
-.field-line {
-  position: relative;
-}
-.field-line::before,
-.field-line::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 1px;
-  pointer-events: none;
-}
-.field-line::before { background: rgba(255, 255, 255, 0.13); }
-/* Focus sweeps an accent rule out from the centre. */
-.field-line::after {
-  background: linear-gradient(90deg, #3b82f6, #22d3ee);
-  transform: scaleX(0);
-  transform-origin: center;
-  transition: transform 0.55s cubic-bezier(0.16, 1, 0.3, 1);
-}
-.field-line:focus-within::after { transform: scaleX(1); }
-/* A bloom behind the focused field — the light responding to attention. */
-.field-line::before { transition: background 0.3s ease; }
-.field-line:focus-within::before { background: rgba(255, 255, 255, 0.2); }
+.auth-field-icon { transition: color 0.35s ease, transform 0.35s cubic-bezier(0.16,1,0.3,1); }
+.auth-field-wrap:focus-within .auth-field-icon { color: #8ab8ff; transform: translateY(-50%) scale(1.06); }
 
 .login-chk {
   appearance: none;
-  width: 17px;
-  height: 17px;
+  width: 17px; height: 17px;
   border-radius: 5px;
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255,255,255,0.24);
+  background: rgba(255,255,255,0.04);
   cursor: pointer;
   position: relative;
-  transition: 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: 0.25s cubic-bezier(0.16,1,0.3,1);
 }
+.login-chk:hover { border-color: rgba(255,255,255,0.4); }
 .login-chk:checked {
   background: linear-gradient(135deg, #3b82f6, #06b6d4);
   border-color: transparent;
+  box-shadow: 0 0 0 3px rgba(80,140,255,0.16);
 }
 .login-chk:checked::after {
   content: "";
   position: absolute;
-  left: 5px;
-  top: 1.5px;
-  width: 4px;
-  height: 9px;
+  left: 5px; top: 1.5px;
+  width: 4px; height: 9px;
   border: solid #fff;
   border-width: 0 2px 2px 0;
   transform: rotate(45deg);
@@ -439,30 +524,54 @@ body {
   position: relative;
   overflow: hidden;
   isolation: isolate;
-  transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.4s ease;
+  transition: transform 0.4s cubic-bezier(0.16,1,0.3,1), box-shadow 0.4s ease, filter 0.3s ease;
 }
 .auth-submit:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 18px 40px -12px rgba(56, 132, 255, 0.75), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  transform: translateY(-1.5px);
+  filter: brightness(1.06);
+  box-shadow: 0 20px 44px -14px rgba(56,132,255,0.8), inset 0 1px 0 rgba(255,255,255,0.45);
 }
-/* A light sweeping across the button on hover — brief, once, not a loop. */
+.auth-submit:active:not(:disabled) { transform: translateY(0) scale(0.988); }
 .auth-submit::after {
   content: "";
   position: absolute;
   inset: 0;
   z-index: -1;
-  background: linear-gradient(100deg, transparent 20%, rgba(255, 255, 255, 0.28) 50%, transparent 80%);
-  transform: translateX(-120%);
-  transition: transform 0.75s cubic-bezier(0.16, 1, 0.3, 1);
+  background: linear-gradient(100deg, transparent 22%, rgba(255,255,255,0.3) 50%, transparent 78%);
+  transform: translateX(-125%);
+  transition: transform 0.8s cubic-bezier(0.16,1,0.3,1);
 }
-.auth-submit:hover:not(:disabled)::after { transform: translateX(120%); }
+.auth-submit:hover:not(:disabled)::after { transform: translateX(125%); }
+
+.auth-link { color: #8ab4ff; transition: color 0.25s ease; }
+.auth-link:hover { color: #b3d0ff; }
+
+/* Password-reset note, revealed inline. Grid-row animation so the panel grows
+   smoothly instead of jumping. */
+.auth-note {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.5s cubic-bezier(0.16,1,0.3,1), opacity 0.4s ease;
+  opacity: 0;
+}
+.auth-note.open { grid-template-rows: 1fr; opacity: 1; }
+.auth-note > div { overflow: hidden; }
+
+/* On a phone the panel fills most of the frame, so the suspended shards have
+   nowhere to sit and just crowd the edges. The orbs stay — they are pure
+   colour and still carry the atmosphere. */
+@media (max-width: 560px) {
+  .auth-shard { display: none; }
+  .auth-panel { padding: 34px 24px 26px; border-radius: 26px; }
+  .auth-orb { filter: blur(52px); opacity: 0.75; }
+}
 
 @media (prefers-reduced-motion: reduce) {
-  .auth-in { opacity: 1; transform: none; animation: none; }
-  .login-card::before { display: none; }
-  .field-line::after,
-  .auth-submit::after,
-  .auth-submit { transition: none; }
+  .auth-in, .auth-enter { opacity: 1; transform: none; filter: none; animation: none; }
+  .auth-orb, .auth-shard { opacity: 1; animation: none; }
+  .auth-panel { animation: none; }
+  .auth-panel::after, .auth-submit::after { display: none; }
+  .auth-submit, .login-field, .auth-note { transition: none; }
 }
 
 

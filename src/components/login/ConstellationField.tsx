@@ -60,6 +60,102 @@ function pickTint(): number {
   return 3;
 }
 
+/** Sum of uniforms ≈ normal. Used to cluster stars toward the galactic plane. */
+function gaussian(): number {
+  return (Math.random() + Math.random() + Math.random() - 1.5) / 1.5;
+}
+
+/**
+ * Paints the Milky Way to an offscreen canvas, once per resize.
+ *
+ * In the reference photographs the galaxy is the *subject* — a bright band
+ * with visible internal structure and dark dust lanes cutting through it — not
+ * the faint corner smudge this scene had before.
+ *
+ * It is painted once and then blitted each frame with a small parallax offset.
+ * Rebuilding several thousand clustered stars every frame would be pointless
+ * work: the band itself never changes, only where it sits.
+ */
+function paintMilkyWay(w: number, h: number): HTMLCanvasElement {
+  const off = document.createElement("canvas");
+  off.width = w;
+  off.height = h;
+  const g = off.getContext("2d")!;
+
+  // The band runs corner to corner. Work in a rotated frame so "along the
+  // band" is simply +x and "across it" is +y.
+  const angle = -0.62;
+  const len = Math.hypot(w, h) * 1.3;
+  const halfWidth = Math.min(w, h) * 0.3;
+
+  g.save();
+  g.translate(w * 0.5, h * 0.42);
+  g.rotate(angle);
+
+  // Diffuse glow of the band.
+  const band = g.createLinearGradient(0, -halfWidth, 0, halfWidth);
+  band.addColorStop(0, "rgba(120,150,215,0)");
+  band.addColorStop(0.3, "rgba(140,165,225,0.055)");
+  band.addColorStop(0.5, "rgba(190,190,225,0.085)");
+  band.addColorStop(0.7, "rgba(140,165,225,0.055)");
+  band.addColorStop(1, "rgba(120,150,215,0)");
+  g.fillStyle = band;
+  g.fillRect(-len / 2, -halfWidth, len, halfWidth * 2);
+
+  // A warmer, denser core toward one end — the galactic centre.
+  const core = g.createRadialGradient(-len * 0.12, 0, 0, -len * 0.12, 0, halfWidth * 1.5);
+  core.addColorStop(0, "rgba(228,205,180,0.075)");
+  core.addColorStop(0.5, "rgba(190,175,190,0.035)");
+  core.addColorStop(1, "rgba(150,160,210,0)");
+  g.fillStyle = core;
+  g.fillRect(-len / 2, -halfWidth * 1.6, len, halfWidth * 3.2);
+
+  // Dense field clustered on the plane. Falls off with distance from the
+  // centreline, which is what gives the band a soft edge rather than a border.
+  const count = Math.round((w * h) / 950);
+  for (let i = 0; i < count; i++) {
+    const bx = (Math.random() - 0.5) * len;
+    const spread = gaussian();
+    const by = spread * halfWidth;
+    const density = 1 - Math.min(1, Math.abs(spread));
+    if (Math.random() > density * 0.95) continue;
+
+    const r = Math.random() < 0.9 ? Math.random() * 0.55 + 0.18 : Math.random() * 1.1 + 0.5;
+    const a = (0.18 + Math.random() * 0.5) * density;
+    const [cr, cg, cb] = STAR_COLORS[pickTint()];
+    g.fillStyle = `rgba(${cr},${cg},${cb},${a})`;
+    g.beginPath();
+    g.arc(bx, by, r, 0, Math.PI * 2);
+    g.fill();
+  }
+
+  // Dust lanes — the dark rifts that split the band lengthways. Painted last,
+  // punching back out through the stars, which is how they read in a photo.
+  g.globalCompositeOperation = "destination-out";
+  for (const lane of [
+    { y: -halfWidth * 0.1, amp: halfWidth * 0.16, thick: halfWidth * 0.2, a: 0.5 },
+    { y: halfWidth * 0.26, amp: halfWidth * 0.1, thick: halfWidth * 0.13, a: 0.34 },
+    { y: -halfWidth * 0.42, amp: halfWidth * 0.12, thick: halfWidth * 0.1, a: 0.26 },
+  ]) {
+    g.beginPath();
+    for (let x = -len / 2; x <= len / 2; x += len / 60) {
+      const y = lane.y + Math.sin(x / (len / 7)) * lane.amp;
+      if (x === -len / 2) g.moveTo(x, y);
+      else g.lineTo(x, y);
+    }
+    g.strokeStyle = `rgba(0,0,0,${lane.a})`;
+    g.lineWidth = lane.thick;
+    g.lineCap = "round";
+    g.filter = "blur(6px)";
+    g.stroke();
+    g.filter = "none";
+  }
+  g.globalCompositeOperation = "source-over";
+  g.restore();
+
+  return off;
+}
+
 /**
  * Tuning. Deliberately fewer, larger, brighter stars than a typical particle
  * demo: the brief is high-end minimalist, and restraint plus a strong cursor
@@ -132,6 +228,8 @@ export function ConstellationField() {
     let stars: Star[] = [];
     /** Link radius for the current viewport — see `linkDistanceFor`. */
     let linkDist = LINK_DISTANCE;
+    /** The Milky Way, painted once per resize and blitted each frame. */
+    let galaxy: HTMLCanvasElement | null = null;
     let raf = 0;
     let running = true;
 
@@ -151,6 +249,7 @@ export function ConstellationField() {
       canvas!.height = Math.floor(height * dpr);
       ctx!.setTransform(dpr, 0, 0, dpr, 0, 0);
       linkDist = linkDistanceFor(width, height);
+      galaxy = width > 0 && height > 0 ? paintMilkyWay(width, height) : null;
 
       // Scale count to area so a large monitor isn't sparse and a phone isn't
       // needlessly busy. Sparser than before — larger, brighter points with
@@ -191,6 +290,14 @@ export function ConstellationField() {
       }
 
       ctx!.clearRect(0, 0, width, height);
+
+      // The galaxy sits behind everything, drifting only slightly with the
+      // pointer — distant things should move least.
+      if (galaxy) {
+        const gx = hasPointer ? -(cur.x / width - 0.5) * 14 : 0;
+        const gy = hasPointer ? -(cur.y / height - 0.5) * 10 : 0;
+        ctx!.drawImage(galaxy, gx, gy);
+      }
 
       // Two very large, slow radials drifting on out-of-phase sine paths. This
       // is the "flow" underneath everything — at this scale and opacity it
