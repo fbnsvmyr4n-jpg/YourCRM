@@ -32,9 +32,28 @@ type Star = {
   phase: number;
 };
 
-const LINK_DISTANCE = 132;
-const CURSOR_RADIUS = 190;
+/**
+ * Tuning. Deliberately fewer, larger, brighter stars than a typical particle
+ * demo: the brief is high-end minimalist, and restraint plus a strong cursor
+ * response reads as considered where a dense fizzing field reads as a
+ * screensaver.
+ */
+const LINK_DISTANCE = 168;
+const CURSOR_RADIUS = 300;
 const MAX_DPR = 2;
+/** Positions kept for the cursor wake, newest first. */
+const TRAIL_LENGTH = 18;
+
+/**
+ * The slow colour wash behind the stars. Sine and cosine on different
+ * frequencies give a path that never visibly repeats, so it reads as drifting
+ * rather than looping.
+ */
+const AURORA = [
+  { cx: 0.28, cy: 0.32, ax: 0.16, ay: 0.12, sx: 0.000045, sy: 0.000062, p: 0, r: 0.55, color: "rgba(56,132,255,0.13)" },
+  { cx: 0.74, cy: 0.62, ax: 0.14, ay: 0.15, sx: 0.000037, sy: 0.000051, p: 2.1, r: 0.5, color: "rgba(34,211,238,0.10)" },
+  { cx: 0.55, cy: 0.18, ax: 0.2, ay: 0.1, sx: 0.000029, sy: 0.000043, p: 4.2, r: 0.42, color: "rgba(139,92,246,0.09)" },
+] as const;
 
 /**
  * The two pieces of maths that define how this feels, pulled out as pure
@@ -57,6 +76,18 @@ export function linkOpacity(d: number, lift = 0, max = LINK_DISTANCE): number {
   return fade * fade * (0.16 + lift * 0.5);
 }
 
+/**
+ * Link radius scaled to the viewport.
+ *
+ * A fixed radius is a bug on small screens: 168px spans nearly half a phone,
+ * so almost every star connects to every other and the field turns into a
+ * dense web instead of sparse constellations. Scaling by the diagonal keeps
+ * the *visual* density constant across sizes.
+ */
+export function linkDistanceFor(width: number, height: number): number {
+  return Math.min(LINK_DISTANCE, Math.max(78, Math.hypot(width, height) * 0.1));
+}
+
 export function ConstellationField() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -71,6 +102,8 @@ export function ConstellationField() {
     let width = 0;
     let height = 0;
     let stars: Star[] = [];
+    /** Link radius for the current viewport — see `linkDistanceFor`. */
+    let linkDist = LINK_DISTANCE;
     let raf = 0;
     let running = true;
 
@@ -79,6 +112,8 @@ export function ConstellationField() {
     const target = { x: -9999, y: -9999 };
     const cur = { x: -9999, y: -9999 };
     let hasPointer = false;
+    /** Recent cursor positions, newest first — drawn as a fading wake. */
+    const trail: { x: number; y: number }[] = [];
 
     function build() {
       const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
@@ -87,10 +122,12 @@ export function ConstellationField() {
       canvas!.width = Math.floor(width * dpr);
       canvas!.height = Math.floor(height * dpr);
       ctx!.setTransform(dpr, 0, 0, dpr, 0, 0);
+      linkDist = linkDistanceFor(width, height);
 
       // Scale count to area so a large monitor isn't sparse and a phone isn't
-      // needlessly busy.
-      const count = Math.round(Math.min(170, Math.max(46, (width * height) / 12000)));
+      // needlessly busy. Sparser than before — larger, brighter points with
+      // longer links carry more presence than a dense field of specks.
+      const count = Math.round(Math.min(110, Math.max(34, (width * height) / 20000)));
       stars = Array.from({ length: count }, () => {
         const depth = Math.random();
         return {
@@ -111,7 +148,28 @@ export function ConstellationField() {
       cur.x += (target.x - cur.x) * 0.08;
       cur.y += (target.y - cur.y) * 0.08;
 
+      if (hasPointer) {
+        trail.unshift({ x: cur.x, y: cur.y });
+        if (trail.length > TRAIL_LENGTH) trail.pop();
+      } else if (trail.length) {
+        trail.pop();
+      }
+
       ctx!.clearRect(0, 0, width, height);
+
+      // Two very large, slow radials drifting on out-of-phase sine paths. This
+      // is the "flow" underneath everything — at this scale and opacity it
+      // registers as depth rather than as shapes you can point at.
+      for (const a of AURORA) {
+        const ax = width * (a.cx + Math.sin(time * a.sx + a.p) * a.ax);
+        const ay = height * (a.cy + Math.cos(time * a.sy + a.p) * a.ay);
+        const r = Math.max(width, height) * a.r;
+        const g = ctx!.createRadialGradient(ax, ay, 0, ax, ay, r);
+        g.addColorStop(0, a.color);
+        g.addColorStop(1, "rgba(0,0,0,0)");
+        ctx!.fillStyle = g;
+        ctx!.fillRect(0, 0, width, height);
+      }
 
       // Parallax: the field slides opposite the pointer, further for nearer
       // bands. Small numbers on purpose — past a few pixels it reads as drift.
@@ -141,15 +199,18 @@ export function ConstellationField() {
           const dist = Math.hypot(dx, dy);
           if (dist > 0.001) {
             const pull = cursorInfluence(dist);
-            x += dx * pull * 0.22;
-            y += dy * pull * 0.22;
+            x += dx * pull * 0.34;
+            y += dy * pull * 0.34;
             glow = pull;
           }
         }
 
         const twinkle = 0.72 + Math.sin(time * 0.0013 + s.phase) * 0.28;
-        const alpha = Math.min(1, (0.2 + s.depth * 0.55) * twinkle + glow * 0.75);
-        return { x, y, r: s.r, alpha, glow, depth: s.depth };
+        const alpha = Math.min(1, (0.24 + s.depth * 0.6) * twinkle + glow * 0.85);
+        // Stars swell as the cursor reaches them — the clearest single signal
+        // that the field is responding to you.
+        const r = s.r * (1 + glow * 1.5);
+        return { x, y, r, alpha, glow, depth: s.depth };
       });
 
       // Links first, so stars sit on top of their own connections.
@@ -161,15 +222,18 @@ export function ConstellationField() {
           const dx = a.x - b.x;
           const dy = a.y - b.y;
           const d2 = dx * dx + dy * dy;
-          if (d2 > LINK_DISTANCE * LINK_DISTANCE) continue;
+          if (d2 > linkDist * linkDist) continue;
 
           const d = Math.sqrt(d2);
           // Links near the cursor pick up the accent colour and strengthen.
           const lift = Math.max(a.glow, b.glow);
-          const opacity = linkOpacity(d, lift);
+          const opacity = linkOpacity(d, lift, linkDist);
           ctx!.strokeStyle = lift > 0.04
-            ? `rgba(96, 165, 250, ${opacity})`
-            : `rgba(180, 200, 235, ${opacity * 0.75})`;
+            ? `rgba(125, 190, 255, ${opacity})`
+            : `rgba(180, 200, 235, ${opacity * 0.8})`;
+          // Lines thicken slightly under the cursor so the constellation the
+          // pointer is touching reads as a single connected shape.
+          ctx!.lineWidth = 1 + lift * 0.8;
           ctx!.beginPath();
           ctx!.moveTo(a.x, a.y);
           ctx!.lineTo(b.x, b.y);
@@ -195,14 +259,40 @@ export function ConstellationField() {
         ctx!.fill();
       }
 
+      // The wake — a comet tail of the cursor's recent path. Drawn after the
+      // stars so it sits over them, and tapered so the oldest end vanishes.
+      if (trail.length > 2) {
+        for (let i = trail.length - 1; i > 0; i--) {
+          const t0 = trail[i];
+          const t1 = trail[i - 1];
+          const k = 1 - i / trail.length;
+          ctx!.strokeStyle = `rgba(140, 200, 255, ${k * k * 0.3})`;
+          ctx!.lineWidth = k * 2.4;
+          ctx!.lineCap = "round";
+          ctx!.beginPath();
+          ctx!.moveTo(t0.x, t0.y);
+          ctx!.lineTo(t1.x, t1.y);
+          ctx!.stroke();
+        }
+      }
+
       // A soft light where the cursor is, tying the whole field together.
       if (hasPointer) {
         const g = ctx!.createRadialGradient(cur.x, cur.y, 0, cur.x, cur.y, CURSOR_RADIUS * 1.15);
-        g.addColorStop(0, "rgba(56, 132, 255, 0.10)");
-        g.addColorStop(0.55, "rgba(6, 182, 212, 0.045)");
-        g.addColorStop(1, "rgba(6, 182, 212, 0)");
+        g.addColorStop(0, "rgba(70, 150, 255, 0.16)");
+        g.addColorStop(0.5, "rgba(34, 211, 238, 0.07)");
+        g.addColorStop(1, "rgba(34, 211, 238, 0)");
         ctx!.fillStyle = g;
         ctx!.fillRect(0, 0, width, height);
+
+        // A tight core right at the pointer, so the light has a source.
+        const core = ctx!.createRadialGradient(cur.x, cur.y, 0, cur.x, cur.y, 46);
+        core.addColorStop(0, "rgba(190, 225, 255, 0.3)");
+        core.addColorStop(1, "rgba(190, 225, 255, 0)");
+        ctx!.fillStyle = core;
+        ctx!.beginPath();
+        ctx!.arc(cur.x, cur.y, 46, 0, Math.PI * 2);
+        ctx!.fill();
       }
 
       raf = requestAnimationFrame(frame);

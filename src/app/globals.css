@@ -308,97 +308,115 @@ body {
   filter: blur(16px);
   transform: rotate(-24deg);
 }
+/* ---------------------------------------------------------------------------
+   Auth screens — borderless.
+   There is no card: the content sits directly on the scene, held together by
+   a soft pool of light rather than a box. Everything that used to be chrome
+   (border, panel fill, backdrop blur) is gone, so type and motion carry it.
+--------------------------------------------------------------------------- */
 .login-card {
   position: relative;
   z-index: 2;
-  width: min(92vw, 430px);
-  border-radius: 28px;
-  padding: 40px 34px 28px;
-  background: rgba(14, 19, 30, 0.55);
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  backdrop-filter: blur(24px) saturate(130%);
-  -webkit-backdrop-filter: blur(24px) saturate(130%);
-  box-shadow: 0 40px 90px -30px rgba(0, 0, 0, 0.85), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  width: min(92vw, 400px);
+  padding: 8px 4px;
   color: #f3f6fc;
 
-  /* Pointer position, written by LoginCard. Defaults keep the card looking
-     right before the first pointer event and on touch devices. */
+  /* Pointer position, written by LoginCard. */
   --mx: 50%;
-  --my: 0%;
+  --my: 30%;
   --glow: 0;
 }
 
-/* Inner sheen — light falling across the glass. */
-.login-card::before,
-.login-card::after {
+/* The only thing standing in for a panel: a wide, soft radial that lifts the
+   text off the starfield for legibility and fades to nothing at the edges —
+   no rim, so it never reads as a container. */
+.login-card::before {
   content: "";
   position: absolute;
-  inset: 0;
-  border-radius: inherit;
+  /* Very wide and very gradual. An earlier, tighter version read as a dark
+     ellipse floating behind the text — a container by another name, which is
+     exactly what this design is trying not to have. The falloff has to finish
+     well outside the content for the eye to stop seeing an edge. */
+  inset: -60% -140%;
   pointer-events: none;
-  opacity: var(--glow);
-  transition: opacity 0.4s ease;
-}
-.login-card::before {
-  background: radial-gradient(
-    260px circle at var(--mx) var(--my),
-    rgba(120, 180, 255, 0.16),
-    transparent 68%
-  );
-  z-index: 0;
-}
-/* Edge catch — the highlight rides the border itself, which is what real
-   glass does and what makes this read as material rather than as a blob.
-   `mask-composite: exclude` punches out the middle, leaving only the rim. */
-.login-card::after {
-  padding: 1px;
-  background: radial-gradient(
-    340px circle at var(--mx) var(--my),
-    rgba(150, 200, 255, 0.75),
-    rgba(120, 180, 255, 0.12) 40%,
-    transparent 70%
-  );
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  mask-composite: exclude;
-  z-index: 1;
-}
-/* Keep the form above both decorative layers. */
-.login-card > * {
-  position: relative;
-  z-index: 2;
+  z-index: -1;
+  background:
+    radial-gradient(
+      50% 42% at 50% 42%,
+      rgba(6, 10, 18, 0.62),
+      rgba(6, 10, 18, 0.34) 38%,
+      rgba(6, 10, 18, 0.12) 60%,
+      transparent 82%
+    ),
+    radial-gradient(26% 22% at var(--mx) var(--my), rgba(90, 150, 255, calc(0.09 * var(--glow))), transparent 72%);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .login-card::before,
-  .login-card::after {
-    display: none;
-  }
+/* Staggered entrance. Children opt in with .auth-in and set their own --d,
+   so the sequence is declared where the markup is rather than centrally. */
+.auth-in {
+  opacity: 0;
+  transform: translateY(14px);
+  animation: authIn 0.85s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation-delay: var(--d, 0s);
+}
+@keyframes authIn {
+  to { opacity: 1; transform: none; }
 }
 
+/* ---- fields: a rule, not a box ---- */
 .login-field {
   width: 100%;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 14px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
   color: #f3f6fc;
-  padding: 15px 46px;
+  padding: 14px 40px 14px 34px;
   font-size: 15px;
   outline: none;
-  transition: border-color 0.18s, box-shadow 0.18s, background 0.18s;
 }
-.login-field::placeholder { color: #7c869a; }
+.login-field::placeholder {
+  color: #6f7a8d;
+  transition: color 0.3s ease;
+}
+.login-field:focus::placeholder { color: #8892a5; }
+
+/* The wrapper owns the rule so it can animate independently of the input. */
+.field-line {
+  position: relative;
+}
+.field-line::before,
+.field-line::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  pointer-events: none;
+}
+.field-line::before { background: rgba(255, 255, 255, 0.13); }
+/* Focus sweeps an accent rule out from the centre. */
+.field-line::after {
+  background: linear-gradient(90deg, #3b82f6, #22d3ee);
+  transform: scaleX(0);
+  transform-origin: center;
+  transition: transform 0.55s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.field-line:focus-within::after { transform: scaleX(1); }
+/* A bloom behind the focused field — the light responding to attention. */
+.field-line::before { transition: background 0.3s ease; }
+.field-line:focus-within::before { background: rgba(255, 255, 255, 0.2); }
+
 .login-chk {
   appearance: none;
-  width: 18px;
-  height: 18px;
+  width: 17px;
+  height: 17px;
   border-radius: 5px;
   border: 1px solid rgba(255, 255, 255, 0.22);
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.03);
   cursor: pointer;
   position: relative;
-  transition: 0.15s;
+  transition: 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .login-chk:checked {
   background: linear-gradient(135deg, #3b82f6, #06b6d4);
@@ -409,17 +427,44 @@ body {
   position: absolute;
   left: 5px;
   top: 1.5px;
-  width: 5px;
+  width: 4px;
   height: 9px;
   border: solid #fff;
   border-width: 0 2px 2px 0;
   transform: rotate(45deg);
 }
-.login-field:focus {
-  border-color: rgba(56, 132, 255, 0.6);
-  background: rgba(255, 255, 255, 0.055);
-  box-shadow: 0 0 0 4px rgba(56, 132, 255, 0.14);
+
+/* ---- primary action ---- */
+.auth-submit {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.4s ease;
 }
+.auth-submit:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 18px 40px -12px rgba(56, 132, 255, 0.75), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+/* A light sweeping across the button on hover — brief, once, not a loop. */
+.auth-submit::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(100deg, transparent 20%, rgba(255, 255, 255, 0.28) 50%, transparent 80%);
+  transform: translateX(-120%);
+  transition: transform 0.75s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.auth-submit:hover:not(:disabled)::after { transform: translateX(120%); }
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-in { opacity: 1; transform: none; animation: none; }
+  .login-card::before { display: none; }
+  .field-line::after,
+  .auth-submit::after,
+  .auth-submit { transition: none; }
+}
+
 
 /* Faux map thumbnail (inbox contact card) */
 .map-thumb {
