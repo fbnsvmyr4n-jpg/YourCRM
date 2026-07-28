@@ -4,29 +4,24 @@ import { useActionState, useState } from "react";
 import { AlertCircle, ArrowRight, Eye, EyeOff, Lock, Mail, ShieldCheck, User } from "lucide-react";
 import { signUpAction, type AuthState } from "@/app/(auth)/actions";
 import { ConstellationField } from "@/components/login/ConstellationField";
+import { NightScene } from "@/components/login/NightScene";
 import { LoginCard } from "@/components/login/LoginCard";
 
 export default function SignUpPage() {
   const [showPw, setShowPw] = useState(false);
   const [state, formAction, pending] = useActionState<AuthState, FormData>(signUpAction, undefined);
 
+  // overflow-hidden matters: the ambient glow behind the content is
+  // deliberately far wider than the content itself, and without clipping it
+  // expands the document on narrow screens — which squeezed the whole layout
+  // into the left half of a phone.
   return (
-    <main className="relative flex min-h-screen w-full items-center justify-center px-4 py-10">
+    <main className="relative flex min-h-screen w-full items-center justify-center overflow-hidden px-4 py-10">
       {/* Cinematic scene */}
       <div className="login-scene" aria-hidden>
         <div className="login-milky" />
         <div className="login-stars" />
-        <svg
-          className="absolute bottom-0 left-0 right-0"
-          style={{ height: "58vh" }}
-          viewBox="0 0 1440 500"
-          preserveAspectRatio="xMidYMax slice"
-          xmlns="http://www.w3.org/2000/svg"
-        >
-          <path d="M0,500 L0,300 L180,150 L320,260 L470,120 L640,300 L760,200 L920,330 L1080,180 L1240,300 L1440,220 L1440,500 Z" fill="#0a1120" />
-          <path d="M0,500 L0,360 L220,240 L400,340 L560,250 L760,380 L980,290 L1200,390 L1440,320 L1440,500 Z" fill="#080d18" />
-          <path d="M0,500 L0,430 L260,360 L520,430 L820,370 L1120,440 L1440,390 L1440,500 Z" fill="#05080f" />
-        </svg>
+        <NightScene />
       </div>
 
       {/* Interactive layer — drifts on its own, reacts to the cursor. */}

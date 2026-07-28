@@ -30,7 +30,35 @@ type Star = {
   r: number;
   /** Phase offset so the twinkle isn't synchronised across the field. */
   phase: number;
+  /** Index into STAR_COLORS — real starfields are not uniformly white. */
+  tint: number;
+  /** The brightest few get diffraction spikes; most do not. */
+  hero: boolean;
 };
+
+/**
+ * Star colour by temperature, roughly following real stellar classes: mostly
+ * white and blue-white, with a minority of warm yellow and amber. A field of
+ * identical white dots is the single clearest tell that a starfield was
+ * generated rather than photographed.
+ */
+const STAR_COLORS = [
+  [214, 232, 255], // blue-white
+  [236, 244, 255], // white
+  [255, 246, 228], // warm white
+  [255, 228, 190], // amber
+  [198, 218, 255], // cool blue
+] as const;
+
+/** Weighted so warm stars stay a minority, as they are in a real sky. */
+function pickTint(): number {
+  const r = Math.random();
+  if (r < 0.34) return 1;
+  if (r < 0.62) return 0;
+  if (r < 0.8) return 4;
+  if (r < 0.93) return 2;
+  return 3;
+}
 
 /**
  * Tuning. Deliberately fewer, larger, brighter stars than a typical particle
@@ -138,6 +166,10 @@ export function ConstellationField() {
           depth,
           r: 0.5 + depth * 1.5,
           phase: Math.random() * Math.PI * 2,
+          tint: pickTint(),
+          // Roughly one in nine. Spikes on everything looks like glitter;
+          // spikes on a handful looks like a long exposure.
+          hero: Math.random() < 0.11 && depth > 0.55,
         };
       });
     }
@@ -145,8 +177,11 @@ export function ConstellationField() {
     function frame(time: number) {
       if (!running) return;
 
-      cur.x += (target.x - cur.x) * 0.08;
-      cur.y += (target.y - cur.y) * 0.08;
+      // 0.14 rather than 0.08 — noticeably quicker to follow the pointer while
+      // still easing. Above roughly 0.2 the smoothing stops reading as fluid
+      // and starts snapping to each event.
+      cur.x += (target.x - cur.x) * 0.14;
+      cur.y += (target.y - cur.y) * 0.14;
 
       if (hasPointer) {
         trail.unshift({ x: cur.x, y: cur.y });
@@ -210,7 +245,7 @@ export function ConstellationField() {
         // Stars swell as the cursor reaches them — the clearest single signal
         // that the field is responding to you.
         const r = s.r * (1 + glow * 1.5);
-        return { x, y, r, alpha, glow, depth: s.depth };
+        return { x, y, r, alpha, glow, depth: s.depth, tint: s.tint, hero: s.hero };
       });
 
       // Links first, so stars sit on top of their own connections.
@@ -242,18 +277,36 @@ export function ConstellationField() {
       }
 
       for (const s of drawn) {
-        if (s.glow > 0.02) {
-          const halo = ctx!.createRadialGradient(s.x, s.y, 0, s.x, s.y, s.r * 9);
-          halo.addColorStop(0, `rgba(125, 211, 252, ${0.36 * s.glow})`);
-          halo.addColorStop(1, "rgba(125, 211, 252, 0)");
-          ctx!.fillStyle = halo;
+        const [cr, cg, cb] = STAR_COLORS[s.tint];
+
+        // Every star carries a faint bloom in its own colour — a bare dot
+        // reads as a pixel, a dot with a halo reads as a light source.
+        const bloomR = s.r * (s.hero ? 7 : 4.5) * (1 + s.glow * 1.6);
+        const bloom = ctx!.createRadialGradient(s.x, s.y, 0, s.x, s.y, bloomR);
+        bloom.addColorStop(0, `rgba(${cr}, ${cg}, ${cb}, ${s.alpha * (0.3 + s.glow * 0.5)})`);
+        bloom.addColorStop(1, `rgba(${cr}, ${cg}, ${cb}, 0)`);
+        ctx!.fillStyle = bloom;
+        ctx!.beginPath();
+        ctx!.arc(s.x, s.y, bloomR, 0, Math.PI * 2);
+        ctx!.fill();
+
+        // Diffraction spikes on the brightest handful — the four-point flare a
+        // camera lens produces on a bright point source.
+        if (s.hero) {
+          const len = s.r * (9 + s.glow * 14);
+          const a = s.alpha * (0.32 + s.glow * 0.4);
+          ctx!.strokeStyle = `rgba(${cr}, ${cg}, ${cb}, ${a})`;
+          ctx!.lineWidth = 0.8;
+          ctx!.lineCap = "round";
           ctx!.beginPath();
-          ctx!.arc(s.x, s.y, s.r * 9, 0, Math.PI * 2);
-          ctx!.fill();
+          ctx!.moveTo(s.x - len, s.y);
+          ctx!.lineTo(s.x + len, s.y);
+          ctx!.moveTo(s.x, s.y - len);
+          ctx!.lineTo(s.x, s.y + len);
+          ctx!.stroke();
         }
-        ctx!.fillStyle = s.glow > 0.25
-          ? `rgba(219, 240, 255, ${s.alpha})`
-          : `rgba(233, 240, 255, ${s.alpha})`;
+
+        ctx!.fillStyle = `rgba(${cr}, ${cg}, ${cb}, ${s.alpha})`;
         ctx!.beginPath();
         ctx!.arc(s.x, s.y, s.r, 0, Math.PI * 2);
         ctx!.fill();
