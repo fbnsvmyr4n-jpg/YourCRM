@@ -47,22 +47,31 @@ export function NightScene() {
             front and fading upward. This is what separates the layers. */}
         {/* Both ends must reach fully transparent. An earlier version finished
             at 0.02 alpha, which drew a visible horizontal seam across the
-            scene wherever a haze band ended — the rect edge showing through. */}
+            scene wherever a haze band ended — the rect edge showing through.
+
+            Substantially denser than before: in the reference photographs the
+            valley mist is nearly white and reads as a distinct layer sitting
+            between ridges, not as a whisper. */}
         <linearGradient id="haze" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="rgba(120,160,220,0)" />
-          <stop offset="0.5" stopColor="rgba(120,160,220,0.11)" />
-          <stop offset="1" stopColor="rgba(120,160,220,0)" />
+          <stop offset="0" stopColor="rgba(150,180,230,0)" />
+          <stop offset="0.42" stopColor="rgba(168,196,238,0.2)" />
+          <stop offset="0.62" stopColor="rgba(158,188,234,0.16)" />
+          <stop offset="1" stopColor="rgba(140,175,225,0)" />
         </linearGradient>
 
-        {/* A cool wash sitting just above the skyline — airglow. */}
+        {/* Warm airglow low at the skyline grading to cool blue above — the
+            amber-under-blue split that gives the reference shots their depth.
+            The scene was cool all the way down, which read flat beside them. */}
         <linearGradient id="horizon" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0" stopColor="rgba(70,120,200,0)" />
-          <stop offset="1" stopColor="rgba(80,140,215,0.13)" />
+          <stop offset="0.45" stopColor="rgba(86,132,205,0.1)" />
+          <stop offset="0.78" stopColor="rgba(168,132,150,0.13)" />
+          <stop offset="1" stopColor="rgba(226,158,110,0.16)" />
         </linearGradient>
       </defs>
 
       {/* Airglow above the peaks */}
-      <rect x="0" y="40" width="1440" height="210" fill="url(#horizon)" />
+      <rect x="0" y="20" width="1440" height="290" fill="url(#horizon)" />
 
       {/* Ridgelines below are deliberately irregular: peaks of very different
           heights and widths, asymmetric slopes (one flank steeper than the

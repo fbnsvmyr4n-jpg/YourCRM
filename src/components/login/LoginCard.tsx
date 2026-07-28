@@ -63,7 +63,7 @@ export function LoginCard({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <section ref={ref} className="login-card">
+    <section ref={ref} className="auth-panel">
       {children}
     </section>
   );
