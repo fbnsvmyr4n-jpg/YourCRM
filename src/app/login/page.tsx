@@ -54,17 +54,25 @@ export default function LoginPage() {
                 <rect x="39" y="39" width="22" height="22" rx="6" transform="rotate(45 50 50)" fill="#0b0f16" />
               </svg>
 
+              {/* Editorial scale and weight: large, light and widely tracked,
+                  the way the reference sets its headlines. Semibold at this
+                  size would read as a UI label rather than a title. */}
               <h1
-                className="auth-in mt-6 text-[2.1rem] font-semibold leading-none tracking-[-0.03em]"
+                className="auth-in mt-6 text-[2.55rem] font-light leading-[0.95] tracking-[-0.045em]"
                 style={{ ["--d" as string]: "0.58s" }}
               >
-                Welcome back
+                Welcome
+                <span className="block bg-clip-text font-normal text-transparent"
+                  style={{ backgroundImage: "linear-gradient(105deg,#dcd2ff,#8ab4ff 45%,#5ee0e8)" }}
+                >
+                  back
+                </span>
               </h1>
               <p
-                className="auth-in mt-3 text-sm text-[#8b96aa]"
+                className="auth-in mt-4 text-[0.82rem] uppercase tracking-[0.24em] text-[#7d88a0]"
                 style={{ ["--d" as string]: "0.66s" }}
               >
-                Sign in to continue to YourCRM
+                Sign in to continue
               </p>
             </div>
 

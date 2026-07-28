@@ -129,6 +129,30 @@ function paintMilkyWay(w: number, h: number): HTMLCanvasElement {
     g.fill();
   }
 
+  // Nebula. The reference sky has a genuinely saturated magenta cloud rather
+  // than a faint tint, so this is built from several overlapping blobs at
+  // different scales — one big radial reads as a spotlight, a cluster of them
+  // reads as gas.
+  g.globalCompositeOperation = "screen";
+  const clouds = [
+    { x: -len * 0.3, y: -halfWidth * 0.5, r: halfWidth * 1.5, c: "rgba(196,60,190,0.2)" },
+    { x: -len * 0.22, y: -halfWidth * 0.1, r: halfWidth * 1.1, c: "rgba(150,60,230,0.19)" },
+    { x: -len * 0.36, y: halfWidth * 0.28, r: halfWidth * 0.9, c: "rgba(226,80,150,0.13)" },
+    { x: -len * 0.12, y: -halfWidth * 0.66, r: halfWidth * 0.8, c: "rgba(120,80,255,0.15)" },
+    { x: len * 0.26, y: halfWidth * 0.32, r: halfWidth * 1.05, c: "rgba(88,120,255,0.12)" },
+  ];
+  for (const c of clouds) {
+    const rg = g.createRadialGradient(c.x, c.y, 0, c.x, c.y, c.r);
+    rg.addColorStop(0, c.c);
+    rg.addColorStop(0.45, c.c.replace(/[\d.]+\)$/, "0.05)"));
+    rg.addColorStop(1, "rgba(0,0,0,0)");
+    g.fillStyle = rg;
+    g.beginPath();
+    g.arc(c.x, c.y, c.r, 0, Math.PI * 2);
+    g.fill();
+  }
+  g.globalCompositeOperation = "source-over";
+
   // Dust lanes — the dark rifts that split the band lengthways. Painted last,
   // punching back out through the stars, which is how they read in a photo.
   g.globalCompositeOperation = "destination-out";

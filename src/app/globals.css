@@ -322,6 +322,11 @@ body {
   z-index: 2;
   width: min(94vw, 452px);
   isolation: isolate;
+  /* A real perspective frame. The reference surfaces are tilted in 3D space,
+     not flat-on, and that tilt is a large part of why they feel like objects
+     suspended in an environment rather than rectangles on an image. */
+  perspective: 1600px;
+  perspective-origin: 50% 40%;
 }
 
 /* Ambient orbs behind the panel. Static blurred gradients rather than live
@@ -364,23 +369,30 @@ body {
 .auth-shard {
   position: absolute;
   z-index: -1;
-  border-radius: 24px;
-  border: 1px solid rgba(255,255,255,0.07);
-  background: linear-gradient(135deg, rgba(255,255,255,0.05), rgba(255,255,255,0.012));
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  border-radius: 22px;
+  border: 1px solid rgba(190,150,255,0.2);
+  background: linear-gradient(135deg, rgba(180,140,255,0.09), rgba(255,255,255,0.014));
+  backdrop-filter: blur(7px);
+  -webkit-backdrop-filter: blur(7px);
+  /* Each shard carries its own violet bloom, so the depth stack reads as
+     several lit surfaces rather than one panel with grey rectangles behind. */
+  box-shadow: 0 0 22px -4px rgba(150,90,255,0.4), inset 0 1px 0 rgba(255,255,255,0.1);
   pointer-events: none;
   opacity: 0;
   animation: shardIn 1.5s cubic-bezier(0.16, 1, 0.3, 1) forwards,
              shardFloat 18s ease-in-out infinite;
 }
+/* Rotated in 3D, not just on the page plane — they sit at genuine angles to
+   the viewer, which is what gives the stack its depth. */
 .auth-shard.one {
-  width: 190px; height: 128px; top: -58px; right: -46px;
-  transform: rotate(9deg); animation-delay: 0.5s, 0s;
+  width: 196px; height: 132px; top: -62px; right: -54px;
+  transform: rotateX(14deg) rotateY(-20deg) rotateZ(7deg) translateZ(-70px);
+  animation-delay: 0.5s, 0s;
 }
 .auth-shard.two {
-  width: 150px; height: 106px; bottom: -44px; left: -52px;
-  transform: rotate(-11deg); animation-delay: 0.68s, -7s;
+  width: 156px; height: 110px; bottom: -48px; left: -58px;
+  transform: rotateX(-11deg) rotateY(18deg) rotateZ(-8deg) translateZ(-110px);
+  animation-delay: 0.68s, -7s;
 }
 @keyframes shardIn { to { opacity: 1; } }
 @keyframes shardFloat {
@@ -390,12 +402,17 @@ body {
 
 /* ---- entrance: the panel resolves out of the scene ---- */
 .auth-enter {
+  transform-style: preserve-3d;
   opacity: 0;
-  transform: translateY(26px) scale(0.965);
+  transform: translateY(26px) translateZ(-90px) rotateX(9deg) scale(0.97);
   filter: blur(9px);
-  animation: panelIn 1.15s cubic-bezier(0.16, 1, 0.3, 1) 0.08s forwards;
+  animation: panelIn 1.25s cubic-bezier(0.16, 1, 0.3, 1) 0.08s forwards;
 }
-@keyframes panelIn { to { opacity: 1; transform: none; filter: blur(0); } }
+/* Settles to a slight residual tilt rather than dead flat — enough to catch
+   the light across the surface, not enough to skew the type. */
+@keyframes panelIn {
+  to { opacity: 1; transform: rotateX(1.6deg) rotateY(-1.1deg); filter: blur(0); }
+}
 
 /* ---- the panel ---- */
 .auth-panel {
@@ -412,11 +429,17 @@ body {
     linear-gradient(175deg, rgba(9,14,26,0.72), rgba(7,11,20,0.8));
   backdrop-filter: blur(34px) saturate(150%);
   -webkit-backdrop-filter: blur(34px) saturate(150%);
+  /* The violet bloom is the signature of the reference: light spilling out
+     past the edge of the surface, not just a bright line on it. Two coloured
+     shadows at different radii give the falloff a real glow rather than a
+     flat halo. */
   box-shadow:
-    0 50px 110px -34px rgba(0,0,0,0.9),
-    0 12px 40px -18px rgba(60,110,220,0.4),
-    inset 0 1px 0 rgba(255,255,255,0.16),
-    inset 0 -1px 0 rgba(255,255,255,0.04);
+    0 0 0 1px rgba(168,120,255,0.16),
+    0 0 28px -2px rgba(150,90,255,0.42),
+    0 0 78px 6px rgba(126,72,240,0.26),
+    0 50px 110px -34px rgba(0,0,0,0.92),
+    inset 0 1px 0 rgba(255,255,255,0.18),
+    inset 0 -1px 0 rgba(255,255,255,0.05);
   /* Slow rise and fall. Uses the standalone translate property, not transform,
      so it composes with the entrance animation instead of overwriting it. */
   animation: panelBreathe 11s ease-in-out 1.2s infinite;
@@ -440,8 +463,8 @@ body {
   padding: 1px;
   pointer-events: none;
   background:
-    linear-gradient(150deg, rgba(255,255,255,0.5), rgba(255,255,255,0.06) 34%, rgba(255,255,255,0.03) 62%, rgba(190,220,255,0.34)),
-    radial-gradient(320px circle at var(--mx) var(--my), rgba(170,210,255,calc(0.85 * var(--glow))), transparent 62%);
+    linear-gradient(150deg, rgba(214,178,255,0.72), rgba(160,120,255,0.2) 26%, rgba(255,255,255,0.05) 52%, rgba(140,200,255,0.3) 78%, rgba(196,150,255,0.6)),
+    radial-gradient(320px circle at var(--mx) var(--my), rgba(200,170,255,calc(0.9 * var(--glow))), transparent 62%);
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
