@@ -80,24 +80,24 @@ export default function SignUpPage() {
 
           <div>
             <label className="mb-2 block text-sm font-medium">Full name</label>
-            <div className="relative">
-              <User className="pointer-events-none absolute left-4 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-[#5b8dff]" />
+            <div className="field-line">
+              <User className="pointer-events-none absolute left-0 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-[#5b8dff]" />
               <input name="name" required placeholder="Your name" autoComplete="name" className="login-field" />
             </div>
           </div>
 
           <div>
             <label className="mb-2 block text-sm font-medium">Email address</label>
-            <div className="relative">
-              <Mail className="pointer-events-none absolute left-4 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-[#5b8dff]" />
+            <div className="field-line">
+              <Mail className="pointer-events-none absolute left-0 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-[#5b8dff]" />
               <input name="email" type="email" required placeholder="you@company.com" autoComplete="email" className="login-field" />
             </div>
           </div>
 
           <div>
             <label className="mb-2 block text-sm font-medium">Password</label>
-            <div className="relative">
-              <Lock className="pointer-events-none absolute left-4 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-[#5b8dff]" />
+            <div className="field-line">
+              <Lock className="pointer-events-none absolute left-0 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-[#5b8dff]" />
               <input
                 name="password"
                 type={showPw ? "text" : "password"}
@@ -111,7 +111,7 @@ export default function SignUpPage() {
                 type="button"
                 onClick={() => setShowPw((v) => !v)}
                 aria-label={showPw ? "Hide password" : "Show password"}
-                className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-[#7c869a] transition-colors hover:text-[#5b8dff]"
+                className="absolute right-0 top-1/2 -translate-y-1/2 p-1 text-[#7c869a] transition-colors hover:text-[#5b8dff]"
               >
                 {showPw ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
               </button>
@@ -121,7 +121,7 @@ export default function SignUpPage() {
           <button
             type="submit"
             disabled={pending}
-            className="flex w-full items-center justify-center gap-2.5 rounded-2xl px-5 py-3.5 text-base font-semibold text-white transition-transform active:translate-y-px disabled:opacity-70"
+            className="auth-submit flex w-full items-center justify-center gap-2.5 rounded-full px-5 py-3.5 text-base font-semibold text-white transition-transform active:translate-y-px disabled:opacity-70"
             style={{
               backgroundImage: "linear-gradient(135deg,#3b82f6,#06b6d4)",
               boxShadow: "0 14px 34px -10px rgba(56,132,255,0.6), inset 0 1px 0 rgba(255,255,255,0.35)",
