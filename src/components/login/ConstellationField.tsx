@@ -112,7 +112,9 @@ function paintMilkyWay(w: number, h: number): HTMLCanvasElement {
 
   // Dense field clustered on the plane. Falls off with distance from the
   // centreline, which is what gives the band a soft edge rather than a border.
-  const count = Math.round((w * h) / 950);
+  // Denser than before: the reference sky is thick with stars, and sparseness
+  // was reading as empty rather than as restraint.
+  const count = Math.round((w * h) / 520);
   for (let i = 0; i < count; i++) {
     const bx = (Math.random() - 0.5) * len;
     const spread = gaussian();
@@ -135,11 +137,13 @@ function paintMilkyWay(w: number, h: number): HTMLCanvasElement {
   // reads as gas.
   g.globalCompositeOperation = "screen";
   const clouds = [
-    { x: -len * 0.3, y: -halfWidth * 0.5, r: halfWidth * 1.5, c: "rgba(196,60,190,0.2)" },
-    { x: -len * 0.22, y: -halfWidth * 0.1, r: halfWidth * 1.1, c: "rgba(150,60,230,0.19)" },
-    { x: -len * 0.36, y: halfWidth * 0.28, r: halfWidth * 0.9, c: "rgba(226,80,150,0.13)" },
-    { x: -len * 0.12, y: -halfWidth * 0.66, r: halfWidth * 0.8, c: "rgba(120,80,255,0.15)" },
-    { x: len * 0.26, y: halfWidth * 0.32, r: halfWidth * 1.05, c: "rgba(88,120,255,0.12)" },
+    { x: -len * 0.3, y: -halfWidth * 0.5, r: halfWidth * 1.6, c: "rgba(206,54,196,0.42)" },
+    { x: -len * 0.2, y: -halfWidth * 0.14, r: halfWidth * 1.2, c: "rgba(146,52,238,0.4)" },
+    { x: -len * 0.38, y: halfWidth * 0.26, r: halfWidth * 0.95, c: "rgba(236,72,152,0.3)" },
+    { x: -len * 0.1, y: -halfWidth * 0.7, r: halfWidth * 0.86, c: "rgba(116,72,255,0.34)" },
+    { x: -len * 0.44, y: -halfWidth * 0.3, r: halfWidth * 0.62, c: "rgba(255,120,200,0.24)" },
+    { x: len * 0.26, y: halfWidth * 0.32, r: halfWidth * 1.1, c: "rgba(74,116,255,0.24)" },
+    { x: len * 0.42, y: -halfWidth * 0.36, r: halfWidth * 0.8, c: "rgba(60,190,230,0.18)" },
   ];
   for (const c of clouds) {
     const rg = g.createRadialGradient(c.x, c.y, 0, c.x, c.y, c.r);
