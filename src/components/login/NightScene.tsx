@@ -13,11 +13,30 @@
  *
  * Server-rendered — there is nothing interactive here, so it costs no JS.
  */
+// Pulled right down and darkened. The reference is pure cosmos — the landscape
+// is here only to anchor the bottom of the frame and give the sky something to
+// end against. At 62vh it was the subject and it fought the nebula.
 export function NightScene() {
   return (
     <svg
       className="absolute bottom-0 left-0 right-0"
-      style={{ height: "62vh" }}
+      /* `width: 100%` is load-bearing. An <svg> is a replaced element: given an
+         explicit height and auto width it derives its width from the viewBox
+         aspect ratio and ignores `right: 0`, so the scene stops partway across
+         and leaves a hard vertical edge. This was latent at the previous 62vh,
+         where the derived width happened to land within a few pixels of a
+         1440-wide viewport — dropping to 34vh is what exposed it. */
+      style={{
+        width: "100%",
+        height: "34vh",
+        opacity: 0.62,
+        /* `slice` crops the viewBox, and the content at the crop line has real
+           brightness, so the top of the element lands as a hard horizontal
+           edge across the sky. Fading the first fifth blends it into the
+           starfield instead. */
+        maskImage: "linear-gradient(to bottom, transparent 0%, #000 20%)",
+        WebkitMaskImage: "linear-gradient(to bottom, transparent 0%, #000 20%)",
+      }}
       viewBox="0 0 1440 560"
       preserveAspectRatio="xMidYMax slice"
       xmlns="http://www.w3.org/2000/svg"
