@@ -6,6 +6,7 @@ import { signInAction, type AuthState } from "@/app/(auth)/actions";
 import { ConstellationField } from "@/components/login/ConstellationField";
 import { NightScene } from "@/components/login/NightScene";
 import { LoginCard } from "@/components/login/LoginCard";
+import { ResetRequestForm } from "@/components/login/ResetRequestForm";
 
 export default function LoginPage() {
   const [showPw, setShowPw] = useState(false);
@@ -127,9 +128,6 @@ export default function LoginPage() {
                   <input type="checkbox" name="remember" value="1" defaultChecked className="login-chk" />
                   Keep me signed in
                 </label>
-                {/* Not a dead link: password reset needs email delivery, which
-                    isn't configured, so this says so plainly instead of
-                    pretending to start a flow that cannot finish. */}
                 <button
                   type="button"
                   onClick={() => setShowReset((v) => !v)}
@@ -138,16 +136,6 @@ export default function LoginPage() {
                 >
                   Forgot password?
                 </button>
-              </div>
-
-              <div className={`auth-note ${showReset ? "open" : ""}`} aria-hidden={!showReset}>
-                <div>
-                  <p className="rounded-xl border border-white/10 bg-white/[0.04] px-3.5 py-3 text-xs leading-relaxed text-[#8b96aa]">
-                    Self-service reset isn&apos;t live yet — it needs an email provider
-                    connected. Until then, an admin can set a new password for you from
-                    <span className="text-[#b9c4d6]"> Settings → Password</span>.
-                  </p>
-                </div>
               </div>
 
               <button
@@ -169,6 +157,15 @@ export default function LoginPage() {
                   provider button on a login screen is the worst place to put
                   one, because people reach for it before the form. */}
             </form>
+
+            {/* The reset request is its own <form>, so it sits *after* the
+                sign-in form rather than inside it — nesting forms is invalid
+                and would stop sign-in submitting its own fields. */}
+            <div className={`auth-note ${showReset ? "open" : ""}`} aria-hidden={!showReset}>
+              <div>
+                <ResetRequestForm />
+              </div>
+            </div>
 
             <p className="auth-in mt-7 text-center text-sm text-[#8b96aa]" style={{ ["--d" as string]: "1.06s" }}>
               New to YourCRM?{" "}

@@ -78,6 +78,28 @@ export function NightScene() {
           <stop offset="1" stopColor="rgba(140,175,225,0)" />
         </linearGradient>
 
+        {/* Mist proper. A flat band across the full width reads as a gradient;
+            real mist pools unevenly and drifts. These are two lumpy banks with
+            different profiles, blurred heavily and slid past each other at
+            different speeds, which is what makes it read as fog rather than as
+            a rectangle of translucent blue. */}
+        <linearGradient id="mistBody" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="rgba(202,222,255,0)" />
+          <stop offset="0.55" stopColor="rgba(210,228,255,0.34)" />
+          <stop offset="1" stopColor="rgba(188,212,250,0)" />
+        </linearGradient>
+        <filter id="mistBlur" x="-25%" y="-80%" width="150%" height="260%">
+          <feGaussianBlur stdDeviation="13" />
+        </filter>
+        <path
+          id="mistA"
+          d="M-260,54 Q-90,14 80,44 T420,32 Q590,8 760,46 T1100,30 Q1270,6 1440,44 T1780,34 L1780,150 L-260,150 Z"
+        />
+        <path
+          id="mistB"
+          d="M-260,60 Q-70,28 120,52 T460,26 Q640,54 800,28 T1140,52 Q1310,22 1480,46 T1780,26 L1780,150 L-260,150 Z"
+        />
+
         {/* Warm airglow low at the skyline grading to cool blue above — the
             amber-under-blue split that gives the reference shots their depth.
             The scene was cool all the way down, which read flat beside them. */}
@@ -104,7 +126,16 @@ export function NightScene() {
         opacity="0.5"
         d="M0,560 L0,268 L74,258 L138,262 L196,236 L246,244 L318,168 L352,196 L392,182 L436,214 L492,232 L548,222 L604,238 L662,196 L698,214 L742,206 L806,230 L868,240 L926,214 L968,228 L1024,150 L1058,182 L1098,170 L1146,206 L1208,228 L1268,216 L1330,234 L1388,222 L1440,240 L1440,560 Z"
       />
-      <rect x="0" y="250" width="1440" height="130" fill="url(#haze)" />
+      <g opacity="0.85" filter="url(#mistBlur)">
+        <use href="#mistA" y="228" fill="url(#mistBody)">
+          <animateTransform attributeName="transform" type="translate"
+            values="0 0; -90 0; 0 0" dur="44s" repeatCount="indefinite" />
+        </use>
+        <use href="#mistB" y="242" fill="url(#mistBody)" opacity="0.75">
+          <animateTransform attributeName="transform" type="translate"
+            values="0 0; 70 0; 0 0" dur="61s" repeatCount="indefinite" />
+        </use>
+      </g>
 
       {/* ---- Range 2 — a broad shoulder left, a sharper pair right. ---- */}
       <path
@@ -112,14 +143,32 @@ export function NightScene() {
         opacity="0.78"
         d="M0,560 L0,352 L68,344 L128,318 L182,330 L244,296 L296,314 L358,326 L420,300 L468,312 L532,268 L570,296 L618,286 L676,318 L740,332 L802,306 L858,320 L918,282 L962,308 L1012,298 L1074,326 L1136,338 L1196,312 L1252,326 L1316,300 L1370,318 L1440,330 L1440,560 Z"
       />
-      <rect x="0" y="322" width="1440" height="140" fill="url(#haze)" />
+      <g opacity="0.8" filter="url(#mistBlur)">
+        <use href="#mistA" y="300" fill="url(#mistBody)">
+          <animateTransform attributeName="transform" type="translate"
+            values="0 0; -90 0; 0 0" dur="53s" repeatCount="indefinite" />
+        </use>
+        <use href="#mistB" y="314" fill="url(#mistBody)" opacity="0.75">
+          <animateTransform attributeName="transform" type="translate"
+            values="0 0; 70 0; 0 0" dur="39s" repeatCount="indefinite" />
+        </use>
+      </g>
 
       {/* ---- Range 3 — the dramatic one; tallest single peak sits off-centre. ---- */}
       <path
         fill="url(#ridge3)"
         d="M0,560 L0,432 L82,420 L156,428 L228,398 L286,414 L352,386 L414,404 L470,352 L512,382 L566,370 L638,406 L706,418 L772,392 L836,408 L896,378 L950,398 L1012,388 L1084,416 L1152,428 L1220,402 L1284,418 L1346,396 L1402,412 L1440,404 L1440,560 Z"
       />
-      <rect x="0" y="400" width="1440" height="130" fill="url(#haze)" opacity="0.65" />
+      <g opacity="0.6" filter="url(#mistBlur)">
+        <use href="#mistA" y="382" fill="url(#mistBody)">
+          <animateTransform attributeName="transform" type="translate"
+            values="0 0; -90 0; 0 0" dur="67s" repeatCount="indefinite" />
+        </use>
+        <use href="#mistB" y="396" fill="url(#mistBody)" opacity="0.75">
+          <animateTransform attributeName="transform" type="translate"
+            values="0 0; 70 0; 0 0" dur="47s" repeatCount="indefinite" />
+        </use>
+      </g>
 
       {/* ---- Range 4 — nearest. Near-black, few features, anchors the frame. ---- */}
       <path

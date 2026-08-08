@@ -66,6 +66,89 @@ function gaussian(): number {
 }
 
 /**
+ * Named constellation figures.
+ *
+ * Proximity-linking alone produces a uniform mesh — every neighbour joins
+ * every neighbour, so nothing has a shape you could point at and name. Real
+ * skies read as a handful of distinct *figures* against a loose field, so
+ * these are drawn deliberately: unit coordinates, each with an explicit edge
+ * list, placed at random position, scale and rotation on every load.
+ *
+ * Shapes are recognisable rather than accurate — the goal is variety the eye
+ * can latch onto, not astronomy.
+ */
+type Figure = { pts: [number, number][]; edges: [number, number][] };
+
+const FIGURES: Figure[] = [
+  // Plough / Big Dipper — the pan and handle.
+  {
+    pts: [[0, 0.34], [0.2, 0.42], [0.4, 0.4], [0.42, 0.2], [0.62, 0.12], [0.82, 0.2], [1, 0.06]],
+    edges: [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [5, 6], [3, 0]],
+  },
+  // Cassiopeia — the W.
+  {
+    pts: [[0, 0.1], [0.25, 0.52], [0.5, 0.14], [0.75, 0.56], [1, 0.08]],
+    edges: [[0, 1], [1, 2], [2, 3], [3, 4]],
+  },
+  // Orion — belt with shoulders and feet.
+  {
+    pts: [[0.12, 0], [0.86, 0.06], [0.4, 0.44], [0.52, 0.5], [0.64, 0.56], [0.2, 1], [0.9, 0.96]],
+    edges: [[0, 2], [1, 4], [2, 3], [3, 4], [2, 5], [4, 6], [0, 1]],
+  },
+  // Crux — the Southern Cross.
+  {
+    pts: [[0.5, 0], [0.5, 1], [0.14, 0.46], [0.9, 0.56]],
+    edges: [[0, 1], [2, 3]],
+  },
+  // Lyra — small parallelogram with a bright apex.
+  {
+    pts: [[0.5, 0], [0.26, 0.42], [0.74, 0.5], [0.34, 0.94], [0.82, 1]],
+    edges: [[0, 1], [0, 2], [1, 3], [2, 4], [3, 4]],
+  },
+  // A loose scatter triangle — deliberately irregular for variety.
+  {
+    pts: [[0, 0.2], [0.58, 0], [1, 0.44], [0.46, 0.9]],
+    edges: [[0, 1], [1, 2], [2, 3], [3, 0]],
+  },
+];
+
+/** A figure placed on screen: absolute points plus the edges joining them. */
+type PlacedFigure = { pts: { x: number; y: number; r: number; tint: number; phase: number }[]; edges: [number, number][] };
+
+function placeFigures(width: number, height: number): PlacedFigure[] {
+  // Scale the count to the viewport so a phone gets two and a wide monitor
+  // gets a sky's worth, without ever crowding.
+  const wanted = Math.max(2, Math.min(5, Math.round((width * height) / 380000)));
+  const pool = [...FIGURES].sort(() => Math.random() - 0.5).slice(0, wanted);
+  const short = Math.min(width, height);
+
+  return pool.map((fig, i) => {
+    const scale = short * (0.16 + Math.random() * 0.13);
+    const angle = (Math.random() - 0.5) * 1.2;
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    // Spread across bands so two figures don't land on top of each other.
+    const cx = width * (0.1 + ((i + Math.random() * 0.6) / wanted) * 0.82);
+    const cy = height * (0.08 + Math.random() * 0.5);
+
+    return {
+      edges: fig.edges,
+      pts: fig.pts.map(([ux, uy]) => {
+        const x0 = (ux - 0.5) * scale;
+        const y0 = (uy - 0.5) * scale;
+        return {
+          x: cx + x0 * cos - y0 * sin,
+          y: cy + x0 * sin + y0 * cos,
+          r: 0.9 + Math.random() * 1.1,
+          tint: pickTint(),
+          phase: Math.random() * Math.PI * 2,
+        };
+      }),
+    };
+  });
+}
+
+/**
  * Paints the Milky Way to an offscreen canvas, once per resize.
  *
  * In the reference photographs the galaxy is the *subject* — a bright band
@@ -155,7 +238,52 @@ function paintMilkyWay(w: number, h: number): HTMLCanvasElement {
     g.arc(c.x, c.y, c.r, 0, Math.PI * 2);
     g.fill();
   }
+  // Filaments. Real nebulosity is wispy and threaded, not a set of clean
+  // circles — a handful of soft strands across the clouds is what stops the
+  // gas reading as airbrushed blobs.
+  for (let i = 0; i < 14; i++) {
+    const fx = -len * 0.45 + Math.random() * len * 0.55;
+    const fy = (Math.random() - 0.5) * halfWidth * 1.6;
+    const flen = halfWidth * (0.5 + Math.random() * 1.1);
+    const drift = (Math.random() - 0.5) * 0.9;
+    g.beginPath();
+    g.moveTo(fx, fy);
+    for (let t = 0; t <= 1.001; t += 0.2) {
+      g.lineTo(fx + flen * t, fy + Math.sin(t * 3.4 + i) * halfWidth * 0.16 + drift * flen * t);
+    }
+    const hue = i % 3 === 0 ? "236,110,200" : i % 3 === 1 ? "150,90,240" : "110,150,255";
+    g.strokeStyle = `rgba(${hue},${0.05 + Math.random() * 0.07})`;
+    g.lineWidth = halfWidth * (0.05 + Math.random() * 0.12);
+    g.lineCap = "round";
+    g.filter = "blur(14px)";
+    g.stroke();
+    g.filter = "none";
+  }
+
   g.globalCompositeOperation = "source-over";
+
+  // Distant galaxies — small tilted ellipses with a bright nucleus. A real
+  // deep field is full of them, and they are the cheapest single cue that
+  // this is deep space rather than just a starry sky.
+  for (let i = 0; i < 7; i++) {
+    const gx = (Math.random() - 0.5) * len * 0.9;
+    const gy = (Math.random() - 0.5) * halfWidth * 2.4;
+    const rx = 3 + Math.random() * 9;
+    const ry = rx * (0.24 + Math.random() * 0.4);
+    g.save();
+    g.translate(gx, gy);
+    g.rotate(Math.random() * Math.PI);
+    const halo = g.createRadialGradient(0, 0, 0, 0, 0, rx);
+    const warm = Math.random() < 0.5;
+    halo.addColorStop(0, warm ? "rgba(255,238,214,0.5)" : "rgba(214,228,255,0.45)");
+    halo.addColorStop(0.4, warm ? "rgba(255,214,170,0.16)" : "rgba(170,200,255,0.15)");
+    halo.addColorStop(1, "rgba(0,0,0,0)");
+    g.fillStyle = halo;
+    g.beginPath();
+    g.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
+    g.fill();
+    g.restore();
+  }
 
   // Dust lanes — the dark rifts that split the band lengthways. Painted last,
   // punching back out through the stars, which is how they read in a photo.
@@ -258,6 +386,8 @@ export function ConstellationField() {
     let linkDist = LINK_DISTANCE;
     /** The Milky Way, painted once per resize and blitted each frame. */
     let galaxy: HTMLCanvasElement | null = null;
+    /** Named constellation figures, re-placed on every resize. */
+    let figures: PlacedFigure[] = [];
     let raf = 0;
     let running = true;
 
@@ -278,6 +408,7 @@ export function ConstellationField() {
       ctx!.setTransform(dpr, 0, 0, dpr, 0, 0);
       linkDist = linkDistanceFor(width, height);
       galaxy = width > 0 && height > 0 ? paintMilkyWay(width, height) : null;
+      figures = width > 0 && height > 0 ? placeFigures(width, height) : [];
 
       // Scale count to area so a large monitor isn't sparse and a phone isn't
       // needlessly busy. Sparser than before — larger, brighter points with
@@ -445,6 +576,61 @@ export function ConstellationField() {
         ctx!.beginPath();
         ctx!.arc(s.x, s.y, s.r, 0, Math.PI * 2);
         ctx!.fill();
+      }
+
+      // Named figures, drawn over the ambient field so their shape stays
+      // legible against it. Brighter lines and larger stars than the loose
+      // field, which is what makes them read as deliberate.
+      for (const fig of figures) {
+        const pts = fig.pts.map((pt) => {
+          const shift = 16;
+          let x = pt.x - px * shift;
+          let y = pt.y - py * shift;
+          let glow = 0;
+          if (hasPointer) {
+            const dx = cur.x - x;
+            const dy = cur.y - y;
+            const dist = Math.hypot(dx, dy);
+            if (dist > 0.001) {
+              const pull = cursorInfluence(dist);
+              x += dx * pull * 0.28;
+              y += dy * pull * 0.28;
+              glow = pull;
+            }
+          }
+          const tw = 0.78 + Math.sin(time * 0.0011 + pt.phase) * 0.22;
+          return { x, y, r: pt.r * (1 + glow * 1.4), a: Math.min(1, 0.5 * tw + glow * 0.5), glow, tint: pt.tint };
+        });
+
+        for (const [a, b] of fig.edges) {
+          const p1 = pts[a];
+          const p2 = pts[b];
+          if (!p1 || !p2) continue;
+          const lift = Math.max(p1.glow, p2.glow);
+          ctx!.strokeStyle = `rgba(170, 205, 255, ${0.2 + lift * 0.55})`;
+          ctx!.lineWidth = 1 + lift * 1.1;
+          ctx!.beginPath();
+          ctx!.moveTo(p1.x, p1.y);
+          ctx!.lineTo(p2.x, p2.y);
+          ctx!.stroke();
+        }
+
+        for (const pt of pts) {
+          const [cr, cg, cb] = STAR_COLORS[pt.tint];
+          const bl = pt.r * 6 * (1 + pt.glow * 1.5);
+          const g2 = ctx!.createRadialGradient(pt.x, pt.y, 0, pt.x, pt.y, bl);
+          g2.addColorStop(0, `rgba(${cr}, ${cg}, ${cb}, ${pt.a * 0.45})`);
+          g2.addColorStop(1, `rgba(${cr}, ${cg}, ${cb}, 0)`);
+          ctx!.fillStyle = g2;
+          ctx!.beginPath();
+          ctx!.arc(pt.x, pt.y, bl, 0, Math.PI * 2);
+          ctx!.fill();
+
+          ctx!.fillStyle = `rgba(${cr}, ${cg}, ${cb}, ${pt.a})`;
+          ctx!.beginPath();
+          ctx!.arc(pt.x, pt.y, pt.r, 0, Math.PI * 2);
+          ctx!.fill();
+        }
       }
 
       // The wake — a comet tail of the cursor's recent path. Drawn after the
