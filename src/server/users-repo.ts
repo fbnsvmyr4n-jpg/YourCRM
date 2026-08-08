@@ -128,6 +128,30 @@ export async function changePassword(
 }
 
 /**
+ * Set a password without knowing the old one. Only for the reset flow, where
+ * the caller has already proved possession of a single-use emailed token —
+ * that token is the authentication, so requiring the current password here
+ * would defeat the entire point of a reset.
+ */
+export async function setPassword(id: string, newPassword: string): Promise<{ ok?: true; error?: string }> {
+  if (newPassword.length < 8) return { error: "Password must be at least 8 characters." };
+
+  let result: { ok?: true; error?: string } = {};
+  await mutateTable<User>(TABLE, seed, (rows) => {
+    const idx = rows.findIndex((u) => u.id === id);
+    if (idx === -1) {
+      result = { error: "Account not found." };
+      return rows;
+    }
+    const next = [...rows];
+    next[idx] = { ...next[idx], passwordHash: hashPassword(newPassword) };
+    result = { ok: true };
+    return next;
+  });
+  return result;
+}
+
+/**
  * Create an account. Email uniqueness is enforced *inside* the lock — checking
  * beforehand isn't enough, because two concurrent signups can both pass the
  * check and then both write, leaving duplicate accounts on one email (which

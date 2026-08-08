@@ -298,15 +298,29 @@ body {
     radial-gradient(1px 1px at 8% 60%, #fff, transparent);
   opacity: 0.7;
 }
+/* The light streak. Previously one flat blurred ellipse; now three offset
+   bands of different length, colour and softness sharing an axis. Real light
+   shafts have a bright core with weaker flanking bleed, and it is that
+   asymmetry — not the blur — that stops it reading as a smudge. */
 .login-milky {
   position: absolute;
-  top: -8%;
-  left: -6%;
-  width: 52%;
-  height: 62%;
-  background: radial-gradient(ellipse at center, rgba(120, 150, 220, 0.22), transparent 62%);
-  filter: blur(16px);
-  transform: rotate(-24deg);
+  top: -18%;
+  left: -14%;
+  width: 74%;
+  height: 96%;
+  transform: rotate(-27deg);
+  background:
+    /* bright core */
+    linear-gradient(90deg, transparent 0%, rgba(196,168,255,0.15) 34%, rgba(226,206,255,0.2) 46%, rgba(170,150,255,0.12) 58%, transparent 92%),
+    /* wider violet bleed */
+    linear-gradient(90deg, transparent 4%, rgba(150,90,235,0.1) 40%, rgba(120,80,220,0.06) 66%, transparent 96%),
+    /* cool outer edge, offset so the falloff is uneven */
+    linear-gradient(92deg, transparent 12%, rgba(90,150,255,0.07) 52%, transparent 88%);
+  /* Feathered along its length so it fades out rather than ending. */
+  mask-image: radial-gradient(58% 46% at 46% 50%, #000 12%, rgba(0,0,0,0.55) 52%, transparent 84%);
+  -webkit-mask-image: radial-gradient(58% 46% at 46% 50%, #000 12%, rgba(0,0,0,0.55) 52%, transparent 84%);
+  filter: blur(26px);
+  opacity: 0.85;
 }
 /* ---------------------------------------------------------------------------
    Auth screens — cinematic glass composition.
@@ -495,23 +509,38 @@ body {
 
 /* ---- fields: inset glass ---- */
 .auth-field-wrap { position: relative; }
+/* Borderless by design. No outline at all — the field is found by its own
+   faint pool of light rather than by a drawn box, so it dissolves into the
+   panel while staying obviously typable. An inset highlight along the top
+   edge reads as a recess in the glass, which is what keeps it legible
+   without a border. */
 .login-field {
   width: 100%;
-  background: rgba(255,255,255,0.035);
-  border: 1px solid rgba(255,255,255,0.1);
-  border-radius: 15px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.055), rgba(255,255,255,0.022));
+  border: 0;
+  border-radius: 14px;
   color: #f3f6fc;
   padding: 15px 44px 15px 46px;
   font-size: 15px;
   outline: none;
-  transition: border-color 0.35s cubic-bezier(0.16,1,0.3,1), background 0.35s ease, box-shadow 0.35s ease;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.09),
+    inset 0 0 0 1px rgba(255,255,255,0.028);
+  transition: background 0.4s ease, box-shadow 0.4s cubic-bezier(0.16,1,0.3,1);
 }
-.login-field::placeholder { color: #6f7a8d; transition: color 0.3s ease; }
-.login-field:hover { border-color: rgba(255,255,255,0.17); }
+.login-field::placeholder { color: #737e92; transition: color 0.3s ease; }
+.login-field:hover {
+  background: linear-gradient(180deg, rgba(255,255,255,0.075), rgba(255,255,255,0.032));
+}
+/* Focus is a bloom, not a ring — consistent with the violet light everywhere
+   else on this screen. */
 .login-field:focus {
-  border-color: rgba(120,175,255,0.62);
-  background: rgba(255,255,255,0.058);
-  box-shadow: 0 0 0 4px rgba(80,140,255,0.13), 0 8px 24px -12px rgba(80,140,255,0.5);
+  background: linear-gradient(180deg, rgba(150,180,255,0.11), rgba(120,150,255,0.05));
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.16),
+    inset 0 0 0 1px rgba(150,190,255,0.16),
+    0 0 26px -6px rgba(140,120,255,0.6),
+    0 10px 30px -16px rgba(90,140,255,0.7);
 }
 .login-field:focus::placeholder { color: #8892a5; }
 .auth-field-icon { transition: color 0.35s ease, transform 0.35s cubic-bezier(0.16,1,0.3,1); }
