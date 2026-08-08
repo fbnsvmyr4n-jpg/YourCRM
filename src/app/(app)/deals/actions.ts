@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidateApp } from "@/server/revalidate";
 import { STAGE_IDS, type StageId } from "@/data/deals";
 import { createDeal, deleteDeal, moveDeal } from "@/server/deals-repo";
 import { id as validId, money, pick, text } from "@/server/validate";
@@ -21,8 +21,7 @@ export async function addDealAction(formData: FormData) {
     value,
     stage,
   });
-  revalidatePath("/deals");
-  revalidatePath("/(app)", "layout");
+  revalidateApp();
   return created;
 }
 
@@ -33,7 +32,7 @@ export async function moveDealAction(id: string, stage: StageId) {
   if (!dealId || !target) return;
 
   await moveDeal(dealId, target);
-  revalidatePath("/deals");
+  revalidateApp();
 }
 
 export async function deleteDealAction(id: string) {
@@ -41,5 +40,5 @@ export async function deleteDealAction(id: string) {
   if (!dealId) return;
 
   await deleteDeal(dealId);
-  revalidatePath("/deals");
+  revalidateApp();
 }

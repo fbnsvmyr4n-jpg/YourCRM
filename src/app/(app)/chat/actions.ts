@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidateApp } from "@/server/revalidate";
 import { answer } from "@/server/chat-agent";
 import { appendChat, clearChat, listChat } from "@/server/chat-repo";
 import { multiline } from "@/server/validate";
@@ -19,11 +19,11 @@ export async function sendChatAction(text: string) {
   const { text: reply, live } = await answer(question, history);
   const message = await appendChat("assistant", reply);
 
-  revalidatePath("/chat");
+  revalidateApp();
   return { message, live };
 }
 
 export async function clearChatAction() {
   await clearChat();
-  revalidatePath("/chat");
+  revalidateApp();
 }

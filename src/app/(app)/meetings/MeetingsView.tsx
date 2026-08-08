@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useRef, useState } from "react";
+import { useOpenFromQuery } from "@/lib/useOpenFromQuery";
 import {
   Calendar,
   CalendarCheck,
@@ -558,6 +559,21 @@ function dateKey(sel: DayRef): string {
 }
 
 function Scheduler({ today }: { today: DayRef }) {
+  const panelRef = useRef<HTMLDivElement | null>(null);
+
+  // Arriving from the dashboard Quick Action: bring the scheduler into view
+  // and ring it, so it is obvious which panel the user was sent to.
+  useOpenFromQuery(
+    "schedule",
+    useCallback(() => {
+      const el = panelRef.current;
+      if (!el) return;
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.add("jump-target");
+      window.setTimeout(() => el.classList.remove("jump-target"), 2800);
+    }, [])
+  );
+
   const [online, setOnline] = useState(true);
   const [connected, setConnected] = useState(true);
   const [view, setView] = useState({ year: today.year, month: today.month });
@@ -603,7 +619,7 @@ function Scheduler({ today }: { today: DayRef }) {
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div ref={panelRef} className="flex flex-col gap-4">
       {/* connect calendar */}
       <Card className="!p-4">
         <div className="flex items-center justify-between">

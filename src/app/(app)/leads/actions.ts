@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidateApp } from "@/server/revalidate";
 import { LEAD_SOURCES, LEAD_STATUSES } from "@/data/leads";
 import { createLead, deleteLead, updateLead, type NewLead } from "@/server/leads-repo";
 import { detachLead } from "@/server/calls-repo";
@@ -32,7 +32,7 @@ export async function addLeadAction(formData: FormData) {
   const input = parseLead(formData);
   if (!input) return;
   const created = await createLead(input);
-  revalidatePath("/leads");
+  revalidateApp();
   return created.id;
 }
 
@@ -41,7 +41,7 @@ export async function updateLeadAction(id: string, formData: FormData) {
   const input = parseLead(formData);
   if (!leadId || !input) return;
   await updateLead(leadId, input);
-  revalidatePath("/leads");
+  revalidateApp();
 }
 
 export async function deleteLeadAction(id: string) {
@@ -55,6 +55,5 @@ export async function deleteLeadAction(id: string) {
   // are sequential, never nested.
   await detachLead(leadId);
 
-  revalidatePath("/leads");
-  revalidatePath("/voice-agents");
+  revalidateApp();
 }

@@ -1,5 +1,8 @@
 "use client";
 
+import { useCallback } from "react";
+import { useOpenFromQuery } from "@/lib/useOpenFromQuery";
+
 import { useMemo, useState } from "react";
 import {
   CalendarCheck,
@@ -45,6 +48,8 @@ export function InboxView({ messages }: { messages: Message[] }) {
   const [filter, setFilter] = useState<InboxFilter>("All");
   const [selectedId, setSelectedId] = useState(messages[0]?.id ?? "");
   const [composeOpen, setComposeOpen] = useState(false);
+  // Arriving from the dashboard Quick Action opens compose directly.
+  useOpenFromQuery("compose", useCallback(() => setComposeOpen(true), []));
   const [busy, setBusy] = useState(false);
 
   const list = useMemo(() => {

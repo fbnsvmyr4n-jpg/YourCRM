@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidateApp } from "@/server/revalidate";
 import { getCurrentUser } from "@/server/session";
 import { updateSettings } from "@/server/settings-repo";
 import { changePassword, updateProfile } from "@/server/users-repo";
@@ -26,7 +26,7 @@ export async function updateTargetsAction(_prev: FormState, formData: FormData):
 
   await updateSettings({ monthlyTarget, weeklyCapacity });
   // Both pages read these, so refresh the whole group rather than just Settings.
-  revalidatePath("/(app)", "layout");
+  revalidateApp();
   return { ok: "Targets updated." };
 }
 
@@ -44,7 +44,7 @@ export async function updateProfileAction(_prev: FormState, formData: FormData):
 
   // Revalidate the layout so the sidebar/topbar pick up the new name,
   // without navigating the user away from Settings.
-  revalidatePath("/(app)", "layout");
+  revalidateApp();
   return { ok: "Profile updated." };
 }
 

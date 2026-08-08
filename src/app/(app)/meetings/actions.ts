@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidateApp } from "@/server/revalidate";
 import { LOSS_REASONS, MEETING_OUTCOMES, MEETING_TYPES } from "@/data/meetings";
 import { detachMeeting } from "@/server/calls-repo";
 import { createMeeting, deleteMeeting, setMeetingOutcome, toDateKey } from "@/server/meetings-repo";
@@ -31,7 +31,7 @@ export async function addMeetingAction(formData: FormData) {
     time: text(formData.get("time"), 20),
     type,
   });
-  revalidatePath("/meetings");
+  revalidateApp();
   return created.id;
 }
 
@@ -49,8 +49,7 @@ export async function setMeetingOutcomeAction(
 
   const reason = value === "lost" ? (pick(lossReason, LOSS_REASONS) ?? "Other") : undefined;
   await setMeetingOutcome(meetingId, value, reason);
-  revalidatePath("/meetings");
-  revalidatePath("/reports");
+  revalidateApp();
 }
 
 export async function deleteMeetingAction(id: string) {
@@ -61,6 +60,5 @@ export async function deleteMeetingAction(id: string) {
   // Referential integrity — see `detachMeeting`. Sequential, never nested.
   await detachMeeting(meetingId);
 
-  revalidatePath("/meetings");
-  revalidatePath("/voice-agents");
+  revalidateApp();
 }

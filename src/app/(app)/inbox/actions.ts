@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidateApp } from "@/server/revalidate";
 import { createMessage, markRead, restoreMessage, trashMessage } from "@/server/inbox-repo";
 import { id as validId, multiline, text } from "@/server/validate";
 
@@ -17,7 +17,7 @@ export async function addMessageAction(formData: FormData) {
     subject: text(formData.get("subject"), 200),
     body: multiline(formData.get("body"), 10_000),
   });
-  revalidatePath("/inbox");
+  revalidateApp();
   return created.id;
 }
 
@@ -25,19 +25,19 @@ export async function markReadAction(id: string) {
   const messageId = validId(id);
   if (!messageId) return;
   await markRead(messageId);
-  revalidatePath("/inbox");
+  revalidateApp();
 }
 
 export async function trashMessageAction(id: string) {
   const messageId = validId(id);
   if (!messageId) return;
   await trashMessage(messageId);
-  revalidatePath("/inbox");
+  revalidateApp();
 }
 
 export async function restoreMessageAction(id: string) {
   const messageId = validId(id);
   if (!messageId) return;
   await restoreMessage(messageId);
-  revalidatePath("/inbox");
+  revalidateApp();
 }
