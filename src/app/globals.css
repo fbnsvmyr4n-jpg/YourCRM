@@ -652,3 +652,50 @@ body {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
 }
+
+/* ---------------------------------------------------------------------------
+   Form fields — one definition for every modal and inline form in the app.
+
+   These were previously twelve copies of the same class string, all using
+   `bg-transparent`. On a frosted panel over a busy background that left typed
+   text sitting on whatever happened to be behind it, and users reported not
+   being able to read what they had entered. A field needs its own surface.
+--------------------------------------------------------------------------- */
+.field-input {
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  /* Opaque enough to read against anything behind it. */
+  background: var(--panel-solid);
+  color: var(--text);
+  padding: 10px 14px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+.field-input::placeholder { color: var(--text-faint); }
+.field-input:hover { border-color: var(--border-strong); }
+.field-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--ring);
+}
+.field-input:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* Multi-line variant. */
+textarea.field-input {
+  resize: none;
+  padding: 12px 14px;
+  line-height: 1.55;
+}
+
+/* Bare inputs that sit inside an already-bordered container (search bars),
+   where a second border and surface would double up. */
+.field-bare {
+  width: 100%;
+  background: transparent;
+  border: 0;
+  outline: none;
+  color: var(--text);
+  font-size: 14px;
+}
+.field-bare::placeholder { color: var(--text-faint); }

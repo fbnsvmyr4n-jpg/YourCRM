@@ -506,7 +506,7 @@ function ModalField({
         required={required}
         autoFocus={autoFocus}
         defaultValue={defaultValue}
-        className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3.5 py-2.5 text-sm outline-none transition-colors focus:border-[var(--border-strong)]"
+        className="field-input"
       />
     </label>
   );

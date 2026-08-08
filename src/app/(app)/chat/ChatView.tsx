@@ -190,7 +190,7 @@ export function ChatView({ messages, aiEnabled }: { messages: ChatMessage[]; aiE
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             placeholder="Ask about your pipeline, leads, meetings…"
-            className="flex-1 rounded-xl border border-[var(--border)] bg-transparent px-4 py-3 text-sm outline-none transition-colors placeholder:text-faint focus:border-[var(--border-strong)]"
+            className="field-input flex-1"
           />
           <button
             type="submit"

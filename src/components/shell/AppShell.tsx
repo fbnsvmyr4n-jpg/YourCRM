@@ -1,13 +1,22 @@
 "use client";
 
 import { useState } from "react";
+import type { Notification } from "@/server/notifications";
 import { CommandPalette } from "./CommandPalette";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
 
 export type ShellUser = { name: string; role: string; initials: string; email: string };
 
-export function AppShell({ children, user }: { children: React.ReactNode; user: ShellUser }) {
+export function AppShell({
+  children,
+  user,
+  notifications,
+}: {
+  children: React.ReactNode;
+  user: ShellUser;
+  notifications: Notification[];
+}) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -31,7 +40,7 @@ export function AppShell({ children, user }: { children: React.ReactNode; user: 
       )}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <Topbar onMenu={() => setMobileOpen(true)} />
+        <Topbar onMenu={() => setMobileOpen(true)} user={user} notifications={notifications} />
         <main className="flex-1 overflow-y-auto px-5 pb-8 sm:px-7">{children}</main>
       </div>
 
