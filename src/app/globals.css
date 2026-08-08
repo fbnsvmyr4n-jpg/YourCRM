@@ -728,3 +728,19 @@ textarea.field-input {
   font-size: 14px;
 }
 .field-bare::placeholder { color: var(--text-faint); }
+
+/* Briefly ring a panel the user was sent to by a Quick Action. Landing on a
+   long page with no idea which card you were sent for is the problem this
+   solves; the ring fades on its own so it never becomes permanent chrome. */
+@keyframes jumpHighlight {
+  0%   { box-shadow: 0 0 0 0 var(--ring), 0 0 0 rgba(0,0,0,0); }
+  15%  { box-shadow: 0 0 0 4px var(--ring), 0 0 40px -6px var(--accent); }
+  100% { box-shadow: 0 0 0 0 rgba(0,0,0,0), 0 0 0 rgba(0,0,0,0); }
+}
+.jump-target {
+  animation: jumpHighlight 2.6s cubic-bezier(0.16, 1, 0.3, 1);
+  border-radius: 20px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .jump-target { animation: none; box-shadow: 0 0 0 3px var(--ring); }
+}

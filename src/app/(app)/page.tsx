@@ -1,9 +1,12 @@
 import Link from "next/link";
-import { ChevronRight, MoreHorizontal, Sparkles } from "lucide-react";
+import { ChevronRight, Sparkles } from "lucide-react";
 import { Avatar, type AvatarColor } from "@/components/ui/Avatar";
 import { AreaChart } from "@/components/ui/AreaChart";
 import { Card, CardHeader, ViewAll } from "@/components/ui/Card";
+import { FocusMenu, type FocusItem } from "@/components/home/FocusMenu";
+import { LiveClock } from "@/components/ui/LiveClock";
 import { iconMap, toneStyles, type Tone } from "@/components/ui/tone";
+import { getCurrentUser } from "@/server/session";
 import { listContacts } from "@/server/contacts-repo";
 import { listWonDeals, weeklyRevenue } from "@/server/deals-repo";
 import { listLeads } from "@/server/leads-repo";
@@ -11,8 +14,6 @@ import { listMeetings } from "@/server/meetings-repo";
 import { listMessages } from "@/server/inbox-repo";
 
 export const dynamic = "force-dynamic";
-
-const USER = "Lang";
 
 function greeting(hour: number) {
   if (hour < 12) return "Good morning";
@@ -32,7 +33,8 @@ function relativeDay(iso: string, now: Date) {
 }
 
 export default async function DashboardPage() {
-  const [contacts, leads, meetings, messages, wonDeals, revenueSeries] = await Promise.all([
+  const [me, contacts, leads, meetings, messages, wonDeals, revenueSeries] = await Promise.all([
+    getCurrentUser(),
     listContacts(),
     listLeads(),
     listMeetings(),
@@ -75,26 +77,38 @@ export default async function DashboardPage() {
   }));
   const revenueTotal = wonDeals.reduce((sum, d) => sum + d.value, 0);
 
-  const focus = [
+  // Deals actually won in the last seven days — the week the panel reports on.
+  const weekAgo = now.getTime() - 7 * 86_400_000;
+  const wonThisWeek = wonDeals.filter((d) => Date.parse(d.wonAt) >= weekAgo);
+
+  const focus: FocusItem[] = [
     {
+      href: "/meetings",
+      menuLabel: "Meetings today",
       icon: "calendar",
       tone: "red" as Tone,
       title: `${meetingsToday.length} meeting${meetingsToday.length === 1 ? "" : "s"} today`,
       sub: meetingsToday[0] ? `Next: ${meetingsToday[0].time} with ${meetingsToday[0].name}` : "Nothing on the calendar",
     },
     {
+      href: "/leads",
+      menuLabel: "Leads needing follow-up",
       icon: "user-plus",
       tone: "amber" as Tone,
       title: `${openLeads.length} lead${openLeads.length === 1 ? "" : "s"} need follow-up`,
       sub: openLeads[0] ? `Start with ${openLeads[0].name}` : "You're all caught up",
     },
     {
+      href: "/inbox",
+      menuLabel: "Unread messages",
       icon: "message",
       tone: "blue" as Tone,
       title: `${unread.length} unread message${unread.length === 1 ? "" : "s"}`,
       sub: unread[0] ? `From ${unread[0].name}` : "Inbox zero 🎉",
     },
     {
+      href: "/deals",
+      menuLabel: "Closed deals",
       icon: "dollar",
       tone: "green" as Tone,
       // Deals closed means *deals*, not leads marked closed — those are
@@ -134,6 +148,7 @@ export default async function DashboardPage() {
         <div className="flex flex-col gap-5">
           <Hero
             greeting={greeting(now.getHours())}
+            name={me?.name.split(" ")[0] ?? "there"}
             date={dateLabel}
             summary={`You have ${meetingsToday.length} meeting${meetingsToday.length === 1 ? "" : "s"} and ${openLeads.length} follow-up${openLeads.length === 1 ? "" : "s"} today.`}
             stats={heroStats}
@@ -146,10 +161,9 @@ export default async function DashboardPage() {
 
           <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
             <ThisWeek
-              openLeads={openLeads.length}
-              totalLeads={leads.length}
-              clients={clients.length}
-              totalContacts={contacts.length}
+              wonThisWeek={wonThisWeek.length}
+              wonValue={wonThisWeek.reduce((sum, d) => sum + d.value, 0)}
+              stillOpen={openLeads.length}
             />
             <Connections items={openLeads.slice(0, 3)} />
           </div>
@@ -172,11 +186,13 @@ export default async function DashboardPage() {
 
 function Hero({
   greeting,
+  name,
   date,
   summary,
   stats,
 }: {
   greeting: string;
+  name: string;
   date: string;
   summary: string;
   stats: { icon: string; tone: Tone; label: string; value: number }[];
@@ -193,9 +209,13 @@ function Hero({
       <div className="relative">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <p className="text-xs font-medium uppercase tracking-[0.14em] text-faint">{date}</p>
+            <p className="flex items-center gap-2.5 text-xs font-medium uppercase tracking-[0.14em] text-faint">
+              {date}
+              <span className="h-1 w-1 rounded-full bg-[var(--border-strong)]" />
+              <LiveClock className="tabular-nums text-accent" />
+            </p>
             <h2 className="mt-1 text-2xl font-bold tracking-tight sm:text-[27px]">
-              {greeting}, {USER} 👋
+              {greeting}, {name} 👋
             </h2>
             <p className="mt-1.5 text-sm text-muted">{summary}</p>
           </div>
@@ -257,7 +277,7 @@ function RevenueOverview({
         <>
           <p className="-mt-1 mb-1 text-2xl font-bold tabular-nums">${total.toLocaleString()}</p>
           <p className="mb-2 text-xs text-faint">Won across all closed deals</p>
-          <AreaChart data={series} />
+          <AreaChart data={series} height={230} />
         </>
       ) : (
         <p className="py-14 text-center text-sm text-faint">
@@ -344,47 +364,61 @@ function SegmentedBar({ value, total, tone }: { value: number; total: number; to
   );
 }
 
+/**
+ * Closed-won against still-open, for the week.
+ *
+ * Replaces two unrelated progress bars (open leads, active clients) that never
+ * answered the only question this panel should: how did the week actually go?
+ * The ratio at the foot is the headline — everything above it is the working.
+ */
 function ThisWeek({
-  openLeads,
-  totalLeads,
-  clients,
-  totalContacts,
+  wonThisWeek,
+  wonValue,
+  stillOpen,
 }: {
-  openLeads: number;
-  totalLeads: number;
-  clients: number;
-  totalContacts: number;
+  wonThisWeek: number;
+  wonValue: number;
+  stillOpen: number;
 }) {
+  const decided = wonThisWeek + stillOpen;
+  const pct = decided > 0 ? Math.round((wonThisWeek / decided) * 100) : null;
+
   return (
-    <Card>
+    <Card className="flex flex-col">
       <CardHeader title="This Week" />
-      <div className="space-y-6 pt-1">
+
+      <div className="space-y-5 pt-1">
         <div>
           <div className="mb-2 flex items-center justify-between">
-            <span className="text-sm text-muted">Open Leads</span>
-            <span className="text-sm font-semibold">
-              {openLeads}/{totalLeads}
+            <span className="text-sm text-muted">Closed won</span>
+            <span className="text-sm font-semibold tabular-nums text-green">
+              {wonThisWeek} · ${wonValue.toLocaleString()}
             </span>
           </div>
-          <SegmentedBar value={openLeads} total={totalLeads} tone="amber" />
-          <div className="mt-1.5 flex justify-between text-[11px] text-faint">
-            <span>0</span>
-            <span>{totalLeads}</span>
-          </div>
+          <SegmentedBar value={wonThisWeek} total={Math.max(decided, 1)} tone="green" />
         </div>
+
         <div>
           <div className="mb-2 flex items-center justify-between">
-            <span className="text-sm text-muted">Active Clients</span>
-            <span className="text-sm font-semibold">
-              {clients}/{totalContacts}
-            </span>
+            <span className="text-sm text-muted">Still open</span>
+            <span className="text-sm font-semibold tabular-nums text-amber">{stillOpen}</span>
           </div>
-          <SegmentedBar value={clients} total={totalContacts} tone="green" />
-          <div className="mt-1.5 flex justify-between text-[11px] text-faint">
-            <span>0</span>
-            <span>{totalContacts}</span>
-          </div>
+          <SegmentedBar value={stillOpen} total={Math.max(decided, 1)} tone="amber" />
         </div>
+      </div>
+
+      <div className="mt-auto flex items-end justify-between border-t border-[var(--border)] pt-4">
+        <div className="leading-tight">
+          <p className="text-[11px] uppercase tracking-wide text-faint">Win ratio</p>
+          <p className="mt-1 text-xs text-faint">
+            {decided === 0 ? "Nothing to measure yet" : `${wonThisWeek} won of ${decided}`}
+          </p>
+        </div>
+        {/* "—" rather than 0% when there is nothing to measure: an unearned
+            zero reads as a bad week instead of an empty one. */}
+        <p className="text-3xl font-bold tabular-nums" style={{ color: pct === null ? "var(--text-faint)" : "var(--green)" }}>
+          {pct === null ? "—" : `${pct}%`}
+        </p>
       </div>
     </Card>
   );
@@ -476,20 +510,29 @@ function Reminders({
 
 /* ---------------- Today's Focus ---------------- */
 
-function TodaysFocus({ items }: { items: { icon: string; tone: Tone; title: string; sub: string }[] }) {
+/**
+ * Each focus is a link to the work it describes, and the ⋯ opens a menu of the
+ * same destinations. Reading "4 leads need follow-up" and then having to go
+ * and find the Leads page is the slow path this removes.
+ */
+function TodaysFocus({ items }: { items: FocusItem[] }) {
   return (
     <Card>
       <CardHeader
         title="Today's Focus"
         icon={<Sparkles className="h-[18px] w-[18px] text-accent" />}
-        action={<MoreHorizontal className="h-4 w-4 text-faint" />}
+        action={<FocusMenu items={items} />}
       />
       <div className="flex flex-col gap-1">
         {items.map((f) => {
           const Icon = iconMap[f.icon];
           const t = toneStyles[f.tone];
           return (
-            <div key={f.title} className="flex items-center gap-3 rounded-xl px-1 py-2.5 text-left">
+            <Link
+              key={f.title}
+              href={f.href}
+              className="group flex items-center gap-3 rounded-xl px-1 py-2.5 text-left transition-colors hover:bg-[var(--raise)]"
+            >
               <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl" style={{ background: t.soft }}>
                 <Icon className="h-[17px] w-[17px]" style={{ color: t.color }} />
               </span>
@@ -497,7 +540,8 @@ function TodaysFocus({ items }: { items: { icon: string; tone: Tone; title: stri
                 <p className="text-[13px] font-medium">{f.title}</p>
                 <p className="truncate text-xs text-faint">{f.sub}</p>
               </div>
-            </div>
+              <ChevronRight className="h-4 w-4 shrink-0 text-faint opacity-0 transition-opacity group-hover:opacity-100" />
+            </Link>
           );
         })}
       </div>
@@ -507,11 +551,16 @@ function TodaysFocus({ items }: { items: { icon: string; tone: Tone; title: stri
 
 /* ---------------- Quick Actions (navigating) ---------------- */
 
+/**
+ * Three of these carry a query flag rather than pointing at the bare page.
+ * The destination reads it on mount and opens the relevant form straight away
+ * — landing on /leads and then hunting for "Add Lead" was the slow path.
+ */
 const QUICK_ACTIONS = [
-  { icon: "user-plus", label: "Add New Lead", href: "/leads" },
-  { icon: "calendar-plus", label: "Schedule Meeting", href: "/meetings" },
+  { icon: "user-plus", label: "Add New Lead", href: "/leads?new=1" },
+  { icon: "calendar-plus", label: "Schedule Meeting", href: "/meetings?schedule=1" },
   { icon: "phone", label: "View Contacts", href: "/contacts" },
-  { icon: "file-text", label: "Compose Email", href: "/inbox" },
+  { icon: "file-text", label: "Compose Email", href: "/inbox?compose=1" },
   { icon: "headphones", label: "Voice Agents", href: "/voice-agents" },
   { icon: "bar-chart", label: "Reports", href: "/reports" },
 ];

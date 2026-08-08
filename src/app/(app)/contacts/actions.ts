@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidateApp } from "@/server/revalidate";
 import { CONTACT_STATUSES, CONTACT_TYPES } from "@/data/contacts";
 import {
   createContact,
@@ -38,7 +38,7 @@ export async function addContactAction(formData: FormData) {
   const input = parseContact(formData);
   if (!input) return;
   const created = await createContact(input);
-  revalidatePath("/contacts");
+  revalidateApp();
   return created.id;
 }
 
@@ -47,12 +47,12 @@ export async function updateContactAction(id: string, formData: FormData) {
   const input = parseContact(formData);
   if (!contactId || !input) return;
   await updateContact(contactId, input);
-  revalidatePath("/contacts");
+  revalidateApp();
 }
 
 export async function deleteContactAction(id: string) {
   const contactId = validId(id);
   if (!contactId) return;
   await deleteContact(contactId);
-  revalidatePath("/contacts");
+  revalidateApp();
 }

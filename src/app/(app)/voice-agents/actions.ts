@@ -1,19 +1,10 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidateApp } from "@/server/revalidate";
 import { CALL_OUTCOMES, type CallOutcome } from "@/data/calls";
 import { MEETING_WHENS } from "@/data/meetings";
 import { deleteCall, logCall, processCall } from "@/server/calls-repo";
 import { count, id as validId, multiline, pick, pickOr, text } from "@/server/validate";
-
-/**
- * Refresh every surface a processed call can touch (Leads, Meetings, the
- * dashboard). Revalidating the group layout covers them all — calling
- * `revalidatePath("/")` here would navigate the user off this page.
- */
-function revalidateAll() {
-  revalidatePath("/(app)", "layout");
-}
 
 /** Run the automation: call → Lead (+ Meeting when one was requested). */
 export async function processCallAction(id: string) {
@@ -21,7 +12,7 @@ export async function processCallAction(id: string) {
   if (!callId) return { error: "Call not found." };
 
   const result = await processCall(callId);
-  revalidateAll();
+  revalidateApp();
   return result;
 }
 
@@ -29,7 +20,7 @@ export async function deleteCallAction(id: string) {
   const callId = validId(id);
   if (!callId) return;
   await deleteCall(callId);
-  revalidatePath("/voice-agents");
+  revalidateApp();
 }
 
 /** Log a call captured by the agent (used by the manual form). */
@@ -60,7 +51,7 @@ export async function logCallAction(formData: FormData) {
     requestedTime: wantsMeeting ? text(formData.get("time"), 20) || "10:00 AM" : undefined,
   });
 
-  revalidatePath("/voice-agents");
+  revalidateApp();
   return call;
 }
 
@@ -132,6 +123,6 @@ export async function simulateCallAction() {
   const scenario = SCENARIOS[Math.floor(Math.random() * SCENARIOS.length)];
   const call = await logCall(scenario);
   const result = await processCall(call.id);
-  revalidateAll();
+  revalidateApp();
   return result;
 }

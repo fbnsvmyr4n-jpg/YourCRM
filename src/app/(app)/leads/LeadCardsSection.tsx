@@ -1,5 +1,8 @@
 "use client";
 
+import { useCallback } from "react";
+import { useOpenFromQuery } from "@/lib/useOpenFromQuery";
+
 import { useState } from "react";
 import { Mail, MapPin, MoreHorizontal, Pencil, Phone, Plus, Trash2, X } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
@@ -12,6 +15,8 @@ type ModalState = null | "new" | LeadCard;
 
 export function LeadCardsSection({ leads }: { leads: LeadCard[] }) {
   const [modal, setModal] = useState<ModalState>(null);
+  // Arriving from the dashboard Quick Action opens the form directly.
+  useOpenFromQuery("new", useCallback(() => setModal("new"), []));
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
