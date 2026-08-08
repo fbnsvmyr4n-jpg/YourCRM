@@ -653,14 +653,14 @@ function Scheduler({ today }: { today: DayRef }) {
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Contact name or company..."
-              className="w-full bg-transparent text-sm outline-none placeholder:text-faint"
+              className="field-bare"
             />
           </div>
           <input
             value={topic}
             onChange={(e) => setTopic(e.target.value)}
             placeholder="Meeting topic (optional)"
-            className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3.5 py-2.5 text-sm outline-none placeholder:text-faint focus:border-[var(--border-strong)]"
+            className="field-input"
           />
         </div>
 
@@ -749,7 +749,7 @@ function Scheduler({ today }: { today: DayRef }) {
         <textarea
           rows={4}
           placeholder="Write any notes or relevant info about this meeting..."
-          className="w-full resize-none rounded-xl border border-[var(--border)] bg-transparent p-3 text-sm outline-none placeholder:text-faint focus:border-[var(--border-strong)]"
+          className="field-input"
         />
       </Card>
     </div>

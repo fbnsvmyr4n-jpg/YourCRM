@@ -191,7 +191,7 @@ function MessageList({
     <div className="card flex min-h-0 flex-col overflow-hidden p-3">
       <div className="mb-2 flex items-center gap-2 rounded-xl border border-[var(--border)] px-3 py-2">
         <Search className="h-4 w-4 text-faint" />
-        <input placeholder="Search messages" className="w-full bg-transparent text-sm outline-none placeholder:text-faint" />
+        <input placeholder="Search messages" className="field-bare" />
       </div>
       <div className="-mr-1 flex flex-1 flex-col gap-2 overflow-y-auto pr-1">
         {list.length === 0 && <p className="mt-8 text-center text-sm text-faint">No messages here.</p>}
@@ -484,7 +484,7 @@ function ComposeModal({
               required
               autoFocus
               placeholder="Name or email address"
-              className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3.5 py-2.5 text-sm outline-none transition-colors focus:border-[var(--border-strong)]"
+              className="field-input"
             />
           </label>
           <label className="block">
@@ -492,7 +492,7 @@ function ComposeModal({
             <input
               name="subject"
               placeholder="Subject line"
-              className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3.5 py-2.5 text-sm outline-none transition-colors focus:border-[var(--border-strong)]"
+              className="field-input"
             />
           </label>
           <label className="block">
@@ -501,7 +501,7 @@ function ComposeModal({
               name="body"
               rows={5}
               placeholder="Write your message..."
-              className="w-full resize-none rounded-xl border border-[var(--border)] bg-transparent p-3 text-sm outline-none transition-colors focus:border-[var(--border-strong)]"
+              className="field-input"
             />
           </label>
         </div>

@@ -195,7 +195,7 @@ function Field({
         defaultValue={defaultValue}
         required={required}
         autoComplete={type === "password" ? "off" : undefined}
-        className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3.5 py-2.5 text-sm outline-none transition-colors focus:border-[var(--border-strong)]"
+        className="field-input"
       />
     </label>
   );
