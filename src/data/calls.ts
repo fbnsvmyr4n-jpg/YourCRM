@@ -29,6 +29,17 @@ export type Call = {
   /** Populated once the automation has run. */
   status: CallStatus;
   createdLeadId?: string;
+  /**
+   * Whether the automation *created* the linked lead or *matched* one that
+   * already existed.
+   *
+   * Without this the detail card could only see that a lead id was present, so
+   * it claimed "Added to Leads" either way — and every repeat caller produced a
+   * card asserting a lead that never appeared on the Leads page. The
+   * distinction existed only in `processCall`'s return value, which is gone the
+   * moment the toast fades. Absent on rows written before this field existed.
+   */
+  leadLink?: "created" | "matched";
   createdMeetingId?: string;
   /** Requested slot, when the caller asked for a meeting. */
   requestedWhen?: MeetingWhen;
@@ -51,7 +62,9 @@ export const agentConfig = {
   greeting:
     "Thanks for calling YourCRM — this is Aria, Lang's assistant. How can I help you today?",
   voice: "Warm · Professional",
-  hours: "Mon–Fri, 08:00–18:00",
+  // No `hours` field: the agent answers whenever the provider rings the
+  // webhook, so there are no office hours to fall outside of. The old value was
+  // a hardcoded "Mon–Fri, 08:00–18:00" that nothing enforced.
 };
 
 /** Seed history so the console is populated on first load. */

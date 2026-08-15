@@ -12,15 +12,30 @@ export type Stage = {
   label: string;
   color: string; // css var
   soft: string;
+  /** What the stage means — shown on the column so the rules aren't folklore. */
+  hint: string;
 };
 
 export const STAGES: Stage[] = [
-  { id: "lead", label: "Lead In", color: "var(--accent)", soft: "var(--accent-soft)" },
-  { id: "qualified", label: "Qualified", color: "var(--purple)", soft: "var(--purple-soft)" },
-  { id: "proposal", label: "Proposal", color: "var(--amber)", soft: "var(--amber-soft)" },
-  { id: "negotiation", label: "Negotiation", color: "#f97316", soft: "rgba(249,115,22,0.12)" },
-  { id: "won", label: "Closed Won", color: "var(--green)", soft: "var(--green-soft)" },
+  { id: "lead", label: "Leads In", color: "var(--accent)", soft: "var(--accent-soft)", hint: "Brand new — not contacted yet" },
+  { id: "qualified", label: "Qualified", color: "var(--purple)", soft: "var(--purple-soft)", hint: "Called and verified — needs a next step" },
+  { id: "proposal", label: "Proposals", color: "var(--amber)", soft: "var(--amber-soft)", hint: "Met — quote or payment link to send" },
+  { id: "negotiation", label: "Negotiations", color: "#f97316", soft: "rgba(249,115,22,0.12)", hint: "Payment link sent — awaiting payment" },
+  { id: "won", label: "Closed Won", color: "var(--green)", soft: "var(--green-soft)", hint: "Paid" },
 ];
+
+/**
+ * Stages that carry a money value.
+ *
+ * A deal only has a number attached once there is something real behind it —
+ * a quote or a payment link. Before that (Leads In, Qualified) any figure is a
+ * guess, and a guess that is summed into a pipeline total reads as a
+ * measurement. Cards in those stages show no value and contribute nothing to
+ * any total.
+ */
+export const MONEY_STAGES: readonly StageId[] = ["proposal", "negotiation", "won"];
+
+export const carriesMoney = (stage: StageId) => MONEY_STAGES.includes(stage);
 
 export type Deal = {
   id: string;
@@ -40,6 +55,23 @@ export type Deal = {
    * invented figure. Absent on deals that have never been won.
    */
   wonAt?: string;
+  /**
+   * Groups the paid part and the outstanding remainder of one original deal.
+   *
+   * A partial payment splits a deal in two: a won record for what was received
+   * and a negotiation record for what is still owed. Both carry the same
+   * `splitId`, which is how the remainder knows where to merge back when the
+   * rest is paid.
+   */
+  splitId?: string;
+  /**
+   * The original contract value, captured at the first split.
+   *
+   * A won record is *partially* paid while `value < splitTotal` — that is what
+   * makes it amber instead of green. Without it, a $10,000 part-payment is
+   * indistinguishable from a $10,000 deal paid in full.
+   */
+  splitTotal?: number;
 };
 
 export const deals: Deal[] = [

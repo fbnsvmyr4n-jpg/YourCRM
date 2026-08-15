@@ -4,10 +4,11 @@ import { useCallback } from "react";
 import { useOpenFromQuery } from "@/lib/useOpenFromQuery";
 
 import { useState } from "react";
-import { Mail, MapPin, MoreHorizontal, Pencil, Phone, Plus, Trash2, X } from "lucide-react";
+import { Mail, MapPin, MoreHorizontal, Pencil, Phone, Plus, Trash2, Users, X } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
+import { Overlay } from "@/components/ui/Overlay";
 import { SourceIcon } from "@/components/ui/SourceIcon";
-import type { LeadCard } from "@/data/leads";
+import { LEAD_STATUSES, STATUS_TONE, type LeadCard, type LeadStatus } from "@/data/leads";
 import { clsx } from "@/lib/clsx";
 import { addLeadAction, deleteLeadAction, updateLeadAction } from "./actions";
 
@@ -19,6 +20,16 @@ export function LeadCardsSection({ leads }: { leads: LeadCard[] }) {
   useOpenFromQuery("new", useCallback(() => setModal("new"), []));
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [filter, setFilter] = useState<"All" | LeadStatus>("All");
+
+  const counts = {
+    All: leads.length,
+    ...Object.fromEntries(
+      LEAD_STATUSES.map((st) => [st, leads.filter((l) => l.status === st).length])
+    ),
+  } as Record<"All" | LeadStatus, number>;
+
+  const visible = filter === "All" ? leads : leads.filter((l) => l.status === filter);
 
   async function handleSubmit(formData: FormData) {
     setBusy(true);
@@ -44,8 +55,54 @@ export function LeadCardsSection({ leads }: { leads: LeadCard[] }) {
 
   return (
     <div className="mt-5">
+      {/* These four were static headings that counted leads but did nothing.
+          They are the natural place to filter from, so they now do. */}
+      <div className="mb-5 grid grid-cols-2 gap-4 @min-[880px]:grid-cols-4">
+        {(["All", ...LEAD_STATUSES] as const).map((st) => {
+          const active = filter === st;
+          const tone = st === "All" ? null : STATUS_TONE[st];
+          const color = tone?.color ?? "var(--text-muted)";
+          const soft = tone?.soft ?? "var(--raise)";
+          const label = st === "All" ? "All Leads" : st;
+
+          return (
+            <button
+              key={st}
+              onClick={() => setFilter(st)}
+              aria-pressed={active}
+              className={clsx(
+                "card focus-ring flex items-center justify-between gap-3 p-5 text-left transition-all",
+                active ? "ring-2" : "hover:-translate-y-0.5"
+              )}
+              style={{
+                background: `linear-gradient(135deg, ${soft}, transparent 90%)`,
+                ...(active ? ({ "--tw-ring-color": color } as React.CSSProperties) : {}),
+              }}
+            >
+              <span className="flex items-center gap-3">
+                <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl" style={{ background: soft }}>
+                  <Users className="h-5 w-5" style={{ color }} />
+                </span>
+                <span className="leading-tight">
+                  <span className="block text-sm font-semibold">{label}</span>
+                  <span className="block text-xs text-faint">
+                    {active ? "Showing these" : "Tap to filter"}
+                  </span>
+                </span>
+              </span>
+              <span className="text-3xl font-bold tabular-nums" style={{ color }}>
+                {String(counts[st] ?? 0).padStart(2, "0")}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
       <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-lg font-semibold tracking-tight">All Leads</h2>
+        <h2 className="text-lg font-semibold tracking-tight">
+          {filter === "All" ? "All Leads" : filter}
+          <span className="ml-2 text-sm font-normal text-faint">{visible.length}</span>
+        </h2>
         <button
           onClick={() => setModal("new")}
           className="btn-accent focus-ring flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold"
@@ -61,9 +118,16 @@ export function LeadCardsSection({ leads }: { leads: LeadCard[] }) {
             Add your first lead
           </button>
         </div>
+      ) : visible.length === 0 ? (
+        <div className="card grid place-items-center p-10 text-center">
+          <p className="text-muted">No leads with this status.</p>
+          <button onClick={() => setFilter("All")} className="btn-soft mt-4 rounded-xl px-5 py-2.5 text-sm font-semibold">
+            Show all leads
+          </button>
+        </div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {leads.map((lead) => (
+        <div className="grid grid-cols-1 gap-4 @min-[560px]:grid-cols-2 @min-[900px]:grid-cols-3">
+          {visible.map((lead) => (
             <LeadCardItem
               key={lead.id}
               lead={lead}
@@ -79,7 +143,13 @@ export function LeadCardsSection({ leads }: { leads: LeadCard[] }) {
         </div>
       )}
 
-      {openMenu && <div className="fixed inset-0 z-20" onClick={() => setOpenMenu(null)} />}
+      {/* Click-away catcher. Portalled for the same reason as the dialogs: it
+          has to cover the whole window, including the parts `<main>` doesn't. */}
+      {openMenu && (
+        <Overlay>
+          <div className="fixed inset-0 z-20" onClick={() => setOpenMenu(null)} />
+        </Overlay>
+      )}
       {modal !== null && (
         <LeadModal
           lead={modal === "new" ? undefined : modal}
@@ -105,7 +175,7 @@ function LeadCardItem({
   onEdit: () => void;
   onDelete: () => void;
 }) {
-  const closed = lead.status === "Closed";
+  const tone = STATUS_TONE[lead.status] ?? { color: "var(--text-muted)", soft: "var(--raise)" };
   return (
     <div className="card relative p-5">
       <div className="flex items-start justify-between">
@@ -149,14 +219,19 @@ function LeadCardItem({
         <Field label="Project Info">
           <span className="truncate text-accent">{lead.company || "—"}</span>
         </Field>
+        {/* `min-w-0` on the flex wrapper is load-bearing: a flex item defaults
+            to `min-width: auto`, so it refuses to shrink below its content and
+            the `truncate` on the child never engages. Without it the status ran
+            26px past its own column and 18px into Source — visible as soon as
+            the label grew from "Follow-up" to "Follow-up Required". */}
         <Field label="Status">
-          <span className="flex items-center gap-1.5" style={{ color: closed ? "var(--green)" : "var(--red)" }}>
-            <span className="h-1.5 w-1.5 rounded-full" style={{ background: closed ? "var(--green)" : "var(--red)" }} />
-            <span className="truncate">{closed ? "Closed" : "Follow-up"}</span>
+          <span className="flex min-w-0 items-center gap-1.5" style={{ color: tone.color }} title={lead.status}>
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: tone.color }} />
+            <span className="truncate">{lead.status}</span>
           </span>
         </Field>
         <Field label="Source">
-          <span className="flex items-center gap-1.5 text-[var(--text)]">
+          <span className="flex min-w-0 items-center gap-1.5 text-[var(--text)]" title={lead.source}>
             <SourceIcon source={lead.source} />
             <span className="truncate">{lead.source}</span>
           </span>
@@ -190,36 +265,47 @@ function LeadModal({
 }) {
   const editing = !!lead;
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center p-4" role="dialog" aria-modal="true">
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
-      <form action={onSubmit} className="card relative z-10 w-full max-w-lg overflow-y-auto p-6" style={{ maxHeight: "90vh" }}>
-        <div className="mb-5 flex items-center justify-between">
-          <h2 className="text-lg font-semibold tracking-tight">{editing ? "Edit Lead" : "Add Lead"}</h2>
-          <button type="button" onClick={onClose} className="text-faint hover:text-[var(--text)]" aria-label="Close">
-            <X className="h-5 w-5" />
-          </button>
-        </div>
+    <Overlay>
+      <div className="fixed inset-0 z-50 grid place-items-center p-4" role="dialog" aria-modal="true">
+        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+        <form action={onSubmit} className="modal-surface relative z-10 w-full max-w-lg overflow-y-auto p-6" style={{ maxHeight: "90vh" }}>
+          <div className="mb-5 flex items-center justify-between">
+            <h2 className="text-lg font-semibold tracking-tight">{editing ? "Edit Lead" : "Add Lead"}</h2>
+            <button type="button" onClick={onClose} className="text-faint hover:text-[var(--text)]" aria-label="Close">
+              <X className="h-5 w-5" />
+            </button>
+          </div>
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <ModalField name="name" label="Name" required autoFocus className="sm:col-span-2" defaultValue={lead?.name} />
-          <ModalField name="email" label="Email" type="email" className="sm:col-span-2" defaultValue={lead?.email} />
-          <ModalField name="phone" label="Phone" defaultValue={lead?.phone} />
-          <ModalField name="location" label="Location" defaultValue={lead?.location} />
-          <ModalField name="company" label="Company (Project Info)" className="sm:col-span-2" defaultValue={lead?.company} />
-          <ModalSelect name="status" label="Status" options={["Follow-up Required", "Closed"]} defaultValue={lead?.status} />
-          <ModalSelect name="source" label="Source" options={["Google Ads", "Facebook", "Referral"]} defaultValue={lead?.source} />
-        </div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <ModalField name="name" label="Name" required autoFocus className="sm:col-span-2" defaultValue={lead?.name} />
+            <ModalField name="email" label="Email" type="email" className="sm:col-span-2" defaultValue={lead?.email} />
+            <ModalField name="phone" label="Phone" defaultValue={lead?.phone} />
+            <ModalField name="location" label="Location" defaultValue={lead?.location} />
+            <ModalField name="company" label="Company (Project Info)" className="sm:col-span-2" defaultValue={lead?.company} />
+            <ModalSelect name="source" label="Source" options={["Google Ads", "Facebook", "Referral", "Phone Call"]} defaultValue={lead?.source} />
+          </div>
 
-        <div className="mt-6 flex items-center justify-end gap-3">
-          <button type="button" onClick={onClose} className="btn-soft focus-ring rounded-xl px-5 py-2.5 text-sm font-medium">
-            Cancel
-          </button>
-          <button type="submit" disabled={busy} className="btn-accent focus-ring rounded-xl px-5 py-2.5 text-sm font-semibold disabled:opacity-60">
-            {busy ? "Saving…" : editing ? "Save Changes" : "Save Lead"}
-          </button>
-        </div>
-      </form>
-    </div>
+          {/* No status field. It used to be chosen here, which meant declaring an
+              outcome for a lead nothing had happened to yet. It now follows the
+              record: a call or meeting moves it to Follow-up Required, a win
+              moves it to Closed Won. */}
+          <p className="mt-4 rounded-xl px-3 py-2 text-xs text-muted" style={{ background: "var(--raise)" }}>
+            {editing
+              ? `Status is ${lead?.status ?? "New Lead"} — set automatically from calls, meetings and deals.`
+              : "Saved as a New Lead. It moves to Follow-up Required after a call or meeting, and to Closed Won when the deal lands."}
+          </p>
+
+          <div className="mt-6 flex items-center justify-end gap-3">
+            <button type="button" onClick={onClose} className="btn-soft focus-ring rounded-xl px-5 py-2.5 text-sm font-medium">
+              Cancel
+            </button>
+            <button type="submit" disabled={busy} className="btn-accent focus-ring rounded-xl px-5 py-2.5 text-sm font-semibold disabled:opacity-60">
+              {busy ? "Saving…" : editing ? "Save Changes" : "Save Lead"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </Overlay>
   );
 }
 

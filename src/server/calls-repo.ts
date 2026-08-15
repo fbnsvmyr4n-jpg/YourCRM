@@ -127,6 +127,7 @@ export async function processCall(id: string): Promise<ProcessResult> {
   let leadMatched = false;
   let meetingCreated = false;
   let createdLeadId: string | undefined;
+  let leadLink: Call["leadLink"];
   let createdMeetingId: string | undefined;
 
   // 1. Capture the caller as a lead — unless they explicitly weren't interested.
@@ -136,6 +137,7 @@ export async function processCall(id: string): Promise<ProcessResult> {
     const existing = await findExistingLead(call.phone, call.callerName, call.company);
     if (existing) {
       createdLeadId = existing.id;
+      leadLink = "matched";
       leadMatched = true; // attached to an existing lead, not duplicated
     } else {
       const lead = await createLead({
@@ -148,6 +150,7 @@ export async function processCall(id: string): Promise<ProcessResult> {
         source: "Phone Call",
       });
       createdLeadId = lead.id;
+      leadLink = "created";
       leadCreated = true;
     }
   }
@@ -173,7 +176,7 @@ export async function processCall(id: string): Promise<ProcessResult> {
   //    concurrent write to another call can't clobber this update.
   //    Note: the lead/meeting writes above take their own locks and complete
   //    before this one starts — locks are never nested, so no deadlock.
-  const updated: Call = { ...call, status: "processed", createdLeadId, createdMeetingId };
+  const updated: Call = { ...call, status: "processed", createdLeadId, leadLink, createdMeetingId };
   await mutateTable<Call>(TABLE, seed, (rows) => {
     const at = rows.findIndex((c) => c.id === id);
     if (at === -1) return rows;
@@ -207,8 +210,11 @@ export async function deleteCall(id: string): Promise<void> {
 export async function detachLead(leadId: string): Promise<void> {
   await mutateTable<Call>(TABLE, seed, (rows) => {
     if (!rows.some((c) => c.createdLeadId === leadId)) return rows; // nothing to do
+    // `leadLink` goes with the id — it describes a link that no longer exists,
+    // and leaving it behind would let the card keep wording a claim about a
+    // deleted record.
     return rows.map((c) =>
-      c.createdLeadId === leadId ? { ...c, createdLeadId: undefined } : c
+      c.createdLeadId === leadId ? { ...c, createdLeadId: undefined, leadLink: undefined } : c
     );
   });
 }

@@ -193,13 +193,66 @@ body {
   box-shadow: var(--shadow-md), inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
+/*
+ * No `backdrop-filter` here, deliberately.
+ *
+ * Cards used to carry `blur(26px) saturate(1.35)`. Measured: every card's
+ * backdrop is `rgb(4,6,11)` straight from `<body>` — a flat solid colour — and
+ * no card overlaps another. Blurring a uniform colour returns that same uniform
+ * colour, so the filter was a **visual no-op**; rendering the page with and
+ * without it is indistinguishable.
+ *
+ * It was not free. A backdrop-filtered surface has to be re-sampled and
+ * re-blurred whenever anything inside it repaints — a blinking caret, a hover
+ * shadow — which is what made these cards appear to flash and to go hazy. It
+ * also made every card a containing block for `position: fixed` (the reason
+ * `components/ui/Overlay` exists) and cost a compositing pass per card, eight
+ * per page.
+ *
+ * Frosted glass stays where something genuinely passes behind it: `.glass` on
+ * the sidebar, and the modal backdrop.
+ */
 .card {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 20px;
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
   box-shadow: var(--shadow-md), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+/*
+ * Opt-in query container, for the cards that hold a responsive grid.
+ *
+ * This was briefly on `.card` itself. That put `container-type` — i.e.
+ * `contain: layout style inline-size` — on top of `backdrop-filter` for every
+ * card on the page, roughly a dozen per route, to solve a problem that only two
+ * of them had. Stacking containment onto a backdrop-filtered surface changes how
+ * Chromium invalidates and re-rasterises it, and a card that has to re-blur a
+ * 26px backdrop whenever anything inside it repaints — a blinking text caret,
+ * say — is exactly how you get a surface that appears to pulse.
+ *
+ * So it is opt-in: a card asks to be a container only when a grid inside it
+ * needs to measure the card instead of the page.
+ */
+.card-q {
+  container-type: inline-size;
+}
+
+/*
+ * Floating panels — the notification list, the account menu, row menus.
+ *
+ * Opaque on purpose, and never `.card`. A card's surface is `--panel`, which is
+ * `rgba(255,255,255,0.045)` in dark: 4.5% white. In the flow of a page that is
+ * fine, because what is behind it is the page background. Floating over *content*
+ * it is not — the notification list was legible only because a `backdrop-filter`
+ * happened to frost the page beneath it, and it turned to glass the moment that
+ * filter came off. The modal surface already learned this lesson; this is the
+ * same rule for popovers.
+ */
+.popover {
+  background: var(--panel-solid);
+  border: 1px solid var(--border-strong);
+  border-radius: 16px;
+  box-shadow: var(--shadow-lg);
 }
 
 .hairline {
@@ -216,15 +269,27 @@ body {
   color: transparent;
 }
 
+/*
+ * The glow has to fit the card it sits in.
+ *
+ * It used to reach 23px below the button at rest and 30px on hover, while the
+ * tightest card that holds one — the meeting scheduler — leaves 17px before its
+ * bottom edge. Cards are `overflow: visible`, so the glow painted *outside* the
+ * card as a hard-edged luminous band, and because `box-shadow` is transitioned,
+ * hovering swelled that band 13px past the edge and back: the flash.
+ *
+ * Reach is `offset-y + blur / 2`. These are 14px at rest and 16px on hover, so
+ * the glow stays inside every card in the app with room to spare.
+ */
 .btn-accent {
   background-image: linear-gradient(135deg, var(--accent-from), var(--accent-to));
   color: var(--accent-contrast);
-  box-shadow: 0 10px 26px -10px var(--ring), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  box-shadow: 0 6px 16px -8px var(--ring), inset 0 1px 0 rgba(255, 255, 255, 0.35);
   transition: transform 0.12s ease, box-shadow 0.2s ease, filter 0.2s ease;
 }
 .btn-accent:hover {
   filter: brightness(1.05);
-  box-shadow: 0 14px 32px -10px var(--ring), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  box-shadow: 0 7px 18px -8px var(--ring), inset 0 1px 0 rgba(255, 255, 255, 0.4);
 }
 .btn-accent:active {
   transform: translateY(1px) scale(0.997);
@@ -728,6 +793,13 @@ textarea.field-input {
   font-size: 14px;
 }
 .field-bare::placeholder { color: var(--text-faint); }
+/* A bare input has no border of its own to ring, so the box it sits in takes
+   the focus treatment. Without this, tabbing into a search field gave no
+   visible indication at all. */
+:has(> .field-bare:focus-visible) {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--ring);
+}
 
 /* Briefly ring a panel the user was sent to by a Quick Action. Landing on a
    long page with no idea which card you were sent for is the problem this
@@ -744,3 +816,584 @@ textarea.field-input {
 @media (prefers-reduced-motion: reduce) {
   .jump-target { animation: none; box-shadow: 0 0 0 3px var(--ring); }
 }
+
+/* ------------------------------------------------------------------ */
+/* Chat assistant identity                                             */
+/*                                                                     */
+/* The assistant used to introduce itself with a flat icon in a tinted */
+/* square, which read as unfinished next to the rest of the product.   */
+/* This gives it presence — a lit orb over a soft gradient wash — while*/
+/* keeping the motion slow and low-contrast so it never competes with  */
+/* the conversation for attention.                                     */
+/* ------------------------------------------------------------------ */
+
+.chat-hero {
+  position: relative;
+  overflow: hidden;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background:
+    radial-gradient(120% 140% at 0% 0%, var(--accent-soft), transparent 60%),
+    radial-gradient(100% 160% at 100% 0%, var(--purple-soft), transparent 55%),
+    var(--panel);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  box-shadow: var(--shadow-sm);
+}
+
+/* A single hairline of light along the top edge, the way lit glass catches it. */
+.chat-hero::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--border-strong), transparent);
+  pointer-events: none;
+}
+
+.chat-orb {
+  position: relative;
+  display: grid;
+  place-items: center;
+  height: 46px;
+  width: 46px;
+  flex-shrink: 0;
+  border-radius: 16px;
+  color: #fff;
+  background-image: linear-gradient(140deg, var(--accent-from), var(--accent-to));
+  box-shadow:
+    0 8px 22px -8px var(--accent-from),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+/* The halo breathes rather than blinks — presence, not a notification. */
+.chat-orb::before {
+  content: "";
+  position: absolute;
+  inset: -5px;
+  border-radius: 20px;
+  background-image: linear-gradient(140deg, var(--accent-from), var(--accent-to));
+  opacity: 0.28;
+  filter: blur(9px);
+  z-index: -1;
+  animation: orb-breathe 5.5s ease-in-out infinite;
+}
+
+@keyframes orb-breathe {
+  0%, 100% { opacity: 0.2; transform: scale(0.96); }
+  50%      { opacity: 0.42; transform: scale(1.05); }
+}
+
+/* Small avatar beside each assistant reply — same family, no halo, so a long
+   conversation doesn't turn into a column of glowing dots. */
+.chat-orb-sm {
+  display: grid;
+  place-items: center;
+  height: 32px;
+  width: 32px;
+  flex-shrink: 0;
+  border-radius: 12px;
+  color: #fff;
+  background-image: linear-gradient(140deg, var(--accent-from), var(--accent-to));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+.chat-live-dot {
+  position: relative;
+  display: inline-block;
+  height: 6px;
+  width: 6px;
+  border-radius: 999px;
+  background: currentColor;
+}
+.chat-live-dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: currentColor;
+  animation: live-ping 2.4s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+@keyframes live-ping {
+  0%        { transform: scale(1); opacity: 0.65; }
+  70%, 100% { transform: scale(2.6); opacity: 0; }
+}
+
+/* Suggestion chips. Present for the whole conversation, so they are quieter
+   than a primary control and only lift on hover. */
+.chat-chip {
+  border: 1px solid var(--border);
+  background: var(--raise);
+  color: var(--text-muted);
+  border-radius: 999px;
+  padding: 6px 13px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: color 0.16s ease, border-color 0.16s ease, background 0.16s ease, transform 0.16s ease;
+}
+.chat-chip:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--border-strong);
+  background: var(--accent-soft);
+  transform: translateY(-1px);
+}
+.chat-chip:disabled { opacity: 0.45; }
+
+/* The strip scrolls sideways rather than wrapping to a second row, so the
+   composer never shifts down as the suggestions change under the cursor. */
+.chat-chips {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.chat-chips::-webkit-scrollbar { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-orb::before,
+  .chat-live-dot::after { animation: none; }
+  .chat-chip:hover:not(:disabled) { transform: none; }
+}
+
+/* ------------------------------------------------------------------ */
+/* Modal surface                                                       */
+/*                                                                     */
+/* Dialogs used `.card`, which is deliberately translucent so page      */
+/* panels sit over the background gradient. Floating above a dense      */
+/* page that let the content underneath show through the form, and the  */
+/* fields became hard to read — reported as "too transparent".          */
+/*                                                                     */
+/* A dialog is not a panel: it needs to fully occlude what it covers.   */
+/* ------------------------------------------------------------------ */
+.modal-surface {
+  background: var(--panel-solid);
+  border: 1px solid var(--border-strong);
+  border-radius: 20px;
+  box-shadow: var(--shadow-lg);
+}
+
+/* ------------------------------------------------------------------ */
+/* Switch                                                              */
+/*                                                                     */
+/* The calendar toggle was built from utility classes, one of which     */
+/* (`w-11`) was never emitted into the stylesheet — so the track        */
+/* computed to width:0 and the knob rendered 44px outside the card it   */
+/* was supposed to sit in. Reported as "escapes its own outlined box".  */
+/*                                                                     */
+/* A control whose geometry has to be exact is safer as a real          */
+/* component: the numbers add up here (2 + 20 + 20 travel + 2 = 44) and */
+/* nothing depends on a just-in-time utility existing.                  */
+/* ------------------------------------------------------------------ */
+.switch {
+  position: relative;
+  display: inline-block;
+  flex: none; /* a flex row must never squeeze it */
+  width: 44px;
+  height: 24px;
+  border-radius: 999px;
+  background: var(--border);
+  transition: background-color 0.18s ease;
+}
+
+.switch[aria-checked="true"] {
+  background-image: linear-gradient(135deg, var(--accent-from), var(--accent-to));
+}
+
+.switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: transform 0.18s ease;
+}
+
+.switch[aria-checked="true"] .switch-knob {
+  transform: translateX(20px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .switch,
+  .switch-knob {
+    transition: none;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Time wheel                                                          */
+/*                                                                     */
+/* Scrollable columns of numbers, in place of a pair of dropdowns. The  */
+/* padding on the element is what lets the first and last values reach  */
+/* the middle of the box, so 00 and 59 are as easy to land on as        */
+/* anything else.                                                       */
+/* ------------------------------------------------------------------ */
+.time-wheel {
+  scrollbar-width: none;
+  scroll-snap-type: y proximity;
+  /* Fades the ends so the column reads as a wheel that continues past the
+     edge, rather than a list that has been cut off. */
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 30px,
+    #000 calc(100% - 30px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 30px,
+    #000 calc(100% - 30px),
+    transparent 100%
+  );
+}
+
+.time-wheel::-webkit-scrollbar {
+  display: none;
+}
+
+.time-wheel > button {
+  scroll-snap-align: center;
+}
+
+/* ==================================================================
+   Login — orbital
+   ==================================================================
+   Rebuilt to the reference: a view from orbit, with the form floating
+   directly on the sky rather than inside a card. The panel is gone on
+   purpose — a frosted box in front of this scene reads as a dialog
+   pasted over a wallpaper, which is exactly what the reference avoids.
+   ================================================================== */
+
+/* Near-black. The old scene carried blue, cyan and violet washes that
+   lifted the whole frame to navy; space in the reference is genuinely
+   dark, and everything bright reads against that. */
+.orbit-sky {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  background:
+    /* Only one wash, and only where the planet's atmosphere would actually
+       light the sky — everything else stays black so the rim reads as the
+       brightest thing in the frame. */
+    radial-gradient(120% 46% at 50% 104%, rgba(24, 54, 102, 0.42), transparent 62%),
+    #020306;
+}
+
+/* The Milky Way, running corner to corner behind everything. */
+/* ---------------- Earth ---------------- */
+
+.earth {
+  position: absolute;
+  left: 50%;
+  /* Anchored by its *top* edge near the bottom of the frame. Anchoring to the
+     bottom and translating down put the arc at the top of the screen instead —
+     the circle is ~3x the viewport wide, so a percentage translate moves it far
+     further than it looks like it should. */
+  top: 93%;
+  width: 340vw;
+  max-width: 4600px;
+  aspect-ratio: 1 / 1;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+/* Atmosphere bleeding up into the sky. */
+.earth-halo {
+  position: absolute;
+  inset: -0.5%;
+  border-radius: 50%;
+  background: radial-gradient(
+    closest-side,
+    transparent 96.5%,
+    rgba(122, 184, 250, 0.5) 98.6%,
+    rgba(70, 134, 214, 0.12) 99.6%,
+    transparent 100%
+  );
+  filter: blur(10px);
+}
+
+.earth-body {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background:
+    radial-gradient(closest-side, #05070d 82%, #0a1120 94%, #0d1728 100%);
+  overflow: hidden;
+}
+
+/* The hairline where the sun catches the atmosphere. Thin and very bright —
+   at this scale it is the single strongest edge in the frame. */
+.earth-rim {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  box-shadow:
+    inset 0 0 0 2px rgba(232, 245, 255, 0.95),
+    inset 0 0 10px 1px rgba(190, 226, 255, 0.7),
+    inset 0 0 34px 6px rgba(110, 175, 245, 0.35),
+    inset 0 0 90px 18px rgba(48, 100, 170, 0.18);
+}
+
+/* City lights, masked to a band just inside the edge so they follow the
+   curve rather than scattering across the disc. */
+.earth-lights {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background-image:
+    radial-gradient(0.06% 0.06% at 19.8% 0.58%, rgba(255, 198, 124, 0.58), transparent),
+    radial-gradient(0.075% 0.075% at 22.2% 0.44%, rgba(255, 232, 196, 0.57), transparent),
+    radial-gradient(0.11% 0.11% at 24.7% 0.71%, rgba(255, 198, 124, 0.58), transparent),
+    radial-gradient(0.06% 0.06% at 27.8% 1.30%, rgba(255, 232, 196, 0.8), transparent),
+    radial-gradient(0.075% 0.075% at 29.0% 0.68%, rgba(255, 214, 158, 0.67), transparent),
+    radial-gradient(0.075% 0.075% at 32.1% 1.21%, rgba(255, 214, 158, 0.59), transparent),
+    radial-gradient(0.06% 0.06% at 34.2% 1.17%, rgba(255, 214, 158, 0.79), transparent),
+    radial-gradient(0.09% 0.09% at 36.8% 1.15%, rgba(255, 232, 196, 0.75), transparent),
+    radial-gradient(0.075% 0.075% at 39.0% 0.72%, rgba(255, 214, 158, 0.85), transparent),
+    radial-gradient(0.11% 0.11% at 41.0% 0.80%, rgba(255, 232, 196, 0.93), transparent),
+    radial-gradient(0.06% 0.06% at 43.7% 1.82%, rgba(255, 214, 158, 0.77), transparent),
+    radial-gradient(0.11% 0.11% at 46.8% 0.58%, rgba(255, 198, 124, 0.73), transparent),
+    radial-gradient(0.09% 0.09% at 49.2% 1.21%, rgba(255, 186, 108, 0.7), transparent),
+    radial-gradient(0.11% 0.11% at 51.3% 1.22%, rgba(255, 198, 124, 0.58), transparent),
+    radial-gradient(0.06% 0.06% at 54.2% 1.06%, rgba(255, 186, 108, 0.58), transparent),
+    radial-gradient(0.11% 0.11% at 56.2% 1.84%, rgba(255, 232, 196, 0.67), transparent),
+    radial-gradient(0.11% 0.11% at 58.9% 0.87%, rgba(255, 198, 124, 0.7), transparent),
+    radial-gradient(0.09% 0.09% at 60.8% 0.68%, rgba(255, 214, 158, 0.61), transparent),
+    radial-gradient(0.11% 0.11% at 63.1% 1.73%, rgba(255, 232, 196, 0.58), transparent),
+    radial-gradient(0.075% 0.075% at 65.5% 0.77%, rgba(255, 186, 108, 0.9), transparent),
+    radial-gradient(0.11% 0.11% at 68.3% 1.83%, rgba(255, 214, 158, 0.96), transparent),
+    radial-gradient(0.075% 0.075% at 69.8% 0.58%, rgba(255, 214, 158, 0.56), transparent),
+    radial-gradient(0.11% 0.11% at 72.5% 0.36%, rgba(255, 186, 108, 0.78), transparent),
+    radial-gradient(0.06% 0.06% at 75.8% 1.39%, rgba(255, 232, 196, 0.75), transparent),
+    radial-gradient(0.11% 0.11% at 77.5% 0.94%, rgba(255, 198, 124, 0.82), transparent),
+    radial-gradient(0.11% 0.11% at 79.6% 1.83%, rgba(255, 186, 108, 0.62), transparent);
+  filter: blur(0.25px);
+  opacity: 1;
+}
+
+/* ---------------- Composition ---------------- */
+
+.orbit-form {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  max-width: 424px;
+  text-align: center;
+}
+
+/* Eclipse mark. The ring is drawn in SVG; this carries its glow. */
+.orbit-mark {
+  filter: drop-shadow(0 0 18px rgba(190, 220, 255, 0.55)) drop-shadow(0 0 46px rgba(120, 170, 255, 0.28));
+}
+
+.orbit-title {
+  font-weight: 200;
+  font-size: clamp(2.6rem, 6.4vw, 3.6rem);
+  letter-spacing: 0.012em;
+  line-height: 1.05;
+  color: #f2f6ff;
+  text-shadow: 0 0 42px rgba(150, 190, 255, 0.28);
+}
+
+.orbit-sub {
+  color: #8f9bb3;
+  font-size: 0.95rem;
+  letter-spacing: 0.006em;
+}
+
+/* Pill fields, sitting on the sky rather than in a container. */
+.orbit-field-wrap { position: relative; }
+
+.orbit-field {
+  width: 100%;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(255, 255, 255, 0.035);
+  padding: 15px 48px 15px 50px;
+  font-size: 0.95rem;
+  color: #eef3ff;
+  outline: none;
+  transition: border-color 0.3s ease, background 0.3s ease, box-shadow 0.3s ease;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.orbit-field::placeholder { color: #7b8698; }
+.orbit-field:hover { border-color: rgba(255, 255, 255, 0.18); }
+.orbit-field:focus {
+  border-color: rgba(190, 220, 255, 0.45);
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: 0 0 0 4px rgba(140, 185, 255, 0.10), 0 0 28px -6px rgba(150, 200, 255, 0.35);
+}
+
+.orbit-icon {
+  position: absolute;
+  left: 20px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #7f8b9f;
+  pointer-events: none;
+  transition: color 0.3s ease;
+}
+.orbit-field-wrap:focus-within .orbit-icon { color: #cfe0ff; }
+
+.orbit-eye {
+  position: absolute;
+  right: 18px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #7f8b9f;
+  transition: color 0.25s ease;
+}
+.orbit-eye:hover { color: #dce8ff; }
+
+/* Silver pill. Light against a dark frame is what makes it the one
+   obvious action on the screen. */
+.orbit-submit {
+  width: 100%;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.26), rgba(255, 255, 255, 0.07) 62%, rgba(255, 255, 255, 0.03));
+  color: #ffffff;
+  padding: 15px 24px;
+  font-size: 0.98rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.28s ease, border-color 0.28s ease;
+  box-shadow: 0 10px 34px -12px rgba(150, 190, 255, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.orbit-submit:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: rgba(255, 255, 255, 0.42);
+  box-shadow: 0 16px 44px -12px rgba(170, 205, 255, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+.orbit-submit:active:not(:disabled) { transform: translateY(0) scale(0.99); }
+.orbit-submit:disabled { opacity: 0.7; }
+
+/* Sheen sweep on hover. */
+.orbit-submit::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-120%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.30), transparent);
+  transition: transform 0.85s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.orbit-submit:hover:not(:disabled)::after { transform: translateX(120%); }
+
+.orbit-quiet {
+  color: #8b96aa;
+  transition: color 0.25s ease;
+}
+.orbit-quiet:hover { color: #d6e2f7; }
+
+/* The shared `.login-chk` is accent blue, which shouted against this frame. */
+.orbit-form .login-chk {
+  width: 15px;
+  height: 15px;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.05);
+}
+.orbit-form .login-chk:checked {
+  background: rgba(255, 255, 255, 0.9);
+  border-color: rgba(255, 255, 255, 0.9);
+}
+.orbit-form .login-chk:checked::after { border-color: #06070c; }
+
+/* "or continue with" — rules that fade out rather than stopping. */
+.orbit-divider {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 16px;
+  color: #79839a;
+  font-size: 0.86rem;
+}
+.orbit-divider::before,
+.orbit-divider::after {
+  content: "";
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.16), transparent);
+}
+
+.orbit-oauth {
+  width: 54px;
+  height: 54px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.045);
+  color: #eaf1ff;
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.28s ease, background 0.28s ease;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.orbit-oauth:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.09);
+}
+
+/* Entrance: everything rises a little, in sequence. */
+.orbit-in {
+  opacity: 0;
+  animation: orbit-rise 0.9s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation-delay: var(--d, 0s);
+}
+@keyframes orbit-rise {
+  from { opacity: 0; transform: translateY(14px); filter: blur(6px); }
+  to { opacity: 1; transform: translateY(0); filter: blur(0); }
+}
+
+@media (max-width: 560px) {
+  /* On a phone the form is taller than the viewport, so a limb fixed to the
+     *viewport* will always have content scrolling across it — lowering it just
+     moves which element gets cut. Anchoring the scene to the page instead
+     (`main` is the positioned ancestor) makes the horizon sit below the whole
+     form, however tall it gets. */
+  .orbit-sky { position: absolute; }
+  .earth { width: 620vw; top: 99%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .orbit-in { opacity: 1; transform: none; filter: none; animation: none; }
+  .orbit-submit::after { display: none; }
+}
+
+/* Brand lockup on the login screen. Heavier than the page's thin title on
+   purpose — a wordmark that whispers stops being a wordmark — but tracked and
+   lit so it belongs to the same frame. */
+/* The wordmark carries the brand on its own — no plate, no border, nothing
+   boxed. Nothing else on these screens is a rectangle, so a container around
+   the logo read as a foreign object dropped onto the page.
+   Fully opaque and a touch larger instead: solid white against black is what
+   makes it feel present, and the glow ties it to the lit title below without
+   washing the letters out. */
+.orbit-wordmark {
+  font-size: 1.32rem;
+  font-weight: 650;
+  letter-spacing: 0.045em;
+  color: #ffffff;
+  text-shadow: 0 0 30px rgba(150, 195, 255, 0.45), 0 0 68px rgba(90, 150, 255, 0.22);
+}
+.orbit-wordmark-accent {
+  /* Brighter than the sidebar's blue: on black it needs the extra luminance to
+     read as the same colour. */
+  background-image: linear-gradient(100deg, #6cb2ff, #34dcec);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  /* `background-clip: text` kills text-shadow, so the halo comes from a filter. */
+  filter: drop-shadow(0 0 22px rgba(70, 190, 255, 0.5));
+}
+

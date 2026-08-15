@@ -1,8 +1,34 @@
 import type { AvatarColor } from "@/components/ui/Avatar";
 
-export type MsgChannel = "amber" | "green" | "blue";
-export type Attachment = { name: string; size: string; kind: "pdf" | "doc" };
 export type MsgFolder = "unread" | "assigned" | "sent" | "received" | "trash";
+
+/** Allowed values first, types derived — see the note in `data/contacts.ts`. */
+export const MSG_CATEGORIES = [
+  "Appointments",
+  "Tasks",
+  "Meeting Requests",
+  "Follow-ups",
+  "Enquiries",
+] as const;
+export type MsgCategory = (typeof MSG_CATEGORIES)[number];
+
+export const ATTACHMENT_KINDS = ["pdf", "doc", "txt"] as const;
+export type AttachmentKind = (typeof ATTACHMENT_KINDS)[number];
+
+export type Attachment = {
+  name: string;
+  size: string;
+  kind: AttachmentKind;
+  /**
+   * The document's text.
+   *
+   * Attachments used to be name-and-size only, so there was nothing behind the
+   * card to open — clicking one could never do anything. When this is present
+   * the file opens in the viewer and the assistant can summarise it; when it is
+   * absent the card says so rather than pretending.
+   */
+  content?: string;
+};
 
 export type Message = {
   id: string;
@@ -13,9 +39,6 @@ export type Message = {
   company: string;
   subject: string;
   preview: string;
-  time: string;
-  ago: string;
-  channel: MsgChannel;
   unread: boolean;
   assigned: boolean;
   direction: "sent" | "received";
@@ -24,11 +47,31 @@ export type Message = {
   attachments: Attachment[];
   email: string;
   phone: string;
-  localTime: string;
   language: string;
-  firstInteraction: { date: string; time: string };
-  latestInteraction: { date: string; time: string };
+  /**
+   * ISO timestamp — the stored truth.
+   *
+   * Replaces `time: "10:31"`, `ago: "2m ago"`, `localTime`, `firstInteraction`
+   * and `latestInteraction`, every one of which was a finished string that
+   * nothing recomputed. A message stayed "2m ago" forever, and the "local time"
+   * was a literal rather than anything to do with the client's clock.
+   */
+  at: string;
+  /** Drives the category chips. Derived on read when absent. */
+  category?: MsgCategory;
+  /** The client's real business location. */
+  location?: string;
+  /** IANA zone, e.g. "Africa/Johannesburg" — their current time is computed from it. */
+  timeZone?: string;
 };
+
+/**
+ * Seed fixtures.
+ *
+ * Timestamps are anchored to when the store is first written so the demo reads
+ * sensibly, and are frozen from that point on — exactly like real messages.
+ */
+const minutesAgo = (n: number) => new Date(Date.now() - n * 60_000).toISOString();
 
 export const messages: Message[] = [
   {
@@ -40,9 +83,8 @@ export const messages: Message[] = [
     company: "Call Movers inc.",
     subject: "Proposal for Q3 development partnership",
     preview: "Hi Lang, thanks for the call earlier. I've attached the proposal and scope docs for review before Friday.",
-    time: "10:31",
-    ago: "2m ago",
-    channel: "amber",
+    at: minutesAgo(2),
+    category: "Follow-ups",
     unread: true,
     assigned: true,
     direction: "received",
@@ -54,15 +96,60 @@ export const messages: Message[] = [
       "Best,\nBradley",
     ],
     attachments: [
-      { name: "Proposal.pdf", size: "2.1 MB", kind: "pdf" },
-      { name: "Scope.doc", size: "1.4 MB", kind: "doc" },
+      {
+        name: "Proposal.pdf",
+        size: "2.1 MB",
+        kind: "pdf",
+        content: [
+          "Q3 DEVELOPMENT PARTNERSHIP — PROPOSAL",
+          "Prepared by Call Movers inc. for YourCRM",
+          "",
+          "1. OVERVIEW",
+          "A three-month engagement covering CRM integration, data migration from the existing spreadsheet workflow, and staff onboarding.",
+          "",
+          "2. MILESTONES",
+          "  M1 — Discovery and data audit ......... 2 weeks ..... $4,000",
+          "  M2 — Integration build ................ 5 weeks ..... $12,000",
+          "  M3 — Migration and onboarding ......... 3 weeks ..... $8,000",
+          "",
+          "3. TOTAL",
+          "  $24,000, invoiced per milestone on completion.",
+          "",
+          "4. TERMS",
+          "Payment within 14 days of each milestone invoice. Either party may end the engagement with 30 days' notice.",
+          "",
+          "5. NEXT STEPS",
+          "Feedback requested before Friday so the start date can be confirmed.",
+        ].join("\n"),
+      },
+      {
+        name: "Scope.doc",
+        size: "1.4 MB",
+        kind: "doc",
+        content: [
+          "SCOPE OF WORK — Q3 PARTNERSHIP",
+          "",
+          "IN SCOPE",
+          "  • Migration of ~4,000 contact records from spreadsheets",
+          "  • Deal pipeline configuration (5 stages)",
+          "  • Two custom reports: revenue by month, win rate by source",
+          "  • Training: two sessions, up to 8 staff",
+          "",
+          "OUT OF SCOPE",
+          "  • Telephony integration (quoted separately)",
+          "  • Ongoing support beyond the 30-day handover period",
+          "",
+          "ASSUMPTIONS",
+          "  • Source data is provided in CSV within week one",
+          "  • A single point of contact is available for sign-off",
+        ].join("\n"),
+      },
     ],
     email: "BradleyB@gmail.com",
     phone: "+27 71 443 8872",
-    localTime: "16 May 2024, 10:31 AM",
+    location: "Cape Town, South Africa",
+    timeZone: "Africa/Johannesburg",
     language: "English",
-    firstInteraction: { date: "12 May 2024", time: "09:15 AM" },
-    latestInteraction: { date: "16 May 2024", time: "10:31 AM" },
   },
   {
     id: "alex-carter",
@@ -73,9 +160,8 @@ export const messages: Message[] = [
     company: "Carter Co.",
     subject: "Re: Website revamp invoice",
     preview: "Payment has been sent through — please confirm you received the $500 for the first milestone.",
-    time: "09:16",
-    ago: "1h ago",
-    channel: "amber",
+    at: minutesAgo(64),
+    category: "Tasks",
     unread: true,
     assigned: false,
     direction: "received",
@@ -86,13 +172,32 @@ export const messages: Message[] = [
       "Looking forward to the next phase!",
       "Cheers,\nAlex",
     ],
-    attachments: [{ name: "Invoice-041.pdf", size: "0.6 MB", kind: "pdf" }],
+    attachments: [
+      {
+        name: "Invoice-041.pdf",
+        size: "0.6 MB",
+        kind: "pdf",
+        content: [
+          "INVOICE 041",
+          "Carter Co. — Website Revamp",
+          "",
+          "Milestone 1: Design and information architecture",
+          "Amount: $500.00",
+          "Status: PAID",
+          "",
+          "Remaining milestones:",
+          "  M2 — Build ................ $1,200 (not yet invoiced)",
+          "  M3 — Launch and handover .. $800  (not yet invoiced)",
+          "",
+          "Please confirm receipt.",
+        ].join("\n"),
+      },
+    ],
     email: "alex@carterco.com",
     phone: "+27 71 443 8872",
-    localTime: "16 May 2024, 09:16 AM",
+    location: "Johannesburg, South Africa",
+    timeZone: "Africa/Johannesburg",
     language: "English",
-    firstInteraction: { date: "02 May 2024", time: "14:20 PM" },
-    latestInteraction: { date: "16 May 2024", time: "09:16 AM" },
   },
   {
     id: "jamie-wilson",
@@ -103,9 +208,8 @@ export const messages: Message[] = [
     company: "Wilson & Co.",
     subject: "Meeting request — automation rollout",
     preview: "Could we set up 30 minutes next week to walk through the automation rollout plan?",
-    time: "Yesterday",
-    ago: "1d ago",
-    channel: "green",
+    at: minutesAgo(60 * 22),
+    category: "Meeting Requests",
     unread: false,
     assigned: true,
     direction: "received",
@@ -119,10 +223,9 @@ export const messages: Message[] = [
     attachments: [],
     email: "jamie@wilsonco.com",
     phone: "+27 82 908 4410",
-    localTime: "15 May 2024, 04:45 PM",
+    location: "Durban, South Africa",
+    timeZone: "Africa/Johannesburg",
     language: "English",
-    firstInteraction: { date: "28 Apr 2024", time: "11:00 AM" },
-    latestInteraction: { date: "15 May 2024", time: "16:45 PM" },
   },
   {
     id: "morgan-smith",
@@ -133,9 +236,8 @@ export const messages: Message[] = [
     company: "Smith Solutions",
     subject: "Re: Sales automation demo",
     preview: "Thanks for the demo — I've shared it internally and will circle back with questions.",
-    time: "2d ago",
-    ago: "2d ago",
-    channel: "blue",
+    at: minutesAgo(60 * 48),
+    category: "Follow-ups",
     unread: false,
     assigned: false,
     direction: "sent",
@@ -148,10 +250,9 @@ export const messages: Message[] = [
     attachments: [],
     email: "morgan@smith.co.za",
     phone: "+27 71 987 6543",
-    localTime: "14 May 2024, 12:10 PM",
+    location: "Pretoria, South Africa",
+    timeZone: "Africa/Johannesburg",
     language: "English",
-    firstInteraction: { date: "20 Apr 2024", time: "10:30 AM" },
-    latestInteraction: { date: "14 May 2024", time: "12:10 PM" },
   },
   {
     id: "jenny-lou",
@@ -162,9 +263,10 @@ export const messages: Message[] = [
     company: "Lou Media",
     subject: "Re: Referral introduction",
     preview: "Alex passed along your details — I'd love to learn more about how you work with agencies.",
-    time: "2d ago",
-    ago: "2d ago",
-    channel: "blue",
+    at: minutesAgo(60 * 50),
+    // Proposes a specific slot ("would next Tuesday suit for an intro call"),
+    // so it is a meeting request rather than an enquiry.
+    category: "Meeting Requests",
     unread: false,
     assigned: false,
     direction: "sent",
@@ -175,13 +277,36 @@ export const messages: Message[] = [
       "Would next Tuesday suit for an intro call?",
       "Warm regards,\nLang",
     ],
-    attachments: [{ name: "Overview.pdf", size: "1.1 MB", kind: "pdf" }],
-    email: "j.lou@example.com",
-    phone: "+27 12 345 6789",
-    localTime: "14 May 2024, 09:05 AM",
+    attachments: [
+      {
+        name: "Overview.pdf",
+        size: "1.1 MB",
+        kind: "pdf",
+        content: [
+          "PARTNERING WITH AGENCIES — OVERVIEW",
+          "",
+          "HOW IT WORKS",
+          "Agencies resell YourCRM to their own clients and manage those accounts from a single dashboard.",
+          "",
+          "COMMERCIALS",
+          "  • 20% recurring commission on referred accounts",
+          "  • No minimum volume",
+          "  • Dedicated onboarding for the agency team",
+          "",
+          "TYPICAL TIMELINE",
+          "  Week 1 — agency onboarding",
+          "  Week 2 — first client migrated",
+          "  Week 4 — handover complete",
+        ].join("\n"),
+      },
+    ],
+    email: "j.lou@loumedia.co.uk",
+    phone: "+44 20 7946 0812",
+    // A different zone on purpose: the point of showing a client's local time is
+    // knowing whether it is a reasonable hour where *they* are.
+    location: "London, United Kingdom",
+    timeZone: "Europe/London",
     language: "English",
-    firstInteraction: { date: "13 May 2024", time: "16:00 PM" },
-    latestInteraction: { date: "14 May 2024", time: "09:05 AM" },
   },
 ];
 

@@ -69,11 +69,40 @@ export type UpcomingMeeting = {
   outcome?: MeetingOutcome;
   /** Only meaningful when `outcome` is "lost". */
   lossReason?: LossReason;
+  /**
+   * Where an online meeting actually happens.
+   *
+   * Clicking a row opens this. Absent means there is nothing to open, and the
+   * row says so rather than pretending to be a link.
+   */
+  link?: string;
+  /** Where change notifications go. Absent means nobody can be told. */
+  email?: string;
+  /** Notes for this meeting, saved against it rather than floating loose. */
+  notes?: string;
 };
+
+/**
+ * Seed dates, derived from the label each fixture was written with.
+ *
+ * The seed stored only `when: "Today" | "Tomorrow" | "This Week"` — a rendered
+ * label with no date behind it. That is the same defect the schema fix
+ * addressed for *new* meetings, but the fixtures were never migrated, so five
+ * of nine meetings had nothing to place on the calendar and simply never
+ * appeared on it. `whenFor()` recomputes the label from this on every read, so
+ * these stay correct as days pass instead of freezing.
+ */
+function seedDate(offsetDays: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + offsetDays);
+  // Local getters, not toISOString — that shifts the day across time zones.
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
 
 export const upcomingMeetings: UpcomingMeeting[] = [
   {
     id: "mtg-alex-carter",
+    date: seedDate(0),
     when: "Today",
     time: "10:00 AM",
     initials: "AC",
@@ -86,6 +115,7 @@ export const upcomingMeetings: UpcomingMeeting[] = [
   },
   {
     id: "mtg-jamie-wilson",
+    date: seedDate(0),
     when: "Today",
     time: "2:30 PM",
     initials: "JW",
@@ -98,6 +128,7 @@ export const upcomingMeetings: UpcomingMeeting[] = [
   },
   {
     id: "mtg-morgan-smith",
+    date: seedDate(1),
     when: "Tomorrow",
     time: "11:00 AM",
     initials: "MS",
@@ -110,6 +141,7 @@ export const upcomingMeetings: UpcomingMeeting[] = [
   },
   {
     id: "mtg-taylor-brown",
+    date: seedDate(1),
     when: "Tomorrow",
     time: "3:00 PM",
     initials: "TB",
@@ -122,6 +154,7 @@ export const upcomingMeetings: UpcomingMeeting[] = [
   },
   {
     id: "mtg-jenny-lou",
+    date: seedDate(3),
     when: "This Week",
     time: "9:30 AM",
     initials: "JL",

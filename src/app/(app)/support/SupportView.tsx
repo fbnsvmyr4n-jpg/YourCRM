@@ -87,14 +87,14 @@ export function SupportView() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search help articles…"
-              className="w-full rounded-2xl border border-[var(--border)] bg-[var(--panel-solid)]/60 py-3.5 pl-12 pr-4 text-sm outline-none transition-colors placeholder:text-faint focus:border-[var(--border-strong)]"
+              className="focus-ring w-full rounded-2xl border border-[var(--border)] bg-[var(--panel-solid)]/60 py-3.5 pl-12 pr-4 text-sm outline-none transition-colors placeholder:text-faint focus:border-[var(--border-strong)]"
             />
           </div>
         </div>
       </Card>
 
       {/* Quick links */}
-      <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mt-5 grid grid-cols-1 gap-4 @min-[440px]:grid-cols-2 @min-[880px]:grid-cols-4">
         {QUICK_LINKS.map((l) => {
           const Icon = l.icon;
           return (
@@ -116,7 +116,7 @@ export function SupportView() {
         })}
       </div>
 
-      <div className="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
+      <div className="mt-5 grid grid-cols-1 gap-5 @min-[760px]:grid-cols-[minmax(0,1fr)_300px]">
         {/* FAQs */}
         <Card>
           <CardHeader title="Frequently asked questions" />

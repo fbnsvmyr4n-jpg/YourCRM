@@ -155,6 +155,10 @@ export function Sidebar({
         <button
           type="button"
           onClick={onToggle}
+          // Collapsed, the word is gone and only the chevron remains, which
+          // leaves the control with no accessible name at all.
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-expanded={!collapsed}
           className="focus-ring flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-muted transition-colors hover:text-[var(--text)]"
         >
           <ChevronsLeft

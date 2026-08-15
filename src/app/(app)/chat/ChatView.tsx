@@ -1,18 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { Bot, RotateCcw, Send, Sparkles } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { RotateCcw, Send, Sparkles } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import type { ChatMessage } from "@/server/chat-repo";
+import { intentOf, suggestFor } from "@/server/chat-answers";
 import { clsx } from "@/lib/clsx";
 import { clearChatAction, sendChatAction } from "./actions";
-
-const SUGGESTIONS = [
-  "What's my pipeline worth?",
-  "Who should I follow up with?",
-  "What's on today?",
-  "Give me a summary",
-];
 
 /** Minimal markdown: **bold**, *italic*, and `code`. */
 function renderText(text: string) {
@@ -35,7 +29,17 @@ function renderText(text: string) {
   });
 }
 
-export function ChatView({ messages, aiEnabled }: { messages: ChatMessage[]; aiEnabled: boolean }) {
+type Knows = { contacts: number; deals: number; meetings: number };
+
+export function ChatView({
+  messages,
+  aiEnabled,
+  knows,
+}: {
+  messages: ChatMessage[];
+  aiEnabled: boolean;
+  knows: Knows;
+}) {
   const [items, setItems] = useState(messages);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
@@ -44,6 +48,19 @@ export function ChatView({ messages, aiEnabled }: { messages: ChatMessage[]; aiE
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [items, busy]);
+
+  // What this conversation has already covered, so the idle strip suggests
+  // something new rather than re-offering a question just answered.
+  const asked = useMemo(
+    () =>
+      items
+        .filter((m) => m.role === "user")
+        .map((m) => intentOf(m.text))
+        .filter((id): id is string => !!id),
+    [items]
+  );
+
+  const suggestions = useMemo(() => suggestFor(draft, asked), [draft, asked]);
 
   async function send(text: string) {
     const question = text.trim();
@@ -75,31 +92,33 @@ export function ChatView({ messages, aiEnabled }: { messages: ChatMessage[]; aiE
 
   return (
     <div className="mx-auto flex h-auto max-w-[900px] animate-fade-up flex-col lg:h-[calc(100vh-104px)]">
-      {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3 pb-4 pt-1">
-        <div className="flex items-center gap-3">
-          <span
-            className="relative grid h-11 w-11 shrink-0 place-items-center rounded-2xl"
-            style={{ background: "var(--accent-soft)" }}
-          >
-            <Bot className="h-6 w-6 text-accent" />
-            <span className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-[var(--panel-solid)] bg-[var(--green)]" />
+      {/* Identity */}
+      <div className="chat-hero mb-4 flex flex-wrap items-center justify-between gap-4 px-5 py-4">
+        <div className="flex min-w-0 items-center gap-3.5">
+          <span className="chat-orb">
+            <Sparkles className="h-[22px] w-[22px]" />
           </span>
-          <div className="leading-tight">
-            <h1 className="flex items-center gap-2 text-xl font-bold tracking-tight">
-              CRM Assistant
+          <div className="min-w-0 leading-tight">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-[19px] font-bold tracking-tight">CRM Assistant</h1>
               <span
-                className="rounded-full px-2 py-0.5 text-[10px] font-bold"
+                className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold tracking-wide"
                 style={
                   aiEnabled
                     ? { background: "var(--green-soft)", color: "var(--green)" }
                     : { background: "var(--amber-soft)", color: "var(--amber)" }
                 }
               >
+                <span className="chat-live-dot" />
                 {aiEnabled ? "AI CONNECTED" : "DATA MODE"}
               </span>
-            </h1>
-            <p className="text-xs text-faint">Knows your live pipeline, leads, meetings and inbox.</p>
+            </div>
+            <p className="mt-1.5 truncate text-xs text-muted">
+              Answering from{" "}
+              <strong className="font-semibold text-[var(--text)]">{knows.contacts}</strong> contacts,{" "}
+              <strong className="font-semibold text-[var(--text)]">{knows.deals}</strong> deals and{" "}
+              <strong className="font-semibold text-[var(--text)]">{knows.meetings}</strong> meetings — live.
+            </p>
           </div>
         </div>
         <button
@@ -117,11 +136,8 @@ export function ChatView({ messages, aiEnabled }: { messages: ChatMessage[]; aiE
           {items.map((m) => (
             <div key={m.id} className={clsx("flex", m.role === "user" ? "justify-end" : "justify-start")}>
               {m.role === "assistant" && (
-                <span
-                  className="mr-2.5 mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-xl"
-                  style={{ background: "var(--accent-soft)" }}
-                >
-                  <Sparkles className="h-4 w-4 text-accent" />
+                <span className="chat-orb-sm mr-2.5 mt-0.5">
+                  <Sparkles className="h-4 w-4" />
                 </span>
               )}
               <div
@@ -142,11 +158,8 @@ export function ChatView({ messages, aiEnabled }: { messages: ChatMessage[]; aiE
 
           {busy && (
             <div className="flex justify-start">
-              <span
-                className="mr-2.5 mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-xl"
-                style={{ background: "var(--accent-soft)" }}
-              >
-                <Sparkles className="h-4 w-4 text-accent" />
+              <span className="chat-orb-sm mr-2.5 mt-0.5">
+                <Sparkles className="h-4 w-4" />
               </span>
               <div className="flex items-center gap-1.5 rounded-2xl px-4 py-3.5" style={{ background: "var(--raise)" }}>
                 {[0, 150, 300].map((d) => (
@@ -162,21 +175,21 @@ export function ChatView({ messages, aiEnabled }: { messages: ChatMessage[]; aiE
           <div ref={endRef} />
         </div>
 
-        {/* Suggestions */}
-        {items.length <= 1 && (
-          <div className="flex flex-wrap gap-2 border-t border-[var(--border)] px-5 py-3">
-            {SUGGESTIONS.map((s) => (
-              <button
-                key={s}
-                onClick={() => send(s)}
-                disabled={busy}
-                className="btn-soft focus-ring rounded-full px-3.5 py-1.5 text-xs font-medium disabled:opacity-50"
-              >
-                {s}
-              </button>
-            ))}
-          </div>
-        )}
+        {/* Suggestions — kept for the whole conversation, and rewritten as the
+            user types so a half-formed question is one click from an answer. */}
+        <div className="chat-chips border-t border-[var(--border)] px-5 py-3">
+          {suggestions.map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => send(s)}
+              disabled={busy}
+              className="chat-chip focus-ring shrink-0"
+            >
+              {s}
+            </button>
+          ))}
+        </div>
 
         {/* Composer */}
         <form

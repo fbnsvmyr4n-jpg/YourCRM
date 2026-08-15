@@ -22,6 +22,10 @@ export type NewMeeting = {
   date: string;
   time: string;
   type: MeetingType;
+  /** Join URL for an online meeting. */
+  link?: string;
+  /** Participant's address, so changes can actually be sent to someone. */
+  email?: string;
 };
 
 function initialsFor(name: string) {
@@ -132,10 +136,72 @@ export async function createMeeting(input: NewMeeting): Promise<UpcomingMeeting>
       topic: input.topic.trim() || "Meeting",
       type: input.type,
       status: "Pending",
+      link: input.link?.trim() || undefined,
+      email: input.email?.trim() || undefined,
     };
     return [meeting, ...rows];
   });
   return meeting;
+}
+
+/**
+ * Change an existing meeting.
+ *
+ * Returns the row as it was *and* as it now is, so the caller can tell the
+ * participant precisely what changed rather than sending "something moved".
+ */
+export async function updateMeeting(
+  id: string,
+  patch: Partial<NewMeeting>
+): Promise<{ before: UpcomingMeeting; after: UpcomingMeeting } | null> {
+  let result: { before: UpcomingMeeting; after: UpcomingMeeting } | null = null;
+
+  await mutateTable<UpcomingMeeting>(TABLE, seed, (rows) => {
+    const idx = rows.findIndex((m) => m.id === id);
+    if (idx === -1) return rows;
+
+    const before = rows[idx];
+    const name = patch.name?.trim() || before.name;
+
+    const after: UpcomingMeeting = {
+      ...before,
+      name,
+      initials: initialsFor(name),
+      company: patch.company?.trim() || before.company,
+      topic: patch.topic?.trim() || before.topic,
+      date: patch.date ?? before.date,
+      time: patch.time ?? before.time,
+      type: patch.type ?? before.type,
+      // Empty string clears the field; undefined leaves it alone. Without the
+      // distinction a link could never be removed once set.
+      link: patch.link === undefined ? before.link : patch.link.trim() || undefined,
+      email: patch.email === undefined ? before.email : patch.email.trim() || undefined,
+    };
+    after.when = whenFor(after.date, after.when);
+
+    result = { before, after };
+    const next = [...rows];
+    next[idx] = after;
+    return next;
+  });
+
+  return result;
+}
+
+/** Notes live on the meeting they describe. */
+export async function setMeetingNotes(id: string, notes: string): Promise<void> {
+  await mutateTable<UpcomingMeeting>(TABLE, seed, (rows) => {
+    const idx = rows.findIndex((m) => m.id === id);
+    if (idx === -1) return rows;
+    const next = [...rows];
+    next[idx] = { ...next[idx], notes: notes.trim() || undefined };
+    return next;
+  });
+}
+
+export async function getMeeting(id: string): Promise<UpcomingMeeting | undefined> {
+  const rows = await listMeetings();
+  return rows.find((m) => m.id === id);
 }
 
 export async function deleteMeeting(id: string): Promise<void> {

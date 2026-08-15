@@ -25,7 +25,11 @@ export type Contact = {
   companyInfo: string;
   owner: string;
   info: string;
-  activity: { title: string; date: string }[];
+  /**
+   * ISO timestamp of creation. Absent on rows written before this existed — the
+   * timeline simply omits a "created" entry for those rather than guessing one.
+   */
+  createdAt?: string;
 };
 
 export const contacts: Contact[] = [
@@ -43,11 +47,6 @@ export const contacts: Contact[] = [
     companyInfo: "Real Estate Investment & Development",
     owner: "Lang Lee",
     info: "CEO — Real Estate Investment",
-    activity: [
-      { title: "Contact activity explained", date: "23 May 2024, 9:41 AM" },
-      { title: "Sent proposal for Q3 development", date: "21 May 2024, 2:15 PM" },
-      { title: "Discovery call completed", date: "18 May 2024, 11:00 AM" },
-    ],
   },
   {
     id: "taylor-brown",
@@ -63,10 +62,6 @@ export const contacts: Contact[] = [
     companyInfo: "Interested in CRM Implementation",
     owner: "Lang Lee",
     info: "Interested in CRM Implementation",
-    activity: [
-      { title: "First contact via web form", date: "22 May 2024, 10:02 AM" },
-      { title: "Sent intro email", date: "22 May 2024, 10:20 AM" },
-    ],
   },
   {
     id: "alex-carter",
@@ -82,10 +77,6 @@ export const contacts: Contact[] = [
     companyInfo: "Website Development & Design",
     owner: "Lang Lee",
     info: "Website Development project",
-    activity: [
-      { title: "Invoice paid — $500", date: "18 Jul 2025, 10:30 AM" },
-      { title: "Project kickoff meeting", date: "12 Jul 2025, 9:00 AM" },
-    ],
   },
   {
     id: "jamie-wilson",
@@ -101,7 +92,6 @@ export const contacts: Contact[] = [
     companyInfo: "CRM Implementation & Automation",
     owner: "Lang Lee",
     info: "CRM Implementation",
-    activity: [{ title: "Signed annual contract", date: "17 Jul 2025, 2:15 PM" }],
   },
   {
     id: "morgan-smith",
@@ -117,7 +107,6 @@ export const contacts: Contact[] = [
     companyInfo: "Looking for Sales Automation",
     owner: "Lang Lee",
     info: "Looking for Sales Automation",
-    activity: [{ title: "Requested a demo", date: "20 May 2024, 9:15 AM" }],
   },
   {
     id: "jenny-lou",
@@ -133,6 +122,5 @@ export const contacts: Contact[] = [
     companyInfo: "Referral — Marketing services",
     owner: "Lang Lee",
     info: "Referral lead — Marketing",
-    activity: [{ title: "Referred by Alex Carter", date: "20 May 2024, 9:15 AM" }],
   },
 ];

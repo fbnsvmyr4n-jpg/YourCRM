@@ -159,7 +159,7 @@ function placeFigures(width: number, height: number): PlacedFigure[] {
  * Rebuilding several thousand clustered stars every frame would be pointless
  * work: the band itself never changes, only where it sits.
  */
-function paintMilkyWay(w: number, h: number): HTMLCanvasElement {
+function paintMilkyWay(w: number, h: number, plain = false): HTMLCanvasElement {
   const off = document.createElement("canvas");
   off.width = w;
   off.height = h;
@@ -219,7 +219,8 @@ function paintMilkyWay(w: number, h: number): HTMLCanvasElement {
   // different scales — one big radial reads as a spotlight, a cluster of them
   // reads as gas.
   g.globalCompositeOperation = "screen";
-  const clouds = [
+  // A clear sky has no saturated gas cloud in it.
+  const clouds = plain ? [] : [
     { x: -len * 0.3, y: -halfWidth * 0.5, r: halfWidth * 1.6, c: "rgba(206,54,196,0.42)" },
     { x: -len * 0.2, y: -halfWidth * 0.14, r: halfWidth * 1.2, c: "rgba(146,52,238,0.4)" },
     { x: -len * 0.38, y: halfWidth * 0.26, r: halfWidth * 0.95, c: "rgba(236,72,152,0.3)" },
@@ -368,8 +369,17 @@ export function linkDistanceFor(width: number, height: number): number {
   return Math.min(LINK_DISTANCE, Math.max(78, Math.hypot(width, height) * 0.1));
 }
 
-export function ConstellationField() {
+/**
+ * `plain` drops the saturated nebula, the proximity links and the named
+ * figures, leaving the stars, the soft band and the cursor parallax.
+ *
+ * The login screen's reference is a clear sky seen from orbit — a magenta gas
+ * cloud and a web of joining lines are a different picture, and they compete
+ * with the form. Everything that made the field feel alive is kept.
+ */
+export function ConstellationField({ variant = "constellations" }: { variant?: "constellations" | "plain" } = {}) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const plain = variant === "plain";
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -407,8 +417,8 @@ export function ConstellationField() {
       canvas!.height = Math.floor(height * dpr);
       ctx!.setTransform(dpr, 0, 0, dpr, 0, 0);
       linkDist = linkDistanceFor(width, height);
-      galaxy = width > 0 && height > 0 ? paintMilkyWay(width, height) : null;
-      figures = width > 0 && height > 0 ? placeFigures(width, height) : [];
+      galaxy = width > 0 && height > 0 ? paintMilkyWay(width, height, plain) : null;
+      figures = !plain && width > 0 && height > 0 ? placeFigures(width, height) : [];
 
       // Scale count to area so a large monitor isn't sparse and a phone isn't
       // needlessly busy. Sparser than before — larger, brighter points with
@@ -516,7 +526,7 @@ export function ConstellationField() {
 
       // Links first, so stars sit on top of their own connections.
       ctx!.lineWidth = 1;
-      for (let i = 0; i < drawn.length; i++) {
+      for (let i = 0; plain ? false : i < drawn.length; i++) {
         for (let j = i + 1; j < drawn.length; j++) {
           const a = drawn[i];
           const b = drawn[j];
@@ -739,7 +749,7 @@ export function ConstellationField() {
       document.removeEventListener("pointerleave", onLeave);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, []);
+  }, [plain]);
 
   return (
     <canvas
