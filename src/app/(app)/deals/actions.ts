@@ -2,7 +2,7 @@
 
 import { revalidateApp } from "@/server/revalidate";
 import { STAGE_IDS, type StageId } from "@/data/deals";
-import { createDeal, deleteDeal, moveDeal } from "@/server/deals-repo";
+import { createDeal, deleteDeal, moveDeal, recordPayment, setDealValue } from "@/server/deals-repo";
 import { id as validId, money, pick, text } from "@/server/validate";
 
 export async function addDealAction(formData: FormData) {
@@ -41,4 +41,33 @@ export async function deleteDealAction(id: string) {
 
   await deleteDeal(dealId);
   revalidateApp();
+}
+
+/** Attach a figure once a real quote exists. */
+export async function setDealValueAction(id: string, formData: FormData) {
+  const dealId = validId(id);
+  const value = money(formData.get("value"));
+  if (!dealId || value === null) return;
+
+  await setDealValue(dealId, value);
+  revalidateApp();
+}
+
+/**
+ * Record money received against a deal awaiting payment.
+ *
+ * Validated here *and* re-checked inside the repo against the deal's live
+ * value — a server action's arguments are as forgeable as any form field, and
+ * this one moves money between columns.
+ */
+export async function recordPaymentAction(id: string, formData: FormData) {
+  const dealId = validId(id);
+  if (!dealId) return { error: "Deal not found." };
+
+  const amount = money(formData.get("amount"));
+  if (amount === null) return { error: "Enter a valid amount." };
+
+  const result = await recordPayment(dealId, amount);
+  revalidateApp();
+  return result;
 }

@@ -1,12 +1,21 @@
 import type { AvatarColor } from "@/components/ui/Avatar";
-import { messages as seed, type Message } from "@/data/inbox";
+import { messages as seed, type Attachment, type Message } from "@/data/inbox";
+import { classifyMessage } from "./inbox-classify";
 import { mutateTable, readTable } from "./store";
 
 const TABLE = "messages";
 
 const COLORS: AvatarColor[] = ["blue", "green", "amber", "purple", "pink", "teal"];
 
-export type NewMessage = { to: string; subject: string; body: string };
+export type NewMessage = {
+  to: string;
+  subject: string;
+  body: string;
+  /** Carried over when replying or forwarding, so the thread keeps its files. */
+  attachments?: Attachment[];
+  /** Copied from the message being answered, so the panel keeps its context. */
+  from?: Pick<Message, "name" | "role" | "company" | "phone" | "location" | "timeZone" | "initials" | "color">;
+};
 
 function initialsFor(name: string) {
   const parts = name.replace(/@.*/, "").split(/[\s.@]+/).filter(Boolean);
@@ -15,46 +24,69 @@ function initialsFor(name: string) {
   return (a + b || name.trim().slice(0, 2)).toUpperCase();
 }
 
+/**
+ * Fill in what a stored row can't have.
+ *
+ * `category` is classified here rather than at write time so messages that
+ * predate the field still answer the chips — and so improving the rules
+ * improves old mail too, instead of only what arrives next.
+ *
+ * `at` is backfilled for any row written before timestamps existed. Those rows
+ * only ever had strings like "2m ago", so there is no real instant to recover;
+ * they sort to the end rather than claiming a time they never had.
+ */
+function normalise(m: Message): Message {
+  return {
+    ...m,
+    at: m.at ?? "",
+    category: m.category ?? classifyMessage(m.subject, m.body ?? []),
+  };
+}
+
 export async function listMessages(): Promise<Message[]> {
-  return readTable<Message>(TABLE, seed);
+  const rows = await readTable<Message>(TABLE, seed);
+  return rows.map(normalise).sort((a, b) => b.at.localeCompare(a.at));
+}
+
+export async function getMessage(id: string): Promise<Message | undefined> {
+  const rows = await listMessages();
+  return rows.find((m) => m.id === id);
 }
 
 export async function createMessage(input: NewMessage): Promise<Message> {
   let msg!: Message;
+
   await mutateTable<Message>(TABLE, seed, (rows) => {
     const to = input.to.trim() || "New Recipient";
     const body = input.body.trim();
-    const now = new Date();
-    const dateStr = now.toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "numeric" });
-    const timeStr = now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+    const subject = input.subject.trim() || "(no subject)";
 
     msg = {
       id: `msg-${Math.random().toString(36).slice(2, 8)}`,
-      initials: initialsFor(to),
-      color: COLORS[rows.length % COLORS.length],
-      name: to,
-      role: "Recipient",
-      company: "—",
-      subject: input.subject.trim() || "(no subject)",
+      initials: input.from?.initials ?? initialsFor(to),
+      color: input.from?.color ?? COLORS[rows.length % COLORS.length],
+      name: input.from?.name ?? to,
+      role: input.from?.role ?? "Recipient",
+      company: input.from?.company ?? "—",
+      subject,
       preview: body.slice(0, 120) || "—",
-      time: "Just now",
-      ago: "just now",
-      channel: "blue",
+      at: new Date().toISOString(),
+      category: classifyMessage(subject, body ? body.split(/\n\n+/) : []),
       unread: false,
       assigned: false,
       direction: "sent",
       trashed: false,
       body: body ? body.split(/\n\n+/) : ["(no content)"],
-      attachments: [],
+      attachments: input.attachments ?? [],
       email: /@/.test(to) ? to : "—",
-      phone: "—",
-      localTime: `${dateStr}, ${timeStr}`,
+      phone: input.from?.phone ?? "—",
+      location: input.from?.location,
+      timeZone: input.from?.timeZone,
       language: "English",
-      firstInteraction: { date: dateStr, time: timeStr },
-      latestInteraction: { date: dateStr, time: timeStr },
     };
     return [msg, ...rows];
   });
+
   return msg;
 }
 

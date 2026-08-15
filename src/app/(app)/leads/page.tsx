@@ -1,10 +1,10 @@
-import { Info, Target, Users } from "lucide-react";
+import Link from "next/link";
+import { Info, Settings2, Target } from "lucide-react";
 import { AreaChart } from "@/components/ui/AreaChart";
 import { Avatar } from "@/components/ui/Avatar";
 import { Card, CardHeader } from "@/components/ui/Card";
-import { toneStyles, type Tone } from "@/components/ui/tone";
-import { type LeadCard as LeadCardType } from "@/data/leads";
-import { leadAnalytics, listLeads, type LeadAnalytics } from "@/server/leads-repo";
+import { STATUS_TONE, type LeadCard as LeadCardType } from "@/data/leads";
+import { leadAnalytics, listLeadsWithStatus, type LeadAnalytics } from "@/server/lead-status";
 import { weeklyRevenue, listWonDeals } from "@/server/deals-repo";
 import { getSettings } from "@/server/settings-repo";
 import { LeadCardsSection } from "./LeadCardsSection";
@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 
 export default async function LeadsPage() {
   const [leads, stats, wonDeals, revenueSeries, settings] = await Promise.all([
-    listLeads(),
+    listLeadsWithStatus(),
     leadAnalytics(),
     listWonDeals(),
     weeklyRevenue(),
@@ -40,28 +40,10 @@ export default async function LeadsPage() {
       </div>
 
       {/* Top row */}
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1.05fr_1.1fr_0.92fr]">
+      <div className="grid grid-cols-1 gap-5 @min-[960px]:grid-cols-[minmax(0,1.05fr)_minmax(0,1.1fr)_minmax(0,0.92fr)]">
         <SalesTargetCard pct={pct} won={wonThisMonth} target={monthlyTarget} series={revenueSeries} />
         <LeadsFeedCard leads={leads} />
         <LeadSourcesCard stats={stats} />
-      </div>
-
-      {/* Stat tiles — counted from persisted leads */}
-      <div className="mt-5 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatTile label="All Leads" value={stats.total} sub="Total leads" tone="neutral" />
-        <StatTile
-          label="New Leads"
-          value={stats.newThisWeekUnknown ? "—" : stats.newThisWeek}
-          sub={stats.newThisWeekUnknown ? "No capture dates yet" : "Last 7 days"}
-          tone="purple"
-        />
-        <StatTile label="Follow-up Required" value={stats.open} sub="Action needed" tone="red" />
-        <StatTile
-          label="Closed Leads"
-          value={stats.closed}
-          sub={stats.conversion === null ? "None yet" : `${stats.conversion}% conversion`}
-          tone="green"
-        />
       </div>
 
       {/* Lead cards (persisted) */}
@@ -95,7 +77,12 @@ function SalesTargetCard({
           <p className="mt-1 text-4xl font-bold tracking-tight tabular-nums">
             ${target.toLocaleString()}
           </p>
-          <p className="mt-2 text-xs text-muted">Monthly Target</p>
+          <Link
+            href="/settings"
+            className="focus-ring mt-2 inline-flex items-center gap-1.5 text-xs text-muted transition-colors hover:text-accent"
+          >
+            Monthly Target <Settings2 className="h-3 w-3" />
+          </Link>
         </div>
         <span
           className="rounded-xl border px-3 py-1.5 text-sm font-semibold text-green"
@@ -105,17 +92,12 @@ function SalesTargetCard({
         </span>
       </div>
 
-      <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-[130px_minmax(0,1fr)]">
-        <div className="rounded-2xl border border-[var(--border)] p-4">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">Progress</p>
-          <p className="accent-text mt-1 text-3xl font-bold tabular-nums">{pct}%</p>
-          <p className="mt-2 text-xs text-muted">
-            ${won.toLocaleString()} of ${target.toLocaleString()} this month
-          </p>
-        </div>
-        <div className="min-w-0">
-          <AreaChart data={series} height={180} ticks={3} />
-        </div>
+      <div className="mt-4 rounded-2xl border border-[var(--border)] p-4">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">Progress</p>
+        <p className="accent-text mt-1 text-3xl font-bold tabular-nums">{pct}%</p>
+        <p className="mt-2 text-xs text-muted">
+          ${won.toLocaleString()} of ${target.toLocaleString()} this month
+        </p>
       </div>
 
       {/* Gradient progress bar */}
@@ -138,16 +120,20 @@ function SalesTargetCard({
           <span>Target</span>
         </div>
       </div>
+
+      {/* The chart sat in a 130px-wide sliver beside the progress figure, which
+          made it unreadable. Full width below the bar, and taller. */}
+      <div className="mt-5 border-t border-[var(--border)] pt-4">
+        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-faint">
+          Revenue — last 6 weeks
+        </p>
+        <AreaChart data={series} height={200} ticks={4} />
+      </div>
     </Card>
   );
 }
 
 /* ---------------- Lead's Feed ---------------- */
-
-const STATUS_DOT: Record<string, string> = {
-  "Follow-up Required": "var(--red)",
-  Closed: "var(--green)",
-};
 
 /**
  * Real leads, newest first. The old version rendered a hardcoded `leadsFeed`
@@ -155,14 +141,23 @@ const STATUS_DOT: Record<string, string> = {
  * cold/mid/hot "temperature" badges — none of which the app records.
  */
 function LeadsFeedCard({ leads }: { leads: LeadCardType[] }) {
-  const rows = leads.slice(0, 6);
+  // New leads first — they are the ones nobody has touched yet — then
+  // follow-ups, then wins.
+  const order: Record<string, number> = { "New Lead": 0, "Follow-up Required": 1, "Closed Won": 2 };
+  const rows = [...leads]
+    .sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9))
+    .slice(0, 6);
   return (
     <Card className="flex flex-col">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-[15px] font-semibold tracking-tight">Lead&apos;s Feed</h3>
+        {/* New Leads belong in the feed too — it previously showed only
+            follow-ups and closed won, so a brand new lead was invisible on the
+            very panel meant to surface incoming work. */}
         <div className="flex items-center gap-3 text-[11px] text-muted">
-          <Legend color="var(--red)" label="Follow-up" />
-          <Legend color="var(--green)" label="Closed" />
+          <Legend color="var(--accent)" label="New" />
+          <Legend color="var(--amber)" label="Follow-up" />
+          <Legend color="var(--green)" label="Won" />
         </div>
       </div>
 
@@ -181,11 +176,15 @@ function LeadsFeedCard({ leads }: { leads: LeadCardType[] }) {
                 <p className="truncate text-xs text-faint">{l.company}</p>
               </div>
               <div className="hidden min-w-0 flex-1 sm:block">
+                {/* `inline-block`, not the default `inline`: on an inline
+                    element `w-fit` is inert and vertical padding doesn't affect
+                    line height, so a wrapped badge bleeds over the line below
+                    it. `whitespace-nowrap` keeps it on one line. */}
                 <span
-                  className="w-fit rounded-md px-2 py-0.5 text-[10px] font-semibold"
+                  className="inline-block w-fit whitespace-nowrap rounded-md px-2 py-0.5 text-[10px] font-semibold"
                   style={{
-                    background: l.status === "Closed" ? "var(--green-soft)" : "var(--red-soft)",
-                    color: l.status === "Closed" ? "var(--green)" : "var(--red)",
+                    background: STATUS_TONE[l.status]?.soft ?? "var(--raise)",
+                    color: STATUS_TONE[l.status]?.color ?? "var(--text-muted)",
                   }}
                 >
                   {l.status}
@@ -194,7 +193,7 @@ function LeadsFeedCard({ leads }: { leads: LeadCardType[] }) {
               </div>
               <span
                 className="h-2.5 w-2.5 shrink-0 rounded-full"
-                style={{ background: STATUS_DOT[l.status] ?? "var(--border-strong)" }}
+                style={{ background: STATUS_TONE[l.status]?.color ?? "var(--border-strong)" }}
               />
             </div>
           ))}
@@ -224,6 +223,10 @@ function Legend({ color, label }: { color: string; label: string }) {
  */
 function LeadSourcesCard({ stats }: { stats: LeadAnalytics }) {
   const max = Math.max(1, ...stats.bySource.map((s) => s.count));
+  const best = stats.bySource.reduce(
+    (top, s) => (s.count > top.count ? s : top),
+    stats.bySource[0] ?? { label: "—" as LeadCardType["source"], count: 0, pct: 0 }
+  );
   const colors = ["var(--accent)", "var(--purple)", "var(--amber)", "var(--green)"];
   return (
     <Card className="flex flex-col">
@@ -234,10 +237,11 @@ function LeadSourcesCard({ stats }: { stats: LeadAnalytics }) {
         </p>
       </div>
 
-      <div className="grid grid-cols-3 gap-2 rounded-2xl border border-[var(--border)] p-3 text-center">
+      <div className="grid grid-cols-4 gap-2 rounded-2xl border border-[var(--border)] p-3 text-center">
         <MiniStat label="Total" value={String(stats.total)} accent />
+        <MiniStat label="New" value={String(stats.fresh)} />
         <MiniStat label="Open" value={String(stats.open)} />
-        <MiniStat label="Closed" value={String(stats.closed)} />
+        <MiniStat label="Won" value={String(stats.closed)} />
       </div>
 
       {stats.bySource.length === 0 ? (
@@ -258,6 +262,34 @@ function LeadSourcesCard({ stats }: { stats: LeadAnalytics }) {
               </span>
             </div>
           ))}
+
+          {/* The panel used to end here with a tall gap below the bars. The
+              best and worst performing source is a real reading of the same
+              data, and it is what the bars are actually for. */}
+          <div className="mt-auto border-t border-[var(--border)] pt-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-faint">
+                  Top source
+                </p>
+                <p className="mt-1 truncate text-sm font-bold text-green">{best.label}</p>
+                <p className="text-[11px] text-faint">
+                  {best.count} lead{best.count === 1 ? "" : "s"} · {best.pct}%
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-faint">
+                  Conversion
+                </p>
+                <p className="mt-1 text-sm font-bold" style={{ color: "var(--accent)" }}>
+                  {stats.conversion === null ? "—" : `${stats.conversion}%`}
+                </p>
+                <p className="text-[11px] text-faint">
+                  {stats.closed} of {stats.total} won
+                </p>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </Card>
@@ -272,42 +304,3 @@ function MiniStat({ label, value, accent }: { label: string; value: string; acce
     </div>
   );
 }
-
-/* ---------------- Stat tiles ---------------- */
-
-function StatTile({
-  label,
-  value,
-  sub,
-  tone,
-}: {
-  label: string;
-  /** String so a tile can honestly render "—" when the data can't answer it. */
-  value: number | string;
-  sub: string;
-  tone: Tone | "neutral";
-}) {
-  const color = tone === "neutral" ? "var(--text-muted)" : toneStyles[tone].color;
-  const soft = tone === "neutral" ? "var(--raise)" : toneStyles[tone].soft;
-  return (
-    <div
-      className="card flex items-center justify-between gap-3 p-5"
-      style={{ background: `linear-gradient(135deg, ${soft}, transparent 90%)` }}
-    >
-      <div className="flex items-center gap-3">
-        <span className="grid h-11 w-11 place-items-center rounded-xl" style={{ background: soft }}>
-          <Users className="h-5 w-5" style={{ color }} />
-        </span>
-        <div className="leading-tight">
-          <p className="text-sm font-semibold">{label}</p>
-          <p className="text-xs text-faint">{sub}</p>
-        </div>
-      </div>
-      <span className="text-3xl font-bold tabular-nums" style={{ color }}>
-        {/* Only pad real counts — padding a placeholder like "—" renders "0—". */}
-        {typeof value === "number" ? String(value).padStart(2, "0") : value}
-      </span>
-    </div>
-  );
-}
-

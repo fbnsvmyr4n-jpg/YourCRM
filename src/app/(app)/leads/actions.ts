@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidateApp } from "@/server/revalidate";
-import { LEAD_SOURCES, LEAD_STATUSES } from "@/data/leads";
+import { LEAD_SOURCES } from "@/data/leads";
 import { createLead, deleteLead, updateLead, type NewLead } from "@/server/leads-repo";
 import { detachLead } from "@/server/calls-repo";
 import { email as validEmail, id as validId, pick, text } from "@/server/validate";
@@ -10,12 +10,13 @@ import { email as validEmail, id as validId, pick, text } from "@/server/validat
 function parseLead(formData: FormData): NewLead | null {
   const name = text(formData.get("name"), 80);
   const email = validEmail(formData.get("email"));
-  const status = pick(formData.get("status"), LEAD_STATUSES);
   const source = pick(formData.get("source"), LEAD_SOURCES);
 
-  // Status and source drive the Reports funnel and the lead-source donut —
-  // an unrecognised value there silently corrupts every chart on that page.
-  if (!name || email === null || !status || !source) return null;
+  // Source drives the lead-source breakdown — an unrecognised value there
+  // silently corrupts the chart. Status is deliberately *not* read from the
+  // form: it is derived from calls, meetings and deals, so accepting one here
+  // would let a posted value contradict what actually happened.
+  if (!name || email === null || !source) return null;
 
   return {
     name,
@@ -23,7 +24,8 @@ function parseLead(formData: FormData): NewLead | null {
     phone: text(formData.get("phone"), 40),
     location: text(formData.get("location"), 80),
     company: text(formData.get("company"), 80),
-    status,
+    // Every lead starts here; it moves on its own as events land.
+    status: "New Lead",
     source,
   };
 }

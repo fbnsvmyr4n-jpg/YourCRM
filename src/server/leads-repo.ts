@@ -1,5 +1,5 @@
 import type { AvatarColor } from "@/components/ui/Avatar";
-import { leadCards as seed, LEAD_SOURCES, type LeadCard, type LeadSource } from "@/data/leads";
+import { leadCards as seed, type LeadCard, type LeadSource } from "@/data/leads";
 import { mutateTable, readTable } from "./store";
 
 const TABLE = "leads";
@@ -73,45 +73,4 @@ export async function updateLead(id: string, patch: NewLead): Promise<LeadCard |
 
 export async function deleteLead(id: string): Promise<void> {
   await mutateTable<LeadCard>(TABLE, seed, (rows) => rows.filter((l) => l.id !== id));
-}
-
-/* ---------------- analytics ---------------- */
-
-export type LeadAnalytics = {
-  total: number;
-  open: number;
-  closed: number;
-  /** Captured in the last 7 days. Only counts leads that carry a timestamp. */
-  newThisWeek: number;
-  /** True when no lead has a timestamp, so "this week" can't be answered. */
-  newThisWeekUnknown: boolean;
-  conversion: number | null;
-  bySource: { label: LeadSource; count: number; pct: number }[];
-};
-
-export async function leadAnalytics(): Promise<LeadAnalytics> {
-  const rows = await listLeads();
-  const total = rows.length;
-  const closed = rows.filter((l) => l.status === "Closed").length;
-  const open = rows.filter((l) => l.status === "Follow-up Required").length;
-
-  const weekAgo = Date.now() - 7 * 86_400_000;
-  const dated = rows.filter((l) => l.createdAt && Number.isFinite(Date.parse(l.createdAt)));
-  const newThisWeek = dated.filter((l) => Date.parse(l.createdAt!) >= weekAgo).length;
-
-  const bySource = LEAD_SOURCES.map((label) => {
-    const count = rows.filter((l) => l.source === label).length;
-    return { label, count, pct: total > 0 ? Math.round((count / total) * 100) : 0 };
-  }).filter((s) => s.count > 0);
-
-  return {
-    total,
-    open,
-    closed,
-    newThisWeek,
-    // Every lead predates the field — say "—" rather than report a false zero.
-    newThisWeekUnknown: total > 0 && dated.length === 0,
-    conversion: total > 0 ? Math.round((closed / total) * 100) : null,
-    bySource,
-  };
 }

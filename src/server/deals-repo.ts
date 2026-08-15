@@ -1,5 +1,12 @@
 import type { AvatarColor } from "@/components/ui/Avatar";
-import { deals as seed, FALLBACK_STAGE, STAGE_IDS, type Deal, type StageId } from "@/data/deals";
+import {
+  carriesMoney,
+  deals as seed,
+  FALLBACK_STAGE,
+  STAGE_IDS,
+  type Deal,
+  type StageId,
+} from "@/data/deals";
 import { mutateTable, readTable } from "./store";
 
 const TABLE = "deals";
@@ -46,7 +53,12 @@ function normalise(deal: Deal): Deal {
   const stage = (STAGE_IDS as readonly string[]).includes(deal.stage)
     ? deal.stage
     : FALLBACK_STAGE;
-  const value = Number.isFinite(deal.value) ? Math.max(0, deal.value) : 0;
+
+  // Leads In and Qualified carry no money — enforced on read as well as write,
+  // so figures stored before that rule existed (or by any path that skips
+  // validation) can't leak into a total that is presented as a measurement.
+  const raw = Number.isFinite(deal.value) ? Math.max(0, deal.value) : 0;
+  const value = carriesMoney(stage) ? raw : 0;
 
   // Backfill for deals won before `wonAt` existed. Rows already in the store
   // don't gain a new field, so without this every historical win silently
@@ -82,7 +94,11 @@ export async function createDeal(input: NewDeal): Promise<Deal> {
       company: input.company.trim() || "—",
       initials: initialsFor(contact),
       color: COLORS[rows.length % COLORS.length],
-      value: Number.isFinite(input.value) ? Math.max(0, Math.round(input.value)) : 0,
+      // A deal added to Leads In or Qualified carries no figure, whatever the
+      // form sent — those stages are before any quote exists.
+      value: carriesMoney(input.stage) && Number.isFinite(input.value)
+        ? Math.max(0, Math.round(input.value))
+        : 0,
       stage: input.stage,
       owner: "Lang Lee",
       closeDate: "—",
@@ -100,6 +116,26 @@ export async function moveDeal(id: string, stage: StageId): Promise<void> {
     if (idx === -1) return rows;
 
     const current = rows[idx];
+
+    // Dragging the outstanding remainder into Closed Won settles the deal:
+    // merge it back into the record holding the part already paid, so the
+    // board shows one entry at the full contract value rather than two
+    // fragments the user has to add up themselves.
+    if (stage === "won" && current.splitId) {
+      const sibling = rows.find(
+        (d) => d.id !== current.id && d.splitId === current.splitId && d.stage === "won"
+      );
+      if (sibling) {
+        return rows
+          .filter((d) => d.id !== current.id)
+          .map((d) =>
+            d.id === sibling.id
+              ? { ...d, value: d.value + current.value, wonAt: d.wonAt ?? new Date().toISOString() }
+              : d
+          );
+      }
+    }
+
     // Record when the deal actually reached "won", so revenue reporting is
     // driven by a real event. Moving it back out clears the stamp — otherwise
     // a deal that was reopened would keep counting as revenue. Re-winning a
@@ -107,11 +143,133 @@ export async function moveDeal(id: string, stage: StageId): Promise<void> {
     const wonAt =
       stage === "won" ? (current.wonAt ?? new Date().toISOString()) : undefined;
 
+    // `mutateTable` hands back raw stored rows, not normalised ones — so a lead
+    // written before Leads In carried no money still holds its old figure on
+    // disk, invisible on the board but very much there. Promoting it must not
+    // resurrect a number nobody quoted, so a value only survives a move
+    // *between* money stages; arriving from Leads In or Qualified starts blank
+    // and the user enters the quote.
+    const cameFromMoney = carriesMoney(
+      (STAGE_IDS as readonly string[]).includes(current.stage) ? current.stage : FALLBACK_STAGE
+    );
+    const value = carriesMoney(stage) && cameFromMoney ? current.value : 0;
+
     const next = [...rows];
-    next[idx] = { ...current, stage, wonAt };
+    next[idx] = { ...current, stage, value, wonAt };
     return next;
   });
 }
+
+/**
+ * Set a deal's value.
+ *
+ * Needed because a deal arriving in Proposals from Qualified has no figure yet
+ * — Qualified carries no money, so the number is entered at the point a quote
+ * actually exists.
+ */
+export async function setDealValue(id: string, value: number): Promise<void> {
+  await mutateTable<Deal>(TABLE, seed, (rows) => {
+    const idx = rows.findIndex((d) => d.id === id);
+    if (idx === -1) return rows;
+
+    const current = rows[idx];
+    if (!carriesMoney(current.stage)) return rows;
+
+    const next = [...rows];
+    next[idx] = {
+      ...current,
+      value: Math.max(0, Math.round(value)),
+      // Re-quoting a deal that was never split resets nothing; one that *was*
+      // split keeps its original total so the paid/outstanding split stays
+      // meaningful.
+      splitTotal: current.splitId ? current.splitTotal : undefined,
+    };
+    return next;
+  });
+}
+
+export type PaymentResult = { error?: string };
+
+/**
+ * Record a payment against a deal awaiting settlement.
+ *
+ * Splits it in two: what has been received moves to Closed Won, what is still
+ * owed stays in Negotiations. Paying the full outstanding amount settles it
+ * outright — there is no zero-value remainder left behind.
+ *
+ * All of it happens inside one `mutateTable`, because the two halves must never
+ * exist independently: a crash between "reduce the remainder" and "create the
+ * paid record" would destroy money.
+ */
+export async function recordPayment(id: string, amount: number): Promise<PaymentResult> {
+  let error: string | undefined;
+
+  await mutateTable<Deal>(TABLE, seed, (rows) => {
+    const idx = rows.findIndex((d) => d.id === id);
+    if (idx === -1) {
+      error = "Deal not found.";
+      return rows;
+    }
+
+    const deal = rows[idx];
+    if (deal.stage !== "negotiation") {
+      error = "Payments can only be recorded against a deal in Negotiations.";
+      return rows;
+    }
+
+    const paid = Math.round(amount);
+    if (!Number.isFinite(paid) || paid <= 0) {
+      error = "Enter an amount greater than zero.";
+      return rows;
+    }
+    if (paid > deal.value) {
+      error = `That is more than the ${fmt(deal.value)} still outstanding.`;
+      return rows;
+    }
+
+    const splitId = deal.splitId ?? `split-${Math.random().toString(36).slice(2, 10)}`;
+    // Captured once, at the first split — the full contract value is what
+    // decides whether the won record is partially or fully paid.
+    const splitTotal = deal.splitTotal ?? deal.value;
+    const remaining = deal.value - paid;
+
+    const existingWon = rows.find((d) => d.splitId === splitId && d.stage === "won");
+
+    let next = rows.map((d) => {
+      if (d.id !== deal.id) return d;
+      return { ...d, value: remaining, splitId, splitTotal };
+    });
+
+    if (existingWon) {
+      // A second part-payment tops up the same won record rather than
+      // scattering the deal across several cards.
+      next = next.map((d) =>
+        d.id === existingWon.id ? { ...d, value: d.value + paid, splitTotal } : d
+      );
+    } else {
+      const settled: Deal = {
+        ...deal,
+        id: `${deal.id}-paid-${Math.random().toString(36).slice(2, 6)}`,
+        value: paid,
+        stage: "won",
+        splitId,
+        splitTotal,
+        wonAt: new Date().toISOString(),
+      };
+      next = [settled, ...next];
+    }
+
+    // Nothing left owing: drop the empty remainder so the board doesn't show a
+    // $0 card sitting in Negotiations.
+    if (remaining === 0) next = next.filter((d) => d.id !== deal.id);
+
+    return next;
+  });
+
+  return { error };
+}
+
+const fmt = (n: number) => `$${n.toLocaleString()}`;
 
 export async function deleteDeal(id: string): Promise<void> {
   await mutateTable<Deal>(TABLE, seed, (rows) => rows.filter((d) => d.id !== id));

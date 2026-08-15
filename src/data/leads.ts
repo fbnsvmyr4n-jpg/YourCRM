@@ -5,8 +5,24 @@ import type { AvatarColor } from "@/components/ui/Avatar";
 export const LEAD_SOURCES = ["Google Ads", "Facebook", "Referral", "Phone Call"] as const;
 export type LeadSource = (typeof LEAD_SOURCES)[number];
 
-export const LEAD_STATUSES = ["Closed", "Follow-up Required"] as const;
+/**
+ * Where a lead is in its life.
+ *
+ * **Never chosen by hand.** A lead starts as "New Lead" and moves on its own:
+ * to "Follow-up Required" once a call or meeting has happened and there is
+ * still work to do, and to "Closed Won" once that work succeeds. Asking someone
+ * to pick a status at creation forced them to declare an outcome for a lead
+ * that nothing had happened to yet.
+ */
+export const LEAD_STATUSES = ["New Lead", "Follow-up Required", "Closed Won"] as const;
 export type LeadStatus = (typeof LEAD_STATUSES)[number];
+
+/** One palette for status, so the feed, the cards and the filters agree. */
+export const STATUS_TONE: Record<LeadStatus, { color: string; soft: string }> = {
+  "New Lead": { color: "var(--accent)", soft: "var(--accent-soft)" },
+  "Follow-up Required": { color: "var(--amber)", soft: "var(--amber-soft)" },
+  "Closed Won": { color: "var(--green)", soft: "var(--green-soft)" },
+};
 
 export type LeadCard = {
   id: string;
@@ -35,7 +51,7 @@ export const leadCards: LeadCard[] = [
     phone: "(555) 123 4567",
     location: "NY, New York City",
     company: "Abshire Group",
-    status: "Closed",
+    status: "Closed Won",
     source: "Google Ads",
   },
   {
@@ -71,7 +87,7 @@ export const leadCards: LeadCard[] = [
     phone: "(555) 123 4567",
     location: "NY, New York City",
     company: "Mann & Co.",
-    status: "Closed",
+    status: "Closed Won",
     source: "Facebook",
   },
   {
@@ -95,7 +111,7 @@ export const leadCards: LeadCard[] = [
     phone: "(555) 123 4567",
     location: "NY, New York City",
     company: "Cole Media",
-    status: "Closed",
+    status: "Closed Won",
     source: "Facebook",
   },
 ];

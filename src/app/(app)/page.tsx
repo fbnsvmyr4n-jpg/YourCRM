@@ -137,15 +137,22 @@ export default async function DashboardPage() {
       icon: "message",
       tone: "purple" as Tone,
       text: `New message from ${received[0].name}`,
-      time: received[0].ago,
+      // Was `received[0].ago` — a stored string like "2m ago" that stayed "2m
+      // ago" forever. Messages carry a real timestamp now, so this derives the
+      // same way the won-deal line above it does.
+      time: relativeDay(received[0].at, now),
     },
   ].filter(Boolean) as { icon: string; tone: Tone; text: string; time: string }[];
 
   return (
     <div className="mx-auto max-w-[1500px] animate-fade-up">
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_346px]">
-        {/* ---------------- MAIN COLUMN ---------------- */}
-        <div className="flex flex-col gap-5">
+      <div className="grid grid-cols-1 gap-5 @min-[820px]:grid-cols-[minmax(0,1fr)_346px]">
+        {/* ---------------- MAIN COLUMN ----------------
+            A container in its own right. Without this the two-up rows below
+            would size themselves against `<main>` and split *this* column in
+            half regardless of how narrow it is — which is what squeezed the
+            revenue chart to 225px on a page that had 920px to give. */}
+        <div className="@container flex flex-col gap-5">
           <Hero
             greeting={greeting(now.getHours())}
             name={me?.name.split(" ")[0] ?? "there"}
@@ -154,12 +161,12 @@ export default async function DashboardPage() {
             stats={heroStats}
           />
 
-          <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-5 @min-[560px]:grid-cols-2">
             <RevenueOverview series={revenueSeries} total={revenueTotal} />
             <RevenueReceived rows={revenueRows} now={now} />
           </div>
 
-          <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-5 @min-[560px]:grid-cols-2">
             <ThisWeek
               wonThisWeek={wonThisWeek.length}
               wonValue={wonThisWeek.reduce((sum, d) => sum + d.value, 0)}
@@ -228,7 +235,7 @@ function Hero({
           </Link>
         </div>
 
-        <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="mt-5 grid grid-cols-2 gap-3 @min-[520px]:grid-cols-4">
           {stats.map((s) => {
             const Icon = iconMap[s.icon];
             const t = toneStyles[s.tone];
@@ -316,7 +323,7 @@ function RevenueReceived({
         <p className="py-10 text-center text-sm text-faint">No deals won yet.</p>
       ) : (
         <>
-          <div className="grid grid-cols-[1.6fr_1fr_auto] gap-x-3 px-1 pb-2 text-[11px] font-semibold uppercase tracking-wide text-faint">
+          <div className="grid grid-cols-[minmax(0,2.2fr)_minmax(0,0.9fr)_auto] gap-x-3 px-1 pb-2 text-[11px] font-semibold uppercase tracking-wide text-faint">
             <span>Client</span>
             <span className="hidden sm:block">Won</span>
             <span className="text-right">Amount</span>
@@ -325,9 +332,13 @@ function RevenueReceived({
             {rows.slice(0, 5).map((r) => (
               <div
                 key={r.id}
-                className="grid grid-cols-[1.6fr_1fr_auto] items-center gap-x-3 rounded-xl px-1 py-3 transition-colors hover:bg-[var(--raise)]"
+                className="grid grid-cols-[minmax(0,2.2fr)_minmax(0,0.9fr)_auto] items-center gap-x-3 rounded-xl px-1 py-3 transition-colors hover:bg-[var(--raise)]"
               >
-                <div className="flex items-center gap-2.5">
+                {/* `min-w-0` on the grid item itself: the inner block already
+                    had it, but this flex wrapper was still contributing the
+                    untruncated title to the track's automatic minimum, which
+                    inflated column one to 200px in a 228px row. */}
+                <div className="flex min-w-0 items-center gap-2.5">
                   <Avatar initials={r.initials} color={r.color} size="sm" />
                   <div className="min-w-0 leading-tight">
                     <p className="truncate text-sm font-medium">{r.client}</p>
@@ -442,7 +453,7 @@ function Connections({
             <Link
               href="/leads"
               key={c.name}
-              className="flex items-center gap-3 rounded-xl px-1 py-2.5 transition-colors hover:bg-[var(--raise)]"
+              className="focus-ring flex items-center gap-3 rounded-xl px-1 py-2.5 transition-colors hover:bg-[var(--raise)]"
             >
               <Avatar initials={c.initials} color={c.color} />
               <div className="min-w-0 flex-1 leading-tight">
@@ -478,7 +489,7 @@ function Reminders({
             <Link
               href="/meetings"
               key={r.id}
-              className="flex items-center gap-3 rounded-xl px-1 py-3 transition-colors hover:bg-[var(--raise)]"
+              className="focus-ring flex items-center gap-3 rounded-xl px-1 py-3 transition-colors hover:bg-[var(--raise)]"
             >
               <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl" style={{ background: "var(--accent-soft)" }}>
                 <Icon className="h-[18px] w-[18px] text-accent" />
@@ -531,7 +542,7 @@ function TodaysFocus({ items }: { items: FocusItem[] }) {
             <Link
               key={f.title}
               href={f.href}
-              className="group flex items-center gap-3 rounded-xl px-1 py-2.5 text-left transition-colors hover:bg-[var(--raise)]"
+              className="focus-ring group flex items-center gap-3 rounded-xl px-1 py-2.5 text-left transition-colors hover:bg-[var(--raise)]"
             >
               <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl" style={{ background: t.soft }}>
                 <Icon className="h-[17px] w-[17px]" style={{ color: t.color }} />

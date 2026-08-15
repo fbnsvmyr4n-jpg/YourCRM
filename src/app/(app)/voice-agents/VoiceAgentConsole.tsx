@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import {
+  ArrowUpRight,
   Bot,
   CalendarPlus,
   Check,
@@ -37,7 +39,14 @@ function timeAgo(iso: string) {
 
 type Toast = { lead: boolean; leadMatched: boolean; meeting: boolean; name: string } | null;
 
-export function VoiceAgentConsole({ calls }: { calls: Call[] }) {
+export function VoiceAgentConsole({
+  calls,
+  phoneNumber,
+}: {
+  calls: Call[];
+  /** The connected line, or null while calls are simulated. */
+  phoneNumber: string | null;
+}) {
   const [selectedId, setSelectedId] = useState(calls[0]?.id ?? "");
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<Toast>(null);
@@ -146,26 +155,40 @@ export function VoiceAgentConsole({ calls }: { calls: Call[] }) {
       )}
 
       {/* Agent status + stats */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.3fr_1fr_1fr_1fr]">
+      <div className="grid grid-cols-1 gap-4 @min-[680px]:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]">
+        {/* The badge used to read LIVE over fixed office hours, both hardcoded.
+            Nothing could be dialled and there were no hours — so it asserted a
+            working phone line that did not exist. It now reports the real state
+            of the telephony config: live only when a number is actually
+            connected, and honest about being simulated when it isn't. */}
         <Card className="flex items-center gap-4">
           <span
             className="relative grid h-12 w-12 shrink-0 place-items-center rounded-2xl"
             style={{ background: "var(--accent-soft)" }}
           >
             <Bot className="h-6 w-6 text-accent" />
-            <span className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-[var(--panel-solid)] bg-[var(--green)]" />
+            <span
+              className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-[var(--panel-solid)]"
+              style={{ background: phoneNumber ? "var(--green)" : "var(--amber)" }}
+            />
           </span>
           <div className="min-w-0">
             <p className="flex items-center gap-2 font-semibold">
               {agentConfig.name}
               <span
                 className="rounded-full px-2 py-0.5 text-[10px] font-bold"
-                style={{ background: "var(--green-soft)", color: "var(--green)" }}
+                style={
+                  phoneNumber
+                    ? { background: "var(--green-soft)", color: "var(--green)" }
+                    : { background: "var(--amber-soft)", color: "var(--amber)" }
+                }
               >
-                LIVE
+                {phoneNumber ? "LIVE · 24/7" : "SIMULATED"}
               </span>
             </p>
-            <p className="truncate text-xs text-faint">{agentConfig.hours}</p>
+            <p className="truncate text-xs text-faint">
+              {phoneNumber ? `Answering ${phoneNumber} around the clock` : "No phone number connected yet"}
+            </p>
           </div>
         </Card>
         <Stat icon={<PhoneCall className="h-5 w-5" />} value={String(calls.length)} label="Calls handled" tone="var(--accent)" soft="var(--accent-soft)" />
@@ -173,7 +196,7 @@ export function VoiceAgentConsole({ calls }: { calls: Call[] }) {
         <Stat icon={<Clock className="h-5 w-5" />} value={duration(totalSec)} label="Talk time" tone="var(--purple)" soft="var(--purple-soft)" />
       </div>
 
-      <div className="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,380px)_minmax(0,1fr)]">
+      <div className="mt-5 grid grid-cols-1 gap-5 @min-[780px]:grid-cols-[minmax(0,380px)_minmax(0,1fr)]">
         {/* Call log */}
         <Card className="!p-4">
           <div className="mb-3 flex items-center justify-between">
@@ -284,7 +307,7 @@ function CallDetail({
 }) {
   const meta = OUTCOME_META[call.outcome];
   return (
-    <Card className="flex flex-col">
+    <Card className="card-q flex flex-col">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--border)] pb-4">
         <div className="flex items-center gap-3">
           <Avatar initials={call.initials} color={call.color} size="lg" />
@@ -313,24 +336,47 @@ function CallDetail({
         </div>
       </div>
 
-      {/* Summary */}
-      <div className="py-4">
-        <p className="mb-1.5 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-faint">
-          <Sparkles className="h-3.5 w-3.5 text-accent" /> Agent summary
+      {/* Agent summary.
+          This is the one thing worth reading on the whole panel — what the
+          caller actually wanted — and as small grey body copy it read as a
+          caption and got scanned straight past. It now carries the weight of
+          the conclusion it is: accent-lit panel, a rule down the edge to anchor
+          the eye, and text at reading size rather than metadata size. */}
+      <div className="my-4 rounded-2xl border border-[var(--border)] p-4" style={{ background: "var(--accent-soft)" }}>
+        <p className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-accent">
+          <Sparkles className="h-3.5 w-3.5" /> Agent summary
         </p>
-        <p className="text-sm leading-relaxed text-muted">{call.summary}</p>
+        <p className="border-l-2 pl-3 text-[15px] font-medium leading-relaxed text-[var(--text)]" style={{ borderColor: "var(--accent)" }}>
+          {call.summary}
+        </p>
+        {call.topic && (
+          <p className="mt-3 text-xs text-muted">
+            <span className="font-semibold text-[var(--text)]">Topic:</span> {call.topic}
+          </p>
+        )}
       </div>
 
       {/* What the automation produced.
           A processed call with no link means the record it created was deleted
           afterwards (the link is cleared so nothing points at a missing row) —
           say so, rather than "will be created", which will never happen now. */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 @min-[440px]:grid-cols-2">
         <AutomationCard
           icon={<Target className="h-4 w-4" />}
           title="Lead"
           done={!!call.createdLeadId}
-          doneText="Added to Leads"
+          // "Added to Leads" was asserted whenever a lead id existed, including
+          // when the caller matched a lead that was already there — so a repeat
+          // caller produced a card promising a new lead the user then couldn't
+          // find. Say which of the two actually happened. Rows written before
+          // `leadLink` existed can't know, so they state only what is certain.
+          doneText={
+            call.leadLink === "created"
+              ? "Added to Leads"
+              : call.leadLink === "matched"
+                ? "Matched an existing lead"
+                : "Linked to a lead"
+          }
           pendingText={
             call.outcome === "not-interested"
               ? "Not applicable"
@@ -339,6 +385,7 @@ function CallDetail({
                 : "Will be created"
           }
           na={call.outcome === "not-interested"}
+          href={call.createdLeadId ? "/leads" : undefined}
         />
         <AutomationCard
           icon={<CalendarPlus className="h-4 w-4" />}
@@ -353,6 +400,7 @@ function CallDetail({
                 : "Will be booked"
           }
           na={call.outcome !== "meeting-booked"}
+          href={call.createdMeetingId ? "/meetings" : undefined}
         />
       </div>
 
@@ -403,6 +451,7 @@ function AutomationCard({
   doneText,
   pendingText,
   na,
+  href,
 }: {
   icon: React.ReactNode;
   title: string;
@@ -410,11 +459,14 @@ function AutomationCard({
   doneText: string;
   pendingText: string;
   na: boolean;
+  /** Where the record lives. Given only when there is really one to open. */
+  href?: string;
 }) {
   const color = done ? "var(--green)" : na ? "var(--text-faint)" : "var(--amber)";
   const soft = done ? "var(--green-soft)" : na ? "var(--raise)" : "var(--amber-soft)";
-  return (
-    <div className="flex items-center gap-3 rounded-2xl border border-[var(--border)] p-3">
+
+  const body = (
+    <>
       <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl" style={{ background: soft, color }}>
         {done ? <Check className="h-4 w-4" /> : icon}
       </span>
@@ -424,6 +476,20 @@ function AutomationCard({
           {done ? doneText : pendingText}
         </p>
       </div>
-    </div>
+      {href && <ArrowUpRight className="ml-auto h-4 w-4 shrink-0 text-faint" />}
+    </>
+  );
+
+  const shell = "flex items-center gap-3 rounded-2xl border border-[var(--border)] p-3";
+
+  // A claim the user can check for themselves is worth more than one they have
+  // to take on trust — the whole complaint here was a card asserting a record
+  // that turned out not to be there.
+  return href ? (
+    <Link href={href} className={`${shell} focus-ring transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--raise)]`}>
+      {body}
+    </Link>
+  ) : (
+    <div className={shell}>{body}</div>
   );
 }

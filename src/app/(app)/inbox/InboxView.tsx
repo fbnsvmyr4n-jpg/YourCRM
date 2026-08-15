@@ -1,15 +1,16 @@
 "use client";
 
-import { useCallback } from "react";
-import { useOpenFromQuery } from "@/lib/useOpenFromQuery";
-
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
+import Link from "next/link";
 import {
   CalendarCheck,
   ClipboardList,
   CornerUpLeft,
   CornerUpRight,
   DollarSign,
+  ExternalLink,
+  FileText,
   Mail,
   MapPin,
   MessageCircle,
@@ -26,47 +27,97 @@ import {
   X,
 } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
-import { inboxFilters, type InboxFilter, type Message, type MsgChannel } from "@/data/inbox";
+import { ChannelBadge, type ContactChannel } from "@/components/ui/ChannelBadge";
+import { ClientClock } from "@/components/ui/ClientClock";
+import { PersonField, type Person } from "@/components/ui/PersonField";
+import { TimeAgo } from "@/components/ui/TimeAgo";
+import {
+  inboxFilters,
+  MSG_CATEGORIES,
+  type Attachment,
+  type InboxFilter,
+  type Message,
+  type MsgCategory,
+} from "@/data/inbox";
 import { clsx } from "@/lib/clsx";
-import { addMessageAction, markReadAction, restoreMessageAction, trashMessageAction } from "./actions";
+import { useOpenFromQuery } from "@/lib/useOpenFromQuery";
+import {
+  addMessageAction,
+  forwardAction,
+  markReadAction,
+  replyAction,
+  restoreMessageAction,
+  trashMessageAction,
+} from "./actions";
 
-const CHANNEL: Record<MsgChannel, { color: string; soft: string; icon: typeof Mail }> = {
-  amber: { color: "var(--amber)", soft: "var(--amber-soft)", icon: Mail },
-  green: { color: "var(--green)", soft: "var(--green-soft)", icon: Mail },
-  blue: { color: "var(--accent)", soft: "var(--accent-soft)", icon: CornerUpLeft },
+const CHIP_META: Record<MsgCategory, { icon: typeof Mail; tone: string; soft: string }> = {
+  Appointments: { icon: CalendarCheck, tone: "var(--accent)", soft: "var(--accent-soft)" },
+  Tasks: { icon: ClipboardList, tone: "var(--amber)", soft: "var(--amber-soft)" },
+  "Meeting Requests": { icon: Users, tone: "var(--green)", soft: "var(--green-soft)" },
+  "Follow-ups": { icon: CornerUpLeft, tone: "var(--red)", soft: "var(--red-soft)" },
+  Enquiries: { icon: MessageCircle, tone: "var(--purple)", soft: "var(--purple-soft)" },
 };
 
-const chips = [
-  { label: "Appointments", icon: CalendarCheck, tone: "var(--accent)" },
-  { label: "Tasks", icon: ClipboardList, tone: "var(--amber)" },
-  { label: "Meeting Requests", icon: Users, tone: "var(--green)" },
-  { label: "Follow-ups", icon: CornerUpLeft, tone: "var(--red)" },
-  { label: "Enquiries", icon: MessageCircle, tone: "var(--purple)" },
-];
-
-export function InboxView({ messages }: { messages: Message[] }) {
+export function InboxView({
+  messages,
+  contactFor,
+  channelFor,
+  people,
+}: {
+  messages: Message[];
+  contactFor: Record<string, string>;
+  /** Where each sender came from — a real source, resolved on the server. */
+  channelFor: Record<string, ContactChannel>;
+  /** Contacts and leads, so addressing a new email is recognition, not recall. */
+  people: Person[];
+}) {
   const [filter, setFilter] = useState<InboxFilter>("All");
+  const [category, setCategory] = useState<MsgCategory | null>(null);
+  const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState(messages[0]?.id ?? "");
   const [composeOpen, setComposeOpen] = useState(false);
-  // Arriving from the dashboard Quick Action opens compose directly.
   useOpenFromQuery("compose", useCallback(() => setComposeOpen(true), []));
   const [busy, setBusy] = useState(false);
 
   const list = useMemo(() => {
-    switch (filter) {
-      case "Unread":
-        return messages.filter((m) => m.unread && !m.trashed);
-      case "Assigned to me":
-        return messages.filter((m) => m.assigned && !m.trashed);
-      case "Sent":
-        return messages.filter((m) => m.direction === "sent" && !m.trashed);
-      case "Received":
-        return messages.filter((m) => m.direction === "received" && !m.trashed);
-      case "Trash":
-        return messages.filter((m) => m.trashed);
-      default:
-        return messages.filter((m) => !m.trashed);
-    }
+    const byFolder = (() => {
+      switch (filter) {
+        case "Unread":
+          return messages.filter((m) => m.unread && !m.trashed);
+        case "Assigned to me":
+          return messages.filter((m) => m.assigned && !m.trashed);
+        case "Sent":
+          return messages.filter((m) => m.direction === "sent" && !m.trashed);
+        case "Received":
+          return messages.filter((m) => m.direction === "received" && !m.trashed);
+        case "Trash":
+          return messages.filter((m) => m.trashed);
+        default:
+          return messages.filter((m) => !m.trashed);
+      }
+    })();
+
+    const byCategory = category ? byFolder.filter((m) => m.category === category) : byFolder;
+
+    const q = query.trim().toLowerCase();
+    if (!q) return byCategory;
+
+    // Search covers the body too — the useful search is usually for something
+    // said inside a message, not just its subject line.
+    return byCategory.filter((m) =>
+      [m.name, m.subject, m.preview, m.company, m.email, ...m.body].some((f) =>
+        f.toLowerCase().includes(q)
+      )
+    );
+  }, [filter, category, query, messages]);
+
+  // Counts come from the same folder the user is looking at, so a chip never
+  // promises results that the current folder would filter away.
+  const counts = useMemo(() => {
+    const scope = filter === "Trash" ? messages.filter((m) => m.trashed) : messages.filter((m) => !m.trashed);
+    const out = {} as Record<MsgCategory, number>;
+    for (const c of MSG_CATEGORIES) out[c] = scope.filter((m) => m.category === c).length;
+    return out;
   }, [filter, messages]);
 
   const selected = messages.find((m) => m.id === selectedId) ?? list[0] ?? messages[0];
@@ -74,7 +125,7 @@ export function InboxView({ messages }: { messages: Message[] }) {
   function handleSelect(id: string) {
     setSelectedId(id);
     const msg = messages.find((m) => m.id === id);
-    if (msg?.unread) markReadAction(id); // fire-and-forget; revalidates the unread state
+    if (msg?.unread) markReadAction(id);
   }
 
   async function handleCompose(formData: FormData) {
@@ -84,6 +135,7 @@ export function InboxView({ messages }: { messages: Message[] }) {
       setComposeOpen(false);
       if (id) {
         setFilter("Sent");
+        setCategory(null);
         setSelectedId(id);
       }
     } finally {
@@ -112,22 +164,50 @@ export function InboxView({ messages }: { messages: Message[] }) {
   }
 
   return (
-    <div className="mx-auto flex h-auto max-w-[1500px] animate-fade-up flex-col gap-4 lg:h-[calc(100vh-104px)]">
-      {/* Chips */}
-      <div className="flex flex-wrap items-center gap-2.5">
-        {chips.map((c) => {
-          const Icon = c.icon;
+    <div className="mx-auto flex h-auto max-w-[1500px] animate-fade-up flex-col gap-4 @min-[1100px]:h-[calc(100vh-104px)]">
+      {/* Chips and folder tabs stick to the top of the scroller.
+          These are controls, not headings: letting them scroll away meant they
+          were sliced in half at the scroller's top edge on the way out, which
+          reads as a clipping bug. `-mt-1 pt-1` swallows `<main>`'s own top
+          padding so nothing peeks above the block, and the solid `--bg` is what
+          the message list disappears behind. The unblurred `-16px` shadow is
+          background, not decoration: `<main>` carries `scroll-p-2`, which moves
+          where `top-0` actually sticks, leaving a 12px band above the block
+          where the message body showed through. */}
+      <div className="sticky top-0 z-10 -mt-1 flex flex-col gap-4 bg-[var(--bg)] pb-2 pt-1 shadow-[0_-16px_0_0_var(--bg)]">
+        {/* Category chips. These were decoration — a message had no category,
+            so there was nothing for them to filter on. They now toggle a real
+            filter and carry live counts. */}
+        <div className="flex flex-wrap items-center gap-2.5">
+        {MSG_CATEGORIES.map((c) => {
+          const meta = CHIP_META[c];
+          const Icon = meta.icon;
+          const active = category === c;
+          const n = counts[c];
           return (
             <button
-              key={c.label}
-              className="btn-soft focus-ring flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-medium"
-              style={{ color: c.tone }}
+              key={c}
+              onClick={() => setCategory(active ? null : c)}
+              aria-pressed={active}
+              disabled={n === 0 && !active}
+              className={clsx(
+                "focus-ring flex items-center gap-2 rounded-xl border px-3.5 py-2 text-sm font-medium transition-colors",
+                active ? "border-transparent" : "btn-soft border-transparent",
+                n === 0 && !active && "opacity-45"
+              )}
+              style={active ? { background: meta.soft, color: meta.tone } : { color: meta.tone }}
             >
               <Icon className="h-[16px] w-[16px]" />
-              <span className="text-[var(--text)]">{c.label}</span>
+              <span className={active ? "" : "text-[var(--text)]"}>{c}</span>
+              <span className="text-xs text-faint">{n}</span>
             </button>
           );
         })}
+        {category && (
+          <button onClick={() => setCategory(null)} className="focus-ring text-xs text-faint hover:text-[var(--text)]">
+            Clear
+          </button>
+        )}
         <button
           onClick={() => setComposeOpen(true)}
           className="btn-accent focus-ring ml-auto flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold"
@@ -137,12 +217,11 @@ export function InboxView({ messages }: { messages: Message[] }) {
         </button>
       </div>
 
-      {/* Filter tabs */}
+        {/* Folder tabs */}
       <div className="flex flex-wrap items-center gap-2">
         {inboxFilters.map((f) => {
           const active = filter === f;
-          const count =
-            f === "Unread" ? messages.filter((m) => m.unread && !m.trashed).length : undefined;
+          const count = f === "Unread" ? messages.filter((m) => m.unread && !m.trashed).length : undefined;
           return (
             <button
               key={f}
@@ -158,25 +237,65 @@ export function InboxView({ messages }: { messages: Message[] }) {
             </button>
           );
         })}
+        </div>
       </div>
 
-      {/* 3 columns */}
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,340px)_minmax(0,1fr)_minmax(0,320px)]">
-        <MessageList list={list} selectedId={selected?.id ?? ""} onSelect={handleSelect} />
+      {/* The reader is the point of this page, so it gets a floor of its own.
+          Three columns only once 340 + 400 + 320 + 32px of gaps actually fit;
+          before that the list and reader share the width and the sender card
+          moves underneath, which beats crushing the message to 268px. */}
+      <div
+        className={clsx(
+          "grid min-h-0 flex-1 grid-cols-1 gap-4",
+          "@min-[720px]:grid-cols-[minmax(0,300px)_minmax(0,1fr)]",
+          "@min-[720px]:[grid-template-areas:'list_reader''card_card']",
+          "@min-[1100px]:grid-cols-[minmax(0,340px)_minmax(400px,1fr)_minmax(0,320px)]",
+          "@min-[1100px]:[grid-template-areas:'list_reader_card']"
+        )}
+      >
+        <MessageList
+          className="@min-[720px]:[grid-area:list]"
+          list={list}
+          selectedId={selected?.id ?? ""}
+          onSelect={handleSelect}
+          query={query}
+          setQuery={setQuery}
+          channelFor={channelFor}
+        />
         {selected ? (
           <Reader
+            className="@min-[720px]:[grid-area:reader]"
+            key={selected.id}
             message={selected}
             busy={busy}
             onTrash={() => handleTrash(selected.id)}
             onRestore={() => handleRestore(selected.id)}
+            onSent={(id) => {
+              setFilter("Sent");
+              setCategory(null);
+              setSelectedId(id);
+            }}
           />
         ) : (
-          <div className="card grid min-h-0 place-items-center p-6 text-sm text-faint">No message selected.</div>
+          <div className="card grid min-h-0 place-items-center p-6 text-sm text-faint @min-[720px]:[grid-area:reader]">
+            No message selected.
+          </div>
         )}
-        {selected ? <ContactCard message={selected} /> : <div className="card" />}
+        {selected ? (
+          <ContactCard
+            className="@min-[720px]:[grid-area:card]"
+            message={selected}
+            messages={messages}
+            contactId={contactFor[selected.id]}
+          />
+        ) : (
+          <div className="card @min-[720px]:[grid-area:card]" />
+        )}
       </div>
 
-      {composeOpen && <ComposeModal busy={busy} onClose={() => setComposeOpen(false)} onSubmit={handleCompose} />}
+      {composeOpen && (
+        <ComposeModal people={people} busy={busy} onClose={() => setComposeOpen(false)} onSubmit={handleCompose} />
+      )}
     </div>
   );
 }
@@ -187,23 +306,40 @@ function MessageList({
   list,
   selectedId,
   onSelect,
+  query,
+  setQuery,
+  channelFor,
+  className,
 }: {
   list: Message[];
   selectedId: string;
   onSelect: (id: string) => void;
+  query: string;
+  setQuery: (q: string) => void;
+  channelFor: Record<string, ContactChannel>;
+  className?: string;
 }) {
   return (
-    <div className="card flex min-h-0 flex-col overflow-hidden p-3">
+    <div className={clsx("card flex min-h-0 flex-col overflow-hidden p-3", className)}>
       <div className="mb-2 flex items-center gap-2 rounded-xl border border-[var(--border)] px-3 py-2">
-        <Search className="h-4 w-4 text-faint" />
-        <input placeholder="Search messages" className="field-bare" />
+        <Search className="h-4 w-4 shrink-0 text-faint" />
+        {/* Was a decorative input wired to nothing. */}
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search messages"
+          className="field-bare"
+        />
+        {query && (
+          <button onClick={() => setQuery("")} className="focus-ring shrink-0 text-faint hover:text-[var(--text)]" aria-label="Clear search">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        )}
       </div>
-      <div className="-mr-1 flex flex-1 flex-col gap-2 overflow-y-auto pr-1">
+      <div className="-m-1 flex flex-1 scroll-p-1 flex-col gap-2 overflow-y-auto p-1">
         {list.length === 0 && <p className="mt-8 text-center text-sm text-faint">No messages here.</p>}
         {list.map((m) => {
           const active = m.id === selectedId;
-          const ch = CHANNEL[m.channel];
-          const Icon = ch.icon;
           return (
             <button
               key={m.id}
@@ -215,14 +351,11 @@ function MessageList({
               style={active ? { background: "var(--amber-soft)" } : undefined}
             >
               <div className="flex items-center gap-3">
-                <div className="relative shrink-0">
+                {/* 48px box for a 38px avatar: the spare 10px down and right is
+                    the badge's, so it never reaches the name or the preview. */}
+                <div className="relative h-12 w-12 shrink-0">
                   <Avatar initials={m.initials} color={m.color} />
-                  <span
-                    className="absolute -bottom-1 -right-1 grid h-5 w-5 place-items-center rounded-full border-2"
-                    style={{ background: ch.soft, borderColor: "var(--panel-solid)" }}
-                  >
-                    <Icon className="h-3 w-3" style={{ color: ch.color }} />
-                  </span>
+                  <ChannelBadge channel={channelFor[m.id] ?? "Email"} />
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-2">
@@ -230,7 +363,7 @@ function MessageList({
                       {m.name}
                       {m.unread && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--accent)]" />}
                     </p>
-                    <span className="shrink-0 text-xs text-faint">{m.time}</span>
+                    <TimeAgoShort at={m.at} />
                   </div>
                   <p className="truncate text-xs text-muted">{m.subject}</p>
                 </div>
@@ -244,6 +377,12 @@ function MessageList({
   );
 }
 
+/** The list is dense, so only the relative half fits. */
+function TimeAgoShort({ at }: { at: string }) {
+  if (!at) return <span className="shrink-0 text-xs text-faint">—</span>;
+  return <TimeAgo at={at} mode="relative" className="shrink-0 whitespace-nowrap text-xs text-faint" />;
+}
+
 /* ---------------- Reader ---------------- */
 
 function Reader({
@@ -251,25 +390,53 @@ function Reader({
   busy,
   onTrash,
   onRestore,
+  onSent,
+  className,
 }: {
   message: Message;
   busy: boolean;
   onTrash: () => void;
   onRestore: () => void;
+  onSent: (id: string) => void;
+  className?: string;
 }) {
+  // Reset on message change is handled by the `key` the parent passes, which
+  // remounts this component — the React way to say "this is a different thing
+  // now". Doing it with an effect would mean rendering the previous message's
+  // open composer once before clearing it.
+  const [mode, setMode] = useState<null | "reply" | "forward">(null);
+  const [viewing, setViewing] = useState<Attachment | null>(null);
+  const [sending, setSending] = useState(false);
+
+  async function submit(formData: FormData) {
+    setSending(true);
+    try {
+      const id = mode === "reply" ? await replyAction(message.id, formData) : await forwardAction(message.id, formData);
+      setMode(null);
+      if (id) onSent(id);
+    } finally {
+      setSending(false);
+    }
+  }
+
   return (
-    <div className="card flex min-h-0 flex-col overflow-hidden p-6">
-      <div className="flex items-center justify-between border-b border-[var(--border)] pb-4">
-        <div className="flex items-center gap-3">
+    <div className={clsx("card flex min-h-0 flex-col overflow-hidden p-6", className)}>
+      {/* `min-w-0` on both sides and a nowrap timestamp: without them the long
+          relative stamp wrapped onto three lines and squeezed the name into a
+          two-line column. */}
+      <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] pb-4">
+        <div className="flex min-w-0 items-center gap-3">
           <Avatar initials={message.initials} color={message.color} size="lg" />
-          <div>
-            <p className="text-base font-semibold">{message.name}</p>
-            <p className="text-xs text-faint">
-              {message.time} · {message.ago}
-            </p>
+          <div className="min-w-0">
+            <p className="truncate text-base font-semibold">{message.name}</p>
+            {message.at ? (
+              <TimeAgo at={message.at} mode="relative" className="block truncate text-xs text-faint" />
+            ) : (
+              <p className="text-xs text-faint">No timestamp recorded</p>
+            )}
           </div>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex shrink-0 items-center gap-1">
           {message.trashed ? (
             <button
               onClick={onRestore}
@@ -288,13 +455,20 @@ function Reader({
               <Trash2 className="h-[18px] w-[18px]" />
             </button>
           )}
-          <button className="grid h-9 w-9 place-items-center rounded-full text-faint hover:text-[var(--text)]" aria-label="More">
-            <MoreHorizontal className="h-5 w-5" />
-          </button>
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto py-5">
+      <div className="-mx-1 flex-1 scroll-p-1 overflow-y-auto px-1 py-5">
+        {/* The category sits with the subject, not in the header row — beside
+            the name and the delete button it left no room for either. */}
+        {message.category && (
+          <span
+            className="mb-2 inline-block whitespace-nowrap rounded-full px-2.5 py-1 text-[10px] font-bold"
+            style={{ background: CHIP_META[message.category].soft, color: CHIP_META[message.category].tone }}
+          >
+            {message.category.toUpperCase()}
+          </span>
+        )}
         <h2 className="text-xl font-semibold tracking-tight">{message.subject}</h2>
         <div className="mt-4 space-y-4 text-sm leading-relaxed text-muted">
           {message.body.map((p, i) => (
@@ -310,82 +484,265 @@ function Reader({
               {message.attachments.length} Attachment{message.attachments.length > 1 ? "s" : ""}
             </p>
             <div className="mt-3 flex flex-wrap gap-3">
+              {/* Attachment cards were static — name and size only, with no
+                  file behind them, so there was nothing a click could open.
+                  Ones with stored text now open in a viewer. */}
               {message.attachments.map((a) => (
-                <div
+                <button
                   key={a.name}
-                  className="flex items-center gap-3 rounded-2xl border border-[var(--border)] p-3 pr-5 transition-colors hover:border-[var(--border-strong)]"
+                  onClick={() => a.content && setViewing(a)}
+                  disabled={!a.content}
+                  title={a.content ? `Open ${a.name}` : "No file stored for this attachment"}
+                  className={clsx(
+                    "focus-ring flex items-center gap-3 rounded-2xl border border-[var(--border)] p-3 pr-5 text-left transition-colors",
+                    a.content ? "hover:border-[var(--border-strong)] hover:bg-[var(--raise)]" : "opacity-60"
+                  )}
                 >
                   <FileIcon kind={a.kind} />
                   <div className="leading-tight">
                     <p className="text-sm font-medium">{a.name}</p>
-                    <p className="text-xs text-faint">{a.size}</p>
+                    <p className="text-xs text-faint">{a.content ? a.size : "Not stored"}</p>
                   </div>
-                </div>
+                  {a.content && <ExternalLink className="ml-1 h-3.5 w-3.5 shrink-0 text-faint" />}
+                </button>
               ))}
             </div>
           </div>
         )}
+
+        {mode && (
+          <form action={submit} className="mt-6 rounded-2xl border border-[var(--border)] p-4">
+            <p className="mb-3 flex items-center gap-2 text-sm font-semibold">
+              {mode === "reply" ? (
+                <>
+                  <CornerUpLeft className="h-4 w-4 text-accent" /> Reply to {message.name}
+                </>
+              ) : (
+                <>
+                  <CornerUpRight className="h-4 w-4 text-accent" /> Forward this message
+                </>
+              )}
+            </p>
+
+            {mode === "forward" && (
+              <label className="mb-3 block">
+                <span className="mb-1.5 block text-xs font-medium text-muted">
+                  To<span className="text-[var(--red)]"> *</span>
+                </span>
+                <input name="to" required autoFocus placeholder="Name or email address" className="field-input" />
+              </label>
+            )}
+
+            <textarea
+              name="body"
+              rows={4}
+              required={mode === "reply"}
+              autoFocus={mode === "reply"}
+              placeholder={mode === "reply" ? `Write your reply to ${message.name}…` : "Add a note (optional)…"}
+              className="field-input resize-y"
+            />
+
+            <div className="mt-3 flex justify-end gap-2">
+              <button type="button" onClick={() => setMode(null)} className="btn-soft focus-ring rounded-xl px-4 py-2 text-sm font-medium">
+                Cancel
+              </button>
+              <button type="submit" disabled={sending} className="btn-accent focus-ring flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold disabled:opacity-60">
+                <Send className="h-4 w-4" />
+                {sending ? "Sending…" : mode === "reply" ? "Send reply" : "Forward"}
+              </button>
+            </div>
+          </form>
+        )}
       </div>
 
       <div className="flex items-center gap-3 border-t border-[var(--border)] pt-4">
-        <button className="btn-accent focus-ring flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold">
+        <button
+          onClick={() => setMode(mode === "reply" ? null : "reply")}
+          className="btn-accent focus-ring flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold"
+        >
           <CornerUpLeft className="h-4 w-4" />
           Reply
         </button>
-        <button className="btn-soft focus-ring flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-medium">
+        <button
+          onClick={() => setMode(mode === "forward" ? null : "forward")}
+          className="btn-soft focus-ring flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-medium"
+        >
           <CornerUpRight className="h-4 w-4" />
           Forward
         </button>
       </div>
+
+      {viewing && <AttachmentViewer attachment={viewing} from={message.name} onClose={() => setViewing(null)} />}
     </div>
   );
 }
 
-function FileIcon({ kind }: { kind: "pdf" | "doc" }) {
-  const pdf = kind === "pdf";
-  const color = pdf ? "var(--red)" : "var(--accent)";
-  const soft = pdf ? "var(--red-soft)" : "var(--accent-soft)";
+function AttachmentViewer({
+  attachment,
+  from,
+  onClose,
+}: {
+  attachment: Attachment;
+  from: string;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  // Portalled to <body> on purpose. This viewer is rendered from inside the
+  // reader's `.card`, and that card sets `backdrop-filter` — which makes it the
+  // containing block for `position: fixed`. Left in place, the "full-screen"
+  // overlay was trapped inside the middle column instead of covering the page.
+  return createPortal(
+    <div className="fixed inset-0 z-50 grid place-items-center p-4" role="dialog" aria-modal="true">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="modal-surface relative z-10 flex max-h-[85vh] w-full max-w-2xl flex-col p-6">
+        <div className="mb-4 flex items-start justify-between gap-3 border-b border-[var(--border)] pb-4">
+          <div className="flex items-center gap-3">
+            <FileIcon kind={attachment.kind} />
+            <div className="leading-tight">
+              <p className="font-semibold">{attachment.name}</p>
+              <p className="text-xs text-faint">
+                {attachment.size} · from {from}
+              </p>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-faint hover:text-[var(--text)]" aria-label="Close">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <pre className="flex-1 overflow-auto whitespace-pre-wrap rounded-xl p-4 font-mono text-[13px] leading-relaxed text-[var(--text)]" style={{ background: "var(--raise)" }}>
+          {attachment.content}
+        </pre>
+
+        <p className="mt-4 flex items-center gap-2 text-xs text-faint">
+          <FileText className="h-3.5 w-3.5" />
+          Ask the assistant <Link href="/chat" className="focus-ring rounded text-accent hover:underline">in Chat</Link> to explain this
+          document — it can read the contents.
+        </p>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+function FileIcon({ kind }: { kind: Attachment["kind"] }) {
+  const map = {
+    pdf: { label: "PDF", color: "var(--red)", soft: "var(--red-soft)" },
+    doc: { label: "DOC", color: "var(--accent)", soft: "var(--accent-soft)" },
+    txt: { label: "TXT", color: "var(--text-muted)", soft: "var(--raise)" },
+  } as const;
+  const m = map[kind] ?? map.txt;
   return (
-    <span className="grid h-11 w-11 place-items-center rounded-xl text-[10px] font-bold" style={{ background: soft, color }}>
-      {pdf ? "PDF" : "DOC"}
+    <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl text-[10px] font-bold" style={{ background: m.soft, color: m.color }}>
+      {m.label}
     </span>
   );
 }
 
 /* ---------------- Contact card ---------------- */
 
-function ContactCard({ message }: { message: Message }) {
+function ContactCard({
+  message,
+  messages,
+  contactId,
+  className,
+}: {
+  message: Message;
+  messages: Message[];
+  contactId?: string;
+  className?: string;
+}) {
+  const tel = message.phone.replace(/[^\d+]/g, "");
+  const hasEmail = message.email && message.email !== "—";
+
+  // First and latest contact were stored strings that nothing recomputed. They
+  // are now derived from the messages themselves, so they can't go stale.
+  const thread = useMemo(() => {
+    const mine = messages
+      .filter((m) => m.at && (m.email.toLowerCase() === message.email.toLowerCase() || m.name === message.name))
+      .map((m) => m.at)
+      .sort();
+    return { first: mine[0], latest: mine[mine.length - 1], count: mine.length };
+  }, [messages, message.email, message.name]);
+
   const actions = [
-    { icon: Phone, label: "Call" },
-    { icon: MessageCircle, label: "Text" },
-    { icon: Mail, label: "Email" },
-    { icon: DollarSign, label: "Revenue" },
-    { icon: StickyNote, label: "Note" },
-    { icon: MoreHorizontal, label: "More" },
+    { label: "Call", icon: Phone, href: tel ? `tel:${tel}` : undefined, why: tel ? `Call ${message.phone}` : "No phone number" },
+    { label: "Text", icon: MessageCircle, href: tel ? `sms:${tel}` : undefined, why: tel ? `Text ${message.phone}` : "No phone number" },
+    { label: "Email", icon: Mail, href: hasEmail ? `mailto:${message.email}` : undefined, why: hasEmail ? `Email ${message.email}` : "No email address" },
+    {
+      label: "Revenue",
+      icon: DollarSign,
+      href: contactId ? "/deals" : undefined,
+      why: contactId ? "See deals for this contact" : "Not in your contacts yet",
+    },
+    {
+      label: "Note",
+      icon: StickyNote,
+      href: contactId ? `/contacts?open=${contactId}` : undefined,
+      why: contactId ? "Add a note on their contact record" : "Not in your contacts yet",
+    },
+    {
+      label: "Contact",
+      icon: MoreHorizontal,
+      href: contactId ? `/contacts?open=${contactId}` : undefined,
+      why: contactId ? "Open the full contact record" : "Not in your contacts yet",
+    },
   ];
+
+  const mapsUrl = message.location
+    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(message.location)}`
+    : null;
+
   return (
-    <div className="card flex min-h-0 flex-col overflow-y-auto p-5">
+    <div className={clsx("card flex min-h-0 flex-col overflow-y-auto p-5", className)}>
       <div className="flex items-start gap-3">
         <Avatar initials={message.initials} color={message.color} size="lg" />
         <div className="min-w-0 flex-1">
           <p className="flex items-center gap-1.5 text-base font-semibold">
             <span className="truncate">{message.name}</span>
-            <ShieldCheck className="h-4 w-4 shrink-0 text-[var(--green)]" />
+            {contactId && <ShieldCheck className="h-4 w-4 shrink-0 text-[var(--green)]" />}
           </p>
           <p className="truncate text-xs text-faint">{message.role}</p>
         </div>
       </div>
 
+      {/* Every one of these did nothing. */}
       <div className="mt-5 grid grid-cols-6 gap-1">
         {actions.map((a) => {
           const Icon = a.icon;
-          return (
-            <button key={a.label} className="focus-ring group flex flex-col items-center gap-1">
-              <span className="btn-soft grid h-9 w-9 place-items-center rounded-full transition-transform group-hover:-translate-y-0.5">
-                <Icon className="h-4 w-4 text-accent" />
+          const body = (
+            <>
+              <span
+                className={clsx(
+                  "btn-soft grid h-9 w-9 place-items-center rounded-full transition-transform",
+                  a.href && "group-hover:-translate-y-0.5"
+                )}
+              >
+                <Icon className={clsx("h-4 w-4", a.href ? "text-accent" : "text-faint")} />
               </span>
-              <span className="text-[10px] text-faint">{a.label}</span>
-            </button>
+              <span className={clsx("text-[10px]", a.href ? "text-muted" : "text-faint")}>{a.label}</span>
+            </>
+          );
+
+          return a.href ? (
+            a.href.startsWith("/") ? (
+              <Link key={a.label} href={a.href} title={a.why} className="focus-ring group flex flex-col items-center gap-1">
+                {body}
+              </Link>
+            ) : (
+              <a key={a.label} href={a.href} title={a.why} className="focus-ring group flex flex-col items-center gap-1">
+                {body}
+              </a>
+            )
+          ) : (
+            <span key={a.label} title={a.why} className="flex cursor-not-allowed flex-col items-center gap-1 opacity-50">
+              {body}
+            </span>
           );
         })}
       </div>
@@ -395,40 +752,66 @@ function ContactCard({ message }: { message: Message }) {
       </p>
 
       <Detail label="Email">
-        <a href={`mailto:${message.email}`} className="text-accent hover:underline">
-          {message.email}
-        </a>
+        {hasEmail ? (
+          <a href={`mailto:${message.email}`} className="focus-ring rounded text-accent hover:underline">
+            {message.email}
+          </a>
+        ) : (
+          <span className="text-faint">Not on file</span>
+        )}
       </Detail>
+
       <Detail label="Phone">
-        <a href={`tel:${message.phone}`} className="text-accent hover:underline">
-          {message.phone}
-        </a>
+        {tel ? (
+          <a href={`tel:${tel}`} className="focus-ring rounded text-accent hover:underline">
+            {message.phone}
+          </a>
+        ) : (
+          <span className="text-faint">Not on file</span>
+        )}
       </Detail>
 
-      <Detail label="Location">
-        <div className="mt-1 overflow-hidden rounded-xl border border-[var(--border)]">
-          <div className="map-thumb grid h-24 place-items-center">
-            <MapPin className="h-6 w-6 text-accent drop-shadow" fill="var(--accent)" />
-          </div>
-        </div>
-        <a href="#" className="mt-2 inline-block text-accent hover:underline">
-          Location Address
-        </a>
+      {/* Was a decorative map graphic with a "Location Address" link pointing at
+          "#". It now states where the business actually is and opens it. */}
+      <Detail label="Business location">
+        {message.location ? (
+          <a
+            href={mapsUrl!}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="focus-ring inline-flex items-center gap-1.5 rounded text-accent hover:underline"
+          >
+            <MapPin className="h-3.5 w-3.5 shrink-0" />
+            {message.location}
+            <ExternalLink className="h-3 w-3 shrink-0" />
+          </a>
+        ) : (
+          <span className="text-faint">Not on file</span>
+        )}
       </Detail>
 
-      <Detail label="Local Time">
-        <span className="text-[var(--text)]">{message.localTime}</span>
+      <Detail label="Their local time">
+        {message.timeZone ? (
+          <ClientClock timeZone={message.timeZone} className="text-[var(--text)]" />
+        ) : (
+          <span className="text-faint">Time zone not on file</span>
+        )}
       </Detail>
 
       <Detail label="Languages">
         <span className="text-[var(--text)]">{message.language}</span>
-        <p className="mt-1 text-xs text-faint">Client prefers communication in {message.language}.</p>
       </Detail>
 
       <div className="mt-5 grid grid-cols-2 gap-3">
-        <InteractionCard dotColor="var(--green)" title="First Interaction" date={message.firstInteraction.date} time={message.firstInteraction.time} />
-        <InteractionCard dotColor="var(--red)" title="Latest Interaction" date={message.latestInteraction.date} time={message.latestInteraction.time} />
+        <InteractionCard dotColor="var(--green)" title="First message" at={thread.first} />
+        <InteractionCard dotColor="var(--red)" title="Latest message" at={thread.latest} />
       </div>
+
+      {thread.count > 1 && (
+        <p className="mt-3 text-center text-[11px] text-faint">
+          {thread.count} messages in this thread
+        </p>
+      )}
     </div>
   );
 }
@@ -442,15 +825,18 @@ function Detail({ label, children }: { label: string; children: React.ReactNode 
   );
 }
 
-function InteractionCard({ dotColor, title, date, time }: { dotColor: string; title: string; date: string; time: string }) {
+function InteractionCard({ dotColor, title, at }: { dotColor: string; title: string; at?: string }) {
   return (
     <div className="rounded-xl border border-[var(--border)] p-3">
       <p className="flex items-center gap-1.5 text-[11px] font-medium text-muted">
-        <span className="h-2 w-2 rounded-full" style={{ background: dotColor }} />
+        <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: dotColor }} />
         {title}
       </p>
-      <p className="mt-2 text-sm font-semibold">{date}</p>
-      <p className="text-xs text-faint">{time}</p>
+      {at ? (
+        <TimeAgo at={at} className="mt-2 block text-xs font-semibold" />
+      ) : (
+        <p className="mt-2 text-xs text-faint">No record</p>
+      )}
     </div>
   );
 }
@@ -458,18 +844,40 @@ function InteractionCard({ dotColor, title, date, time }: { dotColor: string; ti
 /* ---------------- Compose modal ---------------- */
 
 function ComposeModal({
+  people,
   busy,
   onClose,
   onSubmit,
 }: {
+  people: Person[];
   busy: boolean;
   onClose: () => void;
   onSubmit: (formData: FormData) => void | Promise<void>;
 }) {
+  const [to, setTo] = useState("");
+
+  /**
+   * Only people you can actually reach.
+   *
+   * A lead captured from a phone call often has no email address, and offering
+   * one as a suggestion here would produce a message that cannot be sent.
+   */
+  const addressable = useMemo(
+    () => people.filter((p) => p.email && p.email.includes("@")),
+    [people]
+  );
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4" role="dialog" aria-modal="true">
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
-      <form action={onSubmit} className="card relative z-10 w-full max-w-lg p-6">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      {/* Opaque — see the note on `.modal-surface`. */}
+      <form action={onSubmit} className="modal-surface relative z-10 w-full max-w-lg p-6">
         <div className="mb-5 flex items-center justify-between">
           <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight">
             <Send className="h-[18px] w-[18px] text-accent" /> New Email
@@ -480,34 +888,32 @@ function ComposeModal({
         </div>
 
         <div className="space-y-4">
-          <label className="block">
+          <div className="block">
             <span className="mb-1.5 block text-xs font-medium text-muted">
               To<span className="text-[var(--red)]"> *</span>
             </span>
-            <input
-              name="to"
-              required
-              autoFocus
+            {/* Suggests from contacts and leads. Typing a recipient from memory
+                was the only option before, in a CRM that already knows every
+                one of them. Picking someone fills in their address; the field
+                still takes a raw address for anyone not on file. */}
+            <PersonField
+              value={to}
+              onChange={setTo}
+              onPick={(p) => setTo(p.email)}
+              people={addressable}
               placeholder="Name or email address"
-              className="field-input"
+              autoFocus
+              describe={(p) => p.email}
             />
-          </label>
+            <input type="hidden" name="to" value={to} />
+          </div>
           <label className="block">
             <span className="mb-1.5 block text-xs font-medium text-muted">Subject</span>
-            <input
-              name="subject"
-              placeholder="Subject line"
-              className="field-input"
-            />
+            <input name="subject" placeholder="Subject line" className="field-input" />
           </label>
           <label className="block">
             <span className="mb-1.5 block text-xs font-medium text-muted">Message</span>
-            <textarea
-              name="body"
-              rows={5}
-              placeholder="Write your message..."
-              className="field-input"
-            />
+            <textarea name="body" rows={5} placeholder="Write your message..." className="field-input resize-y" />
           </label>
         </div>
 
@@ -515,7 +921,14 @@ function ComposeModal({
           <button type="button" onClick={onClose} className="btn-soft focus-ring rounded-xl px-5 py-2.5 text-sm font-medium">
             Cancel
           </button>
-          <button type="submit" disabled={busy} className="btn-accent focus-ring flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold disabled:opacity-60">
+          {/* `required` cannot guard a hidden input, so the button does it. Without
+              this an empty To would post and the action would file the message
+              under "New Recipient". */}
+          <button
+            type="submit"
+            disabled={busy || !to.trim()}
+            className="btn-accent focus-ring flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold disabled:opacity-60"
+          >
             <Send className="h-4 w-4" /> {busy ? "Sending…" : "Send Email"}
           </button>
         </div>

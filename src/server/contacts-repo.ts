@@ -1,5 +1,6 @@
 import type { AvatarColor } from "@/components/ui/Avatar";
 import { contacts as seed, type Contact } from "@/data/contacts";
+import { deleteActivityFor } from "./activity-repo";
 import { mutateTable, readTable } from "./store";
 
 const TABLE = "contacts";
@@ -15,6 +16,8 @@ export type NewContact = {
   companyInfo: string;
   type: Contact["type"];
   status: Contact["status"];
+  /** Set from the session by the action; never trusted from the form. */
+  owner?: string;
 };
 
 function initialsFor(first: string, last: string) {
@@ -57,20 +60,11 @@ export async function createContact(input: NewContact): Promise<Contact> {
       phone: input.phone.trim(),
       company: input.company.trim(),
       companyInfo: input.companyInfo.trim(),
-      owner: "Lang Lee",
+      // Whoever is signed in owns what they create. This was hardcoded to
+      // "Lang Lee", so every contact any user added was attributed to one name.
+      owner: input.owner?.trim() || "Unassigned",
       info: input.companyInfo.trim() || input.company.trim() || `${input.type} contact`,
-      activity: [
-        {
-          title: "Contact created",
-          date: new Date().toLocaleString("en-US", {
-            day: "2-digit",
-            month: "short",
-            year: "numeric",
-            hour: "2-digit",
-            minute: "2-digit",
-          }),
-        },
-      ],
+      createdAt: new Date().toISOString(),
     };
     return [contact, ...rows];
   });
@@ -104,4 +98,8 @@ export async function updateContact(
 
 export async function deleteContact(id: string): Promise<void> {
   await mutateTable<Contact>(TABLE, seed, (rows) => rows.filter((c) => c.id !== id));
+  // The contact's history has no meaning without the contact, and rows left
+  // behind are unreachable but permanent. Cleared after the contact write
+  // completes so the two table locks stay sequential, never nested.
+  await deleteActivityFor(id);
 }

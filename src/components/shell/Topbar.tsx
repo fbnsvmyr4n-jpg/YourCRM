@@ -131,7 +131,7 @@ export function Topbar({
         </button>
 
         {bellOpen && (
-          <div className="card absolute right-0 top-12 z-30 w-[min(92vw,380px)] overflow-hidden p-0">
+          <div className="popover absolute right-0 top-12 z-30 w-[min(92vw,380px)] overflow-hidden p-0">
             <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3">
               <p className="text-sm font-semibold">Notifications</p>
               <span className="text-xs text-faint">
@@ -194,7 +194,7 @@ export function Topbar({
         </button>
 
         {menuOpen && (
-          <div className="card absolute right-0 top-12 z-30 w-60 overflow-hidden p-0">
+          <div className="popover absolute right-0 top-12 z-30 w-60 overflow-hidden p-0">
             <div className="border-b border-[var(--border)] px-4 py-3 leading-tight">
               <p className="truncate text-sm font-semibold">{user.name}</p>
               <p className="mt-0.5 truncate text-xs text-faint">{user.email}</p>

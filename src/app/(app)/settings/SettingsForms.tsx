@@ -18,11 +18,11 @@ export function ProfileForm({ user }: { user: SafeUser }) {
   const [state, action, pending] = useActionState<FormState, FormData>(updateProfileAction, undefined);
 
   return (
-    <Card>
+    <Card className="card-q">
       <CardHeader title="Profile" icon={<UserRound className="h-[18px] w-[18px] text-accent" />} />
       <form action={action} className="space-y-4">
         <Banner state={state} />
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 @min-[440px]:grid-cols-2">
           <Field label="Full name" name="name" defaultValue={user.name} required />
           <Field label="Email address" name="email" type="email" defaultValue={user.email} required />
         </div>
@@ -49,11 +49,11 @@ export function TargetsForm({ settings }: { settings: Settings }) {
   const [state, action, pending] = useActionState<FormState, FormData>(updateTargetsAction, undefined);
 
   return (
-    <Card>
+    <Card className="card-q">
       <CardHeader title="Targets & capacity" icon={<Target className="h-[18px] w-[18px] text-accent" />} />
       <form action={action} className="space-y-4">
         <Banner state={state} />
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 @min-[440px]:grid-cols-2">
           <Field
             label="Monthly revenue target ($)"
             name="monthlyTarget"
@@ -91,12 +91,12 @@ export function PasswordForm() {
   const [state, action, pending] = useActionState<FormState, FormData>(changePasswordAction, undefined);
 
   return (
-    <Card>
+    <Card className="card-q">
       <CardHeader title="Password" icon={<KeyRound className="h-[18px] w-[18px] text-accent" />} />
       <form action={action} className="space-y-4">
         <Banner state={state} />
         <Field label="Current password" name="currentPassword" type="password" required />
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 @min-[440px]:grid-cols-2">
           <Field label="New password" name="newPassword" type="password" required />
           <Field label="Confirm new password" name="confirmPassword" type="password" required />
         </div>

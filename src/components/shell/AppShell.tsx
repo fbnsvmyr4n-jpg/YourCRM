@@ -41,7 +41,21 @@ export function AppShell({
 
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar onMenu={() => setMobileOpen(true)} user={user} notifications={notifications} />
-        <main className="flex-1 overflow-y-auto px-5 pb-8 sm:px-7">{children}</main>
+        {/* `@container` is what lets a page lay itself out against the room it
+            actually has. A viewport media query can't see the sidebar, so a
+            three-column grid switched on at 1024px was really being handed
+            1024 − 264 (sidebar) − 56 (padding) = 704px, and the flexible middle
+            column absorbed the entire shortfall. Sizing against this box instead
+            means collapsing the rail genuinely widens the layout.
+
+            Anything `position: fixed` inside here must be portalled — see
+            `components/ui/Overlay`. */}
+        {/* `scroll-p-2` is what stops focus rings being sliced off. Clicking or
+            tabbing into a control scrolls it into view, and the browser parks it
+            flush against this scroller's edge — where the 3px ring falls outside
+            the scrollport and is clipped, so the highlight appears cut on one
+            side. Scroll padding reserves room for it. */}
+        <main className="@container flex-1 scroll-p-2 overflow-y-auto px-5 pb-8 pt-1 sm:px-7">{children}</main>
       </div>
 
       <CommandPalette />
