@@ -15,6 +15,7 @@ import {
 import { sendEmail } from "@/server/email";
 import { toDisplayTime } from "@/lib/time";
 import { email as validEmail, id as validId, multiline, pick, text } from "@/server/validate";
+import { requireUser } from "@/server/session";
 
 /** `YYYY-MM-DD` and a real calendar date, not just well-shaped text. */
 function isDateKey(value: unknown): value is string {
@@ -24,6 +25,7 @@ function isDateKey(value: unknown): value is string {
 }
 
 export async function addMeetingAction(formData: FormData) {
+  await requireUser();
   const name = text(formData.get("name"), 80);
   const date = formData.get("date");
   const type = pick(formData.get("type"), MEETING_TYPES);
@@ -53,6 +55,7 @@ export async function setMeetingOutcomeAction(
   outcome: string,
   lossReason?: string
 ) {
+  await requireUser();
   const meetingId = validId(id);
   const value = pick(outcome, MEETING_OUTCOMES);
   // An unrecognised outcome must reject: it would land in no funnel stage and
@@ -96,6 +99,7 @@ async function notify(to: string | undefined, subject: string, lines: string[]):
 }
 
 export async function updateMeetingAction(id: string, formData: FormData) {
+  await requireUser();
   const meetingId = validId(id);
   if (!meetingId) return { error: "Meeting not found." };
 
@@ -151,6 +155,7 @@ export async function updateMeetingAction(id: string, formData: FormData) {
 }
 
 export async function setMeetingNotesAction(id: string, formData: FormData) {
+  await requireUser();
   const meetingId = validId(id);
   if (!meetingId) return;
   await setMeetingNotes(meetingId, multiline(formData.get("notes"), 5000));
@@ -158,6 +163,7 @@ export async function setMeetingNotesAction(id: string, formData: FormData) {
 }
 
 export async function deleteMeetingAction(id: string) {
+  await requireUser();
   const meetingId = validId(id);
   if (!meetingId) return { notified: { sent: false, reason: "Meeting not found." } };
 

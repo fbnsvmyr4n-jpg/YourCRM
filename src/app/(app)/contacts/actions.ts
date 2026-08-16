@@ -10,7 +10,7 @@ import {
   type NewContact,
 } from "@/server/contacts-repo";
 import { deleteActivity, logActivity } from "@/server/activity-repo";
-import { getCurrentUser } from "@/server/session";
+import { getCurrentUser, requireUser } from "@/server/session";
 import { email as validEmail, id as validId, multiline, pick, text } from "@/server/validate";
 
 /** Returns null when the submission can't be trusted, so the caller rejects it. */
@@ -38,6 +38,7 @@ function parseContact(formData: FormData): NewContact | null {
 }
 
 export async function addContactAction(formData: FormData) {
+  await requireUser();
   const input = parseContact(formData);
   if (!input) return;
 
@@ -67,6 +68,7 @@ export async function addContactAction(formData: FormData) {
 
 /** Records an outreach attempt. Returns null if the contact isn't real. */
 export async function logOutreachAction(id: string, kind: "call" | "text" | "email") {
+  await requireUser();
   const contactId = validId(id);
   if (!contactId) return null;
 
@@ -92,6 +94,7 @@ export async function logOutreachAction(id: string, kind: "call" | "text" | "ema
 }
 
 export async function addNoteAction(id: string, formData: FormData) {
+  await requireUser();
   const contactId = validId(id);
   const body = multiline(formData.get("note"), 2000);
   if (!contactId || !body) return null;
@@ -105,6 +108,7 @@ export async function addNoteAction(id: string, formData: FormData) {
 }
 
 export async function deleteActivityAction(contactId: string, activityId: string) {
+  await requireUser();
   const cid = validId(contactId);
   const aid = validId(activityId);
   if (!cid || !aid) return;
@@ -113,6 +117,7 @@ export async function deleteActivityAction(contactId: string, activityId: string
 }
 
 export async function updateContactAction(id: string, formData: FormData) {
+  await requireUser();
   const contactId = validId(id);
   const input = parseContact(formData);
   if (!contactId || !input) return;
@@ -141,6 +146,7 @@ export async function updateContactAction(id: string, formData: FormData) {
 }
 
 export async function deleteContactAction(id: string) {
+  await requireUser();
   const contactId = validId(id);
   if (!contactId) return;
   await deleteContact(contactId);

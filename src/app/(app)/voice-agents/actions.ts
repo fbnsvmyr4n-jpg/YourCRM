@@ -5,9 +5,11 @@ import { CALL_OUTCOMES, type CallOutcome } from "@/data/calls";
 import { MEETING_WHENS } from "@/data/meetings";
 import { deleteCall, logCall, processCall } from "@/server/calls-repo";
 import { count, id as validId, multiline, pick, pickOr, text } from "@/server/validate";
+import { requireUser } from "@/server/session";
 
 /** Run the automation: call → Lead (+ Meeting when one was requested). */
 export async function processCallAction(id: string) {
+  await requireUser();
   const callId = validId(id);
   if (!callId) return { error: "Call not found." };
 
@@ -17,6 +19,7 @@ export async function processCallAction(id: string) {
 }
 
 export async function deleteCallAction(id: string) {
+  await requireUser();
   const callId = validId(id);
   if (!callId) return;
   await deleteCall(callId);
@@ -25,6 +28,7 @@ export async function deleteCallAction(id: string) {
 
 /** Log a call captured by the agent (used by the manual form). */
 export async function logCallAction(formData: FormData) {
+  await requireUser();
   const callerName = text(formData.get("callerName"), 80);
   // The outcome decides whether the automation creates a lead and books a
   // meeting, so an unrecognised value has to reject the whole submission
@@ -120,6 +124,7 @@ const SCENARIOS = [
 
 /** Simulate an inbound call, then immediately run the automation on it. */
 export async function simulateCallAction() {
+  await requireUser();
   const scenario = SCENARIOS[Math.floor(Math.random() * SCENARIOS.length)];
   const call = await logCall(scenario);
   const result = await processCall(call.id);

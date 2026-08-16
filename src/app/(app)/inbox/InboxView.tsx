@@ -164,17 +164,20 @@ export function InboxView({
   }
 
   return (
-    <div className="mx-auto flex h-auto max-w-[1500px] animate-fade-up flex-col gap-4 @min-[1100px]:h-[calc(100vh-104px)]">
+    <div className="mx-auto flex h-auto max-w-[1500px] animate-fade-up flex-col gap-4 @min-[1100px]:h-full">
       {/* Chips and folder tabs stick to the top of the scroller.
           These are controls, not headings: letting them scroll away meant they
           were sliced in half at the scroller's top edge on the way out, which
           reads as a clipping bug. `-mt-1 pt-1` swallows `<main>`'s own top
-          padding so nothing peeks above the block, and the solid `--bg` is what
-          the message list disappears behind. The unblurred `-16px` shadow is
-          background, not decoration: `<main>` carries `scroll-p-2`, which moves
-          where `top-0` actually sticks, leaving a 12px band above the block
-          where the message body showed through. */}
-      <div className="sticky top-0 z-10 -mt-1 flex flex-col gap-4 bg-[var(--bg)] pb-2 pt-1 shadow-[0_-16px_0_0_var(--bg)]">
+          padding so nothing peeks above the block.
+
+          The frosted backing only exists below the three-column threshold. At
+          and above it this page is a fixed-height layout whose columns scroll
+          internally, so nothing ever passes beneath these controls — a backing
+          there is decoration, and painted over `.app-aurora` it read as a slab
+          across the top of the page. Below it the page really does scroll, and
+          the frost is what the message list disappears behind. */}
+      <div className="sticky-head -mt-1 flex flex-col gap-4 pb-2 pt-1 @min-[1100px]:before:hidden">
         {/* Category chips. These were decoration — a message had no category,
             so there was nothing for them to filter on. They now toggle a real
             filter and carry live counts. */}

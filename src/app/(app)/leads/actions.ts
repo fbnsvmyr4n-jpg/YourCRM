@@ -5,6 +5,7 @@ import { LEAD_SOURCES } from "@/data/leads";
 import { createLead, deleteLead, updateLead, type NewLead } from "@/server/leads-repo";
 import { detachLead } from "@/server/calls-repo";
 import { email as validEmail, id as validId, pick, text } from "@/server/validate";
+import { requireUser } from "@/server/session";
 
 /** Returns null when the submission can't be trusted, so the caller rejects it. */
 function parseLead(formData: FormData): NewLead | null {
@@ -31,6 +32,7 @@ function parseLead(formData: FormData): NewLead | null {
 }
 
 export async function addLeadAction(formData: FormData) {
+  await requireUser();
   const input = parseLead(formData);
   if (!input) return;
   const created = await createLead(input);
@@ -39,6 +41,7 @@ export async function addLeadAction(formData: FormData) {
 }
 
 export async function updateLeadAction(id: string, formData: FormData) {
+  await requireUser();
   const leadId = validId(id);
   const input = parseLead(formData);
   if (!leadId || !input) return;
@@ -47,6 +50,7 @@ export async function updateLeadAction(id: string, formData: FormData) {
 }
 
 export async function deleteLeadAction(id: string) {
+  await requireUser();
   const leadId = validId(id);
   if (!leadId) return;
 

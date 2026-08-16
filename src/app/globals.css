@@ -255,6 +255,49 @@ body {
   box-shadow: var(--shadow-lg);
 }
 
+/*
+ * A sticky page header that belongs to the page rather than sitting on it.
+ *
+ * The inbox header used `background: var(--bg)` — a flat, fully opaque slab. The
+ * page behind it is not flat: `.app-aurora` paints radial gradients across the
+ * whole surface, so the header punched a dull rectangle out of the glow, with a
+ * hard edge along the bottom and an opaque `box-shadow` extending it upward.
+ *
+ * This frosts instead of covering: the aurora reads through it, content passing
+ * underneath is blurred rather than hidden, and the bottom edge fades out so
+ * there is no line to notice. No border, by design.
+ *
+ * The filter lives on `::before`, not on the element. `backdrop-filter` makes an
+ * element the containing block for `position: fixed` descendants — the trap that
+ * once squeezed a full-screen modal into a card. On a childless pseudo-element
+ * it cannot capture anything, so this stays safe if a dialog is ever added here.
+ */
+.sticky-head {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.sticky-head::before {
+  content: "";
+  position: absolute;
+  /* Bleeds past the block on three sides: upward to cover the strip where
+     scrolled content used to show above the header, and downward to give the
+     fade somewhere to happen that isn't on top of the controls. */
+  inset: -20px -10px -12px;
+  background: color-mix(in srgb, var(--bg) 62%, transparent);
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 16px), transparent);
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 16px), transparent);
+  pointer-events: none;
+}
+
+/* Keeps the controls above the frosted layer, which is a positioned sibling. */
+.sticky-head > * {
+  position: relative;
+}
+
 .hairline {
   border-color: var(--border);
 }

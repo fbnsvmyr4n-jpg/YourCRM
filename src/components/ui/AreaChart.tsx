@@ -273,7 +273,19 @@ function Plot({
   const labelled = new Set([peakIdx, pts.length - 1].filter((i) => pts[i].value > 0));
 
   // x labels are centred, so the first and last would otherwise overhang.
-  const clampX = (v: number) => Math.min(W - 4, Math.max(4, v));
+  //
+  // Clamp the label's *edges*, not its anchor. These are `textAnchor="middle"`,
+  // so half the string sits either side of x — clamping the anchor to `W - 4`
+  // still let half the text past the edge, which measured as 1px clipped off
+  // "$84.6K" and grows with the number ("$1.25M" would lose noticeably more).
+  // If a label is wider than the chart there is no non-overhanging position, so
+  // it centres rather than inverting the clamp.
+  const clampX = (v: number, text: string, fontSize: number) => {
+    const half = textWidth(text, fontSize) / 2;
+    const lo = 4 + half;
+    const hi = W - 4 - half;
+    return hi < lo ? W / 2 : Math.min(hi, Math.max(lo, v));
+  };
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} role="img" aria-label="Revenue over the last six weeks">
@@ -304,7 +316,7 @@ function Plot({
         <g key={i}>
           <circle cx={p.x} cy={p.y} r="4" fill="var(--panel-solid)" stroke="var(--accent)" strokeWidth="2.5" />
           {showLabel.has(i) && (
-            <text x={clampX(p.x)} y={H - 10} textAnchor="middle" fontSize={AXIS_FONT} fill="var(--text-muted)">
+            <text x={clampX(p.x, p.label, AXIS_FONT)} y={H - 10} textAnchor="middle" fontSize={AXIS_FONT} fill="var(--text-muted)">
               {p.label}
             </text>
           )}
@@ -316,7 +328,7 @@ function Plot({
         return (
           <text
             key={`v${i}`}
-            x={clampX(p.x)}
+            x={clampX(p.x, format(p.value), 13)}
             y={Math.max(padT - 8, p.y - 14)}
             textAnchor="middle"
             fontSize="13"

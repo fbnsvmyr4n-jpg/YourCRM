@@ -5,6 +5,7 @@ import { listDeals } from "@/server/deals-repo";
 import { listLeads } from "@/server/leads-repo";
 import { listMeetings } from "@/server/meetings-repo";
 import { listMessages } from "@/server/inbox-repo";
+import { getCurrentUser } from "@/server/session";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +28,16 @@ function money(n: number) {
 }
 
 export async function GET() {
+  // This returns every contact, lead, deal, meeting and message in the CRM.
+  // A route handler is not covered by the `(app)` layout guard *or* by the
+  // `requireUser()` call in the server actions — it is its own public endpoint.
+  // Unauthenticated, it answered with the entire dataset: 41 records including
+  // names, companies, deal values and message subjects.
+  const user = await getCurrentUser();
+  if (!user) {
+    return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
+  }
+
   const [contacts, leads, deals, meetings, messages] = await Promise.all([
     listContacts(),
     listLeads(),

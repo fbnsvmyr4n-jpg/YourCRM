@@ -4,8 +4,10 @@ import { revalidateApp } from "@/server/revalidate";
 import { STAGE_IDS, type StageId } from "@/data/deals";
 import { createDeal, deleteDeal, moveDeal, recordPayment, setDealValue } from "@/server/deals-repo";
 import { id as validId, money, pick, text } from "@/server/validate";
+import { requireUser } from "@/server/session";
 
 export async function addDealAction(formData: FormData) {
+  await requireUser();
   const title = text(formData.get("title"), 120);
   const stage = pick(formData.get("stage"), STAGE_IDS);
   const value = money(formData.get("value"));
@@ -26,6 +28,7 @@ export async function addDealAction(formData: FormData) {
 }
 
 export async function moveDealAction(id: string, stage: StageId) {
+  await requireUser();
   // Both arguments come straight off the wire — the parameter types are erased.
   const dealId = validId(id);
   const target = pick(stage, STAGE_IDS);
@@ -36,6 +39,7 @@ export async function moveDealAction(id: string, stage: StageId) {
 }
 
 export async function deleteDealAction(id: string) {
+  await requireUser();
   const dealId = validId(id);
   if (!dealId) return;
 
@@ -45,6 +49,7 @@ export async function deleteDealAction(id: string) {
 
 /** Attach a figure once a real quote exists. */
 export async function setDealValueAction(id: string, formData: FormData) {
+  await requireUser();
   const dealId = validId(id);
   const value = money(formData.get("value"));
   if (!dealId || value === null) return;
@@ -61,6 +66,7 @@ export async function setDealValueAction(id: string, formData: FormData) {
  * this one moves money between columns.
  */
 export async function recordPaymentAction(id: string, formData: FormData) {
+  await requireUser();
   const dealId = validId(id);
   if (!dealId) return { error: "Deal not found." };
 
