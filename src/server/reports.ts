@@ -6,7 +6,7 @@ import { STAGES, type Deal } from "@/data/deals";
 import { listDeals, weeklyRevenue } from "./deals-repo";
 import { listLeadsWithStatus } from "./lead-status";
 import { listContacts } from "./contacts-repo";
-import { meetingAnalytics, type MeetingAnalytics } from "./meetings-repo";
+import { listMeetings, meetingAnalytics, toDateKey, type MeetingAnalytics } from "./meetings-repo";
 
 /**
  * Everything the Reports page shows, computed in one place.
@@ -71,6 +71,14 @@ export type ReportData = {
    */
   followUps: { id: string; name: string; company: string; source: LeadSource; initials: string; color: AvatarColor }[];
   meetings: MeetingAnalytics;
+  /**
+   * The awaiting-outcome backlog, split by whether the meeting has happened.
+   *
+   * "10 awaiting" on its own overstates the problem: a meeting next week simply
+   * hasn't occurred yet, while one from last week is genuinely waiting on the
+   * user. Only `past` is a backlog anyone can act on.
+   */
+  awaiting: { past: number; upcoming: number };
   topDeals: Deal[];
   /** Only meaningful with more than one owner; empty otherwise. */
   owners: { owner: string; won: number; revenue: number }[];
@@ -102,7 +110,7 @@ const SOURCE_COLOR: Record<LeadSource, string> = {
 };
 
 export async function reportData(): Promise<ReportData> {
-  const [deals, leads, contacts, meetings, weekly, calls] = await Promise.all([
+  const [deals, leads, contacts, meetings, weekly, calls, meetingRows] = await Promise.all([
     listDeals(),
     listLeadsWithStatus(),
     listContacts(),
@@ -111,7 +119,18 @@ export async function reportData(): Promise<ReportData> {
     meetingAnalytics(),
     weeklyRevenue(6),
     listCalls(),
+    listMeetings(),
   ]);
+
+  // Same test `meetingAnalytics` uses for `pending`: the repo's `normalise`
+  // defaults every row to "scheduled" on read, so a missing-field check here
+  // would match nothing.
+  const todayKey = toDateKey(new Date());
+  const stillAwaiting = meetingRows.filter((m) => m.outcome === "scheduled");
+  const awaiting = {
+    past: stillAwaiting.filter((m) => m.date && m.date < todayKey).length,
+    upcoming: stillAwaiting.filter((m) => !m.date || m.date >= todayKey).length,
+  };
 
   const won = deals.filter((d) => d.stage === "won");
   const open = deals.filter((d) => d.stage !== "won");
@@ -228,6 +247,7 @@ export async function reportData(): Promise<ReportData> {
         color: l.color,
       })),
     meetings,
+    awaiting,
     // Seven rather than five: it fills the column beside the stacked meeting
     // and voice panels, and shows most of a small pipeline rather than a third
     // of it. The card links to Deals for the rest.

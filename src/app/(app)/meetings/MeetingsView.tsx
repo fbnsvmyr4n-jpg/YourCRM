@@ -1055,8 +1055,15 @@ function Scheduler({ today, people, meetings }: { today: DayRef; people: Person[
         )}
       </Card>
 
-      {/* meeting notes */}
-      <Card className="!p-4">
+      {/* Meeting notes — last in the rail, so it takes the slack.
+          The grid stretches this rail to match the analytics column beside it,
+          which left 140px of empty card-less space under here. `flex-1` hands
+          that leftover to this card and the column layout passes it down to the
+          textarea, so the gap turns into somewhere to actually write rather
+          than into padding. Where the rail isn't stretched (under 820px the
+          grid is a single column) there is no slack to take and the textarea
+          falls back to its min-height, which is the size it has always been. */}
+      <Card className="!p-4 flex flex-1 flex-col">
         <MeetingNotes meetings={meetings} />
       </Card>
     </div>
@@ -1382,7 +1389,7 @@ function MeetingNotes({ meetings }: { meetings: UpcomingMeeting[] }) {
   // instead of carrying the previous text across.
   return (
     <>
-      <div className="mb-2 flex items-center justify-between gap-2">
+      <div className="mb-2 flex shrink-0 items-center justify-between gap-2">
         <p className="text-sm font-semibold">Meeting Notes</p>
         {meetings.length > 0 && (
           <select
@@ -1431,14 +1438,16 @@ function NotesEditor({ meeting }: { meeting: UpcomingMeeting }) {
 
   return (
     <>
+      {/* No `rows`: the height comes from the flex column so the field fills the
+          card. `min-h` is the floor for when there is no slack to fill — the
+          same 112px four rows used to give. */}
       <textarea
-        rows={4}
         value={notes}
         onChange={(e) => setNotes(e.target.value)}
         placeholder={`Notes for ${meeting.name} — ${meeting.topic}…`}
-        className="field-input resize-y"
+        className="field-input min-h-[112px] flex-1 resize-y"
       />
-      <div className="mt-2 flex items-center justify-between gap-2">
+      <div className="mt-2 flex shrink-0 items-center justify-between gap-2">
         <span className="text-[11px] text-faint">
           {saved ? "Saved." : dirty ? "Unsaved changes" : "Up to date"}
         </span>

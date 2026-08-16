@@ -3,8 +3,10 @@
 import { revalidateApp } from "@/server/revalidate";
 import { createMessage, getMessage, markRead, restoreMessage, trashMessage } from "@/server/inbox-repo";
 import { id as validId, multiline, text } from "@/server/validate";
+import { requireUser } from "@/server/session";
 
 export async function addMessageAction(formData: FormData) {
+  await requireUser();
   // The compose field accepts "Name or email address", so this stays free text
   // — only bounded, not format-checked. The repo already defaults a blank
   // subject to "(no subject)"; the body cap is what matters, because an
@@ -30,6 +32,7 @@ export async function addMessageAction(formData: FormData) {
  * like any other message rather than being a special case.
  */
 export async function replyAction(id: string, formData: FormData) {
+  await requireUser();
   const messageId = validId(id);
   if (!messageId) return;
 
@@ -66,6 +69,7 @@ export async function replyAction(id: string, formData: FormData) {
 }
 
 export async function forwardAction(id: string, formData: FormData) {
+  await requireUser();
   const messageId = validId(id);
   if (!messageId) return;
 
@@ -101,6 +105,7 @@ export async function forwardAction(id: string, formData: FormData) {
 }
 
 export async function markReadAction(id: string) {
+  await requireUser();
   const messageId = validId(id);
   if (!messageId) return;
   await markRead(messageId);
@@ -108,6 +113,7 @@ export async function markReadAction(id: string) {
 }
 
 export async function trashMessageAction(id: string) {
+  await requireUser();
   const messageId = validId(id);
   if (!messageId) return;
   await trashMessage(messageId);
@@ -115,6 +121,7 @@ export async function trashMessageAction(id: string) {
 }
 
 export async function restoreMessageAction(id: string) {
+  await requireUser();
   const messageId = validId(id);
   if (!messageId) return;
   await restoreMessage(messageId);

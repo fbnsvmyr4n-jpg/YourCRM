@@ -170,12 +170,16 @@ export default async function ReportsPage() {
           </div>
         </Card>
 
-        <Card>
+        <Card className="flex flex-col">
           <CardHeader
             title="Pipeline by stage"
             icon={<Wallet className="h-[18px] w-[18px] text-accent" />}
           />
-          <div className="space-y-4 pt-1">
+          {/* This card is the shorter of the pair, so the grid stretches it to
+              match the revenue chart and left 27px hanging under the last stage.
+              Spreading the five rows over the extra height reads as deliberate
+              spacing rather than a gap at the bottom. */}
+          <div className="flex flex-1 flex-col justify-between gap-4 pt-1">
             {r.stages.map((s) => (
               <div key={s.id}>
                 <div className="mb-1.5 flex items-center justify-between gap-2 text-sm">
@@ -207,7 +211,7 @@ export default async function ReportsPage() {
           paired by height instead: leads + voice on the left, status +
           meetings on the right. Measured, the two columns end within ~10px
           of each other. */}
-      <div className="mt-5 grid grid-cols-1 items-start gap-5 @min-[880px]:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
+      <div className="mt-5 grid grid-cols-1 gap-5 @min-[880px]:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
         <div className="flex flex-col gap-5">
           <Card>
             <CardHeader
@@ -296,7 +300,7 @@ export default async function ReportsPage() {
             )}
           </Card>
 
-          <Card>
+          <Card className="flex flex-1 flex-col">
             <CardHeader
               title="Voice agent"
               icon={<Headset className="h-[18px] w-[18px] text-accent" />}
@@ -309,7 +313,7 @@ export default async function ReportsPage() {
             {r.voice.calls === 0 ? (
               <p className="py-6 text-sm text-faint">No calls answered yet.</p>
             ) : (
-              <>
+              <div className="flex flex-1 flex-col">
                 <div className="grid grid-cols-3 gap-3 pt-1">
                   <div className="rounded-xl border border-[var(--border)] p-3">
                     <p className="text-[11px] text-faint">Calls</p>
@@ -346,7 +350,7 @@ export default async function ReportsPage() {
                   ))}
                 </div>
 
-                <p className="mt-4 border-t border-[var(--border)] pt-4 text-xs text-faint">
+                <p className="mt-auto border-t border-[var(--border)] pt-4 text-xs text-faint">
                   {r.voice.totalMinutes} minute{r.voice.totalMinutes === 1 ? "" : "s"} answered in
                   total
                   {r.voice.avgSeconds !== null && (
@@ -354,7 +358,7 @@ export default async function ReportsPage() {
                   )}
                   .
                 </p>
-              </>
+              </div>
             )}
           </Card>
         </div>
@@ -435,24 +439,43 @@ export default async function ReportsPage() {
             )}
           </Card>
 
-          <Card>
+          <Card className="flex flex-1 flex-col">
             <CardHeader
               title="Meeting outcomes"
               icon={<CalendarCheck className="h-[18px] w-[18px] text-accent" />}
               action={<span className="text-xs text-faint">{r.meetings.total} booked</span>}
             />
             {r.meetings.decided === 0 ? (
-              <div className="py-6">
+              <div className="flex flex-1 flex-col pt-2">
                 <p className="text-sm text-faint">
                   No outcomes recorded yet
                   {r.meetings.pending > 0 && <> — {r.meetings.pending} meeting{r.meetings.pending === 1 ? "" : "s"} awaiting one</>}.
                 </p>
-                <p className="mt-2 text-xs text-faint">
+                {/* Splitting the backlog is the difference between a number and a
+                    task list: only the meetings that have already happened are
+                    actually waiting on anyone. */}
+                {r.meetings.pending > 0 && (
+                  <div className="mt-4 grid grid-cols-2 gap-3">
+                    <div className="rounded-xl border border-[var(--border)] p-3">
+                      <p className="text-[11px] text-faint">Already happened</p>
+                      <p className="mt-0.5 text-xl font-bold tabular-nums text-amber">
+                        {r.awaiting.past}
+                      </p>
+                      <p className="text-[10px] text-faint">Waiting on you</p>
+                    </div>
+                    <div className="rounded-xl border border-[var(--border)] p-3">
+                      <p className="text-[11px] text-faint">Still to come</p>
+                      <p className="mt-0.5 text-xl font-bold tabular-nums">{r.awaiting.upcoming}</p>
+                      <p className="text-[10px] text-faint">Not due yet</p>
+                    </div>
+                  </div>
+                )}
+                <p className="mt-4 text-xs text-faint">
                   Mark a meeting as showed, advanced, won, lost or no-show and the rates appear here.
                 </p>
                 <Link
                   href="/meetings"
-                  className="focus-ring mt-4 inline-block rounded-lg text-sm font-semibold text-accent hover:underline"
+                  className="focus-ring mt-auto inline-block rounded-lg pt-4 text-sm font-semibold text-accent hover:underline"
                 >
                   Go to Meetings →
                 </Link>

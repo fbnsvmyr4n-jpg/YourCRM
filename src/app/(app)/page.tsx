@@ -6,6 +6,7 @@ import { Card, CardHeader, ViewAll } from "@/components/ui/Card";
 import { FocusMenu, type FocusItem } from "@/components/home/FocusMenu";
 import { LiveClock } from "@/components/ui/LiveClock";
 import { iconMap, toneStyles, type Tone } from "@/components/ui/tone";
+import { activityFeed } from "@/server/activity-feed";
 import { getCurrentUser } from "@/server/session";
 import { listContacts } from "@/server/contacts-repo";
 import { listWonDeals, weeklyRevenue } from "@/server/deals-repo";
@@ -33,7 +34,7 @@ function relativeDay(iso: string, now: Date) {
 }
 
 export default async function DashboardPage() {
-  const [me, contacts, leads, meetings, messages, wonDeals, revenueSeries] = await Promise.all([
+  const [me, contacts, leads, meetings, messages, wonDeals, revenueSeries, feed] = await Promise.all([
     getCurrentUser(),
     listContacts(),
     listLeads(),
@@ -41,6 +42,7 @@ export default async function DashboardPage() {
     listMessages(),
     listWonDeals(),
     weeklyRevenue(),
+    activityFeed(),
   ]);
 
   const now = new Date();
@@ -118,31 +120,15 @@ export default async function DashboardPage() {
     },
   ];
 
-  const received = [...messages].filter((m) => m.direction === "received" && !m.trashed);
-  const activity = [
-    leads[0] && { icon: "user-plus", tone: "blue" as Tone, text: `New lead: ${leads[0].name}`, time: "just now" },
-    meetings[0] && {
-      icon: "calendar",
-      tone: "red" as Tone,
-      text: `Meeting: ${meetings[0].name} — ${meetings[0].topic}`,
-      time: meetings[0].when.toLowerCase(),
-    },
-    wonDeals[0] && {
-      icon: "dollar",
-      tone: "green" as Tone,
-      text: `Deal won: ${wonDeals[0].title} — $${wonDeals[0].value.toLocaleString()}`,
-      time: relativeDay(wonDeals[0].wonAt, now),
-    },
-    received[0] && {
-      icon: "message",
-      tone: "purple" as Tone,
-      text: `New message from ${received[0].name}`,
-      // Was `received[0].ago` — a stored string like "2m ago" that stayed "2m
-      // ago" forever. Messages carry a real timestamp now, so this derives the
-      // same way the won-deal line above it does.
-      time: relativeDay(received[0].at, now),
-    },
-  ].filter(Boolean) as { icon: string; tone: Tone; text: string; time: string }[];
+  // Every row carries the timestamp it was derived from, so the label is a
+  // fact and the ordering is real. This used to be four fixed slots with
+  // `time: "just now"` written into the lead line as a literal.
+  const activity = feed.map((e) => ({
+    icon: e.icon,
+    tone: e.tone,
+    text: e.text,
+    time: relativeDay(e.at, now),
+  }));
 
   return (
     <div className="mx-auto max-w-[1500px] animate-fade-up">
@@ -182,7 +168,18 @@ export default async function DashboardPage() {
         <div className="flex flex-col gap-5">
           <TodaysFocus items={focus} />
           <QuickActions />
-          <ActivityFeed items={activity} />
+          {/* The feed card is taken out of flow in the two-column layout.
+              `flex: 1 1 0%` controls how leftover space is *distributed*; it
+              does not stop an item contributing its full content height to the
+              flex container's *intrinsic* size. So 20 rows still set this
+              rail's height and pushed 598px of slack onto the main column —
+              the gap moved rather than closed. An absolutely positioned card
+              contributes nothing, so the main column decides the height and
+              the feed fills exactly what it is given. The `min-h` is what this
+              wrapper contributes instead. */}
+          <div className="@min-[820px]:relative @min-[820px]:min-h-[300px] @min-[820px]:flex-1">
+            <ActivityFeed items={activity} />
+          </div>
         </div>
       </div>
     </div>
@@ -605,11 +602,28 @@ function QuickActions() {
 
 function ActivityFeed({ items }: { items: { icon: string; tone: Tone; text: string; time: string }[] }) {
   return (
-    <Card>
+    // Last card in the rail, so it absorbs whatever height the main column
+    // leaves over — 271px of empty rail sat under here. A feed is the right
+    // thing to grow: it was capped at four rows by construction while the
+    // store held far more real events.
+    //
+    // The list scrolls inside the card rather than setting its height. Sizing
+    // the card to a fixed number of rows just moved the gap to the other
+    // column (12 rows overshot the main column by 147px), and any row count
+    // that balances today stops balancing the moment the data changes. This
+    // way the feed fills exactly what it is given, in either direction, and
+    // the rest of the history is a scroll away.
+    <Card className="flex flex-col @min-[820px]:absolute @min-[820px]:inset-0 @min-[820px]:min-h-0">
       {/* No "View all" here — the feed is derived from several entities and
           has no single destination to send anyone to. */}
       <CardHeader title="Activity Feed" />
-      <div className="relative flex flex-col">
+      {/* The fill-and-scroll behaviour is scoped to the two-column layout,
+          which is the only place there is leftover height to hand out. A flex
+          item defaults to `min-height: auto` and so refuses to shrink below its
+          content — without `min-h-0` the 20 rows set the rail's height and
+          pushed 598px of slack onto the main column instead. Single column: no
+          stretch, no cap, the list is simply its natural height. */}
+      <div className="relative -mx-1 flex flex-col px-1 @min-[820px]:min-h-0 @min-[820px]:flex-1 @min-[820px]:overflow-y-auto">
         {items.map((a, i) => {
           const Icon = iconMap[a.icon];
           const t = toneStyles[a.tone];

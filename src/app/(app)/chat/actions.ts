@@ -4,12 +4,14 @@ import { revalidateApp } from "@/server/revalidate";
 import { answer } from "@/server/chat-agent";
 import { appendChat, clearChat, listChat } from "@/server/chat-repo";
 import { multiline } from "@/server/validate";
+import { requireUser } from "@/server/session";
 
 /** Long enough for a real question, short enough that no single message can
  *  bloat the chat collection or the prompt sent to the model. */
 const MAX_QUESTION = 4000;
 
 export async function sendChatAction(text: string) {
+  await requireUser();
   const question = multiline(text, MAX_QUESTION);
   if (!question) return null;
 
@@ -24,6 +26,7 @@ export async function sendChatAction(text: string) {
 }
 
 export async function clearChatAction() {
+  await requireUser();
   await clearChat();
   revalidateApp();
 }
