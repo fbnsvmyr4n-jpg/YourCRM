@@ -156,7 +156,8 @@ export default async function DashboardPage() {
             <ThisWeek
               wonThisWeek={wonThisWeek.length}
               wonValue={wonThisWeek.reduce((sum, d) => sum + d.value, 0)}
-              stillOpen={openLeads.length}
+              needFollowUp={openLeads.length}
+              totalLeads={leads.length}
             />
             <Connections items={openLeads.slice(0, 3)} />
           </div>
@@ -379,54 +380,60 @@ function SegmentedBar({ value, total, tone }: { value: number; total: number; to
  * answered the only question this panel should: how did the week actually go?
  * The ratio at the foot is the headline — everything above it is the working.
  */
+/**
+ * Two facts about the week, deliberately kept apart.
+ *
+ * This card used to show a "Win ratio" of
+ * `wonThisWeek ÷ (wonThisWeek + stillOpen)` — **deals divided by deals plus
+ * leads**. It read "8 won of 14" while the entire store held ten deals,
+ * contradicted the Reports page's 100% with no way to reconcile the two, and
+ * fell every time a lead was added, so the metric punished prospecting. The
+ * local was even named `decided`, borrowed from the meetings analytics where
+ * that word has a precise and correct meaning: the name was copied, the
+ * semantics were not.
+ *
+ * The underlying error was mixing a **flow** (deals closed during the week)
+ * with a **stock** (leads awaiting follow-up right now). Those share no
+ * denominator, so they get separate rows and separate units, and no ratio is
+ * drawn between them. The follow-up bar measures against all leads, which is a
+ * proportion that actually exists.
+ */
 function ThisWeek({
   wonThisWeek,
   wonValue,
-  stillOpen,
+  needFollowUp,
+  totalLeads,
 }: {
   wonThisWeek: number;
   wonValue: number;
-  stillOpen: number;
+  needFollowUp: number;
+  totalLeads: number;
 }) {
-  const decided = wonThisWeek + stillOpen;
-  const pct = decided > 0 ? Math.round((wonThisWeek / decided) * 100) : null;
-
   return (
     <Card className="flex flex-col">
       <CardHeader title="This Week" />
 
-      <div className="space-y-5 pt-1">
-        <div>
-          <div className="mb-2 flex items-center justify-between">
-            <span className="text-sm text-muted">Closed won</span>
-            <span className="text-sm font-semibold tabular-nums text-green">
-              {wonThisWeek} · ${wonValue.toLocaleString()}
-            </span>
-          </div>
-          <SegmentedBar value={wonThisWeek} total={Math.max(decided, 1)} tone="green" />
-        </div>
-
-        <div>
-          <div className="mb-2 flex items-center justify-between">
-            <span className="text-sm text-muted">Still open</span>
-            <span className="text-sm font-semibold tabular-nums text-amber">{stillOpen}</span>
-          </div>
-          <SegmentedBar value={stillOpen} total={Math.max(decided, 1)} tone="amber" />
-        </div>
+      <div className="pt-1">
+        <p className="text-xs text-faint">Closed won · last 7 days</p>
+        <p className="mt-1 text-3xl font-bold tabular-nums text-green">
+          ${wonValue.toLocaleString()}
+        </p>
+        <p className="mt-1 text-xs text-faint">
+          {wonThisWeek === 0
+            ? "No deals closed yet this week"
+            : `across ${wonThisWeek} deal${wonThisWeek === 1 ? "" : "s"}`}
+        </p>
       </div>
 
-      <div className="mt-auto flex items-end justify-between border-t border-[var(--border)] pt-4">
-        <div className="leading-tight">
-          <p className="text-[11px] uppercase tracking-wide text-faint">Win ratio</p>
-          <p className="mt-1 text-xs text-faint">
-            {decided === 0 ? "Nothing to measure yet" : `${wonThisWeek} won of ${decided}`}
-          </p>
+      <div className="mt-auto border-t border-[var(--border)] pt-4">
+        <div className="mb-2 flex items-center justify-between">
+          <span className="text-sm text-muted">Leads awaiting follow-up</span>
+          <span className="text-sm font-semibold tabular-nums text-amber">
+            {needFollowUp}
+            {totalLeads > 0 && <span className="text-faint"> of {totalLeads}</span>}
+          </span>
         </div>
-        {/* "—" rather than 0% when there is nothing to measure: an unearned
-            zero reads as a bad week instead of an empty one. */}
-        <p className="text-3xl font-bold tabular-nums" style={{ color: pct === null ? "var(--text-faint)" : "var(--green)" }}>
-          {pct === null ? "—" : `${pct}%`}
-        </p>
+        <SegmentedBar value={needFollowUp} total={Math.max(totalLeads, 1)} tone="amber" />
       </div>
     </Card>
   );
