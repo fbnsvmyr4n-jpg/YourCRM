@@ -112,7 +112,9 @@ describe("every server action is authorised", () => {
           .find((l) => l && !l.startsWith("//") && !l.startsWith("*") && !l.startsWith("/*"));
 
         const guarded =
-          firstStatement === "await requireUser();" ||
+          // Bare guard, or one whose result is kept to attribute the write —
+          // `const actor = await requireUser();` is the same check.
+          /^(const \w+ = )?await requireUser\(\);$/.test(firstStatement ?? "") ||
           // Settings actions predate `requireUser` and fail closed by returning
           // an error state instead of throwing, which suits their form shape.
           firstStatement === "const me = await getCurrentUser();";

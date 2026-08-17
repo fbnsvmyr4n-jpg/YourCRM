@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { readSessionToken, SESSION_COOKIE } from "./auth";
+import { logDenied } from "./log";
 import { findUserById, toSafeUser, type SafeUser } from "./users-repo";
 
 /** The signed-in user for the current request, or null. */
@@ -32,6 +33,12 @@ export async function getCurrentUser(): Promise<SafeUser | null> {
  */
 export async function requireUser(): Promise<SafeUser> {
   const user = await getCurrentUser();
-  if (!user) throw new Error("Not authenticated.");
+  if (!user) {
+    // The line that would have made both Critical vulnerabilities visible while
+    // they were live. An unauthenticated caller reaching an action now leaves a
+    // trace; previously it left none, on a public URL, for three weeks.
+    logDenied("server-action", "no valid session");
+    throw new Error("Not authenticated.");
+  }
   return user;
 }

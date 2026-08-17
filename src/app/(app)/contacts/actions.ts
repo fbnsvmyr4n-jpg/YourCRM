@@ -12,6 +12,7 @@ import {
 import { deleteActivity, logActivity } from "@/server/activity-repo";
 import { getCurrentUser, requireUser } from "@/server/session";
 import { email as validEmail, id as validId, multiline, pick, text } from "@/server/validate";
+import { logWrite } from "@/server/log";
 
 /** Returns null when the submission can't be trusted, so the caller rejects it. */
 function parseContact(formData: FormData): NewContact | null {
@@ -108,11 +109,13 @@ export async function addNoteAction(id: string, formData: FormData) {
 }
 
 export async function deleteActivityAction(contactId: string, activityId: string) {
-  await requireUser();
+  const actor = await requireUser();
   const cid = validId(contactId);
   const aid = validId(activityId);
   if (!cid || !aid) return;
   await deleteActivity(cid, aid);
+  // Removing a timeline entry erases history, so the removal is itself history.
+  logWrite("delete", "activity", { id: aid, actor: actor.id, detail: `contact ${cid}` });
   revalidateApp();
 }
 
@@ -146,9 +149,10 @@ export async function updateContactAction(id: string, formData: FormData) {
 }
 
 export async function deleteContactAction(id: string) {
-  await requireUser();
+  const actor = await requireUser();
   const contactId = validId(id);
   if (!contactId) return;
   await deleteContact(contactId);
+  logWrite("delete", "contact", { id: contactId, actor: actor.id });
   revalidateApp();
 }

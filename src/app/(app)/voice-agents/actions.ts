@@ -6,6 +6,7 @@ import { MEETING_WHENS } from "@/data/meetings";
 import { deleteCall, logCall, processCall } from "@/server/calls-repo";
 import { count, id as validId, multiline, pick, pickOr, text } from "@/server/validate";
 import { requireUser } from "@/server/session";
+import { logWrite } from "@/server/log";
 
 /** Run the automation: call → Lead (+ Meeting when one was requested). */
 export async function processCallAction(id: string) {
@@ -19,10 +20,11 @@ export async function processCallAction(id: string) {
 }
 
 export async function deleteCallAction(id: string) {
-  await requireUser();
+  const actor = await requireUser();
   const callId = validId(id);
   if (!callId) return;
   await deleteCall(callId);
+  logWrite("delete", "call", { id: callId, actor: actor.id });
   revalidateApp();
 }
 

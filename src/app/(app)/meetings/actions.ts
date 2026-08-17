@@ -16,6 +16,7 @@ import { sendEmail } from "@/server/email";
 import { toDisplayTime } from "@/lib/time";
 import { email as validEmail, id as validId, multiline, pick, text } from "@/server/validate";
 import { requireUser } from "@/server/session";
+import { logWrite } from "@/server/log";
 
 /** `YYYY-MM-DD` and a real calendar date, not just well-shaped text. */
 function isDateKey(value: unknown): value is string {
@@ -163,7 +164,7 @@ export async function setMeetingNotesAction(id: string, formData: FormData) {
 }
 
 export async function deleteMeetingAction(id: string) {
-  await requireUser();
+  const actor = await requireUser();
   const meetingId = validId(id);
   if (!meetingId) return { notified: { sent: false, reason: "Meeting not found." } };
 
@@ -171,6 +172,8 @@ export async function deleteMeetingAction(id: string) {
   const meeting = await getMeeting(meetingId);
 
   await deleteMeeting(meetingId);
+
+  logWrite("delete", "meeting", { id: meetingId, actor: actor.id });
   // Referential integrity — see `detachMeeting`. Sequential, never nested.
   await detachMeeting(meetingId);
 
