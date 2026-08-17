@@ -2,7 +2,12 @@
 
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { createSessionToken, SESSION_COOKIE, SESSION_MAX_AGE } from "@/server/auth";
+import {
+  createSessionToken,
+  readSessionToken,
+  SESSION_COOKIE,
+  SESSION_MAX_AGE,
+} from "@/server/auth";
 import {
   checkLoginRate,
   clearLoginRate,
@@ -13,6 +18,7 @@ import {
 } from "@/server/rate-limit-repo";
 import { authenticate, createUser } from "@/server/users-repo";
 import { email as validEmail, text } from "@/server/validate";
+import { logAuth } from "@/server/log";
 
 /** scrypt cost is paid per attempt — bound the input so it can't be abused. */
 const MAX_PASSWORD = 200;
@@ -69,17 +75,22 @@ export async function signInAction(_prev: AuthState, formData: FormData): Promis
   // scrypt verification — which is intentionally slow and would otherwise be
   // free CPU for an attacker to burn.
   const gate = await checkLoginRate(keys);
-  if (!gate.allowed) return { error: lockoutMessage(gate.retryAfterSec) };
+  if (!gate.allowed) {
+    logAuth("ratelimited", { email, reason: "too many failed attempts" });
+    return { error: lockoutMessage(gate.retryAfterSec) };
+  }
 
   const user = await authenticate(email, password);
   if (!user) {
     await registerFailedLogin(keys);
+    logAuth("signin.failed", { email });
     // Deliberately identical whether the email exists or not — a different
     // message here would turn the login form into an account-enumeration oracle.
     return { error: "Incorrect email or password." };
   }
 
   await clearLoginRate(keys);
+  logAuth("signin.ok", { userId: user.id });
   await startSession(user.id, formData.get("remember") === "1");
   redirect("/");
 }
@@ -104,14 +115,20 @@ export async function signUpAction(_prev: AuthState, formData: FormData): Promis
   // Email uniqueness is enforced atomically inside createUser — checking here
   // first would be a check-then-act race under concurrent signups.
   const { user, error } = await createUser({ name, email, password });
-  if (error || !user) return { error: error ?? "Could not create the account." };
+  if (error || !user) {
+    logAuth("signup.failed", { email, reason: error ?? "unknown" });
+    return { error: error ?? "Could not create the account." };
+  }
 
+  logAuth("signup.ok", { userId: user.id });
   await startSession(user.id);
   redirect("/");
 }
 
 export async function signOutAction() {
   const store = await cookies();
+  const userId = readSessionToken(store.get(SESSION_COOKIE)?.value) ?? undefined;
+  logAuth("signout", { userId });
   store.delete(SESSION_COOKIE);
   redirect("/login");
 }

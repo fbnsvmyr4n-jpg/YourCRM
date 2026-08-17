@@ -52,11 +52,6 @@ export async function listActivity(): Promise<Activity[]> {
   return [...rows].sort((a, b) => b.at.localeCompare(a.at));
 }
 
-export async function listActivityFor(contactId: string): Promise<Activity[]> {
-  const rows = await listActivity();
-  return rows.filter((a) => a.contactId === contactId);
-}
-
 export async function logActivity(input: {
   contactId: string;
   kind: ActivityKind;

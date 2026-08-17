@@ -5,6 +5,7 @@ import { STAGE_IDS, type StageId } from "@/data/deals";
 import { createDeal, deleteDeal, moveDeal, recordPayment, setDealValue } from "@/server/deals-repo";
 import { id as validId, money, pick, text } from "@/server/validate";
 import { requireUser } from "@/server/session";
+import { logWrite } from "@/server/log";
 
 export async function addDealAction(formData: FormData) {
   await requireUser();
@@ -39,11 +40,13 @@ export async function moveDealAction(id: string, stage: StageId) {
 }
 
 export async function deleteDealAction(id: string) {
-  await requireUser();
+  const actor = await requireUser();
   const dealId = validId(id);
   if (!dealId) return;
 
   await deleteDeal(dealId);
+
+  logWrite("delete", "deal", { id: dealId, actor: actor.id });
   revalidateApp();
 }
 

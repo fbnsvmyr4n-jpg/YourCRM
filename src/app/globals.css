@@ -37,7 +37,7 @@
 
   --text: #0b1220;
   --text-muted: #55617a;
-  --text-faint: #8a94a8;
+  --text-faint: #666e7c; /* WCAG AA: 4.55:1 on --bg, 5.14:1 on cards */
 
   --accent: #2f6bff;
   --accent-from: #3b82f6;
@@ -81,7 +81,7 @@
 
   --text: #f3f6fc;
   --text-muted: #9aa5b8;
-  --text-faint: #616d82;
+  --text-faint: #798395; /* WCAG AA: 5.01:1 on --bg, 4.56:1 on cards */
 
   --accent: #5b8dff;
   --accent-from: #4f8bff;
@@ -125,7 +125,7 @@
 
   --text: #e7ecf5;
   --text-muted: #828da2;
-  --text-faint: #4d5872;
+  --text-faint: #727b90; /* WCAG AA: 4.78:1 on --bg, 4.53:1 on cards */
 
   --accent: #6f9bff;
   --accent-from: #5b8dff;
