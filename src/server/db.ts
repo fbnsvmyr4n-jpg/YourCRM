@@ -26,6 +26,11 @@ function getPool(): Pool {
       // proxy with a certificate this client doesn't need to verify.
       ssl: connectionString.includes("localhost") ? undefined : { rejectUnauthorized: false },
       max: 3, // serverless-friendly: keep the pool small
+      // A hung query used to hang the request that issued it — nothing bounded
+      // it. These turn a stalled database into a fast, visible failure rather
+      // than a page that never returns.
+      connectionTimeoutMillis: 10_000,
+      statement_timeout: 15_000,
     });
   }
   return pool;

@@ -10,7 +10,10 @@ import { getSettings } from "./settings-repo";
 import { CONFIDENT, findEntity, rankIntents } from "./chat-intents";
 import { INTENTS, SUGGESTION_POOL } from "./chat-answers";
 
-const MODEL = "claude-opus-4-8";
+// Sonnet 5 rather than Opus: this task is retrieval and summarisation over a
+// small CRM snapshot, where latency and cost matter more than peak reasoning.
+// The previous value, claude-opus-4-8, was a superseded generation.
+const MODEL = "claude-sonnet-5";
 
 function money(n: number) {
   return `$${Math.round(n).toLocaleString()}`;
@@ -148,7 +151,10 @@ export async function answer(
   if (process.env.ANTHROPIC_API_KEY) {
     try {
       const { default: Anthropic } = await import("@anthropic-ai/sdk");
-      const client = new Anthropic();
+      // The SDK defaults to roughly a 10-minute timeout, which in a chat box
+      // is indistinguishable from a hang. One retry, then fall back to the
+      // deterministic assistant rather than leaving the user waiting.
+      const client = new Anthropic({ timeout: 30_000, maxRetries: 1 });
 
       const response = await client.messages.create({
         model: MODEL,

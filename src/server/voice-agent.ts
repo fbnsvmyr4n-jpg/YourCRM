@@ -121,7 +121,6 @@ export function companyFromSpeech(speech: string): string {
   return cleaned.length > 80 ? cleaned.slice(0, 80) : cleaned;
 }
 
-/** Caller said no / nothing further. */
 export function isDecline(speech: string): boolean {
   return /^\s*(no|nope|nah|not (right )?now|no thanks?|that'?s (all|it)|nothing)\b/i.test(speech);
 }

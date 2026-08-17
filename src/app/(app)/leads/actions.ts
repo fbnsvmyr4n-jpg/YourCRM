@@ -6,6 +6,7 @@ import { createLead, deleteLead, updateLead, type NewLead } from "@/server/leads
 import { detachLead } from "@/server/calls-repo";
 import { email as validEmail, id as validId, pick, text } from "@/server/validate";
 import { requireUser } from "@/server/session";
+import { logWrite } from "@/server/log";
 
 /** Returns null when the submission can't be trusted, so the caller rejects it. */
 function parseLead(formData: FormData): NewLead | null {
@@ -50,11 +51,13 @@ export async function updateLeadAction(id: string, formData: FormData) {
 }
 
 export async function deleteLeadAction(id: string) {
-  await requireUser();
+  const actor = await requireUser();
   const leadId = validId(id);
   if (!leadId) return;
 
   await deleteLead(leadId);
+
+  logWrite("delete", "lead", { id: leadId, actor: actor.id });
   // Referential integrity: calls that produced this lead must stop pointing at
   // it, or the Voice Agent detail keeps claiming "Added to Leads" for a record
   // that no longer exists. Runs after the lead write completes — the two locks

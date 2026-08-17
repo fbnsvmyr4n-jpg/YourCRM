@@ -107,17 +107,6 @@ export async function contactSummaries(
   return out;
 }
 
-export async function contactTimeline(contact: Contact): Promise<TimelineEntry[]> {
-  const [activity, deals, meetings, calls, messages] = await Promise.all([
-    listActivity(),
-    listDeals(),
-    listMeetings(),
-    listCalls(),
-    listMessages(),
-  ]);
-  return buildTimeline(contact, activity, deals, meetings, calls, messages);
-}
-
 function buildTimeline(
   contact: Contact,
   activity: Activity[],
