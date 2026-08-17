@@ -1,0 +1,43 @@
+name: CI
+
+# The audit found seven test suites written and deleted over three weeks, and
+# 41 defects of which 51% were reported by the user rather than caught by the
+# build. Tests that nobody runs protect nothing — this is what makes them real.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Ordered cheapest-first so an obvious break fails in seconds rather than
+      # after a full build.
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npx eslint src tests
+
+      - name: Tests
+        run: npm test
+
+      # Six high-severity CVEs reached production unnoticed because nothing
+      # checked. Advisory-only for now: it reports without blocking, so the
+      # first red build is a decision rather than a surprise.
+      - name: Dependency audit
+        run: npm audit --omit=dev || true
+
+      # Turbopack fails on this project's path, which contains a space.
+      - name: Build
+        run: npm run build -- --webpack
