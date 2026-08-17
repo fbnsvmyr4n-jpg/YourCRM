@@ -40,8 +40,11 @@ export async function sendEmail(opts: {
   }
 
   try {
+    // Without this a stalled connection blocks a password reset indefinitely:
+    // `fetch` has no default timeout, and this runs inside a user's request.
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
+      signal: AbortSignal.timeout(10_000),
       headers: {
         Authorization: `Bearer ${key}`,
         "Content-Type": "application/json",
