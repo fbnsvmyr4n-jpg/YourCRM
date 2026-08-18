@@ -194,8 +194,17 @@ CREATE INDEX IF NOT EXISTS deals_source_idx ON deals (sub_account_id, source) WH
 --
 -- `app.sub_account_id` is set per transaction by the connection wrapper.
 -- ---------------------------------------------------------------------------
+-- ENABLE alone is not enough. Postgres exempts a table's OWNER from row-level
+-- security, and this application connects as the owner of its own schema. With
+-- ENABLE only, every policy below is present, every schema test passes, and no
+-- isolation is actually enforced at runtime — the failure is completely silent
+-- and would only surface as one customer reading another's records. FORCE
+-- applies the policies to the owner too, which is the whole point of having
+-- them. Never add one without the other.
 ALTER TABLE contacts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE contacts  FORCE ROW LEVEL SECURITY;
 ALTER TABLE deals    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE deals     FORCE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS contacts_tenant_isolation ON contacts;
 CREATE POLICY contacts_tenant_isolation ON contacts
@@ -331,11 +340,17 @@ CREATE TABLE IF NOT EXISTS settings (
 -- Row-Level Security on every tenant-scoped table
 -- ---------------------------------------------------------------------------
 ALTER TABLE companies  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE companies   FORCE ROW LEVEL SECURITY;
 ALTER TABLE meetings   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE meetings    FORCE ROW LEVEL SECURITY;
 ALTER TABLE messages   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE messages    FORCE ROW LEVEL SECURITY;
 ALTER TABLE activities ENABLE ROW LEVEL SECURITY;
+ALTER TABLE activities  FORCE ROW LEVEL SECURITY;
 ALTER TABLE calls      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE calls       FORCE ROW LEVEL SECURITY;
 ALTER TABLE settings   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE settings    FORCE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS companies_tenant_isolation ON companies;
 CREATE POLICY companies_tenant_isolation ON companies
