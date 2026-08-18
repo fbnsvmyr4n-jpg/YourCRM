@@ -186,6 +186,15 @@ CREATE TABLE IF NOT EXISTS deals (
 
   -- Which contact referred this deal in, closing the loop back to Prospect.
   -- Set when source = 'referral'; drives the referral credit programme.
+  -- Partial payments, carried over from the JSONB model rather than dropped.
+  -- A deal paid in instalments splits into a won record for what has been paid
+  -- and an open one for what is still owed; both share `split_id`, which is how
+  -- the remainder knows where to merge back. `split_total_cents` is the original
+  -- contract value — without it a £10,000 part-payment is indistinguishable from
+  -- a £10,000 deal paid in full.
+  split_id        TEXT,
+  split_total_cents BIGINT,
+
   referred_by_contact_id TEXT REFERENCES contacts(id) ON DELETE SET NULL,
 
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -194,6 +203,7 @@ CREATE TABLE IF NOT EXISTS deals (
 );
 CREATE INDEX IF NOT EXISTS deals_tenant_idx ON deals (sub_account_id) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS deals_stage_idx  ON deals (sub_account_id, stage) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS deals_split_idx  ON deals (sub_account_id, split_id) WHERE split_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS deals_source_idx ON deals (sub_account_id, source) WHERE deleted_at IS NULL;
 
 -- ---------------------------------------------------------------------------
