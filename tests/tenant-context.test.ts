@@ -53,7 +53,55 @@ describe("tenant scoping cannot leak between requests", () => {
   });
 });
 
-describe("the role enum has one source of truth", () => {
+describe("enums have one source of truth", () => {
+  /**
+   * Every one of these exists twice: as a CHECK constraint in the schema and as
+   * an `as const` array in TypeScript. That duplication is unavoidable — the
+   * database must reject bad data and the compiler must reject bad code — so
+   * the pair is pinned together here instead of being trusted.
+   *
+   * Not hypothetical: `role` had already drifted to four values that the schema
+   * rejected, and nothing caught it until the first real INSERT failed at
+   * runtime. Same defect class as `as SomeType` standing in for validation.
+   */
+  function checkConstraint(column: string): string[] {
+    const schema = readFileSync(join(SERVER, "schema.sql"), "utf8");
+    const re = new RegExp(`CHECK \\(${column} IN \\(([^)]*)\\)\\)`);
+    const m = schema.match(re);
+    expect(m, `no CHECK constraint found for ${column}`).toBeTruthy();
+    return [...m![1].matchAll(/'([^']+)'/g)].map((x) => x[1]).sort();
+  }
+
+  function tsEnum(src: string, name: string): string[] {
+    const m = src.match(new RegExp(`export const ${name} = \\[([\\s\\S]*?)\\] as const`));
+    expect(m, `no exported ${name} array found`).toBeTruthy();
+    return [...m![1].matchAll(/"([^"]+)"/g)].map((x) => x[1]).sort();
+  }
+
+  const DEALS = readFileSync(join(SERVER, "repos", "deals.ts"), "utf8");
+
+  it("deal stages match the CHECK constraint exactly", () => {
+    expect(tsEnum(DEALS, "STAGES")).toEqual(checkConstraint("stage"));
+  });
+
+  it("deal sources match the CHECK constraint exactly", () => {
+    expect(tsEnum(DEALS, "SOURCES")).toEqual(checkConstraint("source"));
+  });
+
+  it("the open and post-close stage groups are real stages, and do not overlap", () => {
+    // These two drive "is this a lead" and "is this revenue". A typo in either
+    // would not fail any query — it would quietly shrink a number on a report.
+    const stages = new Set(tsEnum(DEALS, "STAGES"));
+    const open = tsEnum(DEALS, "OPEN_STAGES");
+    const closed = tsEnum(DEALS, "CLOSED_WON_STAGES");
+
+    for (const s of [...open, ...closed]) {
+      expect(stages.has(s), `"${s}" is not a real stage`).toBe(true);
+    }
+    expect(open.filter((s) => closed.includes(s)), "a stage is both open and won").toEqual([]);
+    expect(stages.has("lost"), "there is no terminal lost stage").toBe(true);
+  });
+
   it("matches the CHECK constraint on users.role exactly", () => {
     /**
      * These had already drifted: the schema allowed owner/admin/member while
