@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 /**
@@ -51,6 +51,95 @@ describe("tenant scoping cannot leak between requests", () => {
     // worse than a loud failure; this must throw.
     expect(TENANT).toMatch(/if \(!ctx\.subAccountId[\s\S]*?throw new Error/);
   });
+});
+
+describe("the role enum has one source of truth", () => {
+  it("matches the CHECK constraint on users.role exactly", () => {
+    /**
+     * These had already drifted: the schema allowed owner/admin/member while
+     * the TypeScript union listed four different values, so the first real
+     * insert failed. Same defect class as `as SomeType` standing in for
+     * validation — a compile-time claim nothing checked against the database.
+     */
+    const schema = readFileSync(join(SERVER, "schema.sql"), "utf8");
+    const check = schema.match(/role\s+TEXT NOT NULL DEFAULT[\s\S]*?CHECK \(role IN \(([^)]*)\)\)/);
+    expect(check, "could not find the role CHECK constraint").toBeTruthy();
+    const inDb = [...check![1].matchAll(/'([^']+)'/g)].map((m) => m[1]).sort();
+
+    const inCode = [...TENANT.match(/export const ROLES = \[([^\]]*)\]/)![1].matchAll(/"([^"]+)"/g)]
+      .map((m) => m[1])
+      .sort();
+
+    expect(inCode, "the Role union and the database disagree about valid roles").toEqual(inDb);
+  });
+});
+
+describe("every repository scopes itself, without relying on the database", () => {
+  /**
+   * Defence in depth, and the reason it is not paranoia: row-level security is
+   * bypassed by any superuser or BYPASSRLS connection — a Neon admin session, a
+   * migration script, a read-replica user added later. A repository trusting
+   * RLS alone leaks its entire table the moment anything connects differently,
+   * and nothing reports it.
+   *
+   * So each repo filters `sub_account_id` itself as well. The objection to that
+   * is the audit's own lesson — a predicate you must remember is one that gets
+   * forgotten — which is answered here rather than by leaving it out: this test
+   * reads the SQL and checks.
+   */
+  const REPOS = join(SERVER, "repos");
+
+  function repoFiles(): string[] {
+    if (!existsSync(REPOS)) return [];
+    return readdirSync(REPOS)
+      .filter((n) => n.endsWith(".ts"))
+      .map((n) => join(REPOS, n));
+  }
+
+  it("finds the repositories (a suite matching nothing proves nothing)", () => {
+    expect(repoFiles().length).toBeGreaterThan(0);
+  });
+
+  for (const path of repoFiles()) {
+    const name = path.split("/").pop()!;
+
+    it(`${name} filters the tenant in every statement it issues`, () => {
+      // Comments must go first. Doc comments here use markdown backticks around
+      // column names, and those shift every subsequent backtick pairing — an
+      // earlier version of this test silently skipped the main SELECT constant
+      // for exactly that reason and passed while a query had no tenant filter
+      // at all. A detector that quietly matches less than it claims is worse
+      // than no detector.
+      const src = readFileSync(path, "utf8")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^\s*\/\/.*$/gm, "");
+
+      // Template literals passed to q.rows/q.one, i.e. the SQL this repo runs.
+      const statements = [...src.matchAll(/`([^`]*\b(?:SELECT|INSERT|UPDATE|DELETE)\b[^`]*)`/gi)]
+        .map((m) => m[1])
+        .filter((sql) => /\b(FROM|INTO|UPDATE)\s+(contacts|deals|meetings|messages|activities|calls|companies)\b/i.test(sql));
+
+      // contacts.ts has five: the shared projection, insert, update, delete,
+      // restore. A drop in this number means the extractor stopped seeing
+      // statements, not that the repo got safer.
+      expect(statements.length, `${name} issues no recognisable SQL`).toBeGreaterThanOrEqual(5);
+      for (const sql of statements) {
+        expect(
+          /sub_account_id/.test(sql),
+          `a statement in ${name} does not mention sub_account_id, so it would return every tenant's rows on any connection that bypasses row-level security:\n${sql.trim().slice(0, 180)}`
+        ).toBe(true);
+      }
+    });
+
+    it(`${name} takes the tenant from the context, never from an argument`, () => {
+      const src = readFileSync(path, "utf8");
+      expect(src, `${name} does not read q.ctx.subAccountId`).toMatch(/q\.ctx\.subAccountId/);
+      // A caller-supplied tenant id is an authorisation bug wearing a parameter.
+      expect(src, `${name} accepts a tenant id as an argument`).not.toMatch(
+        /\bsubAccountId\s*:\s*string\b/
+      );
+    });
+  }
 });
 
 describe("no query can be issued outside a tenant", () => {

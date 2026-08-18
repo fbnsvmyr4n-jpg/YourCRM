@@ -36,6 +36,20 @@ export function getPool(): Pool {
   return pool;
 }
 
+/**
+ * Close the pool and forget it, so the next call builds a fresh one.
+ *
+ * Needed for an orderly shutdown: open sockets keep a Node process alive
+ * indefinitely, which is why a test run that has touched the database appears
+ * to pass and then hang instead of exiting.
+ */
+export async function closePool(): Promise<void> {
+  const current = pool;
+  pool = null;
+  ready = null;
+  await current?.end();
+}
+
 /** Create the storage table once per process. */
 function init(): Promise<void> {
   if (!ready) {
