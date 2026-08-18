@@ -16,7 +16,7 @@ import { Pool } from "pg";
 let pool: Pool | null = null;
 let ready: Promise<void> | null = null;
 
-function getPool(): Pool {
+export function getPool(): Pool {
   if (!pool) {
     const connectionString = process.env.DATABASE_URL;
     if (!connectionString) throw new Error("DATABASE_URL is not set");

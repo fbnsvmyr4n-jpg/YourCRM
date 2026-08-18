@@ -98,6 +98,32 @@ describe("row-level security backs the application up", () => {
     });
   }
 
+  it("forces the policies onto the table owner", () => {
+    /**
+     * The one that would have made all of this decorative.
+     *
+     * Postgres exempts a table's OWNER from row-level security. This app
+     * connects to its database as the owner of its own schema, so with ENABLE
+     * alone every policy is present, every test above passes, and no isolation
+     * is enforced at runtime. There is no error and no log line — the only
+     * symptom is one customer reading another's records.
+     *
+     * Exactly the audit's recurring root cause: asserting a verified state
+     * from a proxy signal. "A policy exists" is not "isolation is enforced".
+     */
+    const enabled = [...SCHEMA.matchAll(/ALTER TABLE\s+(\w+)\s+ENABLE ROW LEVEL SECURITY/g)].map(
+      (m) => m[1]
+    );
+    expect(enabled.length).toBeGreaterThanOrEqual(8);
+    for (const table of enabled) {
+      const forced = new RegExp(`ALTER TABLE\\s+${table}\\s+FORCE ROW LEVEL SECURITY`);
+      expect(
+        forced.test(SCHEMA),
+        `${table} enables RLS but does not FORCE it — the owner, which is this application, bypasses every policy on it`
+      ).toBe(true);
+    }
+  });
+
   it("every policy checks writes as well as reads", () => {
     // USING alone filters SELECT but still permits INSERT/UPDATE of a row
     // belonging to another tenant. Both clauses are required.
