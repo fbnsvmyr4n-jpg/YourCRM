@@ -19,7 +19,16 @@ import { logDenied } from "./log";
  *   user          — a person inside either
  */
 
-export const ROLES = ["agency_owner", "agency_admin", "agency_staff", "sub_account_user"] as const;
+/**
+ * Permission tier, mirroring the CHECK constraint on `users.role`. The two are
+ * kept identical by a test — an enum with two sources of truth is the drift the
+ * project's rules exist to prevent, and this pair had already diverged once.
+ *
+ * A user's *level* is not encoded here: agency staff have a NULL
+ * `sub_account_id`, sub-account staff have one. Level is structure, role is
+ * permission, and conflating them was what produced four overlapping values.
+ */
+export const ROLES = ["owner", "admin", "member"] as const;
 export type Role = (typeof ROLES)[number];
 
 export type TenantContext = {
