@@ -223,11 +223,28 @@ describe("every repository scopes itself, without relying on the database", () =
   })();
   const TABLE_ALT = TENANT_TABLES.join("|");
 
+  /**
+   * Every module that queries tenant data — not just the ones under `repos/`.
+   *
+   * Discovered by whether the file takes a `TenantQuery`, the same way the
+   * authorisation suite finds server actions by their "use server" directive
+   * rather than by filename. A directory-based scan would have missed the
+   * analytics layer entirely: it lives outside `repos/`, issues its own
+   * aggregate SQL across several tenant tables, and a missing predicate there
+   * leaks totals rather than records — which is harder to notice, not easier.
+   */
   function repoFiles(): string[] {
-    if (!existsSync(REPOS)) return [];
-    return readdirSync(REPOS)
-      .filter((n) => n.endsWith(".ts"))
-      .map((n) => join(REPOS, n));
+    const out: string[] = [];
+    if (existsSync(REPOS)) {
+      for (const n of readdirSync(REPOS)) if (n.endsWith(".ts")) out.push(join(REPOS, n));
+    }
+    for (const n of readdirSync(SERVER)) {
+      const path = join(SERVER, n);
+      if (!n.endsWith(".ts") || !statSync(path).isFile()) continue;
+      if (n === "tenant.ts") continue; // defines the type rather than consuming it
+      if (/TenantQuery/.test(readFileSync(path, "utf8"))) out.push(path);
+    }
+    return out;
   }
 
   it("finds the repositories (a suite matching nothing proves nothing)", () => {
