@@ -115,3 +115,63 @@ export async function withTenant<T>(
     client.release();
   }
 }
+
+/**
+ * A querier for work that happens BEFORE anyone is signed in.
+ *
+ * Rate limiting a login and issuing a password reset both run for someone whose
+ * account has not been identified yet — that is the entire point of them — so
+ * there is no tenant to scope them to and `withTenant` cannot serve them. The
+ * honest options were an escape hatch or letting those modules reach for the
+ * pool themselves; the second would put a hole in the rule that nothing outside
+ * this file opens a connection, and would be invisible in review.
+ *
+ * So the hatch exists, is named for what it is, and is deliberately awkward:
+ * a separate brand, so a repository written for tenant data cannot silently
+ * accept one. The tables it may touch are listed here and enforced by a test —
+ * none of them holds customer records; a row is a hash or a counter.
+ */
+declare const systemBrand: unique symbol;
+
+/** The only tables reachable without a tenant. Enforced by `tenant-context.test.ts`. */
+export const SYSTEM_TABLES = ["users", "password_resets", "login_attempts", "agencies", "sub_accounts"] as const;
+
+export interface SystemQuery {
+  readonly [systemBrand]: true;
+  rows<T extends QueryResultRow>(sql: string, params?: readonly unknown[]): Promise<T[]>;
+  one<T extends QueryResultRow>(sql: string, params?: readonly unknown[]): Promise<T | null>;
+}
+
+/**
+ * Run `fn` with no tenant set.
+ *
+ * Still a transaction, and still the pool — the only thing missing is
+ * `app.sub_account_id`, which means every row-level policy matches nothing.
+ * That is the safety property: if this is ever pointed at a CRM table by
+ * mistake, it returns empty rather than everything.
+ */
+export async function withSystem<T>(fn: (q: SystemQuery) => Promise<T>): Promise<T> {
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const q = {
+      async rows<R extends QueryResultRow>(sql: string, params: readonly unknown[] = []) {
+        const { rows } = await client.query<R>(sql, params as unknown[]);
+        return rows;
+      },
+      async one<R extends QueryResultRow>(sql: string, params: readonly unknown[] = []) {
+        const { rows } = await client.query<R>(sql, params as unknown[]);
+        return rows[0] ?? null;
+      },
+    } as SystemQuery;
+    const result = await fn(q);
+    await client.query("COMMIT");
+    return result;
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+

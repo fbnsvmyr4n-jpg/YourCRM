@@ -97,8 +97,22 @@ CREATE TABLE IF NOT EXISTS users (
   deleted_at      TIMESTAMPTZ
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS users_email_per_agency ON users (agency_id, lower(email));
 CREATE INDEX IF NOT EXISTS users_agency_idx ON users (agency_id);
+
+-- Replaces `users_email_per_agency`, which was unique on (agency_id, email) and
+-- had two problems.
+--
+-- Sign-in identifies an account by email ALONE — there is no agency hint on the
+-- login form — so per-agency uniqueness still allowed two agencies to hold the
+-- same address, and the lookup would resolve to whichever row came back first.
+-- That can sign somebody into the wrong agency, silently. Global uniqueness is
+-- what email-only login actually requires; if the product ever needs one person
+-- in two agencies, that is a membership table, not a looser index.
+--
+-- It also had no `WHERE deleted_at IS NULL`, so a departed user's address stayed
+-- taken forever and could never be re-registered.
+CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique
+  ON users (lower(email)) WHERE deleted_at IS NULL;
 
 -- ---------------------------------------------------------------------------
 -- CRM entities
@@ -381,3 +395,73 @@ DROP POLICY IF EXISTS settings_tenant_isolation ON settings;
 CREATE POLICY settings_tenant_isolation ON settings
   USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
   WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
+
+
+-- ---------------------------------------------------------------------------
+-- Assistant chat
+--
+-- Tenant-scoped and user-scoped: a conversation belongs to one person inside
+-- one sub-account, and two colleagues must never see each other's threads.
+--
+-- Hard-deleted rather than soft, uniquely in this schema. "Clear chat" is a
+-- user asking for their own conversation to be gone, and a tombstone that
+-- quietly keeps it would make the button a lie. There is no audit interest in
+-- what somebody asked an assistant.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id              TEXT PRIMARY KEY,
+  sub_account_id  TEXT NOT NULL REFERENCES sub_accounts(id) ON DELETE CASCADE,
+  user_id         TEXT REFERENCES users(id) ON DELETE CASCADE,
+  role            TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+  text            TEXT NOT NULL DEFAULT '',
+  at              TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS chat_messages_tenant_idx ON chat_messages (sub_account_id, user_id, at);
+
+ALTER TABLE chat_messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE chat_messages  FORCE ROW LEVEL SECURITY;
+CREATE POLICY chat_messages_tenant_isolation ON chat_messages
+  USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
+  WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
+
+
+-- ---------------------------------------------------------------------------
+-- Pre-authentication tables
+--
+-- These two are deliberately NOT tenant-scoped, and the reason is structural
+-- rather than an oversight: both are used before anyone is signed in, so there
+-- is no tenant to scope them to. Rate limiting a login has to work for a user
+-- whose account we have not identified yet — that is the entire point — and a
+-- password reset is requested by someone who cannot authenticate.
+--
+-- They carry no customer records. A row here is a hash and a counter.
+-- ---------------------------------------------------------------------------
+
+-- Only a SHA-256 hash of each token is ever stored. A live reset token IS a
+-- credential, so the same rule as passwords applies: if this table leaks, the
+-- rows must be useless. Single-use and short-lived; rows are deleted on use or
+-- expiry rather than flagged, so the table cannot grow without bound.
+CREATE TABLE IF NOT EXISTS password_resets (
+  token_hash      TEXT PRIMARY KEY,
+  user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  email           TEXT NOT NULL,
+  expires_at      TIMESTAMPTZ NOT NULL,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS password_resets_user_idx ON password_resets (user_id);
+CREATE INDEX IF NOT EXISTS password_resets_expiry_idx ON password_resets (expires_at);
+
+-- Keyed `email:someone@example.com` or `ip:1.2.3.4`; the prefix keeps the two
+-- namespaces apart so one cannot be spoofed into the other. Persisted rather
+-- than held in memory because on a serverless host each request may land on a
+-- fresh instance, and an in-process counter would reset constantly and protect
+-- nothing.
+CREATE TABLE IF NOT EXISTS login_attempts (
+  key             TEXT PRIMARY KEY,
+  failures        INTEGER NOT NULL DEFAULT 0,
+  first_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  locked_until    TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS login_attempts_lock_idx ON login_attempts (locked_until);
+

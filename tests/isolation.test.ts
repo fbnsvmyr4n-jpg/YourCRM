@@ -29,6 +29,12 @@ const NOT_TENANT_SCOPED: Record<string, string> = {
   sub_accounts: "level 2 — scoped by agency_id, and is the thing others point at",
   users: "scoped by agency_id; sub_account_id is nullable for agency-wide staff",
   settings: "keyed BY sub_account_id as its primary key",
+  password_resets:
+    "pre-authentication: requested by somebody who cannot sign in, so there is " +
+    "no tenant to scope to. Holds a hash and an expiry, never customer records.",
+  login_attempts:
+    "pre-authentication: rate limiting must work before the account is even " +
+    "identified, which is the point of it. Holds a key and a counter.",
 };
 
 function tableNames(sql: string): string[] {
@@ -128,7 +134,11 @@ describe("row-level security backs the application up", () => {
     // USING alone filters SELECT but still permits INSERT/UPDATE of a row
     // belonging to another tenant. Both clauses are required.
     const policies = [...SCHEMA.matchAll(/CREATE POLICY (\w+) ON (\w+)([\s\S]*?);/g)];
-    expect(policies.length).toBeGreaterThanOrEqual(8);
+    // Tracks the schema rather than a number someone wrote once: every table
+    // that enables RLS must have exactly one policy, so the two counts move
+    // together and a new table cannot arrive with neither.
+    const enabled = [...SCHEMA.matchAll(/ALTER TABLE\s+(\w+)\s+ENABLE ROW LEVEL SECURITY/g)];
+    expect(policies.length, "a table enables RLS but has no policy").toBe(enabled.length);
     for (const [, policyName, table, body] of policies) {
       expect(body, `policy ${policyName} on ${table} has no USING clause`).toMatch(/USING \(/);
       expect(body, `policy ${policyName} on ${table} has no WITH CHECK clause`).toMatch(/WITH CHECK \(/);
