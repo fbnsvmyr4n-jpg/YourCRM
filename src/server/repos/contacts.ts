@@ -241,3 +241,55 @@ export async function restoreContact(q: TenantQuery, id: string): Promise<boolea
   );
   return row !== null;
 }
+
+/**
+ * Assign, reassign or unassign the owner of this record.
+ *
+ * Separate from the general update for the same reason a stage change is: it
+ * is a claim about who is responsible, not a form field, and it is the one
+ * write the database refuses on grounds the caller cannot see from the row.
+ *
+ * A database trigger rejects an owner from another tenant — a plain foreign key
+ * cannot express that, because the tenant is on this row and the agency is on
+ * the user. The check runs there rather than only here so an import script or a
+ * future endpoint cannot skip it. This turns its error into a readable one;
+ * it does not replace it.
+ *
+ * `null` unassigns, which is always allowed.
+ */
+export async function assignOwner(
+  q: TenantQuery,
+  id: string,
+  ownerUserId: string | null
+): Promise<{ record?: ContactRecord; error?: string }> {
+  try {
+    const row = await q.one<Row>(
+      `WITH updated AS (
+         UPDATE contacts SET owner_user_id = $3
+         WHERE id = $2 AND sub_account_id = $1 AND deleted_at IS NULL
+         RETURNING *
+       )
+       ${SELECT.replace("FROM contacts c", "FROM updated c").replace("$1", "$1")}`,
+      [q.ctx.subAccountId, id, ownerUserId]
+    );
+    return row ? { record: toRecord(row) } : { error: "That record no longer exists." };
+  } catch (err) {
+    if (String(err).includes("does not belong to sub-account")) {
+      return { error: "That person is not a member of this account." };
+    }
+    throw err;
+  }
+}
+
+/** Everything assigned to one person — or, with null, everything unassigned. */
+export async function listByOwner(
+  q: TenantQuery,
+  ownerUserId: string | null
+): Promise<ContactRecord[]> {
+  const rows = await q.rows<Row>(
+    `${SELECT} AND c.owner_user_id IS NOT DISTINCT FROM $2`,
+    [q.ctx.subAccountId, ownerUserId]
+  );
+  return rows.map(toRecord);
+}
+
