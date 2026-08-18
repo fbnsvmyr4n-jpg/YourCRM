@@ -119,8 +119,16 @@ CREATE TABLE IF NOT EXISTS contacts (
   email           TEXT,
   phone           TEXT,
   company_id      TEXT,                     -- FK added once companies exists
-  type            TEXT NOT NULL DEFAULT 'lead' CHECK (type IN ('lead', 'client')),
   info            TEXT,
+  location        TEXT,
+
+  -- `leads` used to be a separate table holding a duplicate of the same person,
+  -- linked to `contacts` only by name matching — so one human could exist twice
+  -- with divergent data and nothing reconciled them. A contact is now simply a
+  -- person; whether they are a "lead" is DERIVED from having an open deal, and
+  -- whether they are a client is derived from having a won one. Nothing about
+  -- their sales position is stored here, because stored status is what went
+  -- stale in the old model.
 
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -154,7 +162,16 @@ CREATE TABLE IF NOT EXISTS deals (
   -- Discovery and drive what gets shown in the Demo.
   pain_points     JSONB NOT NULL DEFAULT '[]'::jsonb,
 
+  -- How this opportunity arrived. Lived on the old `leads` table, which meant
+  -- revenue-by-source had to match a won deal to a lead BY NAME — the audit
+  -- found only 4 of 10 matched, and a rename broke the link silently. As a
+  -- column on the deal the attribution is exact and cannot drift.
+  source          TEXT NOT NULL DEFAULT 'other'
+                    CHECK (source IN ('google_ads', 'facebook', 'referral',
+                                      'phone_call', 'website', 'outbound', 'other')),
+
   -- Which contact referred this deal in, closing the loop back to Prospect.
+  -- Set when source = 'referral'; drives the referral credit programme.
   referred_by_contact_id TEXT REFERENCES contacts(id) ON DELETE SET NULL,
 
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -163,6 +180,7 @@ CREATE TABLE IF NOT EXISTS deals (
 );
 CREATE INDEX IF NOT EXISTS deals_tenant_idx ON deals (sub_account_id) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS deals_stage_idx  ON deals (sub_account_id, stage) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS deals_source_idx ON deals (sub_account_id, source) WHERE deleted_at IS NULL;
 
 -- ---------------------------------------------------------------------------
 -- Row-Level Security

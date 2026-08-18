@@ -144,3 +144,40 @@ describe("the deal pipeline matches the documented sales process", () => {
     expect(tableBody(SCHEMA, "deals")).toMatch(/referred_by_contact_id/);
   });
 });
+
+describe("leads are folded into contacts and deals", () => {
+  /**
+   * The old model kept `leads` and `contacts` as separate tables holding the
+   * same human, joined only by matching their name. Two consequences, both
+   * measured during the audit: the same person could exist twice with
+   * divergent data, and revenue-by-source matched only 4 of 10 won deals
+   * because a rename severed the link with no error.
+   *
+   * A lead is now not a record type at all. It is a *position*: a contact who
+   * has an open deal. Nothing to duplicate, nothing to reconcile.
+   */
+
+  it("has no leads table to drift out of sync with contacts", () => {
+    expect(
+      tableNames(SCHEMA),
+      "a `leads` table reintroduces the duplicate-person class of bug"
+    ).not.toContain("leads");
+  });
+
+  it("attributes source on the deal, not by matching names", () => {
+    const body = tableBody(SCHEMA, "deals");
+    expect(body, "deals cannot be attributed to a source").toMatch(/source\s+TEXT\s+NOT NULL/);
+    for (const src of ["google_ads", "facebook", "referral", "phone_call"]) {
+      expect(body, `source "${src}" is missing`).toContain(`'${src}'`);
+    }
+  });
+
+  it("does not store a lead's sales position on the contact", () => {
+    // Stored status is what went stale. Whether someone is a lead or a client
+    // is derived from their deals, the same rule the meetings model follows.
+    const body = tableBody(SCHEMA, "contacts");
+    expect(body, "contacts store a stage — it will disagree with the deal").not.toMatch(
+      /^\s*(stage|status)\s+TEXT/m
+    );
+  });
+});
