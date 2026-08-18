@@ -99,7 +99,12 @@ describe("the schema runs on real Postgres", () => {
       `SELECT relname, relforcerowsecurity AS f FROM pg_class
        WHERE relrowsecurity AND relnamespace = 'public'::regnamespace ORDER BY relname`
     );
-    expect(rows.length).toBe(8);
+    // Derived from the schema, not hardcoded: this used to say 8 and would have
+    // silently under-checked the moment a ninth table arrived — which it just
+    // did, when chat_messages was added.
+    const declared = [...SCHEMA.matchAll(/ALTER TABLE\s+\w+\s+ENABLE ROW LEVEL SECURITY/g)].length;
+    expect(rows.length, "a table declares RLS but Postgres does not report it").toBe(declared);
+    expect(declared).toBeGreaterThanOrEqual(9);
     for (const r of rows) expect(r.f, `${r.relname} is not FORCEd`).toBe(true);
   });
 });

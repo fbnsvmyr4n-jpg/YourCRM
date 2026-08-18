@@ -197,6 +197,32 @@ describe("every repository scopes itself, without relying on the database", () =
    */
   const REPOS = join(SERVER, "repos");
 
+  /**
+   * Tenant-scoped tables, read out of the schema rather than listed by hand.
+   *
+   * A hand-written list is a second source of truth that silently falls behind:
+   * `chat_messages` and `settings` were added and the guard simply stopped
+   * seeing those repos' SQL, reporting zero statements instead of a failure.
+   * Deriving it means a new tenant table is covered the moment it exists.
+   */
+  const TENANT_TABLES = (() => {
+    const schema = readFileSync(join(SERVER, "schema.sql"), "utf8");
+    const out: string[] = [];
+    for (const m of schema.matchAll(/CREATE TABLE IF NOT EXISTS (\w+) \(/g)) {
+      // Bounded at the statement terminator. A non-greedy match across the
+      // whole file runs into the NEXT table's columns, which is how `users`
+      // — whose sub_account_id is nullable, because agency staff are not
+      // pinned to one client — first appeared in this list.
+      const body = schema.slice(m.index!, schema.indexOf("\n);", m.index!));
+      // Two shapes count as tenant-scoped: a NOT NULL column, and `settings`,
+      // which keys ON sub_account_id as its primary key. Only `users` is
+      // neither, because its sub_account_id is nullable by design.
+      if (/sub_account_id\s+TEXT\s+(NOT NULL|PRIMARY KEY)/.test(body)) out.push(m[1]);
+    }
+    return out;
+  })();
+  const TABLE_ALT = TENANT_TABLES.join("|");
+
   function repoFiles(): string[] {
     if (!existsSync(REPOS)) return [];
     return readdirSync(REPOS)
@@ -208,8 +234,44 @@ describe("every repository scopes itself, without relying on the database", () =
     expect(repoFiles().length).toBeGreaterThan(0);
   });
 
+  /**
+   * Repositories that legitimately have no tenant, each with a stated reason.
+   *
+   * An allowlist rather than a silent skip: adding a file here is a visible
+   * decision in a diff, and the reason has to be written down. These run
+   * through `withSystem`, which sets no `app.sub_account_id` — so every
+   * row-level policy matches nothing and a mistake here returns empty rather
+   * than everything.
+   */
+  const UNTENANTED: Record<string, string> = {
+    "auth.ts":
+      "pre-authentication: reset tokens and login rate limiting run for somebody " +
+      "who is not signed in. Touches only password_resets and login_attempts.",
+    "users.ts":
+      "sign-in happens before a tenant exists, and users are agency-level anyway; " +
+      "scoped by agency_id explicitly, or by the user's own id.",
+  };
+
+  for (const [name, reason] of Object.entries(UNTENANTED)) {
+    it(`${name} is exempt for a stated reason, and touches no CRM table`, () => {
+      // The exemption is from tenant *scoping*, not from scrutiny. What it must
+      // still prove is that it never reads customer data — an untenanted query
+      // against contacts or deals would see nothing under RLS, but the repos
+      // also filter themselves, and a file here bypasses that check entirely.
+      expect(reason.length, `${name} has no reason recorded`).toBeGreaterThan(20);
+      const src = readFileSync(join(REPOS, name), "utf8");
+      for (const table of TENANT_TABLES) {
+        expect(
+          new RegExp(`\\b(FROM|INTO|UPDATE|JOIN)\\s+${table}\\b`, "i").test(src),
+          `${name} is exempt from tenant scoping but queries ${table}, which holds customer records`
+        ).toBe(false);
+      }
+    });
+  }
+
   for (const path of repoFiles()) {
     const name = path.split("/").pop()!;
+    if (name in UNTENANTED) continue;
 
     it(`${name} filters the tenant in every statement it issues`, () => {
       // Comments must go first. Doc comments here use markdown backticks around
@@ -225,7 +287,7 @@ describe("every repository scopes itself, without relying on the database", () =
       // Template literals passed to q.rows/q.one, i.e. the SQL this repo runs.
       const statements = [...src.matchAll(/`([^`]*\b(?:SELECT|INSERT|UPDATE|DELETE)\b[^`]*)`/gi)]
         .map((m) => m[1])
-        .filter((sql) => /\b(FROM|INTO|UPDATE)\s+(contacts|deals|meetings|messages|activities|calls|companies)\b/i.test(sql));
+        .filter((sql) => new RegExp(`\\b(FROM|INTO|UPDATE)\\s+(${TABLE_ALT})\\b`, "i").test(sql));
 
       /**
        * Self-calibrating coverage check, replacing a hard-coded floor of five.
@@ -239,10 +301,10 @@ describe("every repository scopes itself, without relying on the database", () =
        * ways is what catches an extractor that quietly matches less than it
        * claims — which this one already did once.
        */
-      const TABLE_REF = /\b(?:FROM|INTO|UPDATE)\s+(?:contacts|deals|meetings|messages|activities|calls|companies)\b/gi;
-      const inFile = (src.match(TABLE_REF) ?? []).length;
+      const tableRef = () => new RegExp(`\\b(?:FROM|INTO|UPDATE)\\s+(?:${TABLE_ALT})\\b`, "gi");
+      const inFile = (src.match(tableRef()) ?? []).length;
       const inStatements = statements.reduce(
-        (n, sql) => n + (sql.match(TABLE_REF) ?? []).length,
+        (n, sql) => n + (sql.match(tableRef()) ?? []).length,
         0
       );
       expect(
