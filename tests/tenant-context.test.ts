@@ -64,11 +64,24 @@ describe("enums have one source of truth", () => {
    * rejected, and nothing caught it until the first real INSERT failed at
    * runtime. Same defect class as `as SomeType` standing in for validation.
    */
-  function checkConstraint(column: string): string[] {
+  /**
+   * Scoped to a table, because column names are not unique across the schema.
+   *
+   * `kind` exists on both `meetings` and `activities`, and `outcome` on both
+   * `meetings` and `calls`. An unscoped search returns whichever table appears
+   * first in the file, so this helper was matching the right constraint by
+   * ordering luck and would have compared the wrong two lists the moment a
+   * table moved. Same class as every other detector on this project that
+   * matched something without matching the right thing.
+   */
+  function checkConstraint(table: string, column: string): string[] {
     const schema = readFileSync(join(SERVER, "schema.sql"), "utf8");
-    const re = new RegExp(`CHECK \\(${column} IN \\(([^)]*)\\)\\)`);
-    const m = schema.match(re);
-    expect(m, `no CHECK constraint found for ${column}`).toBeTruthy();
+    const start = schema.indexOf(`CREATE TABLE IF NOT EXISTS ${table} (`);
+    expect(start, `no table named ${table}`).toBeGreaterThan(-1);
+    const body = schema.slice(start, schema.indexOf("\n);", start));
+
+    const m = body.match(new RegExp(`CHECK \\(${column} IN \\(([^)]*)\\)\\)`));
+    expect(m, `no CHECK constraint on ${table}.${column}`).toBeTruthy();
     return [...m![1].matchAll(/'([^']+)'/g)].map((x) => x[1]).sort();
   }
 
@@ -81,11 +94,11 @@ describe("enums have one source of truth", () => {
   const DEALS = readFileSync(join(SERVER, "repos", "deals.ts"), "utf8");
 
   it("deal stages match the CHECK constraint exactly", () => {
-    expect(tsEnum(DEALS, "STAGES")).toEqual(checkConstraint("stage"));
+    expect(tsEnum(DEALS, "STAGES")).toEqual(checkConstraint("deals", "stage"));
   });
 
   it("deal sources match the CHECK constraint exactly", () => {
-    expect(tsEnum(DEALS, "SOURCES")).toEqual(checkConstraint("source"));
+    expect(tsEnum(DEALS, "SOURCES")).toEqual(checkConstraint("deals", "source"));
   });
 
   it("the open and post-close stage groups are real stages, and do not overlap", () => {
@@ -107,11 +120,11 @@ describe("enums have one source of truth", () => {
   it("meeting outcomes match the CHECK constraint exactly", () => {
     // The old JSONB repo stored "no-show" while the schema said "no_show".
     // Nothing caught it, because nothing compared them.
-    expect(tsEnum(MEETINGS, "OUTCOMES")).toEqual(checkConstraint("outcome"));
+    expect(tsEnum(MEETINGS, "OUTCOMES")).toEqual(checkConstraint("meetings", "outcome"));
   });
 
   it("meeting kinds match the CHECK constraint exactly", () => {
-    expect(tsEnum(MEETINGS, "KINDS")).toEqual(checkConstraint("kind"));
+    expect(tsEnum(MEETINGS, "KINDS")).toEqual(checkConstraint("meetings", "kind"));
   });
 
   it("the attended group is made of real outcomes and excludes the pending one", () => {
@@ -124,6 +137,33 @@ describe("enums have one source of truth", () => {
     expect(attended, "a no-show counts as attended").not.toContain("no_show");
   });
 
+  it("activity entity types match the CHECK constraint exactly", () => {
+    const src = readFileSync(join(SERVER, "repos", "activity.ts"), "utf8");
+    expect(tsEnum(src, "ENTITY_TYPES")).toEqual(checkConstraint("activities", "entity_type"));
+  });
+
+  it("message directions match the CHECK constraint exactly", () => {
+    const src = readFileSync(join(SERVER, "repos", "inbox.ts"), "utf8");
+    expect(tsEnum(src, "DIRECTIONS")).toEqual(checkConstraint("messages", "direction"));
+  });
+
+  it("activity kinds are documented as an application rule, not a database one", () => {
+    /**
+     * The exception that proves the rule. `activities.kind` has no CHECK
+     * constraint on purpose — a new kind of event should not need a migration,
+     * and an unknown kind arriving from a newer deployment must not fail a
+     * write mid-release. That is a real trade-off, so the module has to say so
+     * rather than leave a reader assuming the database is enforcing it.
+     */
+    const src = readFileSync(join(SERVER, "repos", "activity.ts"), "utf8");
+    expect(
+      "a CHECK on activities.kind now exists, so ACTIVITY_KINDS should be pinned to it like the others"
+    ).not.toMatch(/CHECK \(kind IN/);
+    expect(src, "the missing CHECK on kind is undocumented").toMatch(
+      /no CHECK constraint behind this/i
+    );
+  });
+
   it("matches the CHECK constraint on users.role exactly", () => {
     /**
      * These had already drifted: the schema allowed owner/admin/member while
@@ -131,10 +171,8 @@ describe("enums have one source of truth", () => {
      * insert failed. Same defect class as `as SomeType` standing in for
      * validation — a compile-time claim nothing checked against the database.
      */
-    const schema = readFileSync(join(SERVER, "schema.sql"), "utf8");
-    const check = schema.match(/role\s+TEXT NOT NULL DEFAULT[\s\S]*?CHECK \(role IN \(([^)]*)\)\)/);
-    expect(check, "could not find the role CHECK constraint").toBeTruthy();
-    const inDb = [...check![1].matchAll(/'([^']+)'/g)].map((m) => m[1]).sort();
+    // Uses the shared table-scoped helper now, rather than its own regex.
+    const inDb = checkConstraint("users", "role");
 
     const inCode = [...TENANT.match(/export const ROLES = \[([^\]]*)\]/)![1].matchAll(/"([^"]+)"/g)]
       .map((m) => m[1])
@@ -189,10 +227,29 @@ describe("every repository scopes itself, without relying on the database", () =
         .map((m) => m[1])
         .filter((sql) => /\b(FROM|INTO|UPDATE)\s+(contacts|deals|meetings|messages|activities|calls|companies)\b/i.test(sql));
 
-      // contacts.ts has five: the shared projection, insert, update, delete,
-      // restore. A drop in this number means the extractor stopped seeing
-      // statements, not that the repo got safer.
-      expect(statements.length, `${name} issues no recognisable SQL`).toBeGreaterThanOrEqual(5);
+      /**
+       * Self-calibrating coverage check, replacing a hard-coded floor of five.
+       *
+       * That floor was calibrated to contacts.ts and was simply wrong for an
+       * append-only log with two statements — it failed a correct repo, which
+       * is the mirror of the failure it was meant to prevent. The property
+       * actually wanted is "the extractor saw ALL the SQL", so it is measured
+       * directly: every table reference in the stripped source must fall
+       * inside an extracted statement. Counting the same thing two independent
+       * ways is what catches an extractor that quietly matches less than it
+       * claims — which this one already did once.
+       */
+      const TABLE_REF = /\b(?:FROM|INTO|UPDATE)\s+(?:contacts|deals|meetings|messages|activities|calls|companies)\b/gi;
+      const inFile = (src.match(TABLE_REF) ?? []).length;
+      const inStatements = statements.reduce(
+        (n, sql) => n + (sql.match(TABLE_REF) ?? []).length,
+        0
+      );
+      expect(
+        inStatements,
+        `${name}: the SQL extractor saw ${inStatements} of ${inFile} table references, so this test is checking less than it appears to`
+      ).toBe(inFile);
+      expect(statements.length, `${name} issues no recognisable SQL`).toBeGreaterThan(0);
       for (const sql of statements) {
         expect(
           /sub_account_id/.test(sql),
