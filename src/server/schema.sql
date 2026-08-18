@@ -465,3 +465,64 @@ CREATE TABLE IF NOT EXISTS login_attempts (
 );
 CREATE INDEX IF NOT EXISTS login_attempts_lock_idx ON login_attempts (locked_until);
 
+
+-- ---------------------------------------------------------------------------
+-- Ownership must stay inside the tenant
+--
+-- `owner_user_id REFERENCES users(id)` says the owner is a real user. It does
+-- NOT say the owner belongs to this customer, and a foreign key cannot express
+-- that: the tenant is on the row, the agency is on the user, and the link
+-- between them runs through sub_accounts.
+--
+-- Verified before this existed: a deal in agency A's sub-account could be
+-- assigned to agency B's employee, and the reports layer joins users to show
+-- the owner's NAME — so B's staff name rendered on A's report. Row-level
+-- security does not catch it, because the write targets a row in A's own tenant
+-- and is legitimately allowed; only the value being written is wrong.
+--
+-- Enforced as a trigger rather than in the repositories alone, for the same
+-- reason the policies exist: a rule that only lives in application code is one
+-- an import script, a migration or a future endpoint can skip without noticing.
+-- ---------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION assert_owner_in_tenant() RETURNS trigger AS $$
+BEGIN
+  IF NEW.owner_user_id IS NULL THEN
+    RETURN NEW;  -- unassigned is always valid
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM users u
+    JOIN sub_accounts sa ON sa.id = NEW.sub_account_id
+    WHERE u.id = NEW.owner_user_id
+      AND u.deleted_at IS NULL
+      AND u.agency_id = sa.agency_id
+      -- Agency-wide staff (NULL sub_account_id) may own anything in their
+      -- agency; someone pinned to one client may only own that client's work.
+      AND (u.sub_account_id IS NULL OR u.sub_account_id = NEW.sub_account_id)
+  ) THEN
+    RAISE EXCEPTION
+      'owner % does not belong to sub-account %', NEW.owner_user_id, NEW.sub_account_id
+      USING ERRCODE = 'check_violation';
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS contacts_owner_in_tenant ON contacts;
+CREATE TRIGGER contacts_owner_in_tenant
+  BEFORE INSERT OR UPDATE OF owner_user_id, sub_account_id ON contacts
+  FOR EACH ROW EXECUTE FUNCTION assert_owner_in_tenant();
+
+DROP TRIGGER IF EXISTS deals_owner_in_tenant ON deals;
+CREATE TRIGGER deals_owner_in_tenant
+  BEFORE INSERT OR UPDATE OF owner_user_id, sub_account_id ON deals
+  FOR EACH ROW EXECUTE FUNCTION assert_owner_in_tenant();
+
+DROP TRIGGER IF EXISTS meetings_owner_in_tenant ON meetings;
+CREATE TRIGGER meetings_owner_in_tenant
+  BEFORE INSERT OR UPDATE OF owner_user_id, sub_account_id ON meetings
+  FOR EACH ROW EXECUTE FUNCTION assert_owner_in_tenant();
+
