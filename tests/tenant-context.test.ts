@@ -102,6 +102,28 @@ describe("enums have one source of truth", () => {
     expect(stages.has("lost"), "there is no terminal lost stage").toBe(true);
   });
 
+  const MEETINGS = readFileSync(join(SERVER, "repos", "meetings.ts"), "utf8");
+
+  it("meeting outcomes match the CHECK constraint exactly", () => {
+    // The old JSONB repo stored "no-show" while the schema said "no_show".
+    // Nothing caught it, because nothing compared them.
+    expect(tsEnum(MEETINGS, "OUTCOMES")).toEqual(checkConstraint("outcome"));
+  });
+
+  it("meeting kinds match the CHECK constraint exactly", () => {
+    expect(tsEnum(MEETINGS, "KINDS")).toEqual(checkConstraint("kind"));
+  });
+
+  it("the attended group is made of real outcomes and excludes the pending one", () => {
+    // This group is the numerator of the show rate. A typo would not fail a
+    // query; it would quietly report a lower show rate than the truth.
+    const outcomes = new Set(tsEnum(MEETINGS, "OUTCOMES"));
+    const attended = tsEnum(MEETINGS, "ATTENDED_OUTCOMES");
+    for (const o of attended) expect(outcomes.has(o), `"${o}" is not a real outcome`).toBe(true);
+    expect(attended, "a meeting nobody has marked up counts as attended").not.toContain("scheduled");
+    expect(attended, "a no-show counts as attended").not.toContain("no_show");
+  });
+
   it("matches the CHECK constraint on users.role exactly", () => {
     /**
      * These had already drifted: the schema allowed owner/admin/member while
