@@ -65,8 +65,8 @@ export function VoiceAgentConsole({
       if (res.call) {
         setSelectedId(res.call.id);
         setToast({
-          lead: !!res.leadCreated,
-          leadMatched: !!res.leadMatched,
+          lead: !!res.contactCreated,
+          leadMatched: !!res.contactMatched,
           meeting: !!res.meetingCreated,
           name: res.call.callerName,
         });
@@ -83,8 +83,8 @@ export function VoiceAgentConsole({
       const res = await processCallAction(id);
       if (res.call) {
         setToast({
-          lead: !!res.leadCreated,
-          leadMatched: !!res.leadMatched,
+          lead: !!res.contactCreated,
+          leadMatched: !!res.contactMatched,
           meeting: !!res.meetingCreated,
           name: res.call.callerName,
         });
