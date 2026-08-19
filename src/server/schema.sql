@@ -1,3 +1,10 @@
+-- Re-running this file must be safe.
+--
+-- Everything here is idempotent: tables and indexes use IF NOT EXISTS, triggers
+-- and policies are dropped first. `CREATE POLICY` has no IF NOT EXISTS of its
+-- own, and a second application failed halfway through — leaving the schema
+-- partly updated at precisely the moment somebody was trying to bring it up to
+-- date. A migration you cannot re-run is one you cannot recover with.
 -- ---------------------------------------------------------------------------
 -- YourCRM — multi-tenant schema
 --
@@ -240,10 +247,12 @@ ALTER TABLE deals    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE deals     FORCE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS contacts_tenant_isolation ON contacts;
+DROP POLICY IF EXISTS contacts_tenant_isolation ON contacts;
 CREATE POLICY contacts_tenant_isolation ON contacts
   USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
   WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
 
+DROP POLICY IF EXISTS deals_tenant_isolation ON deals;
 DROP POLICY IF EXISTS deals_tenant_isolation ON deals;
 CREATE POLICY deals_tenant_isolation ON deals
   USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
@@ -413,30 +422,36 @@ ALTER TABLE settings   ENABLE ROW LEVEL SECURITY;
 ALTER TABLE settings    FORCE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS companies_tenant_isolation ON companies;
+DROP POLICY IF EXISTS companies_tenant_isolation ON companies;
 CREATE POLICY companies_tenant_isolation ON companies
   USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
   WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
 
+DROP POLICY IF EXISTS meetings_tenant_isolation ON meetings;
 DROP POLICY IF EXISTS meetings_tenant_isolation ON meetings;
 CREATE POLICY meetings_tenant_isolation ON meetings
   USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
   WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
 
 DROP POLICY IF EXISTS messages_tenant_isolation ON messages;
+DROP POLICY IF EXISTS messages_tenant_isolation ON messages;
 CREATE POLICY messages_tenant_isolation ON messages
   USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
   WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
 
+DROP POLICY IF EXISTS activities_tenant_isolation ON activities;
 DROP POLICY IF EXISTS activities_tenant_isolation ON activities;
 CREATE POLICY activities_tenant_isolation ON activities
   USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
   WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
 
 DROP POLICY IF EXISTS calls_tenant_isolation ON calls;
+DROP POLICY IF EXISTS calls_tenant_isolation ON calls;
 CREATE POLICY calls_tenant_isolation ON calls
   USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
   WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
 
+DROP POLICY IF EXISTS settings_tenant_isolation ON settings;
 DROP POLICY IF EXISTS settings_tenant_isolation ON settings;
 CREATE POLICY settings_tenant_isolation ON settings
   USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
@@ -467,6 +482,7 @@ CREATE INDEX IF NOT EXISTS chat_messages_tenant_idx ON chat_messages (sub_accoun
 
 ALTER TABLE chat_messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE chat_messages  FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS chat_messages_tenant_isolation ON chat_messages;
 CREATE POLICY chat_messages_tenant_isolation ON chat_messages
   USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
   WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
@@ -571,4 +587,32 @@ DROP TRIGGER IF EXISTS meetings_owner_in_tenant ON meetings;
 CREATE TRIGGER meetings_owner_in_tenant
   BEFORE INSERT OR UPDATE OF owner_user_id, sub_account_id ON meetings
   FOR EACH ROW EXECUTE FUNCTION assert_owner_in_tenant();
+
+
+-- ---------------------------------------------------------------------------
+-- In-flight voice sessions
+--
+-- Scratch state for a call that is happening right now: what the caller has
+-- said so far, what the agent has worked out. It lives for the length of the
+-- call and is deleted when the call ends.
+--
+-- Not tenant-scoped, and deliberately so: a telephony webhook arrives before
+-- anything has resolved which customer the call belongs to — that resolution
+-- reads the dialled number, which happens at the end. Keyed by the provider's
+-- own call id, which is unguessable and unique across the platform.
+--
+-- The last thing still living in `crm_collections`. Moving it here means the
+-- application never issues DDL, so it can run as a role with no CREATE
+-- privilege on the schema — which is what stops it from being able to bypass
+-- row-level security.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS voice_sessions (
+  id          TEXT PRIMARY KEY,
+  data        JSONB NOT NULL,
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+-- Abandoned calls leave rows behind — a provider does not always send a final
+-- status callback. Indexed so a sweep of stale sessions stays cheap.
+CREATE INDEX IF NOT EXISTS voice_sessions_stale_idx ON voice_sessions (updated_at);
 

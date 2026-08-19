@@ -1,6 +1,6 @@
 import { MEETING_WHENS, type MeetingWhen } from "@/data/meetings";
 import { rankIntents, type Intent } from "./chat-intents";
-import { mutateTable, readTable } from "./store";
+import { withSystem } from "./tenant";
 
 /**
  * What the agent says to a real caller, and what it remembers between turns.
@@ -17,7 +17,6 @@ import { mutateTable, readTable } from "./store";
  * survive between them — it lives in the store, keyed by the call's SID.
  */
 
-const TABLE = "voice-sessions";
 
 export type VoiceStep = "intent" | "name" | "company" | "when" | "done";
 
@@ -35,26 +34,45 @@ export type VoiceSession = {
   startedAt: string;
 };
 
-const seed: VoiceSession[] = [];
 
 export async function getSession(id: string): Promise<VoiceSession | null> {
-  const rows = await readTable<VoiceSession>(TABLE, seed);
-  return rows.find((s) => s.id === id) ?? null;
-}
-
-/** Create-or-update in one lock, so two rapid turns can't clobber each other. */
-export async function saveSession(session: VoiceSession): Promise<void> {
-  await mutateTable<VoiceSession>(TABLE, seed, (rows) => {
-    const at = rows.findIndex((s) => s.id === session.id);
-    if (at === -1) return [session, ...rows];
-    const next = [...rows];
-    next[at] = session;
-    return next;
+  return withSystem(async (q) => {
+    const row = await q.one<{ data: VoiceSession }>(
+      `SELECT data FROM voice_sessions WHERE id = $1`,
+      [id]
+    );
+    return row?.data ?? null;
   });
 }
 
+/**
+ * Create-or-update in one statement, so two rapid turns cannot clobber each
+ * other.
+ *
+ * The previous version read every session into memory, edited the array and
+ * wrote it back under an advisory lock. An upsert on a primary key does the
+ * same job without loading anybody else's call, and without a lock that every
+ * concurrent call had to queue behind.
+ */
+export async function saveSession(session: VoiceSession): Promise<void> {
+  await withSystem((q) =>
+    q.rows(
+      `INSERT INTO voice_sessions (id, data, updated_at)
+       VALUES ($1, $2::jsonb, now())
+       ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
+      [session.id, JSON.stringify(session)]
+    )
+  );
+}
+
 export async function endSession(id: string): Promise<void> {
-  await mutateTable<VoiceSession>(TABLE, seed, (rows) => rows.filter((s) => s.id !== id));
+  await withSystem(async (q) => {
+    await q.rows(`DELETE FROM voice_sessions WHERE id = $1`, [id]);
+    // A provider does not always send a final status callback, so abandoned
+    // calls would otherwise accumulate forever. Anything untouched for a day
+    // is not a live conversation.
+    await q.rows(`DELETE FROM voice_sessions WHERE updated_at < now() - interval '1 day'`);
+  });
 }
 
 /* ------------------------------------------------------------------ */

@@ -35,6 +35,14 @@ const NOT_TENANT_SCOPED: Record<string, string> = {
   login_attempts:
     "pre-authentication: rate limiting must work before the account is even " +
     "identified, which is the point of it. Holds a key and a counter.",
+  voice_sessions:
+    "pre-tenant: a telephony webhook arrives before anything has resolved which " +
+    "customer the call belongs to — that resolution reads the dialled number and " +
+    "happens when the call ENDS. Keyed by the provider's own call id, which is " +
+    "unguessable and unique across the platform, read only by the webhook, and " +
+    "deleted when the call finishes. It does hold what the caller said, so the " +
+    "TTL sweep is not housekeeping — it is the thing that stops a transcript " +
+    "outliving the conversation when a provider drops the final callback.",
 };
 
 function tableNames(sql: string): string[] {
