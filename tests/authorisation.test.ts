@@ -115,6 +115,15 @@ describe("every server action is authorised", () => {
           // Bare guard, or one whose result is kept to attribute the write —
           // `const actor = await requireUser();` is the same check.
           /^(const \w+ = )?await requireUser\(\);$/.test(firstStatement ?? "") ||
+          // The tenant-aware entry points. Both resolve identity BEFORE they do
+          // anything else and throw when there is no session — the same
+          // fail-closed behaviour as `requireUser`, plus the tenant. They are
+          // accepted as guards because they are strictly stronger, not because
+          // they are an exception: an action that establishes which customer it
+          // is acting for has necessarily established who is asking.
+          /^(const \w+ = )?await requireTenant\(\);$/.test(firstStatement ?? "") ||
+          /^(return |const \w+ = )?await withCurrentTenant\(/.test(firstStatement ?? "") ||
+          /^return withCurrentTenant\(/.test(firstStatement ?? "") ||
           // Settings actions predate `requireUser` and fail closed by returning
           // an error state instead of throwing, which suits their form shape.
           firstStatement === "const me = await getCurrentUser();";
@@ -150,7 +159,7 @@ describe("every API route is authorised", () => {
 
       for (const verb of handlers) {
         const body = bodyOf(src, verb);
-        const guarded = /await (getCurrentUser|requireUser)\(\)/.test(body);
+        const guarded = /await (getCurrentUser|requireUser|requireTenant)\(\)|withCurrentTenant\(/.test(body);
         expect(
           guarded,
           `${file} → ${verb}() serves data without checking for a session`

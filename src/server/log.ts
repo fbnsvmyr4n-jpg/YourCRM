@@ -70,7 +70,9 @@ export function logAuth(
  * `entity` and `id` identify the record; the new values are deliberately absent.
  */
 export function logWrite(
-  action: "create" | "update" | "delete",
+  // `restore` exists because deletion is now soft: undoing one is a real write,
+  // and a log that records only the destruction tells half the story.
+  action: "create" | "update" | "delete" | "restore",
   entity: string,
   fields: { id?: string; actor?: string; detail?: string } = {}
 ): void {

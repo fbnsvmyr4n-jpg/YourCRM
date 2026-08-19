@@ -26,13 +26,76 @@ import {
 import { Avatar } from "@/components/ui/Avatar";
 import { Overlay } from "@/components/ui/Overlay";
 import { TimeAgo } from "@/components/ui/TimeAgo";
-import type { Contact, ContactType } from "@/data/contacts";
-import type { ContactSummary, TimelineEntry } from "@/server/contact-timeline";
+import type { ContactRecord } from "@/server/repos/contacts";
+import type { AvatarColor } from "@/components/ui/Avatar";
+
+/**
+ * A contact, decorated with what the screen needs and the record no longer stores.
+ *
+ * `type`, `status`, `initials` and `color` were columns once. Three of them were
+ * presentation and the fourth — a stored sales position — was the thing that
+ * went stale and disagreed with the deals underneath it. They are derived here,
+ * at the edge, where being wrong is a redraw rather than a wrong number in a
+ * database.
+ */
+export type ContactType = "lead" | "client";
+
+export type Contact = Omit<ContactRecord, "email" | "phone" | "location" | "info"> & {
+  /**
+   * Nullable in the database, never null here.
+   *
+   * The columns are genuinely optional — plenty of contacts have no phone
+   * number — but a screen renders text, and threading `| null` through forty
+   * JSX expressions buys nothing. Flattened once, at the boundary.
+   */
+  email: string;
+  phone: string;
+  location: string;
+  initials: string;
+  color: AvatarColor;
+  type: ContactType;
+  status: string;
+  /** The old `company` and `companyInfo` both read from this one column now. */
+  info: string;
+  company: string;
+  companyInfo: string;
+  owner: string;
+};
+
+const AVATAR_COLORS: AvatarColor[] = ["blue", "green", "amber", "purple", "pink", "teal"];
+
+/** Stable per contact: the same person keeps the same colour between renders. */
+function paletteFor(id: string): AvatarColor {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) | 0;
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+}
+
+export function decorate(c: ContactRecord, people: { id: string; name: string }[]): Contact {
+  const first = c.firstName.trim();
+  const last = c.lastName.trim();
+  return {
+    ...c,
+    email: c.email ?? "",
+    info: c.info ?? "",
+    phone: c.phone ?? "",
+    location: c.location ?? "",
+    initials: ((first[0] ?? "") + (last[0] ?? "") || first.slice(0, 2)).toUpperCase(),
+    color: paletteFor(c.id),
+    // Derived from deals, which is the whole point: somebody is a client
+    // because they bought something, not because a dropdown says so.
+    type: c.isClient ? "client" : "lead",
+    status: c.isClient ? "Client" : c.hasOpenDeal ? "In progress" : "No open deal",
+    company: c.info ?? "",
+    companyInfo: c.info ?? "",
+    owner: people.find((p) => p.id === c.ownerUserId)?.name ?? "Unassigned",
+  };
+}
+import type { ContactSummary, TimelineEntry } from "@/server/contact-summaries";
 import { clsx } from "@/lib/clsx";
 import {
   addContactAction,
   addNoteAction,
-  deleteActivityAction,
   deleteContactAction,
   logOutreachAction,
   updateContactAction,
@@ -42,16 +105,19 @@ import {
 type ModalState = null | "new" | Contact;
 type Panel = null | "note" | "revenue";
 
-const money = (n: number) => `$${Math.round(n).toLocaleString()}`;
+/** Takes integer cents, because that is what the database stores. */
+const money = (cents: number) => `$${Math.round(cents / 100).toLocaleString()}`;
 
 export function ContactsView({
   contacts,
   summaries,
-  currentUser,
+  currentUserId,
 }: {
   contacts: Contact[];
+  /** Colleagues who can own a record, for the assign control. */
+  people?: { id: string; name: string }[];
   summaries: Record<string, ContactSummary>;
-  currentUser: string | null;
+  currentUserId: string | null;
 }) {
   const [selectedId, setSelectedId] = useState(contacts[0]?.id ?? "");
   const [modal, setModal] = useState<ModalState>(null);
@@ -137,7 +203,7 @@ export function ContactsView({
         className="@min-[700px]:[grid-area:profile]"
         contact={contact}
         summary={summary}
-        currentUser={currentUser}
+        currentUserId={currentUserId}
         onEdit={() => setModal(contact)}
         onDelete={() => handleDelete(contact.id)}
         panel={panel}
@@ -162,12 +228,7 @@ export function ContactsView({
 
 /* ---------------- LEFT: info panel ---------------- */
 
-const STATUS_TONE: Record<string, { color: string; soft: string }> = {
-  Active: { color: "var(--green)", soft: "var(--green-soft)" },
-  New: { color: "var(--accent)", soft: "var(--accent-soft)" },
-  "Follow-up": { color: "var(--amber)", soft: "var(--amber-soft)" },
-  Inactive: { color: "var(--text-faint)", soft: "var(--raise)" },
-};
+
 
 function InfoPanel({
   contact,
@@ -178,7 +239,12 @@ function InfoPanel({
   summary?: ContactSummary;
   className?: string;
 }) {
-  const tone = STATUS_TONE[contact.status] ?? STATUS_TONE.Inactive;
+  // Derived status, so the palette is chosen from what is true now.
+  const tone = contact.isClient
+    ? { color: "var(--green)", soft: "var(--green-soft)" }
+    : contact.hasOpenDeal
+      ? { color: "var(--accent)", soft: "var(--accent-soft)" }
+      : { color: "var(--muted)", soft: "var(--rule-soft)" };
 
   return (
     <aside className={clsx("card flex flex-col gap-5 overflow-y-auto p-5", className)}>
@@ -199,8 +265,8 @@ function InfoPanel({
 
       {summary && (
         <div className="grid grid-cols-2 gap-2">
-          <MiniStat label="Won" value={money(summary.wonValue)} tone="var(--green)" />
-          <MiniStat label="Open" value={money(summary.openValue)} tone="var(--accent)" />
+          <MiniStat label="Won" value={money(summary.wonValueCents)} tone="var(--green)" />
+          <MiniStat label="Open" value={money(summary.openValueCents)} tone="var(--accent)" />
         </div>
       )}
 
@@ -269,7 +335,7 @@ function InfoRow({ icon: Icon, label, value }: { icon: typeof User; label: strin
 function ProfilePanel({
   contact,
   summary,
-  currentUser,
+  currentUserId,
   onEdit,
   onDelete,
   panel,
@@ -279,7 +345,7 @@ function ProfilePanel({
 }: {
   contact: Contact;
   summary?: ContactSummary;
-  currentUser: string | null;
+  currentUserId: string | null;
   onEdit: () => void;
   onDelete: () => void;
   panel: Panel;
@@ -494,7 +560,7 @@ function ProfilePanel({
       {panel === "note" && <NotePanel contactId={contact.id} onDone={() => setPanel(null)} />}
       {panel === "revenue" && <RevenuePanel summary={summary} />}
 
-      <ActivityPanel contact={contact} entries={summary?.timeline ?? []} currentUser={currentUser} />
+      <ActivityPanel contact={contact} entries={summary?.timeline ?? []} currentUserId={currentUserId} />
     </section>
   );
 }
@@ -606,12 +672,12 @@ function RevenuePanel({ summary }: { summary?: ContactSummary }) {
             Won
           </p>
           <p className="mt-0.5 text-xl font-bold" style={{ color: "var(--green)" }}>
-            {money(summary.wonValue)}
+            {money(summary.wonValueCents)}
           </p>
         </div>
         <div className="rounded-xl px-4 py-3" style={{ background: "var(--accent-soft)" }}>
           <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-accent">In pipeline</p>
-          <p className="mt-0.5 text-xl font-bold text-accent">{money(summary.openValue)}</p>
+          <p className="mt-0.5 text-xl font-bold text-accent">{money(summary.openValueCents)}</p>
         </div>
       </div>
 
@@ -627,7 +693,7 @@ function RevenuePanel({ summary }: { summary?: ContactSummary }) {
                 className="shrink-0 text-sm font-semibold"
                 style={{ color: d.won ? "var(--green)" : "var(--text)" }}
               >
-                {money(d.value)}
+                {money(d.valueCents)}
               </span>
             </div>
           ))}
@@ -655,11 +721,11 @@ const KIND_META: Record<string, { icon: typeof User; color: string; soft: string
 function ActivityPanel({
   contact,
   entries,
-  currentUser,
+  currentUserId,
 }: {
   contact: Contact;
   entries: TimelineEntry[];
-  currentUser: string | null;
+  currentUserId: string | null;
 }) {
   return (
     <div className="mt-7 rounded-2xl border border-[var(--border)] p-5">
@@ -702,31 +768,30 @@ function ActivityPanel({
                     <TimeAgo at={e.at} className="shrink-0 text-[11px] text-faint" />
                   </div>
                   {e.detail && <p className="mt-0.5 whitespace-pre-wrap text-xs text-muted">{e.detail}</p>}
-                  {e.amount !== undefined && (
+                  {e.amountCents !== undefined && (
                     <p className="mt-0.5 text-xs font-semibold" style={{ color: "var(--green)" }}>
-                      {money(e.amount)}
+                      {money(e.amountCents)}
                     </p>
                   )}
                 </div>
-                {/* Only entries logged here can be removed. A meeting or a won
-                    deal belongs to its own record — deleting the echo would
-                    just make the history lie. */}
-                {e.source === "logged" && (
-                  <button
-                    onClick={() => deleteActivityAction(contact.id, e.id)}
-                    className="focus-ring mt-0.5 shrink-0 text-faint transition-colors hover:text-[var(--red)]"
-                    aria-label="Delete entry"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                )}
+                {/* Entries used to be removable, and are not any more.
+
+                    The reasoning that already applied to meetings and won deals
+                    — "deleting the echo would just make the history lie" — turns
+                    out to apply to every entry. A timeline someone can edit is
+                    not a record of what happened, it is a record of what they
+                    were willing to leave visible. The log is append-only now,
+                    so there is nothing here to press.
+
+                    A mistyped note stays, and a correcting note goes underneath
+                    it. That is how a ledger works, and this is a ledger. */}
               </li>
             );
           })}
         </ol>
       )}
 
-      {currentUser && (
+      {currentUserId && (
         <p className="mt-5 border-t border-[var(--border)] pt-3 text-[11px] text-faint">
           Owned by {contact.owner}
         </p>
