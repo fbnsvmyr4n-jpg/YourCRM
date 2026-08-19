@@ -343,6 +343,22 @@ CREATE TABLE IF NOT EXISTS calls (
   outcome         TEXT,
   summary         TEXT,
   transcript      JSONB NOT NULL DEFAULT '[]'::jsonb,
+
+  -- What the caller wanted to talk about, and when they asked to meet.
+  --
+  -- `requested_at` is an INSTANT, not the "Tomorrow" + "10:00 AM" pair the old
+  -- model stored. A relative label is only true on the day it was written: a
+  -- call logged on Monday asking for "tomorrow" still said tomorrow on Friday,
+  -- and the meeting it eventually booked landed four days late. Resolved once,
+  -- at capture, in the sub-account's own zone.
+  topic           TEXT,
+  requested_at    TIMESTAMPTZ,
+
+  -- The meeting this call produced, if it produced one. Together with
+  -- `created_deal_id` this is what makes processing idempotent: a call that has
+  -- already been turned into records carries the links to them.
+  created_meeting_id TEXT REFERENCES meetings(id) ON DELETE SET NULL,
+
   deleted_at      TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS calls_tenant_idx ON calls (sub_account_id, received_at) WHERE deleted_at IS NULL;

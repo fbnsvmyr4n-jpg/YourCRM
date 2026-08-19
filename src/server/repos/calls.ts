@@ -33,6 +33,12 @@ export type CallRecord = {
   outcome: string | null;
   summary: string | null;
   transcript: TranscriptTurn[];
+  /** What the caller wanted to discuss. */
+  topic: string | null;
+  /** When they asked to meet — an instant, resolved at capture. */
+  requestedAt: string | null;
+  /** The meeting this call produced, if it produced one. */
+  createdMeetingId: string | null;
   deletedAt: string | null;
 };
 
@@ -45,6 +51,8 @@ export type NewCall = {
   summary?: string | null;
   transcript?: TranscriptTurn[];
   contactId?: string | null;
+  topic?: string | null;
+  requestedAt?: string | Date | null;
 };
 
 type Row = {
@@ -58,13 +66,16 @@ type Row = {
   outcome: string | null;
   summary: string | null;
   transcript: TranscriptTurn[];
+  topic: string | null;
+  requested_at: Date | null;
+  created_meeting_id: string | null;
   deleted_at: Date | null;
 };
 
 const SELECT = `
   SELECT c.id, c.contact_id, c.created_deal_id, c.caller_name, c.phone,
          c.received_at, c.duration_sec, c.outcome, c.summary, c.transcript,
-         c.deleted_at
+         c.topic, c.requested_at, c.created_meeting_id, c.deleted_at
   FROM calls c
   WHERE c.deleted_at IS NULL AND c.sub_account_id = $1`;
 
@@ -80,6 +91,9 @@ function toRecord(r: Row): CallRecord {
     outcome: r.outcome,
     summary: r.summary,
     transcript: r.transcript ?? [],
+    topic: r.topic,
+    requestedAt: r.requested_at ? r.requested_at.toISOString() : null,
+    createdMeetingId: r.created_meeting_id,
     deletedAt: r.deleted_at ? r.deleted_at.toISOString() : null,
   };
 }
@@ -134,8 +148,8 @@ export async function logCall(q: TenantQuery, input: NewCall = {}): Promise<Call
     `WITH inserted AS (
        INSERT INTO calls
          (id, sub_account_id, contact_id, caller_name, phone, received_at,
-          duration_sec, outcome, summary, transcript)
-       VALUES ($2, $1, $3, $4, $5, COALESCE($6, now()), $7, $8, $9, $10::jsonb)
+          duration_sec, outcome, summary, transcript, topic, requested_at)
+       VALUES ($2, $1, $3, $4, $5, COALESCE($6, now()), $7, $8, $9, $10::jsonb, $11, $12)
        RETURNING *
      )
      ${SELECT.replace("FROM calls c", "FROM inserted c")}`,
@@ -150,6 +164,8 @@ export async function logCall(q: TenantQuery, input: NewCall = {}): Promise<Call
       input.outcome?.trim() || null,
       input.summary?.trim() || null,
       JSON.stringify(checkTranscript(input.transcript ?? [])),
+      input.topic?.trim() || null,
+      input.requestedAt ? new Date(input.requestedAt) : null,
     ]
   );
   if (!row) throw new Error("Call was not logged.");
@@ -220,13 +236,14 @@ export async function appendTranscript(
 export async function linkCall(
   q: TenantQuery,
   id: string,
-  links: { contactId?: string | null; createdDealId?: string | null }
+  links: { contactId?: string | null; createdDealId?: string | null; createdMeetingId?: string | null }
 ): Promise<CallRecord | null> {
   const row = await q.one<Row>(
     `WITH updated AS (
        UPDATE calls SET
          contact_id      = CASE WHEN $3::boolean THEN $4 ELSE contact_id END,
-         created_deal_id = CASE WHEN $5::boolean THEN $6 ELSE created_deal_id END
+         created_deal_id = CASE WHEN $5::boolean THEN $6 ELSE created_deal_id END,
+         created_meeting_id = CASE WHEN $7::boolean THEN $8 ELSE created_meeting_id END
        WHERE id = $2 AND sub_account_id = $1 AND deleted_at IS NULL
        RETURNING *
      )
@@ -238,6 +255,8 @@ export async function linkCall(
       links.contactId ?? null,
       links.createdDealId !== undefined,
       links.createdDealId ?? null,
+      links.createdMeetingId !== undefined,
+      links.createdMeetingId ?? null,
     ]
   );
   return row ? toRecord(row) : null;
