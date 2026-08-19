@@ -1,4 +1,9 @@
-import { logCall, processCall } from "@/server/calls-repo";
+import { logCall } from "@/server/repos/calls";
+import { getSettings } from "@/server/repos/settings";
+import { processCall } from "@/server/process-call";
+import { tenantForDialledNumber } from "@/server/telephony-tenant";
+import { withTenant } from "@/server/tenant";
+import { wallClockToInstant } from "@/lib/zoned";
 import { sayAndGather, sayAndHangUp, telephonyConfigured, twiml, verifyTwilioSignature } from "@/server/telephony";
 import {
   GREETING,
@@ -100,11 +105,56 @@ export async function POST(req: Request, ctx: { params: Promise<{ action: string
       const session = await getSession(callSid);
       if (!session) return new Response(null, { status: 204 });
 
+      /**
+       * Whose CRM does this call belong to?
+       *
+       * Nothing in a Twilio callback answers that — there is no session, and
+       * the URL is public. The dialled number is the only signal, so it is what
+       * resolves the tenant. When it resolves to nothing the call is dropped
+       * rather than written somewhere: records landing in the wrong customer's
+       * account is a cross-tenant leak that arrives as a stranger's caller
+       * appearing in your contacts.
+       */
+      const ctx = await tenantForDialledNumber(params.To ?? null);
+      if (!ctx) {
+        await endSession(callSid);
+        return new Response(null, { status: 204 });
+      }
+
       const duration = Number.parseInt(params.CallDuration ?? "", 10);
-      const call = await logCall(
-        callFromSession(session, Number.isFinite(duration) && duration > 0 ? duration : 60)
-      );
-      await processCall(call.id);
+      const durationSec = Number.isFinite(duration) && duration > 0 ? duration : 60;
+      const captured = callFromSession(session, durationSec);
+
+      await withTenant(ctx, async (q) => {
+        const { timeZone } = await getSettings(q);
+
+        // The caller asked for a relative slot ("tomorrow at ten"). Resolved to
+        // an instant here, at capture, in the business's own zone — a label
+        // stored instead would stop being true the day after the call.
+        const day = new Date();
+        if (captured.requestedWhen === "Tomorrow") day.setUTCDate(day.getUTCDate() + 1);
+        if (captured.requestedWhen === "This Week") day.setUTCDate(day.getUTCDate() + 2);
+        const requestedAt = captured.requestedWhen
+          ? wallClockToInstant(day.toISOString().slice(0, 10), captured.requestedTime ?? "10:00", timeZone)
+          : null;
+
+        const call = await logCall(q, {
+          callerName: captured.callerName,
+          phone: captured.phone,
+          durationSec: captured.durationSec,
+          outcome: captured.outcome,
+          summary: captured.summary,
+          transcript: captured.transcript.map((t) => ({
+            role: t.speaker === "Agent" ? ("agent" as const) : ("caller" as const),
+            text: t.text,
+          })),
+          topic: captured.topic ?? null,
+          requestedAt,
+        });
+
+        await processCall(q, call.id);
+      });
+
       await endSession(callSid);
 
       return new Response(null, { status: 204 });

@@ -15,8 +15,10 @@ import {
   ipKey,
   registerFailedLogin,
   signupKey,
-} from "@/server/rate-limit-repo";
-import { authenticate, createUser } from "@/server/users-repo";
+} from "@/server/repos/auth";
+import { authenticate } from "@/server/repos/users";
+import { signUp } from "@/server/signup";
+import { withSystem } from "@/server/tenant";
 import { email as validEmail, text } from "@/server/validate";
 import { logAuth } from "@/server/log";
 
@@ -74,22 +76,22 @@ export async function signInAction(_prev: AuthState, formData: FormData): Promis
   // Checked *before* authenticating, so a locked-out caller never reaches the
   // scrypt verification — which is intentionally slow and would otherwise be
   // free CPU for an attacker to burn.
-  const gate = await checkLoginRate(keys);
+  const gate = await withSystem((q) => checkLoginRate(q, keys));
   if (!gate.allowed) {
     logAuth("ratelimited", { email, reason: "too many failed attempts" });
     return { error: lockoutMessage(gate.retryAfterSec) };
   }
 
-  const user = await authenticate(email, password);
+  const user = await withSystem((q) => authenticate(q, email, password));
   if (!user) {
-    await registerFailedLogin(keys);
+    await withSystem((q) => registerFailedLogin(q, keys));
     logAuth("signin.failed", { email });
     // Deliberately identical whether the email exists or not — a different
     // message here would turn the login form into an account-enumeration oracle.
     return { error: "Incorrect email or password." };
   }
 
-  await clearLoginRate(keys);
+  await withSystem((q) => clearLoginRate(q, keys));
   logAuth("signin.ok", { userId: user.id });
   await startSession(user.id, formData.get("remember") === "1");
   redirect("/");
@@ -108,13 +110,17 @@ export async function signUpAction(_prev: AuthState, formData: FormData): Promis
   // accounts. Capped per IP, and counted on success too — the abuse here is
   // volume rather than guessing.
   const keys = [signupKey(await clientIp())];
-  const gate = await checkLoginRate(keys);
+  const gate = await withSystem((q) => checkLoginRate(q, keys));
   if (!gate.allowed) return { error: lockoutMessage(gate.retryAfterSec) };
-  await registerFailedLogin(keys);
+  await withSystem((q) => registerFailedLogin(q, keys));
 
   // Email uniqueness is enforced atomically inside createUser — checking here
   // first would be a check-then-act race under concurrent signups.
-  const { user, error } = await createUser({ name, email, password });
+  // Signing up creates a tenant — an agency, its primary workspace, and an
+  // owner inside it — not just a row in `users`. All three in one transaction,
+  // because a half-created tenant is somebody who can sign in and has nowhere
+  // to work.
+  const { user, error } = await signUp({ name, email, password });
   if (error || !user) {
     logAuth("signup.failed", { email, reason: error ?? "unknown" });
     return { error: error ?? "Could not create the account." };

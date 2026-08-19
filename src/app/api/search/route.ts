@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import type { AvatarColor } from "@/components/ui/Avatar";
-import { listContacts } from "@/server/contacts-repo";
-import { listDeals } from "@/server/deals-repo";
-import { listLeads } from "@/server/leads-repo";
-import { listMeetings } from "@/server/meetings-repo";
-import { listMessages } from "@/server/inbox-repo";
-import { getCurrentUser } from "@/server/session";
+import { listContacts } from "@/server/repos/contacts";
+import { listDeals } from "@/server/repos/deals";
+import { listMeetings } from "@/server/repos/meetings";
+import { listMessages } from "@/server/repos/inbox";
+import { getSettings } from "@/server/repos/settings";
+import { instantToWallClock } from "@/lib/zoned";
+import { requireTenant, withCurrentTenant } from "@/server/tenant-session";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +20,8 @@ export type SearchItem = {
   color: AvatarColor;
 };
 
-function money(n: number) {
+function money(cents: number) {
+  const n = Math.round(cents / 100);
   if (n >= 1000) {
     const k = n / 1000;
     return `$${k % 1 === 0 ? k.toFixed(0) : k.toFixed(1)}K`;
@@ -27,83 +29,115 @@ function money(n: number) {
   return `$${n}`;
 }
 
+const AVATAR_COLORS: AvatarColor[] = ["blue", "green", "amber", "purple", "pink", "teal"];
+
+function paletteFor(id: string): AvatarColor {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) | 0;
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+}
+
+const initialsOf = (name: string) =>
+  name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((p) => p[0])
+    .join("")
+    .toUpperCase() || "—";
+
 export async function GET() {
-  // This returns every contact, lead, deal, meeting and message in the CRM.
-  // A route handler is not covered by the `(app)` layout guard *or* by the
-  // `requireUser()` call in the server actions — it is its own public endpoint.
-  // Unauthenticated, it answered with the entire dataset: 41 records including
-  // names, companies, deal values and message subjects.
-  const user = await getCurrentUser();
-  if (!user) {
+  /**
+   * This returns every contact, deal, meeting and message the caller can see.
+   *
+   * A route handler is covered by neither the `(app)` layout guard nor the
+   * checks inside server actions — it is its own public endpoint. Unauthenticated
+   * it once answered with the entire dataset: 41 records including names,
+   * companies, deal values and message subjects.
+   *
+   * `requireTenant` now settles both questions at once. It throws when there is
+   * no session, and it establishes WHICH customer's records may be returned —
+   * the half that did not exist before, and the half that matters once there is
+   * more than one customer.
+   */
+  try {
+    await requireTenant();
+  } catch {
     return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
   }
 
-  const [contacts, leads, deals, meetings, messages] = await Promise.all([
-    listContacts(),
-    listLeads(),
-    listDeals(),
-    listMeetings(),
-    listMessages(),
-  ]);
+  const items = await withCurrentTenant(async (q) => {
+    const settings = await getSettings(q);
+    const contacts = await listContacts(q);
+    const deals = await listDeals(q);
+    const meetings = await listMeetings(q);
+    // Trashed mail is excluded by the folder itself rather than by a flag the
+    // loop has to remember to check.
+    const messages = await listMessages(q, "inbox");
 
-  const items: SearchItem[] = [];
+    const nameOf = new Map(contacts.map((c) => [c.id, `${c.firstName} ${c.lastName}`.trim()]));
+    const out: SearchItem[] = [];
 
-  for (const c of contacts) {
-    items.push({
-      id: `contact-${c.id}`,
-      type: "Contact",
-      title: `${c.firstName} ${c.lastName}`,
-      subtitle: [c.company, c.info].filter(Boolean).join(" · "),
-      href: "/contacts",
-      initials: c.initials,
-      color: c.color,
-    });
-  }
-  for (const l of leads) {
-    items.push({
-      id: `lead-${l.id}`,
-      type: "Lead",
-      title: l.name,
-      subtitle: `${l.company} · ${l.status}`,
-      href: "/leads",
-      initials: l.initials,
-      color: l.color,
-    });
-  }
-  for (const d of deals) {
-    items.push({
-      id: `deal-${d.id}`,
-      type: "Deal",
-      title: d.title,
-      subtitle: `${d.contact} · ${money(d.value)}`,
-      href: "/deals",
-      initials: d.initials,
-      color: d.color,
-    });
-  }
-  for (const m of meetings) {
-    items.push({
-      id: `meeting-${m.id}`,
-      type: "Meeting",
-      title: `${m.name} — ${m.topic}`,
-      subtitle: `${m.when} · ${m.time}`,
-      href: "/meetings",
-      initials: m.initials,
-      color: m.color,
-    });
-  }
-  for (const m of messages) {
-    if (m.trashed) continue;
-    items.push({
-      id: `message-${m.id}`,
-      type: "Message",
-      title: m.name,
-      subtitle: m.subject,
-      href: "/inbox",
-      initials: m.initials,
-      color: m.color,
-    });
-  }
+    for (const c of contacts) {
+      const name = `${c.firstName} ${c.lastName}`.trim();
+      out.push({
+        id: `contact-${c.id}`,
+        // The same person appears once. They used to appear twice — as a
+        // Contact and as a Lead — because they were two records.
+        type: c.hasOpenDeal && !c.isClient ? "Lead" : "Contact",
+        title: name,
+        subtitle: [c.info, c.isClient ? "Client" : c.hasOpenDeal ? "In progress" : null]
+          .filter(Boolean)
+          .join(" · "),
+        href: c.hasOpenDeal && !c.isClient ? "/leads" : "/contacts",
+        initials: initialsOf(name),
+        color: paletteFor(c.id),
+      });
+    }
+
+    for (const d of deals) {
+      const who = d.contactId ? (nameOf.get(d.contactId) ?? "") : "";
+      out.push({
+        id: `deal-${d.id}`,
+        type: "Deal",
+        title: d.title,
+        subtitle: [who, money(d.valueCents)].filter(Boolean).join(" · "),
+        href: "/deals",
+        initials: initialsOf(who || d.title),
+        color: paletteFor(d.id),
+      });
+    }
+
+    for (const m of meetings) {
+      const who = m.contactId ? (nameOf.get(m.contactId) ?? "") : "";
+      // Shown in the business's own zone, so the result matches the calendar.
+      const when = instantToWallClock(m.scheduledAt, settings.timeZone);
+      out.push({
+        id: `meeting-${m.id}`,
+        type: "Meeting",
+        title: [who, m.topic].filter(Boolean).join(" — ") || "Meeting",
+        subtitle: when ? `${when.date} · ${when.time}` : "",
+        href: "/meetings",
+        initials: initialsOf(who || m.topic),
+        color: paletteFor(m.id),
+      });
+    }
+
+    for (const m of messages) {
+      const who = m.contactId ? (nameOf.get(m.contactId) ?? "Unknown sender") : "Unknown sender";
+      out.push({
+        id: `message-${m.id}`,
+        type: "Message",
+        title: who,
+        subtitle: m.subject,
+        href: "/inbox",
+        initials: initialsOf(who),
+        color: paletteFor(m.id),
+      });
+    }
+
+    return out;
+  });
 
   return NextResponse.json({ items });
 }

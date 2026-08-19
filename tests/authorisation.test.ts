@@ -170,9 +170,23 @@ describe("every API route is authorised", () => {
 });
 
 describe("the guard itself", () => {
-  it("requireUser throws rather than returning null, so a forgetful caller fails closed", () => {
-    const src = read("src/server/session.ts");
-    expect(src).toMatch(/export async function requireUser/);
+  it("the guard throws rather than returning null, so a forgetful caller fails closed", () => {
+    /**
+     * The property moved, not the requirement.
+     *
+     * `requireUser` lived in `session.ts` and answered "who is asking".
+     * `requireTenant` replaced it and answers that AND "on whose data" — the
+     * half that did not exist while there was one customer. It has to fail the
+     * same way: a caller that forgets to check the result must still be
+     * stopped, which only holds if it throws.
+     */
+    const src = read("src/server/tenant-session.ts");
+    expect(src).toMatch(/export async function requireTenant/);
     expect(src).toMatch(/throw new Error/);
+
+    // And it must not hand back a usable context when there is no session.
+    expect(src, "the guard returns instead of throwing on a missing session").toMatch(
+      /if \(!user\)[\s\S]{0,200}throw new Error/
+    );
   });
 });

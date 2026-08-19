@@ -1,8 +1,11 @@
-import { listCalls } from "./calls-repo";
-import { listDeals } from "./deals-repo";
-import { listMessages } from "./inbox-repo";
-import { listLeads } from "./leads-repo";
-import { listMeetings, toDateKey } from "./meetings-repo";
+import { listCalls } from "./repos/calls";
+import { listDeals } from "./repos/deals";
+import { listMeetings } from "./repos/meetings";
+import { listContacts } from "./repos/contacts";
+import { unreadCount } from "./repos/inbox";
+import { getSettings } from "./repos/settings";
+import { instantToWallClock } from "@/lib/zoned";
+import type { TenantQuery } from "./tenant";
 
 /**
  * The notification feed.
@@ -10,10 +13,12 @@ import { listMeetings, toDateKey } from "./meetings-repo";
  * Everything here is derived from records that already exist — nothing is
  * invented and nothing is filtered out by importance. The brief was explicit:
  * show the user everything that needs their attention, because a feed that
- * quietly drops items is worse than no feed, since it can't be trusted.
+ * quietly drops items is worse than no feed, since it cannot be trusted.
  *
  * Each entry carries an `href` so the bell is a way *into* the work, not just
- * a report that work exists.
+ * a report that work exists. And each is a state that is currently TRUE rather
+ * than an event somebody once fired, which is why it needs no storage: it is a
+ * question asked of the data, not a queue to keep in step.
  */
 
 export type NotificationKind = "meeting" | "lead" | "message" | "call" | "deal";
@@ -28,89 +33,105 @@ export type Notification = {
   weight: number;
 };
 
-export async function listNotifications(): Promise<Notification[]> {
-  const [meetings, leads, messages, calls, deals] = await Promise.all([
-    listMeetings(),
-    listLeads(),
-    listMessages(),
-    listCalls(),
-    listDeals(),
-  ]);
+export async function listNotifications(q: TenantQuery): Promise<Notification[]> {
+  const settings = await getSettings(q);
+  const meetings = await listMeetings(q);
+  const calls = await listCalls(q);
+  const deals = await listDeals(q);
+  const contacts = await listContacts(q);
+  const unread = await unreadCount(q);
+
+  const nameOf = new Map(contacts.map((c) => [c.id, `${c.firstName} ${c.lastName}`.trim()]));
+  const todayKey =
+    instantToWallClock(new Date().toISOString(), settings.timeZone)?.date ??
+    new Date().toISOString().slice(0, 10);
 
   const out: Notification[] = [];
 
-  // Meetings happening today — the most time-critical thing on the list.
-  for (const m of meetings.filter((x) => x.when === "Today")) {
+  // Meetings happening today — the most time-critical thing on the list, and
+  // counted in the business's zone rather than the server's.
+  for (const m of meetings) {
+    const when = instantToWallClock(m.scheduledAt, settings.timeZone);
+    if (when?.date !== todayKey || m.outcome !== "scheduled") continue;
     out.push({
       id: `mtg-today-${m.id}`,
       kind: "meeting",
-      title: `Meeting today · ${m.time}`,
-      detail: `${m.name} — ${m.topic}`,
+      title: `Meeting today · ${when.time}`,
+      detail: [m.contactId ? nameOf.get(m.contactId) : null, m.topic].filter(Boolean).join(" — "),
       href: "/meetings",
       weight: 100,
     });
   }
 
-  // Calls the agent handled but nobody has processed into CRM records yet.
-  for (const c of calls.filter((x) => x.status === "pending")) {
+  // Calls the agent handled that have not become records yet. "Pending" is a
+  // call carrying no links — derived from what happened rather than a stored
+  // status that could disagree with it.
+  for (const c of calls) {
+    if (c.createdDealId || c.createdMeetingId) continue;
     out.push({
       id: `call-${c.id}`,
       kind: "call",
       title: "Call needs processing",
-      detail: `${c.callerName}${c.company && c.company !== "—" ? ` · ${c.company}` : ""}`,
+      detail: c.callerName || "Unknown caller",
       href: "/voice-agents",
       weight: 90,
     });
   }
 
-  // Meetings that have already been and gone with no outcome recorded — these
-  // silently distort every rate on the Meetings page until someone marks them
-  // up. Strictly *past* dates: chasing an outcome for a meeting that hasn't
-  // happened yet would be noise, and would double up with the entry above.
-  const todayKey = toDateKey(new Date());
-  for (const m of meetings) {
-    const unrecorded = (m.outcome ?? "scheduled") === "scheduled";
-    if (!unrecorded || !m.date || m.date >= todayKey) continue;
+  // Meetings that have happened and nobody has said what came of them. This is
+  // the backlog that quietly makes every rate on the Meetings page unanswerable.
+  const past = meetings.filter(
+    (m) => m.outcome === "scheduled" && Date.parse(m.scheduledAt) < Date.now()
+  );
+  if (past.length) {
     out.push({
-      id: `mtg-outcome-${m.id}`,
+      id: "mtg-awaiting",
       kind: "meeting",
-      title: "Outcome not recorded",
-      detail: `${m.name} — mark how the meeting went`,
+      title: `${past.length} meeting${past.length === 1 ? "" : "s"} awaiting an outcome`,
+      detail: "Record what happened so the funnel stays honest",
       href: "/meetings",
-      weight: 60,
-    });
-  }
-
-  for (const l of leads.filter((x) => x.status === "Follow-up Required")) {
-    out.push({
-      id: `lead-${l.id}`,
-      kind: "lead",
-      title: "Follow-up required",
-      detail: `${l.name}${l.company ? ` · ${l.company}` : ""}`,
-      href: "/leads",
       weight: 70,
     });
   }
 
-  for (const m of messages.filter((x) => x.unread && !x.trashed)) {
+  // People with a deal in play — which is what a lead is now.
+  const waiting = contacts.filter((c) => c.hasOpenDeal && !c.isClient);
+  if (waiting.length) {
     out.push({
-      id: `msg-${m.id}`,
-      kind: "message",
-      title: "Unread message",
-      detail: `${m.name} — ${m.subject}`,
-      href: "/inbox",
+      id: "leads-open",
+      kind: "lead",
+      title: `${waiting.length} lead${waiting.length === 1 ? "" : "s"} in progress`,
+      detail: waiting
+        .slice(0, 3)
+        .map((c) => `${c.firstName} ${c.lastName}`.trim())
+        .join(", "),
+      href: "/leads",
+      weight: 60,
+    });
+  }
+
+  // Deals that have been presented, carry a number, and have not closed.
+  const awaitingClose = deals.filter((d) => d.stage === "demo" && d.valueCents > 0);
+  if (awaitingClose.length) {
+    out.push({
+      id: "deals-demo",
+      kind: "deal",
+      title: `${awaitingClose.length} deal${awaitingClose.length === 1 ? "" : "s"} awaiting a close`,
+      detail: `$${Math.round(
+        awaitingClose.reduce((s, d) => s + d.valueCents, 0) / 100
+      ).toLocaleString()} presented`,
+      href: "/deals",
       weight: 50,
     });
   }
 
-  // Deals awaiting payment. Money owed is worth surfacing.
-  for (const d of deals.filter((x) => x.stage === "negotiation")) {
+  if (unread > 0) {
     out.push({
-      id: `deal-${d.id}`,
-      kind: "deal",
-      title: "Awaiting payment",
-      detail: `${d.title} · $${d.value.toLocaleString()}`,
-      href: "/deals",
+      id: "inbox-unread",
+      kind: "message",
+      title: `${unread} unread message${unread === 1 ? "" : "s"}`,
+      detail: "Waiting on a reply",
+      href: "/inbox",
       weight: 40,
     });
   }

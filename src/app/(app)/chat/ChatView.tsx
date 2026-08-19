@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { RotateCcw, Send, Sparkles } from "lucide-react";
 import { Card } from "@/components/ui/Card";
-import type { ChatMessage } from "@/server/chat-repo";
+import type { ChatMessage } from "@/server/repos/chat";
 import { intentOf, suggestFor } from "@/server/chat-answers";
 import { clsx } from "@/lib/clsx";
 import { clearChatAction, sendChatAction } from "./actions";
