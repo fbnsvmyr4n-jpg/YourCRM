@@ -286,10 +286,21 @@ describe("every repository scopes itself, without relying on the database", () =
       // hands one customer another customer's workspace list.
       const path = existsSync(join(REPOS, name)) ? join(REPOS, name) : join(SERVER, name);
       const body = readFileSync(path, "utf8");
-      if (/FROM sub_accounts/i.test(body)) {
+      // Checked per STATEMENT, not per file. Asking whether `agency_id`
+      // appears anywhere in the module stayed true after two of three queries
+      // lost their filter, because the third still had one. "The file mentions
+      // it" is not "every query uses it", and the gap between those is one
+      // customer seeing another customer's workspace list.
+      const stripped = body
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^\s*\/\/.*$/gm, "");
+      const subAccountQueries = [...stripped.matchAll(/`([^`]*FROM sub_accounts[^`]*)`/gi)].map(
+        (m) => m[1]
+      );
+      for (const sql of subAccountQueries) {
         expect(
-          /agency_id = \$/.test(body),
-          `${name} queries sub_accounts without filtering by agency_id`
+          /agency_id = \$/.test(sql),
+          `a query in ${name} reads sub_accounts without filtering by agency_id:\n${sql.trim().slice(0, 160)}`
         ).toBe(true);
       }
       const src = body;
