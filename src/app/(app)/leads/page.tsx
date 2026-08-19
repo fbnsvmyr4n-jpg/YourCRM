@@ -4,32 +4,49 @@ import { AreaChart } from "@/components/ui/AreaChart";
 import { Avatar } from "@/components/ui/Avatar";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { STATUS_TONE, type LeadCard as LeadCardType } from "@/data/leads";
-import { leadAnalytics, listLeadsWithStatus, type LeadAnalytics } from "@/server/lead-status";
-import { weeklyRevenue, listWonDeals } from "@/server/deals-repo";
-import { getSettings } from "@/server/settings-repo";
+import { leadAnalytics, listLeadsWithStatus, type LeadAnalytics } from "@/server/leads-view";
+import { reportData } from "@/server/analytics";
+import { getSettings } from "@/server/repos/settings";
+import { withCurrentTenant } from "@/server/tenant-session";
 import { LeadCardsSection } from "./LeadCardsSection";
 
 export const dynamic = "force-dynamic";
 
 export default async function LeadsPage() {
-  const [leads, stats, wonDeals, revenueSeries, settings] = await Promise.all([
-    listLeadsWithStatus(),
-    leadAnalytics(),
-    listWonDeals(),
-    weeklyRevenue(),
-    getSettings(),
-  ]);
-  const monthlyTarget = settings.monthlyTarget;
+  const { leads, stats, revenueSeries, monthlyTarget, wonThisMonth } = await withCurrentTenant(
+    async (q) => {
+      const settings = await getSettings(q);
+      const report = await reportData(q);
 
-  // Progress against target is real money from real won deals — the same
-  // source the dashboard reports, so the two can never disagree.
-  const monthStart = new Date();
-  monthStart.setUTCDate(1);
-  monthStart.setUTCHours(0, 0, 0, 0);
-  const wonThisMonth = wonDeals
-    .filter((d) => Date.parse(d.wonAt) >= monthStart.getTime())
-    .reduce((sum, d) => sum + d.value, 0);
-  const pct = Math.min(100, Math.round((wonThisMonth / monthlyTarget) * 100));
+      // Progress against target is real money from real won deals — the same
+      // source the dashboard and Reports read, so the three cannot disagree.
+      const monthStart = new Date();
+      monthStart.setUTCDate(1);
+      monthStart.setUTCHours(0, 0, 0, 0);
+
+      const wonThisMonth = report.weekly
+        .filter((w) => Date.parse(w.weekStart) >= monthStart.getTime())
+        .reduce((sum, w) => sum + w.wonCents, 0);
+
+      return {
+        leads: await listLeadsWithStatus(q),
+        stats: await leadAnalytics(q),
+        revenueSeries: report.weekly.map((w) => ({
+          label: new Date(w.weekStart).toLocaleDateString("en-GB", {
+            day: "numeric",
+            month: "short",
+          }),
+          value: Math.round(w.wonCents / 100),
+        })),
+        monthlyTarget: Math.round(settings.monthlyTargetCents / 100),
+        wonThisMonth: Math.round(wonThisMonth / 100),
+      };
+    }
+  );
+
+  // A target of zero is the default on a new account, and dividing by it gives
+  // Infinity. No target set is not 0% progress — it is no answer.
+  const pct = monthlyTarget > 0 ? Math.min(100, Math.round((wonThisMonth / monthlyTarget) * 100)) : null;
 
   return (
     <div className="mx-auto max-w-[1500px] animate-fade-up">
@@ -60,7 +77,7 @@ function SalesTargetCard({
   target,
   series,
 }: {
-  pct: number;
+  pct: number | null;
   won: number;
   target: number;
   series: { label: string; value: number }[];
@@ -94,9 +111,11 @@ function SalesTargetCard({
 
       <div className="mt-4 rounded-2xl border border-[var(--border)] p-4">
         <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">Progress</p>
-        <p className="accent-text mt-1 text-3xl font-bold tabular-nums">{pct}%</p>
+        <p className="accent-text mt-1 text-3xl font-bold tabular-nums">{pct === null ? "—" : `${pct}%`}</p>
         <p className="mt-2 text-xs text-muted">
-          ${won.toLocaleString()} of ${target.toLocaleString()} this month
+          {target > 0
+            ? `$${won.toLocaleString()} of $${target.toLocaleString()} this month`
+            : "Set a monthly target in Settings to track progress"}
         </p>
       </div>
 
@@ -112,7 +131,7 @@ function SalesTargetCard({
           />
           <div
             className="absolute top-0 bottom-0 w-0.5 bg-white shadow"
-            style={{ left: `${pct}%` }}
+            style={{ left: `${pct ?? 0}%` }}
           />
         </div>
         <div className="mt-1.5 flex justify-between text-[11px] text-faint">
