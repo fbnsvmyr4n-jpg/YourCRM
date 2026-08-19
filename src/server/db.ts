@@ -158,7 +158,11 @@ export async function pingDatabase(): Promise<
 > {
   const started = Date.now();
   try {
-    await init();
+    // Deliberately does NOT create anything. This used to call `init()`, which
+    // issued `CREATE TABLE IF NOT EXISTS` — and Postgres checks the schema's
+    // CREATE privilege before noticing the table already exists. That made the
+    // health check fail for any role without CREATE, which is exactly the role
+    // the application should be running as.
     const client = await getPool().connect();
     try {
       await client.query("SELECT 1");
