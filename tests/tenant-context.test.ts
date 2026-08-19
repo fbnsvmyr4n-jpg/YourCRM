@@ -351,6 +351,25 @@ describe("every repository scopes itself, without relying on the database", () =
         (n, sql) => n + (sql.match(tableRef()) ?? []).length,
         0
       );
+      /**
+       * A module that issues no SQL cannot issue an unscoped query.
+       *
+       * Layers above the repositories — `link-contact` finds or creates a
+       * person on behalf of a meeting — hold a TenantQuery and pass it
+       * straight down. Demanding a statement from them was wrong: it failed
+       * correct code, which is the same shape of mistake as the hard-coded
+       * floor this replaced. What matters is that the file either delegates
+       * entirely or scopes everything it runs, so both are checked and
+       * neither is waved through.
+       */
+      if (inFile === 0) {
+        expect(
+          /from "\.\/repos\/|from "\.\.\/repos\/|from "@\/server\/repos\//.test(src),
+          `${name} names no tenant table and calls no repository — it is unclear what it does with the querier it takes`
+        ).toBe(true);
+        return;
+      }
+
       expect(
         inStatements,
         `${name}: the SQL extractor saw ${inStatements} of ${inFile} table references, so this test is checking less than it appears to`
@@ -366,7 +385,14 @@ describe("every repository scopes itself, without relying on the database", () =
 
     it(`${name} takes the tenant from the context, never from an argument`, () => {
       const src = readFileSync(path, "utf8");
-      expect(src, `${name} does not read q.ctx.subAccountId`).toMatch(/q\.ctx\.subAccountId/);
+      // A delegating module never names the tenant — the repositories it calls
+      // do. What must still hold is that it cannot be handed one.
+      const namesTenant = /q\.ctx\.subAccountId/.test(src);
+      const delegates = /from "\.\/repos\/|from "\.\.\/repos\/|from "@\/server\/repos\//.test(src);
+      expect(
+        namesTenant || delegates,
+        `${name} neither scopes its own queries nor delegates to a repository`
+      ).toBe(true);
       // A caller-supplied tenant id is an authorisation bug wearing a parameter.
       expect(src, `${name} accepts a tenant id as an argument`).not.toMatch(
         /\bsubAccountId\s*:\s*string\b/

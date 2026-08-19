@@ -357,6 +357,17 @@ CREATE TABLE IF NOT EXISTS settings (
   sub_account_id    TEXT PRIMARY KEY REFERENCES sub_accounts(id) ON DELETE CASCADE,
   monthly_target_cents BIGINT NOT NULL DEFAULT 0,
   weekly_capacity   INTEGER NOT NULL DEFAULT 20,
+
+  -- The zone this business works in.
+  --
+  -- A booking form submits "2026-03-01" and "14:00" — a wall-clock time with no
+  -- zone attached. Turning that into an instant requires knowing which zone was
+  -- meant, and reading the SERVER's zone means the same booking lands at a
+  -- different moment depending on where it was processed. That is not
+  -- hypothetical: it is the defect the data migration rehearsal caught, where
+  -- identical input produced 12:00 UTC on a laptop and would have produced
+  -- 14:00 UTC on Vercel.
+  time_zone         TEXT NOT NULL DEFAULT 'UTC',
   updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
