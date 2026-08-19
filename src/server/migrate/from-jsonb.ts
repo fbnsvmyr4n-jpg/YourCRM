@@ -79,6 +79,47 @@ export type LegacyMeeting = {
   notes?: string;
 };
 
+export type LegacyUser = {
+  id: string;
+  name?: string;
+  email?: string;
+  passwordHash?: string;
+  role?: string;
+};
+
+export type LegacyCall = {
+  id: string;
+  callerName?: string;
+  phone?: string;
+  company?: string;
+  receivedAt?: string;
+  durationSec?: number;
+  outcome?: string;
+  summary?: string;
+  topic?: string;
+  transcript?: { speaker?: string; text?: string }[];
+  requestedWhen?: string;
+  requestedTime?: string;
+  createdLeadId?: string;
+  createdMeetingId?: string;
+};
+
+export type LegacyActivity = {
+  id: string;
+  contactId?: string;
+  kind?: string;
+  title?: string;
+  detail?: string;
+  at?: string;
+};
+
+export type LegacyChat = {
+  id: string;
+  role?: string;
+  text?: string;
+  at?: string;
+};
+
 export type LegacyMessage = {
   id: string;
   subject?: string;
@@ -121,6 +162,13 @@ export const UNMAPPED: Record<string, string> = {
   "messages.role": "a job title on a message, never displayed",
   "messages.language": "never read",
   "messages.timeZone": "kept on the contact instead, once contacts carry a location",
+  "users.initials": "derived from the name",
+  "calls.initials": "derived",
+  "calls.color": "presentation",
+  "calls.status": "derived from whether the call produced records, so it cannot disagree with them",
+  "calls.leadLink": "derived the same way — created vs matched is a fact about the links",
+  "calls.company": "the caller's company belongs on their contact record, not on each call",
+  "calls.requestedWhen": "a relative label; resolved to a real instant at migration",
 };
 
 // --- Value mappings ---------------------------------------------------------
@@ -180,6 +228,28 @@ export const OUTCOME_MAP: Record<string, string> = {
   advanced: "advanced",
   won: "won",
   lost: "lost",
+};
+
+/**
+ * Legacy user roles → the three the schema allows.
+ *
+ * Every existing user is "Admin", which under a single-workspace model meant
+ * "the person using this". Under a tenant it means something narrower, so the
+ * first user becomes the agency owner and the rest become admins — nobody is
+ * demoted below what they had, and exactly one person can do the things only
+ * an owner should.
+ */
+export const USER_ROLE_MAP: Record<string, string> = {
+  Admin: "admin",
+  Owner: "owner",
+  Member: "member",
+  User: "member",
+};
+
+/** Legacy transcript speakers → the stored roles. */
+export const SPEAKER_MAP: Record<string, string> = {
+  Agent: "agent",
+  Caller: "caller",
 };
 
 export const MEETING_KIND_MAP: Record<string, string> = {

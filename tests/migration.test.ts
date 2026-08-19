@@ -37,6 +37,13 @@ const emptyLegacy = {
   deals: [],
   meetings: [],
   messages: [],
+  // Added when the rehearsal found these four were never being read at all.
+  // Listed here so a future collection cannot be forgotten the same way: the
+  // type will not compile without it.
+  users: [],
+  calls: [],
+  activity: [],
+  chat: [],
 };
 
 beforeAll(async () => {
