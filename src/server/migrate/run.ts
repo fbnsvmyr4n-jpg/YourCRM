@@ -17,6 +17,12 @@ import {
   type LegacyMeeting,
   type LegacyMessage,
   type MigrationReport,
+  type LegacyUser,
+  type LegacyCall,
+  type LegacyActivity,
+  type LegacyChat,
+  SPEAKER_MAP,
+  USER_ROLE_MAP,
 } from "./from-jsonb";
 
 /**
@@ -39,6 +45,10 @@ type Legacy = {
   deals: LegacyDeal[];
   meetings: LegacyMeeting[];
   messages: LegacyMessage[];
+  users: LegacyUser[];
+  calls: LegacyCall[];
+  activity: LegacyActivity[];
+  chat: LegacyChat[];
   settings?: { monthlyTarget?: number; weeklyCapacity?: number };
 };
 
@@ -77,7 +87,25 @@ export async function loadLegacy(q: SystemQuery): Promise<Legacy> {
     await readCollection<LegacyMessage>(q, "messages"),
     await readCollection<{ monthlyTarget?: number; weeklyCapacity?: number }>(q, "settings"),
   ];
-  return { contacts, leads, deals, meetings, messages, settings: settings[0] };
+
+  /**
+   * The four collections this loader did not read.
+   *
+   * Found by rehearsing against a copy: users, calls, activity and chat were
+   * silently absent, and `readCollection` returns an empty array for a name
+   * that does not exist rather than erroring — so every one of them looked
+   * like an empty collection instead of a missing one.
+   *
+   * `users` was the serious one. Six people could sign in before the migration
+   * and none of them after it; the failure would have surfaced as nobody being
+   * able to log in to their own CRM.
+   */
+  const users = await readCollection<LegacyUser>(q, "users");
+  const calls = await readCollection<LegacyCall>(q, "calls");
+  const activity = await readCollection<LegacyActivity>(q, "activity");
+  const chat = await readCollection<LegacyChat>(q, "chat");
+
+  return { contacts, leads, deals, meetings, messages, users, calls, activity, chat, settings: settings[0] };
 }
 
 export async function migrate(
@@ -94,6 +122,13 @@ export async function migrate(
     deals: legacy.deals.length,
     meetings: legacy.meetings.length,
     messages: legacy.messages.length,
+    users: legacy.users.length,
+    calls: legacy.calls.length,
+    activity: legacy.activity.length,
+    chat: legacy.chat.length,
+    // Counted even though it is a single row, so the coverage check can see it
+    // was read rather than having to special-case it.
+    settings: legacy.settings ? 1 : 0,
   };
 
   // --- Tenant root -----------------------------------------------------------
@@ -301,6 +336,123 @@ export async function migrate(
     );
   }
   report.written.messages = legacy.messages.length;
+
+  // --- Users -----------------------------------------------------------------
+  /**
+   * The people who can sign in.
+   *
+   * Missed entirely by the first version of this migration, which would have
+   * left six accounts unable to log in to their own CRM. Password hashes are
+   * carried across as-is — they were already hashed, and rehashing them would
+   * lock everybody out just as thoroughly as dropping them.
+   *
+   * The first user becomes the agency owner; the rest are admins. Every legacy
+   * account is "Admin", which meant "the person using this" under a single
+   * workspace and means something narrower under a tenant.
+   */
+  let ownerAssigned = false;
+  for (const u of legacy.users) {
+    const email = (u.email ?? "").trim().toLowerCase();
+    if (!email || !u.passwordHash) {
+      report.warnings.push(`user ${u.id}: no email or no password hash, skipped`);
+      continue;
+    }
+    const role = ownerAssigned ? (USER_ROLE_MAP[u.role ?? ""] ?? "member") : "owner";
+    ownerAssigned = true;
+
+    await q.rows(
+      `INSERT INTO users (id, agency_id, sub_account_id, name, email, password_hash, role)
+       VALUES ($1, $2, NULL, $3, $4, $5, $6)
+       ON CONFLICT (id) DO NOTHING`,
+      // sub_account_id stays NULL: these are the agency's own people, and
+      // pinning them to the first workspace would lock them out of any client
+      // account added later.
+      [u.id, opts.agencyId, u.name?.trim() || email, email, u.passwordHash, role]
+    );
+  }
+  report.written.users = legacy.users.length;
+
+  // --- Calls -----------------------------------------------------------------
+  for (const c of legacy.calls) {
+    const contactId = matchContact({ name: c.callerName }, keys);
+    // The relative slot resolved to a real instant, the same way the live
+    // product does it now. A stored "Tomorrow" would be wrong on arrival.
+    let requestedAt: string | null = null;
+    if (c.requestedWhen) {
+      const day = new Date(c.receivedAt ?? Date.now());
+      if (c.requestedWhen === "Tomorrow") day.setUTCDate(day.getUTCDate() + 1);
+      if (c.requestedWhen === "This Week") day.setUTCDate(day.getUTCDate() + 2);
+      requestedAt = toTimestamp(
+        day.toISOString().slice(0, 10),
+        c.requestedTime ?? "10:00",
+        opts.legacyTimeZone
+      );
+    }
+
+    await q.rows(
+      `INSERT INTO calls (id, sub_account_id, contact_id, caller_name, phone, received_at,
+                          duration_sec, outcome, summary, transcript, topic, requested_at,
+                          created_meeting_id)
+       VALUES ($1, $2, $3, $4, $5, COALESCE($6::timestamptz, now()), $7, $8, $9, $10::jsonb,
+               $11, $12::timestamptz,
+               (SELECT id FROM meetings WHERE id = $13 AND sub_account_id = $2))
+       ON CONFLICT (id) DO NOTHING`,
+      [
+        c.id,
+        subAccountId,
+        contactId,
+        c.callerName?.trim() || "",
+        c.phone?.trim() || null,
+        c.receivedAt ?? null,
+        Math.max(0, Math.round(c.durationSec ?? 0)),
+        c.outcome ?? null,
+        c.summary?.trim() || null,
+        JSON.stringify(
+          (c.transcript ?? [])
+            .filter((t) => t.text)
+            .map((t) => ({ role: SPEAKER_MAP[t.speaker ?? ""] ?? "caller", text: t.text }))
+        ),
+        c.topic?.trim() || null,
+        requestedAt,
+        // Only if that meeting actually migrated — a link to a row that was
+        // skipped would claim a booking that is not there.
+        c.createdMeetingId ?? null,
+      ]
+    );
+  }
+  report.written.calls = legacy.calls.length;
+
+  // --- Logged activity -------------------------------------------------------
+  for (const a of legacy.activity) {
+    if (!a.contactId || !a.title?.trim()) {
+      report.warnings.push(`activity ${a.id}: no contact or no title, skipped`);
+      continue;
+    }
+    await q.rows(
+      `INSERT INTO activities (id, sub_account_id, entity_type, entity_id, kind, title, detail, at)
+       VALUES ($1, $2, 'contact', $3, $4, $5, $6, COALESCE($7::timestamptz, now()))
+       ON CONFLICT (id) DO NOTHING`,
+      [a.id, subAccountId, a.contactId, a.kind ?? "note", a.title.trim(), a.detail?.trim() || null, a.at ?? null]
+    );
+  }
+  report.written.activity = legacy.activity.length;
+
+  // --- Assistant chat --------------------------------------------------------
+  // Attached to the agency owner, because the old thread belonged to the one
+  // person using the system and a conversation has to belong to somebody.
+  const owner = legacy.users[0]?.id ?? null;
+  if (owner) {
+    for (const m of legacy.chat) {
+      if (!m.text?.trim()) continue;
+      await q.rows(
+        `INSERT INTO chat_messages (id, sub_account_id, user_id, role, text, at)
+         VALUES ($1, $2, $3, $4, $5, COALESCE($6::timestamptz, now()))
+         ON CONFLICT (id) DO NOTHING`,
+        [m.id, subAccountId, owner, m.role === "assistant" ? "assistant" : "user", m.text.trim(), m.at ?? null]
+      );
+    }
+    report.written.chat = legacy.chat.length;
+  }
 
   // --- Settings --------------------------------------------------------------
   if (legacy.settings) {
