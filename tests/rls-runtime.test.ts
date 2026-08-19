@@ -184,6 +184,67 @@ describe("with no tenant set, nothing is visible", () => {
   });
 });
 
+describe("BYPASSRLS defeats everything, reproduced", () => {
+  it("a role with BYPASSRLS sees every tenant, FORCE or not", async () => {
+    /**
+     * Found on production, 20 Aug, and the reason stage 1 exists.
+     *
+     * Neon grants `BYPASSRLS` to the database owner — `neondb_owner` has
+     * rolbypassrls = true. That attribute skips row-level security outright:
+     * not "unless forced", not "unless the owner", but always. Every policy on
+     * the production database was inert while the application connected as
+     * that role, and `pg_class` still reported them enabled AND forced, which
+     * is what made it invisible.
+     *
+     * The failure log had already recorded that BYPASSRLS roles skip policies.
+     * Knowing the rule is not the same as checking whether the instance has
+     * it — which is this project's most-repeated mistake, at one more level.
+     *
+     * Reproduced here so the mechanism is executable rather than folklore.
+     */
+    const db = await tenantDb();
+    await db.exec(`CREATE ROLE bypasser NOSUPERUSER BYPASSRLS;`);
+    await db.exec(`
+      DO $$ DECLARE t text; BEGIN
+        FOR t IN SELECT tablename FROM pg_tables WHERE schemaname = 'public' LOOP
+          EXECUTE format('GRANT ALL ON %I TO bypasser', t);
+        END LOOP;
+      END $$;`);
+
+    await db.exec("BEGIN");
+    await db.exec("SET LOCAL ROLE bypasser");
+    await db.query("SELECT set_config('app.sub_account_id', $1, true)", [A]);
+    const { rows } = await db.query<{ id: string }>("SELECT id FROM contacts ORDER BY id");
+    await db.exec("COMMIT");
+
+    // Both tenants, despite a correct policy, FORCE set, and a tenant selected.
+    expect(rows.map((r) => r.id)).toEqual(["c_alpha", "c_beta"]);
+    await db.close();
+  });
+
+  it("the same role without BYPASSRLS is confined to its tenant", async () => {
+    // The fix, stated as an assertion: it is the role attribute that matters,
+    // so the application must connect as a role that does not have it.
+    const db = await tenantDb();
+    await db.exec(`CREATE ROLE confined NOSUPERUSER NOBYPASSRLS;`);
+    await db.exec(`
+      DO $$ DECLARE t text; BEGIN
+        FOR t IN SELECT tablename FROM pg_tables WHERE schemaname = 'public' LOOP
+          EXECUTE format('GRANT ALL ON %I TO confined', t);
+        END LOOP;
+      END $$;`);
+
+    await db.exec("BEGIN");
+    await db.exec("SET LOCAL ROLE confined");
+    await db.query("SELECT set_config('app.sub_account_id', $1, true)", [A]);
+    const { rows } = await db.query<{ id: string }>("SELECT id FROM contacts");
+    await db.exec("COMMIT");
+
+    expect(rows.map((r) => r.id)).toEqual(["c_alpha"]);
+    await db.close();
+  });
+});
+
 describe("the FORCE defect, reproduced", () => {
   it("without FORCE the policies are inert and every tenant sees everything", async () => {
     /**

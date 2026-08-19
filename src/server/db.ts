@@ -170,3 +170,58 @@ export async function pingDatabase(): Promise<
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
 }
+
+export type IsolationCheck = {
+  role: string;
+  /** True when the connecting role can see past every row-level policy. */
+  bypassesRls: boolean;
+  superuser: boolean;
+  /** Tables with row-level security enabled. */
+  protectedTables: number;
+  ok: boolean;
+};
+
+/**
+ * Can the role this app connects as actually be constrained by the policies?
+ *
+ * Found the hard way on 20 Aug: Neon grants `BYPASSRLS` to the database owner,
+ * and the application was connecting as that owner. `BYPASSRLS` skips
+ * row-level security outright — not "unless forced", not "unless the owner",
+ * always — so every policy on the production database was inert while
+ * `pg_class` cheerfully reported them enabled AND forced.
+ *
+ * That combination is invisible from inside the schema: everything looks
+ * correct because everything IS correct, and the role simply is not subject to
+ * it. Nothing short of asking the role about itself would have shown it.
+ *
+ * The repositories filter `sub_account_id` themselves, so isolation does not
+ * depend on this — but the backstop is only a backstop if it is standing.
+ */
+export async function checkIsolation(): Promise<IsolationCheck> {
+  const { rows } = await getPool().query<{
+    rolname: string;
+    rolbypassrls: boolean;
+    rolsuper: boolean;
+    protected_tables: string;
+  }>(
+    `SELECT r.rolname, r.rolbypassrls, r.rolsuper,
+            (SELECT count(*) FROM pg_class c
+             WHERE c.relrowsecurity AND c.relnamespace = 'public'::regnamespace)::text
+              AS protected_tables
+     FROM pg_roles r WHERE r.rolname = current_user`
+  );
+
+  const row = rows[0];
+  const bypassesRls = row?.rolbypassrls ?? false;
+  const superuser = row?.rolsuper ?? false;
+
+  return {
+    role: row?.rolname ?? "unknown",
+    bypassesRls,
+    superuser,
+    protectedTables: Number(row?.protected_tables ?? 0),
+    // Policies existing is not the same as policies applying. Both have to hold.
+    ok: !bypassesRls && !superuser && Number(row?.protected_tables ?? 0) > 0,
+  };
+}
+
