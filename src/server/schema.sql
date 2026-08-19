@@ -64,6 +64,15 @@ CREATE TABLE IF NOT EXISTS sub_accounts (
   -- unique index below rather than by convention.
   is_primary  BOOLEAN NOT NULL DEFAULT FALSE,
 
+  -- The number the voice agent answers on for this client.
+  --
+  -- A telephony webhook arrives with no session, so nothing about the request
+  -- says whose CRM the call belongs to. The dialled number is the only thing
+  -- that does. Unique, because two sub-accounts sharing a number would make
+  -- every inbound call ambiguous — and the failure looks like somebody else's
+  -- customer quietly appearing in your account.
+  phone_number TEXT UNIQUE,
+
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   deleted_at  TIMESTAMPTZ
 );

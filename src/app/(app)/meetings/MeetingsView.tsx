@@ -33,7 +33,7 @@ import {
   type MeetingType,
   type UpcomingMeeting,
 } from "@/data/meetings";
-import type { MeetingAnalytics } from "@/server/meetings-repo";
+import type { MeetingAnalytics } from "@/server/meeting-analytics";
 import {
   addMeetingAction,
   deleteMeetingAction,

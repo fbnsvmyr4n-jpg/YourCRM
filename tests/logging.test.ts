@@ -92,10 +92,31 @@ describe("the log records what an incident needs", () => {
 });
 
 describe("the events are actually wired up", () => {
-  it("requireUser logs a denial before throwing", () => {
-    const src = read("src/server/session.ts");
-    const body = src.slice(src.indexOf("export async function requireUser"));
-    expect(body).toMatch(/logDenied\(/);
+  it("the tenant guard logs a denial before throwing", () => {
+    /**
+     * An unauthenticated caller reaching a guarded path must leave a trace.
+     * Previously it left none, on a public URL, for three weeks.
+     *
+     * The slice below used to start from a bare `indexOf`, which returns -1
+     * when the name is not found — so after `requireUser` became
+     * `requireTenant` the test examined the last character of the file and
+     * compared "\n" against the pattern. It failed here, but the same shape
+     * silently passes whenever the assertion is a negative one. The index is
+     * checked first now.
+     */
+    const src = read("src/server/tenant-session.ts");
+    const at = src.indexOf("export async function requireTenant");
+    expect(at, "requireTenant is not where this test expects it").toBeGreaterThan(-1);
+    expect(src.slice(at)).toMatch(/logDenied\(/);
+  });
+
+  it("a rejected sub-account switch is logged too", () => {
+    // The other denial worth a trace: a cookie naming somebody else's client
+    // is either a stale value or an attempt, and both should be visible.
+    const src = read("src/server/tenant-session.ts");
+    const at = src.indexOf("export async function resolveSubAccount");
+    expect(at, "resolveSubAccount is not where this test expects it").toBeGreaterThan(-1);
+    expect(src.slice(at)).toMatch(/logDenied\(/);
   });
 
   it("every delete action records who deleted what", () => {

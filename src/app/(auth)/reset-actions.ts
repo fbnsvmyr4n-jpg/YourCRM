@@ -2,13 +2,14 @@
 
 import { headers } from "next/headers";
 import { emailConfigured, resetEmail, sendEmail } from "@/server/email";
-import { consumeResetToken, createResetToken } from "@/server/password-reset-repo";
+import { consumeResetToken, createResetToken } from "@/server/repos/auth";
 import {
   checkLoginRate,
   ipKey,
   registerFailedLogin,
-} from "@/server/rate-limit-repo";
-import { findUserByEmail, setPassword } from "@/server/users-repo";
+} from "@/server/repos/auth";
+import { findUserByEmail, setPassword } from "@/server/repos/users";
+import { withSystem } from "@/server/tenant";
 import { email as validEmail, text } from "@/server/validate";
 
 export type ResetState = { ok?: string; error?: string; devLink?: string } | undefined;
@@ -37,21 +38,21 @@ export async function requestResetAction(_prev: ResetState, formData: FormData):
   const h = await headers();
   const ip = (h.get("x-forwarded-for") ?? "").split(",")[0]?.trim() || "unknown";
   const keys = [ipKey(ip)];
-  const gate = await checkLoginRate(keys);
+  const gate = await withSystem((q) => checkLoginRate(q, keys));
   if (!gate.allowed) {
     const mins = Math.max(1, Math.ceil(gate.retryAfterSec / 60));
     return { error: `Too many requests. Try again in ${mins} minute${mins === 1 ? "" : "s"}.` };
   }
-  await registerFailedLogin(keys);
+  await withSystem((q) => registerFailedLogin(q, keys));
 
   const generic = {
     ok: "If that address has an account, a reset link is on its way. Check your inbox.",
   } satisfies ResetState;
 
-  const user = await findUserByEmail(address);
+  const user = await withSystem((q) => findUserByEmail(q, address));
   if (!user) return generic;
 
-  const token = await createResetToken(user.id, user.email);
+  const token = await withSystem((q) => createResetToken(q, user.id, user.email));
   const link = `${await origin()}/reset-password?token=${encodeURIComponent(token)}`;
   const mail = resetEmail(link);
   const result = await sendEmail({ to: user.email, ...mail });
@@ -79,10 +80,10 @@ export async function resetPasswordAction(_prev: ResetState, formData: FormData)
 
   // Consumed before the write, so a link cannot be redeemed twice even if two
   // requests arrive together.
-  const claim = await consumeResetToken(token);
+  const claim = await withSystem((q) => consumeResetToken(q, token));
   if (!claim) return { error: "This reset link has expired or already been used." };
 
-  const result = await setPassword(claim.userId, password);
+  const result = await withSystem((q) => setPassword(q, claim.userId, password));
   if (result.error) return { error: result.error };
 
   return { ok: "Password updated. You can sign in with your new password." };
