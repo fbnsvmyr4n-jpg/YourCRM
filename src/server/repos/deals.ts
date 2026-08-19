@@ -59,6 +59,10 @@ export type DealRecord = {
   /** Captured in Discovery, and the input to the Demo. */
   painPoints: string[];
   referredByContactId: string | null;
+  /** Set when a deal has been part-paid; both halves share it. */
+  splitId: string | null;
+  /** The original contract value, so a part-payment is distinguishable. */
+  splitTotalCents: number | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -86,6 +90,8 @@ type Row = {
   won_at: Date | null;
   pain_points: string[];
   referred_by_contact_id: string | null;
+  split_id: string | null;
+  split_total_cents: string | null;
   created_at: Date;
   updated_at: Date;
 };
@@ -93,7 +99,8 @@ type Row = {
 const SELECT = `
   SELECT d.id, d.contact_id, d.owner_user_id, d.title, d.value_cents, d.stage,
          d.source, d.lost_reason, d.won_at, d.pain_points,
-         d.referred_by_contact_id, d.created_at, d.updated_at
+         d.referred_by_contact_id, d.split_id, d.split_total_cents,
+         d.created_at, d.updated_at
   FROM deals d
   WHERE d.deleted_at IS NULL AND d.sub_account_id = $1`;
 
@@ -110,6 +117,8 @@ function toRecord(r: Row): DealRecord {
     wonAt: r.won_at ? r.won_at.toISOString() : null,
     painPoints: r.pain_points ?? [],
     referredByContactId: r.referred_by_contact_id,
+    splitId: r.split_id,
+    splitTotalCents: r.split_total_cents === null ? null : Number(r.split_total_cents),
     createdAt: r.created_at.toISOString(),
     updatedAt: r.updated_at.toISOString(),
   };
@@ -375,5 +384,100 @@ export async function listByOwner(
     [q.ctx.subAccountId, ownerUserId]
   );
   return rows.map(toRecord);
+}
+
+export type PaymentResult = { ok?: true; error?: string; wonDealId?: string };
+
+/**
+ * Record money received against a deal that has been presented but not paid.
+ *
+ * A part-payment splits the deal in two: a won record for what has actually
+ * arrived, and the original left holding what is still owed. Both carry the
+ * same `split_id`, and both remember the full contract value — without that,
+ * a £4,000 payment against a £10,000 job is indistinguishable from a £4,000
+ * job paid in full, and the pipeline quietly loses £6,000.
+ *
+ * A second part-payment tops up the same won record rather than scattering one
+ * job across several cards.
+ *
+ * Every check runs against the deal as stored, not as the caller described it.
+ * A server action's arguments are as forgeable as any form field, and this one
+ * moves money between columns.
+ */
+export async function recordPayment(
+  q: TenantQuery,
+  id: string,
+  amountCents: number
+): Promise<PaymentResult> {
+  if (!Number.isInteger(amountCents) || amountCents <= 0) {
+    return { error: "Enter an amount greater than zero." };
+  }
+
+  const deal = await getDeal(q, id);
+  if (!deal) return { error: "That deal no longer exists." };
+
+  // Payment belongs to a deal that has been presented. Taking money against a
+  // prospect nobody has spoken to means the board is not describing reality.
+  if (deal.stage !== "demo" && deal.stage !== "discovery") {
+    return { error: "Payments are recorded against a deal that has reached Discovery or Demo." };
+  }
+  if (amountCents > deal.valueCents) {
+    return { error: "That is more than the amount still outstanding." };
+  }
+
+  const splitId = deal.splitId ?? `split-${Math.random().toString(36).slice(2, 10)}`;
+  // Captured once, at the first split: the full contract value is what decides
+  // whether the won record is partly or fully paid.
+  const splitTotal = deal.splitTotalCents ?? deal.valueCents;
+  const remaining = deal.valueCents - amountCents;
+
+  const existingWon = await q.one<Row>(
+    `${SELECT} AND d.split_id = $2 AND d.won_at IS NOT NULL LIMIT 1`,
+    [q.ctx.subAccountId, splitId]
+  );
+
+  if (existingWon) {
+    await q.rows(
+      `UPDATE deals SET value_cents = value_cents + $3, split_total_cents = $4, updated_at = now()
+       WHERE id = $2 AND sub_account_id = $1 AND deleted_at IS NULL`,
+      [q.ctx.subAccountId, existingWon.id, amountCents, splitTotal]
+    );
+  } else {
+    await q.rows(
+      `INSERT INTO deals (id, sub_account_id, contact_id, owner_user_id, title, value_cents,
+                          stage, source, won_at, split_id, split_total_cents, pain_points)
+       VALUES ($2, $1, $3, $4, $5, $6, 'won', $7, now(), $8, $9, $10::jsonb)`,
+      [
+        q.ctx.subAccountId,
+        `${deal.id}-paid-${Math.random().toString(36).slice(2, 6)}`,
+        deal.contactId,
+        deal.ownerUserId,
+        deal.title,
+        amountCents,
+        deal.source,
+        splitId,
+        splitTotal,
+        JSON.stringify(deal.painPoints),
+      ]
+    );
+  }
+
+  if (remaining === 0) {
+    // Paid in full: nothing is outstanding, so the original is not left behind
+    // as an open deal inflating the pipeline.
+    await q.rows(
+      `UPDATE deals SET deleted_at = now(), updated_at = now()
+       WHERE id = $2 AND sub_account_id = $1`,
+      [q.ctx.subAccountId, deal.id]
+    );
+  } else {
+    await q.rows(
+      `UPDATE deals SET value_cents = $3, split_id = $4, split_total_cents = $5, updated_at = now()
+       WHERE id = $2 AND sub_account_id = $1 AND deleted_at IS NULL`,
+      [q.ctx.subAccountId, deal.id, remaining, splitId, splitTotal]
+    );
+  }
+
+  return { ok: true };
 }
 

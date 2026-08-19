@@ -4,7 +4,60 @@ import { useMemo, useState } from "react";
 import { Coins, GripVertical, HandCoins, Plus, Trash2, Wallet, X } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Overlay } from "@/components/ui/Overlay";
-import { carriesMoney, STAGES, type Deal, type StageId } from "@/data/deals";
+import { BOARD_STAGES as STAGES, carriesMoney } from "@/data/pipeline";
+import type { DealRecord, Stage as StageId } from "@/server/repos/deals";
+import type { AvatarColor } from "@/components/ui/Avatar";
+
+/**
+ * A deal, decorated with what the card shows and the record does not store.
+ *
+ * `contact`, `company`, `initials` and `color` were columns on the old deal —
+ * a copy of the person's details sitting on the opportunity, which is how they
+ * drifted apart from the contact record. The link is a foreign key now, so the
+ * name is looked up rather than duplicated.
+ *
+ * Money stays in cents all the way to the formatter. Converting on the way in
+ * and again on the way out is how a figure ends up 100× wrong.
+ */
+export type Deal = DealRecord & {
+  contact: string;
+  company: string;
+  initials: string;
+  color: AvatarColor;
+  /** Whole-unit value for display only; the source of truth is `valueCents`. */
+  value: number;
+  splitTotal?: number;
+  closeDate: string;
+};
+
+const AVATAR_COLORS: AvatarColor[] = ["blue", "green", "amber", "purple", "pink", "teal"];
+
+function paletteFor(id: string): AvatarColor {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) | 0;
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+}
+
+export function decorateDeal(
+  d: DealRecord,
+  contacts: { id: string; name: string; info: string | null }[]
+): Deal {
+  const person = contacts.find((c) => c.id === d.contactId);
+  const name = person?.name ?? "";
+  const parts = name.split(/\s+/).filter(Boolean);
+  return {
+    ...d,
+    contact: name,
+    company: person?.info ?? "",
+    initials: ((parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "")).toUpperCase() || "—",
+    color: paletteFor(d.id),
+    value: d.valueCents / 100,
+    splitTotal: d.splitTotalCents == null ? undefined : d.splitTotalCents / 100,
+    // The close date the old model stored was an expectation nobody read.
+    // What is shown now is the date the deal actually closed, or nothing.
+    closeDate: d.wonAt ? new Date(d.wonAt).toLocaleDateString() : "",
+  };
+}
 import { clsx } from "@/lib/clsx";
 import {
   addDealAction,
@@ -27,9 +80,18 @@ function fullMoney(n: number) {
 
 /** A won record is only part of the story while it's short of the contract. */
 const isPartiallyPaid = (d: Deal) =>
-  d.stage === "won" && d.splitTotal !== undefined && d.value < d.splitTotal;
+  isWon(d) && d.splitTotal !== undefined && d.value < d.splitTotal;
 
 const PARTIAL = "#f97316"; // orange — money in, but not all of it
+
+/**
+ * Won-ness is a recorded fact, not a position on the board.
+ *
+ * `won_at` survives the deal moving on to Delivery and Referral, which are
+ * post-close stages. Reading the stage instead would make revenue fall the
+ * moment work began — success looking like a loss.
+ */
+const isWon = (d: Deal) => d.wonAt !== null;
 
 export function DealsBoard({ deals }: { deals: Deal[] }) {
   const [items, setItems] = useState<Deal[]>(deals);
@@ -55,9 +117,14 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
     const sum = (stage: StageId) =>
       items.filter((d) => d.stage === stage).reduce((s, d) => s + d.value, 0);
     return {
-      proposals: sum("proposal"),
-      owed: sum("negotiation"),
-      won: sum("won"),
+      // Presented but not yet closed — the work that has had a number put on
+      // it. "Proposals" and "Negotiations" were stages in a pipeline nobody
+      // actually ran.
+      proposals: sum("demo"),
+      owed: sum("discovery"),
+      // Won is read from the recorded fact, so it survives Delivery and
+      // Referral rather than falling the moment delivery begins.
+      won: items.filter(isWon).reduce((s, d) => s + d.value, 0),
       count: items.length,
     };
   }, [items]);
@@ -76,7 +143,7 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
     // the server response lands.
     const sibling =
       stage === "won" && current.splitId
-        ? items.find((d) => d.id !== id && d.splitId === current.splitId && d.stage === "won")
+        ? items.find((d) => d.id !== id && d.splitId === current.splitId && isWon(d))
         : undefined;
 
     setItems((prev) =>
@@ -95,8 +162,12 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
   async function handleAdd(formData: FormData) {
     setBusy(true);
     try {
-      const created = await addDealAction(formData);
-      if (created) setItems((prev) => [created, ...prev]);
+      // The action returns an id, not a card: the board shows a contact's name
+      // and initials, which live on the contact record rather than the deal
+      // now that the link is a foreign key. Inserting a half-built card here
+      // would flash a nameless row until the refresh replaced it, so the
+      // revalidation the action triggers is what puts the deal on the board.
+      await addDealAction(formData);
       setAddOpen(null);
     } finally {
       setBusy(false);
@@ -120,7 +191,7 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
       const splitTotal = deal.splitTotal ?? deal.value;
 
       setItems((prev) => {
-        const existingWon = prev.find((d) => d.splitId === splitId && d.stage === "won");
+        const existingWon = prev.find((d) => d.splitId === splitId && isWon(d));
 
         let next = prev.map((d) =>
           d.id === deal.id ? { ...d, value: remaining, splitId, splitTotal } : d
@@ -165,7 +236,7 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
     }
   }
 
-  const defaultStage = addOpen && addOpen !== true ? addOpen : "lead";
+  const defaultStage = addOpen && addOpen !== true ? addOpen : "prospect";
 
   return (
     <div className="mx-auto flex h-[calc(100vh-104px)] max-w-[1600px] animate-fade-up flex-col">
@@ -262,7 +333,7 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
                     </span>
                   )}
                 </div>
-                <p className="mt-1 text-[11px] text-faint">{stage.hint}</p>
+                <p className="mt-1 text-[11px] text-faint">{stage.exit}</p>
               </div>
 
               <div className="flex flex-1 flex-col gap-2.5 overflow-y-auto p-3">
@@ -408,7 +479,7 @@ function DealCard({
           ) : (
             <span
               className="text-sm font-bold"
-              style={{ color: partial ? PARTIAL : deal.stage === "won" ? "var(--green)" : "var(--text)" }}
+              style={{ color: partial ? PARTIAL : isWon(deal) ? "var(--green)" : "var(--text)" }}
             >
               {money(deal.value)}
             </span>
@@ -454,8 +525,10 @@ function DealModal({
   onSetValue: (formData: FormData) => void | Promise<void>;
 }) {
   const [error, setError] = useState<string | null>(null);
-  const canPay = deal.stage === "negotiation" && deal.value > 0;
-  const canValue = carriesMoney(deal.stage) && deal.stage !== "won";
+  // Payment is recorded once a deal has been presented — Discovery or Demo.
+  // "Negotiations" was a stage in a pipeline nobody actually ran.
+  const canPay = (deal.stage === "demo" || deal.stage === "discovery") && deal.value > 0;
+  const canValue = carriesMoney(deal.stage) && !isWon(deal);
 
   return (
     <Overlay>
@@ -480,7 +553,7 @@ function DealModal({
                 Partly paid — {fullMoney(deal.value)} of {fullMoney(deal.splitTotal)}
               </p>
               <p className="mt-0.5 text-xs text-muted">
-                {`${fullMoney(deal.splitTotal - deal.value)} is still outstanding in Negotiations. Drag it here when it lands and the two merge back into one deal.`}
+                {`${fullMoney(deal.splitTotal - deal.value)} is still outstanding. Drag it here when it lands and the two merge back into one deal.`}
               </p>
             </div>
           )}

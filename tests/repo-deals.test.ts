@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { startTestDb, type TestDb, TENANT_A, TENANT_B, AGENCY, USER_A } from "./helpers/pg";
 import type { TenantContext } from "../src/server/tenant";
 import { readFileSync } from "node:fs";
@@ -284,6 +284,102 @@ describe("deletion is soft and reversible", () => {
 
   it("reports false rather than throwing for a deal that is not there", async () => {
     expect(await inA((q) => repo.deleteDeal(q, "nope"))).toBe(false);
+  });
+});
+
+describe("part-payments split a deal without losing the remainder", () => {
+  /**
+   * The figure that makes this worth testing: without `split_total`, a £4,000
+   * payment against a £10,000 job is indistinguishable from a £4,000 job paid
+   * in full, and £6,000 quietly leaves the pipeline.
+   */
+  // This file does not clear deals between tests — most cases here do not care.
+  // These do: they count rows, and leftovers from earlier tests were being
+  // counted as extra split records. Cleared per test rather than weakening the
+  // assertions, because "how many won records exist" is the thing under test.
+  beforeEach(() => db.seed(`DELETE FROM deals`));
+
+  const presented = () => make({ title: "Big job", valueCents: 1_000_000, stage: "demo" });
+
+  it("moves what was paid to won and leaves the rest outstanding", async () => {
+    const d = await presented();
+    const result = await inA((q) => repo.recordPayment(q, d.id, 400_000));
+    expect(result.ok).toBe(true);
+
+    const all = await inA((q) => repo.listDeals(q));
+    const split = all.filter((x) => x.splitId !== null);
+    expect(split, "the deal did not split in two").toHaveLength(2);
+
+    const won = split.find((x) => x.wonAt !== null)!;
+    const owed = split.find((x) => x.wonAt === null)!;
+    expect(won.valueCents).toBe(400_000);
+    expect(owed.valueCents, "the outstanding balance is wrong").toBe(600_000);
+    // Both halves remember the original contract value.
+    expect(won.splitTotalCents).toBe(1_000_000);
+    expect(owed.splitTotalCents).toBe(1_000_000);
+    expect(won.splitId).toBe(owed.splitId);
+  });
+
+  it("tops up the same won record on a second payment", async () => {
+    // Rather than scattering one job across three cards.
+    const d = await presented();
+    await inA((q) => repo.recordPayment(q, d.id, 400_000));
+    await inA((q) => repo.recordPayment(q, d.id, 100_000));
+
+    const all = await inA((q) => repo.listDeals(q));
+    const won = all.filter((x) => x.wonAt !== null && x.splitId !== null);
+    expect(won, "a second payment created a second won record").toHaveLength(1);
+    expect(won[0].valueCents).toBe(500_000);
+    expect(all.find((x) => x.id === d.id)?.valueCents).toBe(500_000);
+
+    /**
+     * The contract value must still be the ORIGINAL, not what was outstanding
+     * when the second payment arrived. Recomputing it here would shrink
+     * £10,000 to £6,000, and a job that is half paid would render as one paid
+     * in full — the precise confusion this column exists to prevent. A
+     * mutation doing exactly that passed the whole suite before this line.
+     */
+    expect(won[0].splitTotalCents, "the contract value shrank").toBe(1_000_000);
+    expect(all.find((x) => x.id === d.id)?.splitTotalCents).toBe(1_000_000);
+  });
+
+  it("closes the original when the balance reaches zero", async () => {
+    // Otherwise a fully paid job sits in the pipeline forever at £0, inflating
+    // the count of open work.
+    const d = await presented();
+    await inA((q) => repo.recordPayment(q, d.id, 1_000_000));
+
+    expect(await inA((q) => repo.getDeal(q, d.id)), "the settled deal is still open").toBeNull();
+    const won = (await inA((q) => repo.listDeals(q))).filter((x) => x.wonAt !== null);
+    expect(won).toHaveLength(1);
+    expect(won[0].valueCents).toBe(1_000_000);
+  });
+
+  it("refuses more than is outstanding", async () => {
+    const d = await presented();
+    const r = await inA((q) => repo.recordPayment(q, d.id, 1_500_000));
+    expect(r.error).toMatch(/more than/i);
+    expect((await inA((q) => repo.getDeal(q, d.id)))?.valueCents).toBe(1_000_000);
+  });
+
+  it("refuses zero, a negative, and a fractional amount", async () => {
+    const d = await presented();
+    for (const bad of [0, -100, 1.5]) {
+      expect((await inA((q) => repo.recordPayment(q, d.id, bad))).error).toMatch(/greater than zero/i);
+    }
+  });
+
+  it("refuses payment against a deal nobody has presented to", async () => {
+    // Taking money against an untouched prospect means the board is not
+    // describing anything that happened.
+    const d = await make({ stage: "prospect", valueCents: 100_000 });
+    expect((await inA((q) => repo.recordPayment(q, d.id, 50_000))).error).toMatch(/Discovery or Demo/i);
+  });
+
+  it("refuses another tenant's deal", async () => {
+    const d = await presented();
+    expect((await inB((q) => repo.recordPayment(q, d.id, 100_000))).error).toMatch(/no longer exists/i);
+    expect((await inA((q) => repo.getDeal(q, d.id)))?.valueCents).toBe(1_000_000);
   });
 });
 
