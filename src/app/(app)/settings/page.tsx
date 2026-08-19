@@ -4,7 +4,7 @@ import { Avatar } from "@/components/ui/Avatar";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { authSecretConfigured } from "@/server/auth";
 import { getSettings } from "@/server/repos/settings";
-import { currentUser, withCurrentTenant } from "@/server/tenant-session";
+import { currentUser, withTenantPage } from "@/server/tenant-session";
 import { storageEngine } from "@/server/store";
 import {
   AppearanceCard,
@@ -21,7 +21,7 @@ export default async function SettingsPage() {
   if (!user) redirect("/login");
   const engine = storageEngine();
   const secretOk = authSecretConfigured();
-  const settings = await withCurrentTenant((q) => getSettings(q));
+  const settings = await withTenantPage((q) => getSettings(q));
 
   return (
     <div className="mx-auto max-w-[900px] animate-fade-up">

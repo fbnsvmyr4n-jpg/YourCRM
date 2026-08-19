@@ -13,7 +13,7 @@ import { Avatar } from "@/components/ui/Avatar";
 import { AreaChart } from "@/components/ui/AreaChart";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { reportView } from "@/server/reports-view";
-import { withCurrentTenant } from "@/server/tenant-session";
+import { withTenantPage } from "@/server/tenant-session";
 import { ExportButton } from "./ExportButton";
 
 export const dynamic = "force-dynamic";
@@ -36,7 +36,7 @@ const barFill = (color: string) =>
 const rate = (v: number | null) => (v === null ? "—" : `${v}%`);
 
 export default async function ReportsPage() {
-  const r = await withCurrentTenant((q) => reportView(q));
+  const r = await withTenantPage((q) => reportView(q));
 
   const kpis = [
     {

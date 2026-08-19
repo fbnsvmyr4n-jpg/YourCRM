@@ -3,13 +3,13 @@ import { listContacts } from "@/server/repos/contacts";
 import { getSettings } from "@/server/repos/settings";
 import { decorateCall } from "@/server/decorate-call";
 import { telephonyStatus } from "@/server/telephony";
-import { withCurrentTenant } from "@/server/tenant-session";
+import { withTenantPage } from "@/server/tenant-session";
 import { VoiceAgentConsole } from "./VoiceAgentConsole";
 
 export const dynamic = "force-dynamic";
 
 export default async function VoiceAgentsPage() {
-  const calls = await withCurrentTenant(async (q) => {
+  const calls = await withTenantPage(async (q) => {
     const settings = await getSettings(q);
     const rows = await listCalls(q);
     const contacts = await listContacts(q);

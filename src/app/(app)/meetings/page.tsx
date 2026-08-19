@@ -4,13 +4,13 @@ import { getSettings } from "@/server/repos/settings";
 import { meetingAnalytics } from "@/server/meeting-analytics";
 import { decorateMeeting } from "@/server/decorate-meeting";
 import { instantToWallClock } from "@/lib/zoned";
-import { withCurrentTenant } from "@/server/tenant-session";
+import { withTenantPage } from "@/server/tenant-session";
 import MeetingsView from "./MeetingsView";
 
 export const dynamic = "force-dynamic";
 
 export default async function MeetingsPage() {
-  const { meetings, analytics, capacity, today } = await withCurrentTenant(async (q) => {
+  const { meetings, analytics, capacity, today } = await withTenantPage(async (q) => {
     const settings = await getSettings(q);
     const rows = await listMeetings(q);
     const contacts = await listContacts(q);

@@ -14,7 +14,7 @@ import { listMeetings } from "@/server/repos/meetings";
 import { listMessages, unreadCount } from "@/server/repos/inbox";
 import { getSettings } from "@/server/repos/settings";
 import { instantToWallClock } from "@/lib/zoned";
-import { currentUser, withCurrentTenant } from "@/server/tenant-session";
+import { currentUser, withTenantPage } from "@/server/tenant-session";
 
 export const dynamic = "force-dynamic";
 
@@ -39,7 +39,7 @@ export default async function DashboardPage() {
   const me = await currentUser();
 
   const { contacts, meetingsToday, unread, wonDeals, revenueSeries, feed, report, followUps, upcoming } =
-    await withCurrentTenant(async (q) => {
+    await withTenantPage(async (q) => {
       const settings = await getSettings(q);
       const todayKey =
         instantToWallClock(new Date().toISOString(), settings.timeZone)?.date ??

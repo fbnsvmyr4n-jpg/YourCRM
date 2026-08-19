@@ -1,6 +1,6 @@
 import { listDeals } from "@/server/repos/deals";
 import { listContacts } from "@/server/repos/contacts";
-import { withCurrentTenant } from "@/server/tenant-session";
+import { withTenantPage } from "@/server/tenant-session";
 import { DealsBoard, decorateDeal } from "./DealsBoard";
 
 export const dynamic = "force-dynamic";
@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 export default async function DealsPage() {
   // Deals and the people they belong to are read in one tenant transaction, so
   // a card cannot name a contact the same request would not return.
-  const deals = await withCurrentTenant(async (q) => {
+  const deals = await withTenantPage(async (q) => {
     const [rows, contacts] = [await listDeals(q), await listContacts(q)];
     const people = contacts.map((c) => ({
       id: c.id,

@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/shell/AppShell";
 import { listNotifications } from "@/server/notifications";
-import { currentUser, withCurrentTenant } from "@/server/tenant-session";
+import { currentUser, withTenantPage } from "@/server/tenant-session";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +13,7 @@ export default async function AppGroupLayout({ children }: { children: React.Rea
   // Derived on the server from live records, so the bell is accurate the
   // moment any page renders rather than depending on a client fetch. Read
   // inside the tenant, so it can only ever count this customer's work.
-  const notifications = await withCurrentTenant((q) => listNotifications(q));
+  const notifications = await withTenantPage((q) => listNotifications(q));
 
   return (
     <AppShell

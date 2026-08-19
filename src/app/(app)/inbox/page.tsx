@@ -2,7 +2,7 @@ import { listMessages } from "@/server/repos/inbox";
 import { listContacts } from "@/server/repos/contacts";
 import { listDeals } from "@/server/repos/deals";
 import { decorateMessage } from "@/server/decorate-message";
-import { withCurrentTenant } from "@/server/tenant-session";
+import { withTenantPage } from "@/server/tenant-session";
 import type { ContactChannel } from "@/components/ui/ChannelBadge";
 import { InboxView } from "./InboxView";
 
@@ -17,7 +17,7 @@ const SOURCE_LABEL: Record<string, ContactChannel> = {
 };
 
 export default async function InboxPage() {
-  const { messages, contactFor, channelFor, people } = await withCurrentTenant(async (q) => {
+  const { messages, contactFor, channelFor, people } = await withTenantPage(async (q) => {
     // Trash is a folder, so the page reads every message and lets the view
     // filter — the repo's folder predicates back the counts and the tabs.
     const [inbox, sent, trash] = [

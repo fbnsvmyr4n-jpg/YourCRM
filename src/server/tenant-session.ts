@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { readSessionToken, SESSION_COOKIE } from "./auth";
 import { logDenied } from "./log";
 import { findUserById, type SafeUser } from "./repos/users";
@@ -132,6 +133,35 @@ export async function requireTenant(): Promise<TenantContext> {
 export async function withCurrentTenant<T>(fn: (q: TenantQuery) => Promise<T>): Promise<T> {
   const ctx = await requireTenant();
   return withTenant(ctx, fn);
+}
+
+/**
+ * The page variant: resolve the tenant, or send them to sign in.
+ *
+ * `withCurrentTenant` THROWS when there is no session, which is right for a
+ * server action — a caller that forgets to check the result still fails
+ * closed. It is wrong for a page. Next renders a layout and its page
+ * concurrently, so the layout's redirect does not stop the page from running,
+ * and every unauthenticated request logged a stack trace for an error that was
+ * the guard working exactly as intended.
+ *
+ * A log full of expected errors is a log nobody reads, and this one would have
+ * paged somebody. Redirecting is the honest response to "not signed in" on a
+ * page: it is not an exception, it is the answer.
+ */
+export async function withTenantPage<T>(fn: (q: TenantQuery) => Promise<T>): Promise<T> {
+  const user = await currentUser();
+  // `redirect` throws a control-flow signal Next understands, so nothing below
+  // this line runs — and no error surfaces.
+  if (!user) redirect("/login");
+  return withCurrentTenant(fn);
+}
+
+/** Same, for a page that needs the context rather than a querier. */
+export async function requireTenantPage(): Promise<TenantContext> {
+  const user = await currentUser();
+  if (!user) redirect("/login");
+  return requireTenant();
 }
 
 /**

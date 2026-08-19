@@ -7,13 +7,13 @@ import { STATUS_TONE, type LeadCard as LeadCardType } from "@/data/leads";
 import { leadAnalytics, listLeadsWithStatus, type LeadAnalytics } from "@/server/leads-view";
 import { reportData } from "@/server/analytics";
 import { getSettings } from "@/server/repos/settings";
-import { withCurrentTenant } from "@/server/tenant-session";
+import { withTenantPage } from "@/server/tenant-session";
 import { LeadCardsSection } from "./LeadCardsSection";
 
 export const dynamic = "force-dynamic";
 
 export default async function LeadsPage() {
-  const { leads, stats, revenueSeries, monthlyTarget, wonThisMonth } = await withCurrentTenant(
+  const { leads, stats, revenueSeries, monthlyTarget, wonThisMonth } = await withTenantPage(
     async (q) => {
       const settings = await getSettings(q);
       const report = await reportData(q);

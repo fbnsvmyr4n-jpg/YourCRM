@@ -3,13 +3,13 @@ import { listContacts } from "@/server/repos/contacts";
 import { getSettings } from "@/server/repos/settings";
 import { decorateMeeting } from "@/server/decorate-meeting";
 import { instantToWallClock } from "@/lib/zoned";
-import { withCurrentTenant } from "@/server/tenant-session";
+import { withTenantPage } from "@/server/tenant-session";
 import CalendarView from "./CalendarView";
 
 export const dynamic = "force-dynamic";
 
 export default async function CalendarPage() {
-  const { meetings, today } = await withCurrentTenant(async (q) => {
+  const { meetings, today } = await withTenantPage(async (q) => {
     const settings = await getSettings(q);
     const rows = await listMeetings(q);
     const contacts = await listContacts(q);
