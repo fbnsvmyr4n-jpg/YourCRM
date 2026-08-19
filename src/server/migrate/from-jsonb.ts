@@ -1,3 +1,5 @@
+import { wallClockToInstant } from "@/lib/zoned";
+
 /**
  * Migration: `crm_collections` (JSONB documents) → the relational schema.
  *
@@ -250,59 +252,14 @@ export function matchContact(
 /**
  * Combine a legacy date and time into a real instant.
  *
- * The legacy store kept `"2026-03-01"` and `"2:00 pm"` with no time zone at
- * all — wall-clock strings, meaning whatever the person who typed them meant.
- * Turning that into an instant requires choosing a zone, and the choice must be
- * EXPLICIT, because `new Date("2026-03-01T14:00:00")` uses the host's zone:
- * running this migration on a laptop in UTC+2 and on Vercel in UTC produces
- * timestamps two hours apart from identical input. A migration whose output
- * depends on which machine ran it is not a migration, and the discrepancy would
- * only ever surface as meetings sitting at the wrong time.
- *
- * So the zone is a parameter with no default guess, `zone` is recorded in the
- * migration plan, and the same input always yields the same instant.
+ * The legacy store kept `"2026-03-01"` and `"2:00 pm"` with no time zone —
+ * wall-clock strings meaning whatever the person who typed them meant. The
+ * conversion lives in `lib/zoned` and is shared with the booking form, so the
+ * migration and the running product cannot disagree about what "2 pm" was.
  */
 export function toTimestamp(date?: string, time?: string, zone = "UTC"): string | null {
   if (!date) return null;
-  const wall = `${date}T${time ? normaliseTime(time) : "00:00:00"}`;
-  if (Number.isNaN(Date.parse(`${wall}Z`))) return null;
-
-  // Read the wall-clock time as if it were UTC, ask what that instant looks
-  // like in the target zone, and shift by the difference. Handles daylight
-  // saving correctly because the offset is computed for that specific date.
-  const asUtc = Date.parse(`${wall}Z`);
-  const shown = new Intl.DateTimeFormat("en-US", {
-    timeZone: zone,
-    hour12: false,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).formatToParts(new Date(asUtc));
-
-  const part = (t: string) => Number(shown.find((p) => p.type === t)?.value ?? 0);
-  const asZone = Date.UTC(
-    part("year"),
-    part("month") - 1,
-    part("day"),
-    part("hour") % 24,
-    part("minute"),
-    part("second")
-  );
-  return new Date(asUtc - (asZone - asUtc)).toISOString();
-}
-
-function normaliseTime(time: string): string {
-  const t = time.trim();
-  const m = t.match(/^(\d{1,2}):(\d{2})\s*(am|pm)?$/i);
-  if (!m) return "00:00:00";
-  let hour = Number(m[1]);
-  const suffix = m[3]?.toLowerCase();
-  if (suffix === "pm" && hour < 12) hour += 12;
-  if (suffix === "am" && hour === 12) hour = 0;
-  return `${String(hour).padStart(2, "0")}:${m[2]}:00`;
+  return wallClockToInstant(date, time ?? "00:00", zone);
 }
 
 export type MigrationReport = {

@@ -305,12 +305,22 @@ export async function migrate(
   // --- Settings --------------------------------------------------------------
   if (legacy.settings) {
     await q.rows(
-      `INSERT INTO settings (sub_account_id, monthly_target_cents, weekly_capacity)
-       VALUES ($1, $2, $3)
+      `INSERT INTO settings (sub_account_id, monthly_target_cents, weekly_capacity, time_zone)
+       VALUES ($1, $2, $3, $4)
        ON CONFLICT (sub_account_id) DO UPDATE SET
          monthly_target_cents = EXCLUDED.monthly_target_cents,
-         weekly_capacity = EXCLUDED.weekly_capacity`,
-      [subAccountId, toCents(legacy.settings.monthlyTarget), legacy.settings.weeklyCapacity ?? 20]
+         weekly_capacity = EXCLUDED.weekly_capacity,
+         time_zone = EXCLUDED.time_zone`,
+      [
+        subAccountId,
+        toCents(legacy.settings.monthlyTarget),
+        legacy.settings.weeklyCapacity ?? 20,
+        // The same zone the legacy timestamps were read in. Landing on UTC here
+        // would mean every migrated meeting is stored correctly and every
+        // meeting booked afterwards is an hour or two out — a subtler version
+        // of the bug the zone was introduced to fix.
+        opts.legacyTimeZone,
+      ]
     );
     report.written.settings = 1;
   }
