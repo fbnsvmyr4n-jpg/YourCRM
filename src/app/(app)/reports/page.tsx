@@ -12,7 +12,8 @@ import {
 import { Avatar } from "@/components/ui/Avatar";
 import { AreaChart } from "@/components/ui/AreaChart";
 import { Card, CardHeader } from "@/components/ui/Card";
-import { reportData } from "@/server/reports";
+import { reportView } from "@/server/reports-view";
+import { withCurrentTenant } from "@/server/tenant-session";
 import { ExportButton } from "./ExportButton";
 
 export const dynamic = "force-dynamic";
@@ -35,7 +36,7 @@ const barFill = (color: string) =>
 const rate = (v: number | null) => (v === null ? "—" : `${v}%`);
 
 export default async function ReportsPage() {
-  const r = await reportData();
+  const r = await withCurrentTenant((q) => reportView(q));
 
   const kpis = [
     {
@@ -90,7 +91,6 @@ export default async function ReportsPage() {
     [],
     ["Lead source", "Leads", "Revenue traced"],
     ...r.sources.map((s) => [s.source, String(s.leads), String(s.revenue)]),
-    ["Unattributed revenue", "", String(r.attribution.unattributed)],
     [],
     ["Lead status", "Leads"],
     ...r.leadStatus.map((s) => [s.label, String(s.count)]),
@@ -109,13 +109,18 @@ export default async function ReportsPage() {
   const maxStage = Math.max(1, ...r.stages.map((s) => s.value));
   const maxSourceLeads = Math.max(1, ...r.sources.map((s) => s.leads));
   const totalLeads = r.sources.reduce((sum, s) => sum + s.leads, 0);
-  /** Won revenue split by traced source, with the untraced remainder last. */
-  const revenueSegments = [
-    ...r.sources.filter((s) => s.revenue > 0).map((s) => ({ label: s.source, value: s.revenue, color: s.color })),
-    ...(r.attribution.unattributed > 0
-      ? [{ label: "No lead record", value: r.attribution.unattributed, color: "var(--border-strong)" }]
-      : []),
-  ];
+  /**
+   * Won revenue split by source.
+   *
+   * There is no untraced remainder any more. Source used to be discovered by
+   * matching a won deal to a lead BY NAME, and only 4 of 10 matched — so this
+   * chart carried a grey "No lead record" wedge for the money it could not
+   * explain. Source is a column on the deal now, so every pound is accounted
+   * for and the wedge has nothing to hold.
+   */
+  const revenueSegments = r.sources
+    .filter((s) => s.revenue > 0)
+    .map((s) => ({ label: s.source, value: s.revenue, color: s.color }));
 
   return (
     <div className="mx-auto max-w-[1500px] animate-fade-up">
@@ -288,12 +293,8 @@ export default async function ReportsPage() {
                 <p className="mt-3 flex items-start gap-2 text-xs text-faint">
                   <HelpCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                   <span>
-                    A won deal is traced to a source by matching its contact to a lead record —{" "}
-                    <span className="font-semibold text-[var(--text)]">
-                      {r.attribution.matched} of {r.attribution.total}
-                    </span>{" "}
-                    matched. The rest came from contacts with no lead record, so it is left
-                    unattributed rather than shared out.
+                    Every deal records where it came from, so all won revenue is attributed. This
+                    used to be matched by name and only some of it could be traced.
                   </span>
                 </p>
               </div>
@@ -570,7 +571,19 @@ export default async function ReportsPage() {
                       key={d.id}
                       className="flex items-center gap-3 rounded-xl px-1 py-3 transition-colors hover:bg-[var(--raise)]"
                     >
-                      <Avatar initials={d.initials} color={d.color} size="sm" />
+                      <Avatar
+                        initials={
+                          d.contact
+                            .split(/\s+/)
+                            .filter(Boolean)
+                            .slice(0, 2)
+                            .map((p) => p[0])
+                            .join("")
+                            .toUpperCase() || "—"
+                        }
+                        color="blue"
+                        size="sm"
+                      />
                       <div className="min-w-0 flex-1 leading-tight">
                         <p className="truncate text-sm font-medium">{d.contact}</p>
                         <p className="truncate text-xs text-faint">{d.title}</p>
