@@ -5,8 +5,8 @@ import { AlertCircle, Check, KeyRound, LogOut, Target, UserRound } from "lucide-
 import { signOutAction } from "@/app/(auth)/actions";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
-import type { Settings } from "@/server/settings-repo";
-import type { SafeUser } from "@/server/users-repo";
+import type { Settings } from "@/server/repos/settings";
+import type { SafeUser } from "@/server/repos/users";
 import {
   changePasswordAction,
   updateProfileAction,
@@ -45,8 +45,34 @@ export function ProfileForm({ user }: { user: SafeUser }) {
  * `WEEKLY_CAPACITY`). The Leads and Meetings pages measure real progress
  * against these, so they belong to the user, not to the source.
  */
+/**
+ * The zones offered.
+ *
+ * `Intl.supportedValuesOf` returns several hundred, which is a scroll rather
+ * than a choice. This is a short list plus whatever the account is already set
+ * to, so an unusual zone set elsewhere is never silently replaced by picking
+ * the nearest option in a dropdown.
+ */
+const COMMON_ZONES = [
+  "UTC",
+  "Africa/Johannesburg",
+  "Europe/London",
+  "Europe/Berlin",
+  "America/New_York",
+  "America/Chicago",
+  "America/Los_Angeles",
+  "Asia/Dubai",
+  "Asia/Kolkata",
+  "Asia/Singapore",
+  "Australia/Sydney",
+];
+
 export function TargetsForm({ settings }: { settings: Settings }) {
   const [state, action, pending] = useActionState<FormState, FormData>(updateTargetsAction, undefined);
+
+  const ZONES = COMMON_ZONES.includes(settings.timeZone)
+    ? COMMON_ZONES
+    : [settings.timeZone, ...COMMON_ZONES];
 
   return (
     <Card className="card-q">
@@ -58,7 +84,8 @@ export function TargetsForm({ settings }: { settings: Settings }) {
             label="Monthly revenue target ($)"
             name="monthlyTarget"
             type="number"
-            defaultValue={String(settings.monthlyTarget)}
+            // Stored in cents, typed in whole units.
+            defaultValue={String(Math.round(settings.monthlyTargetCents / 100))}
             required
           />
           <Field
@@ -69,9 +96,28 @@ export function TargetsForm({ settings }: { settings: Settings }) {
             required
           />
         </div>
+        <label className="block">
+          <span className="mb-1.5 block text-xs font-semibold text-muted">Time zone</span>
+          <select
+            name="timeZone"
+            defaultValue={settings.timeZone}
+            className="focus-ring w-full rounded-lg bg-[var(--sunken)] px-3 py-2 text-sm"
+          >
+            {/* The zone the business works in. Every booking form submits a
+                wall-clock time with no zone attached, and this is what turns
+                one into a real moment — so the same booking does not land at a
+                different time depending on which server handled it. */}
+            {ZONES.map((z) => (
+              <option key={z} value={z}>
+                {z.replace(/_/g, " ")}
+              </option>
+            ))}
+          </select>
+        </label>
         <p className="text-xs text-faint">
-          Sales Target progress on Leads is measured against the revenue target; Workload &amp;
-          Capacity on Meetings is measured against the weekly capacity.
+          Sales Target progress is measured against the revenue target; Workload &amp; Capacity on
+          Meetings is measured against the weekly capacity. Meeting times are read and shown in the
+          time zone above.
         </p>
         <div className="flex justify-end">
           <button
