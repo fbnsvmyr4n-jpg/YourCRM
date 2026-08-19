@@ -3,8 +3,8 @@ import { Database, HardDrive, ShieldAlert, ShieldCheck } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { authSecretConfigured } from "@/server/auth";
-import { getCurrentUser } from "@/server/session";
-import { getSettings } from "@/server/settings-repo";
+import { getSettings } from "@/server/repos/settings";
+import { currentUser, withCurrentTenant } from "@/server/tenant-session";
 import { storageEngine } from "@/server/store";
 import {
   AppearanceCard,
@@ -17,11 +17,11 @@ import {
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
-  const user = await getCurrentUser();
+  const user = await currentUser();
   if (!user) redirect("/login");
   const engine = storageEngine();
   const secretOk = authSecretConfigured();
-  const settings = await getSettings();
+  const settings = await withCurrentTenant((q) => getSettings(q));
 
   return (
     <div className="mx-auto max-w-[900px] animate-fade-up">
@@ -33,7 +33,21 @@ export default async function SettingsPage() {
       {/* Account summary */}
       <Card className="mb-5">
         <div className="flex items-center gap-4">
-          <Avatar initials={user.initials} color="blue" size="lg" />
+          <Avatar
+            initials={
+              // Derived from the name rather than stored. A second copy of
+              // somebody's initials is a second thing to keep in step.
+              user.name
+                .split(/\s+/)
+                .filter(Boolean)
+                .slice(0, 2)
+                .map((p) => p[0])
+                .join("")
+                .toUpperCase() || "?"
+            }
+            color="blue"
+            size="lg"
+          />
           <div className="min-w-0 flex-1 leading-tight">
             <p className="truncate text-lg font-semibold">{user.name}</p>
             <p className="truncate text-sm text-muted">{user.email}</p>
