@@ -6,13 +6,15 @@ import { Card, CardHeader, ViewAll } from "@/components/ui/Card";
 import { FocusMenu, type FocusItem } from "@/components/home/FocusMenu";
 import { LiveClock } from "@/components/ui/LiveClock";
 import { iconMap, toneStyles, type Tone } from "@/components/ui/tone";
-import { activityFeed } from "@/server/activity-feed";
-import { getCurrentUser } from "@/server/session";
-import { listContacts } from "@/server/contacts-repo";
-import { listWonDeals, weeklyRevenue } from "@/server/deals-repo";
-import { listLeads } from "@/server/leads-repo";
-import { listMeetings } from "@/server/meetings-repo";
-import { listMessages } from "@/server/inbox-repo";
+import { activityFeed } from "@/server/feed";
+import { reportData } from "@/server/analytics";
+import { listContacts } from "@/server/repos/contacts";
+import { listDeals } from "@/server/repos/deals";
+import { listMeetings } from "@/server/repos/meetings";
+import { listMessages, unreadCount } from "@/server/repos/inbox";
+import { getSettings } from "@/server/repos/settings";
+import { instantToWallClock } from "@/lib/zoned";
+import { currentUser, withCurrentTenant } from "@/server/tenant-session";
 
 export const dynamic = "force-dynamic";
 
@@ -34,16 +36,89 @@ function relativeDay(iso: string, now: Date) {
 }
 
 export default async function DashboardPage() {
-  const [me, contacts, leads, meetings, messages, wonDeals, revenueSeries, feed] = await Promise.all([
-    getCurrentUser(),
-    listContacts(),
-    listLeads(),
-    listMeetings(),
-    listMessages(),
-    listWonDeals(),
-    weeklyRevenue(),
-    activityFeed(),
-  ]);
+  const me = await currentUser();
+
+  const { contacts, meetingsToday, unread, wonDeals, revenueSeries, feed, report, followUps, upcoming } =
+    await withCurrentTenant(async (q) => {
+      const settings = await getSettings(q);
+      const todayKey =
+        instantToWallClock(new Date().toISOString(), settings.timeZone)?.date ??
+        new Date().toISOString().slice(0, 10);
+
+      const contacts = await listContacts(q);
+      const deals = await listDeals(q);
+      const meetings = await listMeetings(q);
+      const report = await reportData(q);
+
+      const people = new Map(
+        contacts.map((c) => [c.id, `${c.firstName} ${c.lastName}`.trim()])
+      );
+
+      return {
+        contacts,
+        // "Today" in the business's zone, not the server's — the same rule the
+        // calendar follows, and for the same reason.
+        meetingsToday: meetings
+          .filter((m) => instantToWallClock(m.scheduledAt, settings.timeZone)?.date === todayKey)
+          .map((m) => ({
+            time: instantToWallClock(m.scheduledAt, settings.timeZone)?.time ?? "",
+            name: m.contactId ? (people.get(m.contactId) ?? "") : "",
+          })),
+        unread: await unreadCount(q),
+        // Won-ness from the recorded fact, so a deal in Delivery still counts.
+        wonDeals: deals
+          .filter((d) => d.wonAt !== null)
+          .map((d) => ({
+            id: d.id,
+            client: d.contactId ? (people.get(d.contactId) ?? "") : "",
+            title: d.title,
+            wonAt: d.wonAt!,
+            amountCents: d.valueCents,
+          })),
+        // Labelled points, so the chart's axis is derived from real weeks
+        // rather than from array positions.
+        revenueSeries: report.weekly.map((w) => ({
+          label: new Date(w.weekStart).toLocaleDateString("en-GB", {
+            day: "numeric",
+            month: "short",
+          }),
+          value: Math.round(w.wonCents / 100),
+        })),
+        // Follow-ups: people with a deal still in play. That IS what a lead is
+        // now, so the card no longer needs a separate table to read.
+        followUps: contacts
+          .filter((c) => c.hasOpenDeal)
+          .slice(0, 3)
+          .map((c) => ({
+            initials:
+              ((c.firstName[0] ?? "") + (c.lastName[0] ?? "")).toUpperCase() || "—",
+            color: "amber" as AvatarColor,
+            name: `${c.firstName} ${c.lastName}`.trim(),
+            email: c.email ?? "",
+            company: c.info ?? "",
+          })),
+        upcoming: meetings
+          .filter((m) => Date.parse(m.scheduledAt) >= Date.now() && m.outcome === "scheduled")
+          .sort((a, b) => Date.parse(a.scheduledAt) - Date.parse(b.scheduledAt))
+          .slice(0, 4)
+          .map((m) => {
+            const w = instantToWallClock(m.scheduledAt, settings.timeZone);
+            return {
+              id: m.id,
+              name: m.contactId ? (people.get(m.contactId) ?? "") : "",
+              topic: m.topic || "Meeting",
+              when: w?.date === todayKey ? "Today" : (w?.date ?? ""),
+              time: w?.time ?? "",
+              // Derived from the outcome, never stored alongside it.
+              status: m.outcome === "scheduled" ? "Pending" : "Confirmed",
+            };
+          }),
+        feed: await activityFeed(q),
+        report,
+        // Read so the unread panel has a first sender to name.
+        firstUnread: (await listMessages(q, "unread"))[0] ?? null,
+      };
+    });
 
   const now = new Date();
   const dateLabel = now.toLocaleDateString("en-US", {
@@ -53,31 +128,41 @@ export default async function DashboardPage() {
   });
 
   // ---- derived, real numbers ----
-  const clients = contacts.filter((c) => c.type === "client");
-  const openLeads = leads.filter((l) => l.status === "Follow-up Required");
-  const meetingsToday = meetings.filter((m) => m.when === "Today");
-  const unread = messages.filter((m) => m.unread && !m.trashed);
+  // A client is somebody who bought something and a lead is somebody with an
+  // open deal. Both come from the deals underneath rather than a stored label
+  // that could disagree with them.
+  const clientCount = report.contacts.clients;
+  const openLeadCount = report.contacts.leads;
 
   const heroStats = [
     { icon: "user-plus", tone: "blue" as Tone, label: "Contacts", value: contacts.length },
-    { icon: "bar-chart", tone: "amber" as Tone, label: "Open Leads", value: openLeads.length },
+    { icon: "bar-chart", tone: "amber" as Tone, label: "Open Leads", value: openLeadCount },
     { icon: "calendar", tone: "purple" as Tone, label: "Meetings Today", value: meetingsToday.length },
-    { icon: "message", tone: "green" as Tone, label: "Unread", value: unread.length },
+    { icon: "message", tone: "green" as Tone, label: "Unread", value: unread },
   ];
 
   // Real money from real records: won deals carry the value the user entered
   // and the date they actually closed.
   const revenueRows = wonDeals.map((d) => ({
     id: d.id,
-    initials: d.initials,
-    color: d.color,
-    client: d.contact,
-    company: d.company,
+    // Initials are derived, not stored — a second copy of somebody's name is
+    // a second thing to keep in step.
+    initials:
+      d.client
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((p) => p[0])
+        .join("")
+        .toUpperCase() || "—",
+    color: "blue" as AvatarColor,
+    client: d.client,
+    company: "",
     title: d.title,
     wonAt: d.wonAt,
-    amount: d.value,
+    amount: Math.round(d.amountCents / 100),
   }));
-  const revenueTotal = wonDeals.reduce((sum, d) => sum + d.value, 0);
+  const revenueTotal = Math.round(report.revenue.wonCents / 100);
 
   // Deals actually won in the last seven days — the week the panel reports on.
   const weekAgo = now.getTime() - 7 * 86_400_000;
@@ -90,23 +175,25 @@ export default async function DashboardPage() {
       icon: "calendar",
       tone: "red" as Tone,
       title: `${meetingsToday.length} meeting${meetingsToday.length === 1 ? "" : "s"} today`,
-      sub: meetingsToday[0] ? `Next: ${meetingsToday[0].time} with ${meetingsToday[0].name}` : "Nothing on the calendar",
+      sub: meetingsToday[0]
+        ? `Next: ${meetingsToday[0].time}${meetingsToday[0].name ? ` with ${meetingsToday[0].name}` : ""}`
+        : "Nothing on the calendar",
     },
     {
       href: "/leads",
       menuLabel: "Leads needing follow-up",
       icon: "user-plus",
       tone: "amber" as Tone,
-      title: `${openLeads.length} lead${openLeads.length === 1 ? "" : "s"} need follow-up`,
-      sub: openLeads[0] ? `Start with ${openLeads[0].name}` : "You're all caught up",
+      title: `${openLeadCount} lead${openLeadCount === 1 ? "" : "s"} need follow-up`,
+      sub: openLeadCount > 0 ? "Open deals waiting on a next step" : "You're all caught up",
     },
     {
       href: "/inbox",
       menuLabel: "Unread messages",
       icon: "message",
       tone: "blue" as Tone,
-      title: `${unread.length} unread message${unread.length === 1 ? "" : "s"}`,
-      sub: unread[0] ? `From ${unread[0].name}` : "Inbox zero 🎉",
+      title: `${unread} unread message${unread === 1 ? "" : "s"}`,
+      sub: unread > 0 ? "Waiting on a reply" : "Inbox zero 🎉",
     },
     {
       href: "/deals",
@@ -116,7 +203,7 @@ export default async function DashboardPage() {
       // Deals closed means *deals*, not leads marked closed — those are
       // different records and conflating them overstated the number.
       title: `${wonDeals.length} deal${wonDeals.length === 1 ? "" : "s"} closed`,
-      sub: `$${revenueTotal.toLocaleString()} won · ${clients.length} active client${clients.length === 1 ? "" : "s"}`,
+      sub: `$${revenueTotal.toLocaleString()} won · ${clientCount} active client${clientCount === 1 ? "" : "s"}`,
     },
   ];
 
@@ -143,7 +230,7 @@ export default async function DashboardPage() {
             greeting={greeting(now.getHours())}
             name={me?.name.split(" ")[0] ?? "there"}
             date={dateLabel}
-            summary={`You have ${meetingsToday.length} meeting${meetingsToday.length === 1 ? "" : "s"} and ${openLeads.length} follow-up${openLeads.length === 1 ? "" : "s"} today.`}
+            summary={`You have ${meetingsToday.length} meeting${meetingsToday.length === 1 ? "" : "s"} and ${openLeadCount} follow-up${openLeadCount === 1 ? "" : "s"} today.`}
             stats={heroStats}
           />
 
@@ -155,14 +242,16 @@ export default async function DashboardPage() {
           <div className="grid grid-cols-1 gap-5 @min-[560px]:grid-cols-2">
             <ThisWeek
               wonThisWeek={wonThisWeek.length}
-              wonValue={wonThisWeek.reduce((sum, d) => sum + d.value, 0)}
-              needFollowUp={openLeads.length}
-              totalLeads={leads.length}
+              wonValue={Math.round(
+                wonThisWeek.reduce((sum, d) => sum + d.amountCents, 0) / 100
+              )}
+              needFollowUp={openLeadCount}
+              totalLeads={contacts.length}
             />
-            <Connections items={openLeads.slice(0, 3)} />
+            <Connections items={followUps} />
           </div>
 
-          <Reminders items={meetings.slice(0, 4)} />
+          <Reminders items={upcoming} />
         </div>
 
         {/* ---------------- RIGHT RAIL ---------------- */}
