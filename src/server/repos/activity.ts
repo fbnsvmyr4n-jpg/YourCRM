@@ -39,6 +39,9 @@ export const ACTIVITY_KINDS = [
   "note",
   "email",
   "call",
+  // Texting a contact is its own event: the Contacts screen offers it as a
+  // separate button, and folding it into "call" would misreport what happened.
+  "text",
   "meeting",
   "stage_change",
   "won",
