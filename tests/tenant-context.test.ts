@@ -267,6 +267,10 @@ describe("every repository scopes itself, without relying on the database", () =
     "users.ts":
       "sign-in happens before a tenant exists, and users are agency-level anyway; " +
       "scoped by agency_id explicitly, or by the user's own id.",
+    "tenant-session.ts":
+      "resolves WHICH tenant a request is in; it cannot already be inside one. " +
+      "Touches only sub_accounts, always filtered by the user's own agency_id — " +
+      "which is the check the whole module exists to perform.",
   };
 
   for (const [name, reason] of Object.entries(UNTENANTED)) {
@@ -276,7 +280,19 @@ describe("every repository scopes itself, without relying on the database", () =
       // against contacts or deals would see nothing under RLS, but the repos
       // also filter themselves, and a file here bypasses that check entirely.
       expect(reason.length, `${name} has no reason recorded`).toBeGreaterThan(20);
-      const src = readFileSync(join(REPOS, name), "utf8");
+
+      // An exemption from tenant scoping is not an exemption from scoping. A
+      // module that reads sub_accounts must still constrain by agency, or it
+      // hands one customer another customer's workspace list.
+      const path = existsSync(join(REPOS, name)) ? join(REPOS, name) : join(SERVER, name);
+      const body = readFileSync(path, "utf8");
+      if (/FROM sub_accounts/i.test(body)) {
+        expect(
+          /agency_id = \$/.test(body),
+          `${name} queries sub_accounts without filtering by agency_id`
+        ).toBe(true);
+      }
+      const src = body;
       for (const table of TENANT_TABLES) {
         expect(
           new RegExp(`\\b(FROM|INTO|UPDATE|JOIN)\\s+${table}\\b`, "i").test(src),
