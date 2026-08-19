@@ -1,12 +1,13 @@
-import { STAGES } from "@/data/deals";
-import { listContacts } from "./contacts-repo";
-import { listDeals } from "./deals-repo";
-import { listLeads } from "./leads-repo";
-import { listMeetings } from "./meetings-repo";
-import { listMessages } from "./inbox-repo";
-import type { ChatMessage } from "./chat-repo";
-import { listCalls } from "./calls-repo";
-import { getSettings } from "./settings-repo";
+import { BOARD_STAGES as STAGES } from "@/data/pipeline";
+import { listContacts } from "./repos/contacts";
+import { listDeals } from "./repos/deals";
+import { listMeetings } from "./repos/meetings";
+import { listMessages, unreadCount } from "./repos/inbox";
+import type { ChatMessage } from "./repos/chat";
+import { listCalls } from "./repos/calls";
+import { getSettings } from "./repos/settings";
+import { instantToWallClock } from "@/lib/zoned";
+import type { TenantQuery } from "./tenant";
 import { CONFIDENT, findEntity, rankIntents } from "./chat-intents";
 import { INTENTS, SUGGESTION_POOL } from "./chat-answers";
 
@@ -20,24 +21,34 @@ function money(n: number) {
 }
 
 /** A compact, factual snapshot of the whole CRM for the agent to reason over. */
-export async function buildCrmContext() {
-  const [contacts, leads, deals, meetings, messages, calls, settings] = await Promise.all([
-    listContacts(),
-    listLeads(),
-    listDeals(),
-    listMeetings(),
-    listMessages(),
-    listCalls(),
-    getSettings(),
-  ]);
+export async function buildCrmContext(q: TenantQuery) {
+  const settings = await getSettings(q);
+  const contacts = await listContacts(q);
+  const deals = await listDeals(q);
+  const meetings = await listMeetings(q);
+  const messages = await listMessages(q, "inbox");
+  const calls = await listCalls(q);
 
-  const openLeads = leads.filter((l) => l.status === "Follow-up Required");
-  const wonDeals = deals.filter((d) => d.stage === "won");
-  const openDeals = deals.filter((d) => d.stage !== "won");
-  const openValue = openDeals.reduce((s, d) => s + d.value, 0);
-  const wonValue = wonDeals.reduce((s, d) => s + d.value, 0);
-  const todayMeetings = meetings.filter((m) => m.when === "Today");
-  const unread = messages.filter((m) => m.unread && !m.trashed);
+  // Money arrives in cents and every line below is written for a human, so it
+  // is converted once here rather than at each mention.
+  const units = (cents: number) => Math.round(cents / 100);
+
+  // A lead is a contact with a deal still in play — the derived definition,
+  // so the assistant cannot quote a figure the screens disagree with.
+  const openLeads = contacts.filter((c) => c.hasOpenDeal);
+  // Won-ness from the recorded fact, so Delivery and Referral still count.
+  const wonDeals = deals.filter((d) => d.wonAt !== null);
+  const openDeals = deals.filter((d) => ["prospect", "discovery", "demo"].includes(d.stage));
+  const openValue = units(openDeals.reduce((s, d) => s + d.valueCents, 0));
+  const wonValue = units(wonDeals.reduce((s, d) => s + d.valueCents, 0));
+
+  const todayKey =
+    instantToWallClock(new Date().toISOString(), settings.timeZone)?.date ??
+    new Date().toISOString().slice(0, 10);
+  const todayMeetings = meetings.filter(
+    (m) => instantToWallClock(m.scheduledAt, settings.timeZone)?.date === todayKey
+  );
+  const unread = await unreadCount(q);
 
   // Progress against target is computed exactly the way the Sales Target page
   // computes it — same source, same month boundary — so the assistant can never
@@ -45,22 +56,31 @@ export async function buildCrmContext() {
   const monthStart = new Date();
   monthStart.setUTCDate(1);
   monthStart.setUTCHours(0, 0, 0, 0);
-  const wonThisMonth = wonDeals
-    .filter((d) => d.wonAt && Date.parse(d.wonAt) >= monthStart.getTime())
-    .reduce((sum, d) => sum + d.value, 0);
+  const wonThisMonth = units(
+    wonDeals
+      .filter((d) => d.wonAt && Date.parse(d.wonAt) >= monthStart.getTime())
+      .reduce((sum, d) => sum + d.valueCents, 0)
+  );
 
   const byStage = STAGES.map((s) => {
     const rows = deals.filter((d) => d.stage === s.id);
     return {
       stage: s.label,
       count: rows.length,
-      value: rows.reduce((a, d) => a + d.value, 0),
+      value: units(rows.reduce((a, d) => a + d.valueCents, 0)),
     };
   });
 
+  // Names come from the contact record through the foreign key. The old
+  // briefing read a copy of the name stored on each deal and meeting, so a
+  // renamed contact appeared under two names in the same paragraph.
+  const nameOf = new Map(contacts.map((c) => [c.id, `${c.firstName} ${c.lastName}`.trim()]));
+  const who = (id: string | null) => (id ? (nameOf.get(id) ?? "unknown") : "unassigned");
+
+  const monthlyTarget = units(settings.monthlyTargetCents);
+
   return {
     contacts,
-    leads,
     deals,
     meetings,
     messages,
@@ -73,57 +93,47 @@ export async function buildCrmContext() {
     unread,
     byStage,
     calls,
-    monthlyTarget: settings.monthlyTarget,
+    monthlyTarget,
     wonThisMonth,
-    /** Every stored file, flattened so a question can name one directly. */
-    attachments: messages
-      .filter((m) => !m.trashed)
-      .flatMap((m) =>
-        m.attachments.map((a) => ({
-          name: a.name,
-          kind: a.kind,
-          size: a.size,
-          content: a.content,
-          from: m.name,
-          subject: m.subject,
-        }))
-      ),
-    /** Rendered for the model as a factual briefing. */
+    /**
+     * Rendered for the model as a factual briefing.
+     *
+     * Attachments used to be flattened in here in full, so the assistant could
+     * answer questions about a document's contents. There is no attachment
+     * storage in the new schema, so that section is absent rather than empty —
+     * claiming to have read a file nobody stored is the failure mode this
+     * whole product has been fighting.
+     */
     text: [
       `CONTACTS (${contacts.length}): ${contacts
-        .map((c) => `${c.firstName} ${c.lastName} [${c.type}, ${c.status}] @ ${c.company}`)
-        .join("; ")}`,
-      `LEADS (${leads.length}): ${leads
-        .map((l) => `${l.name} @ ${l.company} — ${l.status}, source ${l.source}`)
+        .map(
+          (c) =>
+            `${c.firstName} ${c.lastName} [${c.isClient ? "client" : c.hasOpenDeal ? "open deal" : "no open deal"}]${
+              c.info ? ` @ ${c.info}` : ""
+            }`
+        )
         .join("; ")}`,
       `DEALS (${deals.length}) — open pipeline ${money(openValue)}, closed won ${money(wonValue)}:`,
       deals
-        .map((d) => `  • ${d.title} — ${d.contact} @ ${d.company}, ${money(d.value)}, stage ${d.stage}, closes ${d.closeDate}`)
+        .map(
+          (d) =>
+            `  • ${d.title} — ${who(d.contactId)}, ${money(units(d.valueCents))}, stage ${d.stage}, source ${d.source}${
+              d.wonAt ? `, won ${d.wonAt.slice(0, 10)}` : ""
+            }${d.painPoints.length ? `, pain points: ${d.painPoints.join(" / ")}` : ""}`
+        )
         .join("\n"),
       `PIPELINE BY STAGE: ${byStage.map((s) => `${s.stage}: ${s.count} deals / ${money(s.value)}`).join("; ")}`,
       `MEETINGS (${meetings.length}): ${meetings
-        .map((m) => `${m.when} ${m.time} — ${m.name} (${m.company}) re: ${m.topic} [${m.status}, ${m.type}]`)
+        .map((m) => {
+          const w = instantToWallClock(m.scheduledAt, settings.timeZone);
+          return `${w?.date ?? "?"} ${w?.time ?? ""} — ${who(m.contactId)} re: ${m.topic} [${m.outcome}, ${m.kind}]`;
+        })
         .join("; ")}`,
-      `INBOX: ${messages.filter((m) => !m.trashed).length} messages, ${unread.length} unread${
-        unread.length ? ` (from ${unread.map((m) => m.name).join(", ")})` : ""
-      }`,
-      `CALLS (${calls.length}), ${calls.filter((c) => c.status === "pending").length} awaiting action: ${calls
-        .map((c) => `${c.callerName} (${c.company}) — ${c.outcome}, ${c.status}`)
+      `INBOX: ${messages.length} messages, ${unread} unread`,
+      `CALLS (${calls.length}): ${calls
+        .map((c) => `${c.callerName || "unknown caller"} — ${c.outcome ?? "no outcome recorded"}`)
         .join("; ")}`,
-      `TARGET: ${money(wonThisMonth)} won this month against a ${money(settings.monthlyTarget)} monthly target`,
-      // Full text, not just filenames — the user asks the assistant to explain
-      // what is *in* a document, which it cannot do from a name.
-      ...messages
-        .filter((m) => !m.trashed && m.attachments.some((a) => a.content))
-        .map((m) =>
-          m.attachments
-            .filter((a) => a.content)
-            .map(
-              (a) =>
-                `ATTACHMENT "${a.name}" (${a.size}, from ${m.name}, re: ${m.subject}):\n${a.content}`
-            )
-            .join("\n\n")
-        ),
+      `TARGET: ${money(wonThisMonth)} won this month against a ${money(monthlyTarget)} monthly target`,
     ].join("\n"),
   };
 }
@@ -143,10 +153,12 @@ export type CrmContext = Awaited<ReturnType<typeof buildCrmContext>>;
  * the box and upgrades to a full LLM by adding one environment variable.
  */
 export async function answer(
+  q: TenantQuery,
   question: string,
-  history: ChatMessage[]
+  history: ChatMessage[],
+  userName: string
 ): Promise<{ text: string; live: boolean }> {
-  const ctx = await buildCrmContext();
+  const ctx = await buildCrmContext(q);
 
   if (process.env.ANTHROPIC_API_KEY) {
     try {
@@ -163,7 +175,11 @@ export async function answer(
         // Chat is latency-sensitive and these are lookup-style questions.
         output_config: { effort: "low" },
         system: [
-          "You are the assistant inside YourCRM, a sales CRM. You help Lang Lee (Admin) run their pipeline.",
+          // The name comes from the session. It was hardcoded to "Lang Lee
+          // (Admin)", so the assistant addressed every user on every account by
+          // one person's name — harmless while there was one user, and a
+          // stranger's name on screen the moment there were two.
+          `You are the assistant inside YourCRM, a sales CRM. You help ${userName} run their pipeline.`,
           "Answer using ONLY the CRM data below. If something isn't in the data, say so plainly rather than inventing it.",
           "Be concise and practical — lead with the answer, then a short supporting detail. Use the person's real names and figures.",
           "When it helps, suggest the next action (who to follow up with, what to close).",
@@ -210,56 +226,57 @@ export async function answer(
 
 /** A person the user asked about by name, wherever they live in the CRM. */
 function describeEntity(question: string, ctx: CrmContext): string | null {
-  // A named file beats everything: "what's in Proposal.pdf" is a question about
-  // that document, not about proposals in general. Checked first because the
-  // filename usually contains a word that would otherwise match a topic.
-  const file = findEntity(question, ctx.attachments, (a) => a.name.replace(/\.\w+$/, ""));
-  if (file) {
-    if (!file.content) {
-      return `**${file.name}** (${file.size}) came from ${file.from}, but no readable text is stored for it — so I can't tell you what's inside.`;
-    }
-    return [
-      `**${file.name}** — from ${file.from}, re: ${file.subject}`,
-      "",
-      // The document itself, not a paraphrase. Without a model available this
-      // is the honest thing to hand back: everything it actually says.
-      file.content,
-    ].join("\n");
-  }
+  /**
+   * Attachments are no longer answerable, and that is deliberate.
+   *
+   * The old version flattened every stored file's full text into the context so
+   * "what's in Proposal.pdf" could be answered from the document itself. There
+   * is no attachment storage in the new schema, so the honest behaviour is to
+   * have nothing to say about files rather than to answer from a name — the
+   * exact failure this product keeps designing against.
+   */
+  const money = (n: number) => `$${Math.round(n).toLocaleString()}`;
+  const units = (cents: number) => Math.round(cents / 100);
+  const fullName = (c: { firstName: string; lastName: string }) =>
+    `${c.firstName} ${c.lastName}`.trim();
 
-  const contact = findEntity(question, ctx.contacts, (c) => `${c.firstName} ${c.lastName} ${c.company}`);
+  const contact = findEntity(question, ctx.contacts, (c) => `${fullName(c)} ${c.info ?? ""}`);
   if (contact) {
-    const deals = ctx.deals.filter((d) => d.contact.toLowerCase() === `${contact.firstName} ${contact.lastName}`.toLowerCase());
-    const meetings = ctx.meetings.filter((m) => m.name.toLowerCase() === `${contact.firstName} ${contact.lastName}`.toLowerCase());
+    // Matched by id, not by comparing names. The old version compared the
+    // contact's name to a copy stored on each deal, so renaming somebody
+    // emptied their history here as well as everywhere else.
+    const deals = ctx.deals.filter((d) => d.contactId === contact.id);
+    const meetings = ctx.meetings.filter((m) => m.contactId === contact.id);
     return [
-      `**${contact.firstName} ${contact.lastName}** — ${contact.company}`,
-      `• ${contact.type === "client" ? "Client" : "Lead"} · status ${contact.status}`,
+      `**${fullName(contact)}**${contact.info ? ` — ${contact.info}` : ""}`,
+      `• ${contact.isClient ? "Client" : contact.hasOpenDeal ? "Open deal in progress" : "No open deal"}`,
       contact.email ? `• ${contact.email}` : null,
       contact.phone ? `• ${contact.phone}` : null,
-      deals.length ? `• ${deals.length} deal${deals.length === 1 ? "" : "s"}: ${deals.map((d) => `${d.title} (${money(d.value)}, ${d.stage})`).join(", ")}` : "• No deals yet",
+      deals.length
+        ? `• ${deals.length} deal${deals.length === 1 ? "" : "s"}: ${deals
+            .map((d) => `${d.title} (${money(units(d.valueCents))}, ${d.stage})`)
+            .join(", ")}`
+        : "• No deals yet",
       meetings.length ? `• ${meetings.length} meeting${meetings.length === 1 ? "" : "s"} booked` : null,
-    ].filter(Boolean).join("\n");
+    ]
+      .filter(Boolean)
+      .join("\n");
   }
 
-  const lead = findEntity(question, ctx.leads, (l) => `${l.name} ${l.company}`);
-  if (lead) {
-    return [
-      `**${lead.name}** — ${lead.company}`,
-      `• Lead · ${lead.status} · via ${lead.source}`,
-      lead.email ? `• ${lead.email}` : null,
-      lead.phone ? `• ${lead.phone}` : null,
-      lead.location && lead.location !== "—" ? `• ${lead.location}` : null,
-    ].filter(Boolean).join("\n");
-  }
-
-  const deal = findEntity(question, ctx.deals, (d) => `${d.title} ${d.contact} ${d.company}`);
+  const deal = findEntity(question, ctx.deals, (d) => d.title);
   if (deal) {
+    const person = ctx.contacts.find((c) => c.id === deal.contactId);
     return [
-      `**${deal.title}** — ${money(deal.value)}`,
-      `• ${deal.contact} at ${deal.company}`,
+      `**${deal.title}** — ${money(units(deal.valueCents))}`,
+      person ? `• ${fullName(person)}${person.info ? ` at ${person.info}` : ""}` : "• Unassigned",
       `• Stage: ${deal.stage}`,
-      deal.closeDate && deal.closeDate !== "—" ? `• Expected close: ${deal.closeDate}` : null,
-    ].filter(Boolean).join("\n");
+      `• Source: ${deal.source}`,
+      // What they said hurts, which is what the demo should be built from.
+      deal.painPoints.length ? `• Pain points: ${deal.painPoints.join(" / ")}` : null,
+      deal.wonAt ? `• Won ${deal.wonAt.slice(0, 10)}` : null,
+    ]
+      .filter(Boolean)
+      .join("\n");
   }
 
   return null;
@@ -268,24 +285,30 @@ function describeEntity(question: string, ctx: CrmContext): string | null {
 function answerFor(id: string, ctx: CrmContext): string {
   switch (id) {
     case "pipeline": {
-      const sorted = [...ctx.openDeals].sort((a, b) => b.value - a.value);
+      const sorted = [...ctx.openDeals].sort((a, b) => b.valueCents - a.valueCents);
       return [
         `Your open pipeline is **${money(ctx.openValue)}** across ${ctx.openDeals.length} active deal${ctx.openDeals.length === 1 ? "" : "s"}, with **${money(ctx.wonValue)}** already closed won.`,
         "",
         ...ctx.byStage.map((s) => `• ${s.stage}: ${s.count} deal${s.count === 1 ? "" : "s"} — ${money(s.value)}`),
         "",
-        sorted.length ? `Biggest open deal: ${sorted[0].title} (${money(sorted[0].value)}).` : "No open deals right now.",
+        sorted.length
+          ? `Biggest open deal: ${sorted[0].title} (${money(Math.round(sorted[0].valueCents / 100))}).`
+          : "No open deals right now.",
       ].join("\n");
     }
 
     case "followups":
-      if (!ctx.openLeads.length) return "You're all caught up — no leads are marked for follow-up. 🎉";
+      if (!ctx.openLeads.length) return "You're all caught up — nobody has a deal waiting on a next step. 🎉";
       return [
-        `You have **${ctx.openLeads.length} lead${ctx.openLeads.length === 1 ? "" : "s"}** needing follow-up:`,
+        `You have **${ctx.openLeads.length} ${ctx.openLeads.length === 1 ? "person" : "people"}** with a deal in progress:`,
         "",
-        ...ctx.openLeads.map((l) => `• **${l.name}** — ${l.company} (via ${l.source})${l.phone ? ` — ${l.phone}` : ""}`),
+        // A lead is a contact with an open deal, so these are contacts.
+        ...ctx.openLeads.map(
+          (l) =>
+            `• **${l.firstName} ${l.lastName}**${l.info ? ` — ${l.info}` : ""}${l.phone ? ` — ${l.phone}` : ""}`
+        ),
         "",
-        `Start with ${ctx.openLeads[0].name}.`,
+        `Start with ${ctx.openLeads[0].firstName} ${ctx.openLeads[0].lastName}.`,
       ].join("\n");
 
     case "meetings": {
@@ -296,27 +319,42 @@ function answerFor(id: string, ctx: CrmContext): string {
           ? `You have **${today.length} meeting${today.length === 1 ? "" : "s"} today**:`
           : "Nothing today. Coming up:",
         "",
-        ...(today.length ? today : ctx.meetings.slice(0, 5)).map(
-          (m) => `• **${m.time}** — ${m.name} (${m.company}) — ${m.topic} · ${m.type}`
-        ),
+        ...(today.length ? today : ctx.meetings.slice(0, 5)).map((m) => {
+          const person = ctx.contacts.find((c) => c.id === m.contactId);
+          const at = new Date(m.scheduledAt).toISOString().slice(11, 16);
+          return `• **${at}** — ${person ? `${person.firstName} ${person.lastName}` : "unassigned"} — ${m.topic} · ${m.kind}`;
+        }),
       ].join("\n");
     }
 
-    case "leads":
-      if (!ctx.leads.length) return "No leads yet.";
+    case "leads": {
+      // There is no separate lead record any more: a lead is a contact with a
+      // deal still in play, so this answers from the people who have one.
+      const clients = ctx.contacts.filter((c) => c.isClient).length;
+      if (!ctx.openLeads.length) return `No open leads. ${clients} contact${clients === 1 ? "" : "s"} have bought.`;
       return [
-        `You have **${ctx.leads.length} lead${ctx.leads.length === 1 ? "" : "s"}** — ${ctx.openLeads.length} needing follow-up, ${ctx.leads.length - ctx.openLeads.length} closed.`,
+        `You have **${ctx.openLeads.length}** ${ctx.openLeads.length === 1 ? "person" : "people"} with an open deal, and ${clients} who have bought.`,
         "",
-        ...ctx.leads.slice(0, 10).map((l) => `• **${l.name}** — ${l.company} — ${l.status} (${l.source})`),
+        ...ctx.openLeads
+          .slice(0, 10)
+          .map((l) => `• **${l.firstName} ${l.lastName}**${l.info ? ` — ${l.info}` : ""}`),
       ].join("\n");
+    }
 
     case "contacts": {
-      const clients = ctx.contacts.filter((c) => c.type === "client");
+      const clients = ctx.contacts.filter((c) => c.isClient);
       if (!ctx.contacts.length) return "No contacts yet.";
       return [
         `You have **${ctx.contacts.length} contact${ctx.contacts.length === 1 ? "" : "s"}** — ${clients.length} client${clients.length === 1 ? "" : "s"} and ${ctx.contacts.length - clients.length} lead${ctx.contacts.length - clients.length === 1 ? "" : "s"}.`,
         "",
-        ...ctx.contacts.slice(0, 10).map((c) => `• **${c.firstName} ${c.lastName}** — ${c.company} (${c.type}, ${c.status})`),
+        ...ctx.contacts
+          .slice(0, 10)
+          .map(
+            (c) =>
+              `• **${c.firstName} ${c.lastName}**${c.info ? ` — ${c.info}` : ""} (${
+                c.isClient ? "client" : c.hasOpenDeal ? "open deal" : "no open deal"
+              })`
+          ),
       ].join("\n");
     }
 
@@ -325,45 +363,52 @@ function answerFor(id: string, ctx: CrmContext): string {
       return [
         `**${ctx.deals.length} deal${ctx.deals.length === 1 ? "" : "s"}** — ${ctx.wonDeals.length} won (${money(ctx.wonValue)}), ${ctx.openDeals.length} open (${money(ctx.openValue)}).`,
         "",
-        ...[...ctx.deals].sort((a, b) => b.value - a.value).slice(0, 6)
-          .map((d) => `• **${d.title}** — ${d.contact}, ${money(d.value)} — ${d.stage}`),
+        ...[...ctx.deals]
+          .sort((a, b) => b.valueCents - a.valueCents)
+          .slice(0, 6)
+          .map((d) => {
+            const person = ctx.contacts.find((c) => c.id === d.contactId);
+            const who = person ? `${person.firstName} ${person.lastName}` : "unassigned";
+            return `• **${d.title}** — ${who}, ${money(Math.round(d.valueCents / 100))} — ${d.stage}`;
+          }),
       ].join("\n");
 
     case "inbox":
-      return ctx.unread.length
-        ? [
-            `You have **${ctx.unread.length} unread message${ctx.unread.length === 1 ? "" : "s"}**:`,
-            "",
-            ...ctx.unread.map((m) => `• **${m.name}** — ${m.subject}`),
-          ].join("\n")
+      // `unread` is a count from the database rather than a list length, so it
+      // agrees with the badge in the sidebar instead of being derived twice.
+      return ctx.unread > 0
+        ? `You have **${ctx.unread} unread message${ctx.unread === 1 ? "" : "s"}** waiting in your inbox.`
         : "Inbox zero — nothing unread. 🎉";
 
     case "calls": {
-      const pending = ctx.calls.filter((c) => c.status === "pending");
+      // "Pending" is a call nobody has recorded an outcome for — the same
+      // rule meetings follow, rather than a stored status that could disagree.
+      const pending = ctx.calls.filter((c) => !c.outcome);
       if (!ctx.calls.length) return "No calls logged yet.";
       return [
         `**${ctx.calls.length} call${ctx.calls.length === 1 ? "" : "s"}** logged — ${pending.length} still needing to be processed.`,
         "",
-        ...ctx.calls.slice(0, 5).map((c) => `• **${c.callerName}** (${c.company}) — ${c.outcome.replace(/-/g, " ")}${c.status === "pending" ? " · needs processing" : ""}`),
+        ...ctx.calls
+          .slice(0, 5)
+          .map(
+            (c) =>
+              `• **${c.callerName || "unknown caller"}** — ${
+                c.outcome ? c.outcome.replace(/-/g, " ") : "no outcome recorded · needs processing"
+              }`
+          ),
       ].join("\n");
     }
 
-    case "attachments": {
-      if (!ctx.attachments.length) return "No attachments in your inbox yet.";
-
-      const withText = ctx.attachments.filter((a) => a.content);
-      return [
-        `**${ctx.attachments.length} attachment${ctx.attachments.length === 1 ? "" : "s"}** in your inbox:`,
-        "",
-        ...ctx.attachments.map(
-          (a) => `• **${a.name}** (${a.size}) — from ${a.from}, re: ${a.subject}`
-        ),
-        "",
-        withText.length
-          ? `Ask me about one by name — e.g. *what's in ${withText[0].name}?* — and I'll summarise it.`
-          : "None of these have readable text stored, so I can't summarise them.",
-      ].join("\n");
-    }
+    case "attachments":
+      /**
+       * Answered honestly rather than removed.
+       *
+       * The intent still exists — somebody will ask about a file — and the
+       * truthful answer is that nothing stores one. Silently dropping the case
+       * would fall through to whichever keyword matched next and produce a
+       * confident answer to a different question.
+       */
+      return "I can't help with attachments yet — files aren't stored anywhere in the CRM, so there's nothing for me to read.";
 
     case "performance": {
       const closable = ctx.deals.length;
@@ -411,13 +456,13 @@ function answerFor(id: string, ctx: CrmContext): string {
         "Here's where things stand:",
         "",
         `• **Pipeline:** ${money(ctx.openValue)} open across ${ctx.openDeals.length} deal${ctx.openDeals.length === 1 ? "" : "s"} · ${money(ctx.wonValue)} won`,
-        `• **Leads:** ${ctx.openLeads.length} need follow-up (of ${ctx.leads.length})`,
+        `• **Leads:** ${ctx.openLeads.length} with an open deal (of ${ctx.contacts.length} contacts)`,
         `• **Today:** ${ctx.todayMeetings.length} meeting${ctx.todayMeetings.length === 1 ? "" : "s"}`,
-        `• **Inbox:** ${ctx.unread.length} unread`,
+        `• **Inbox:** ${ctx.unread} unread`,
         `• **Contacts:** ${ctx.contacts.length}`,
         "",
         ctx.openLeads.length
-          ? `Suggested next step: follow up with ${ctx.openLeads[0].name}.`
+          ? `Suggested next step: follow up with ${ctx.openLeads[0].firstName} ${ctx.openLeads[0].lastName}.`
           : "You're all caught up.",
       ].join("\n");
   }

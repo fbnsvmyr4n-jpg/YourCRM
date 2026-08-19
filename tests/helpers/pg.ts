@@ -68,11 +68,33 @@ export async function startTestDb(): Promise<TestDb> {
       ('${USER_A}', '${AGENCY}', '${TENANT_A}', 'a@test.local', 'x', 'Tester A', 'owner');
   `);
 
-  // An ephemeral port: the suite must not collide with anything already bound,
-  // and vitest may run files in parallel.
-  const port = 49_000 + Math.floor(Math.random() * 9_000);
-  const server = new PGLiteSocketServer({ db, port, host: "127.0.0.1" });
-  await server.start();
+  /**
+   * A free port, found by retrying rather than by hoping.
+   *
+   * This picked one at random from a 9,000-wide range and started the server
+   * once. Vitest runs test files in parallel and each starts its own database,
+   * so a collision was a matter of probability — roughly one run in a hundred
+   * with this many suites, which is exactly the frequency that gets dismissed
+   * as "flaky" and never investigated. One failure already appeared and did
+   * not reproduce, which is what prompted this.
+   *
+   * Retrying on EADDRINUSE turns a probabilistic failure into a deterministic
+   * success.
+   */
+  let server: PGLiteSocketServer | null = null;
+  let port = 0;
+  for (let attempt = 0; attempt < 20 && !server; attempt++) {
+    port = 49_000 + Math.floor(Math.random() * 9_000);
+    const candidate = new PGLiteSocketServer({ db, port, host: "127.0.0.1" });
+    try {
+      await candidate.start();
+      server = candidate;
+    } catch (err) {
+      // Anything other than a busy port is a real failure worth surfacing.
+      if (!String(err).includes("EADDRINUSE")) throw err;
+    }
+  }
+  if (!server) throw new Error("Could not find a free port for the test database.");
 
   // `localhost` rather than the bind address on purpose: db.ts disables TLS
   // only for connection strings containing "localhost".

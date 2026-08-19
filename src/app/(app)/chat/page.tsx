@@ -1,26 +1,25 @@
-import { listChat } from "@/server/chat-repo";
-import { listContacts } from "@/server/contacts-repo";
-import { listDeals } from "@/server/deals-repo";
-import { listMeetings } from "@/server/meetings-repo";
+import { listChat } from "@/server/repos/chat";
+import { listContacts } from "@/server/repos/contacts";
+import { listDeals } from "@/server/repos/deals";
+import { listMeetings } from "@/server/repos/meetings";
+import { withCurrentTenant } from "@/server/tenant-session";
 import { ChatView } from "./ChatView";
 
 export const dynamic = "force-dynamic";
 
 export default async function ChatPage() {
-  const [messages, contacts, deals, meetings] = await Promise.all([
-    listChat(),
-    listContacts(),
-    listDeals(),
-    listMeetings(),
-  ]);
+  const { messages, knows } = await withCurrentTenant(async (q) => ({
+    messages: await listChat(q),
+    // Real counts, not decoration: the header claims the assistant knows the
+    // user's data, and these are the receipts for that claim.
+    knows: {
+      contacts: (await listContacts(q)).length,
+      deals: (await listDeals(q)).length,
+      meetings: (await listMeetings(q)).length,
+    },
+  }));
 
   return (
-    <ChatView
-      messages={messages}
-      aiEnabled={!!process.env.ANTHROPIC_API_KEY}
-      // Real counts, not decoration: the header claims the assistant knows the
-      // user's data, and these are the receipts for that claim.
-      knows={{ contacts: contacts.length, deals: deals.length, meetings: meetings.length }}
-    />
+    <ChatView messages={messages} aiEnabled={!!process.env.ANTHROPIC_API_KEY} knows={knows} />
   );
 }
