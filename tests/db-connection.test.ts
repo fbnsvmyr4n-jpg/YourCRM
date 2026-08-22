@@ -27,7 +27,7 @@ describe("TLS is decided by the host, not by a substring", () => {
 
   it("requires TLS for anything hosted", () => {
     for (const url of [
-      "postgresql://u:p@ep-withered-wave.us-east-2.aws.neon.tech/neondb?sslmode=require",
+      "postgresql://u:p@ep-example-host.us-east-2.aws.neon.tech/neondb?sslmode=require",
       "postgresql://u:p@db.supabase.co:5432/postgres",
       "postgresql://u:p@10.0.0.5:5432/postgres",
       // The substring trap, in the direction that leaks: a real remote host
