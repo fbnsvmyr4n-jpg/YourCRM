@@ -154,12 +154,25 @@ describe("a plan has to be in force, not merely chosen", () => {
     expect(e.reason).toBe("no_agency");
   });
 
-  it("treats a trial with no end date as still running", async () => {
-    // A missing date is not an expired one. Cutting access because a field was
-    // never set would punish an account for a bug in signup.
+  it("treats a trial with no end date as over", async () => {
+    /**
+     * This test asserted the opposite until 22 Aug 2026, on the reasoning that
+     * "a missing date is not an expired one — cutting access because a field
+     * was never set would punish an account for a bug in signup".
+     *
+     * Signup had exactly that bug. It inserted agencies with `plan_status =
+     * 'trialing'` and no `trial_ends_at`, and this leniency turned that into a
+     * free tier for every account ever created. Nothing errored, nobody
+     * complained, and no invoice was ever due.
+     *
+     * The rule now runs the other way, in both places: signup sets the date,
+     * and an unbounded trial counts as finished. Being wrong in this direction
+     * produces a support message; being wrong in the other produced silence.
+     */
     await setPlan("starter", "trialing", null);
     const e = await get();
-    expect(e.active).toBe(true);
+    expect(e.active, "a trial with no end date granted access forever").toBe(false);
+    expect(e.reason).toBe("trial_expired");
   });
 });
 

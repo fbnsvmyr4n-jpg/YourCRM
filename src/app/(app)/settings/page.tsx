@@ -3,6 +3,9 @@ import { Database, HardDrive, ShieldAlert, ShieldCheck } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { authSecretConfigured } from "@/server/auth";
+import { agencyBilling, trialDaysLeft } from "@/server/billing/checkout";
+import { PLAN_INFO, PLANS } from "@/server/billing/plans";
+import { stripeConfigured } from "@/server/billing/stripe";
 import { entitlementsFor, limitOf } from "@/server/entitlements";
 import { roleCan } from "@/server/permissions";
 import { getSettings } from "@/server/repos/settings";
@@ -15,6 +18,7 @@ import {
   PasswordForm,
   ProfileForm,
   SignOutCard,
+  BillingCard,
   TargetsForm,
   WorkspacesCard,
 } from "./SettingsForms";
@@ -39,6 +43,19 @@ export default async function SettingsPage() {
   // client component so the cap comes from the database on every render — a
   // limit cached in the bundle is a limit that stays wrong after an upgrade.
   const tenant = await requireTenantPage();
+
+  // Read on every render rather than cached: a cancellation should take effect
+  // on the next page load, not whenever somebody signs out.
+  const account = await withSystem((q) => agencyBilling(q, user.agencyId));
+  const billing = {
+    plan: account?.plan ?? "starter",
+    planName: PLAN_NAMES[account?.plan ?? "starter"] ?? "Starter",
+    status: (account?.plan_status ?? "trialing") as "trialing" | "active" | "past_due" | "canceled",
+    trialDaysLeft: trialDaysLeft(account?.trial_ends_at ?? null),
+    hasSubscription: Boolean(account?.stripe_customer_id),
+    configured: stripeConfigured(),
+    plans: PLANS.map((p) => PLAN_INFO[p]),
+  };
   const { workspaces, plan, limit } = await withSystem(async (q) => {
     const rows = await listSubAccounts(q, user.agencyId);
     const e = await entitlementsFor(q, user.agencyId);
@@ -92,6 +109,7 @@ export default async function SettingsPage() {
 
       <div className="flex flex-col gap-5">
         <ProfileForm user={user} />
+        <BillingCard billing={billing} canManage={roleCan(user.role, "manage_billing")} />
         <WorkspacesCard
           workspaces={workspaces}
           current={tenant.subAccountId}

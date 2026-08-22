@@ -75,10 +75,19 @@ export async function entitlementsFor(q: AnyQuery, agencyId: string): Promise<En
   if (!agency) return NOTHING("none", "none", "no_agency");
 
   const trialEndsAt = agency.trial_ends_at ? agency.trial_ends_at.toISOString() : null;
+  /**
+   * A trial with no end date counts as expired.
+   *
+   * The condition used to require `trial_ends_at !== null`, which meant a
+   * trialing row without one never expired. Signup wrote exactly that row, so
+   * every account was permanently free. Signup now sets the date — but the rule
+   * belongs here too, because this is the function that decides. An unbounded
+   * trial is not a trial; it is a free tier nobody decided to offer, and the
+   * safe direction for a row nobody can explain is to ask them to choose a plan.
+   */
   const trialExpired =
     agency.plan_status === "trialing" &&
-    agency.trial_ends_at !== null &&
-    agency.trial_ends_at.getTime() <= Date.now();
+    (agency.trial_ends_at === null || agency.trial_ends_at.getTime() <= Date.now());
 
   if (agency.plan_status === "canceled") return NOTHING(agency.plan, agency.plan_status, "canceled");
   if (trialExpired) {

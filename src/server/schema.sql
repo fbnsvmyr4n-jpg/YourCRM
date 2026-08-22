@@ -679,3 +679,33 @@ INSERT INTO plan_entitlements (plan, feature, limit_value) VALUES
   ('saas_pro',  'rebilling',        NULL)
 ON CONFLICT (plan, feature) DO UPDATE SET limit_value = EXCLUDED.limit_value;
 
+-- ---------------------------------------------------------------------------
+-- Billing events
+--
+-- Stripe delivers at least once, and retries anything that does not return 2xx.
+-- The same event WILL arrive twice, and a duplicate must be a no-op rather than
+-- a second charge's worth of state change. The event id is the natural key.
+--
+-- Platform-level, like plan_entitlements: not tenant-scoped, because a webhook
+-- arrives before anything has resolved which customer it belongs to — the
+-- resolution is what the handler does. It holds Stripe ids and a status, never
+-- customer records and never anything from a card.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS stripe_events (
+  id            TEXT PRIMARY KEY,
+  type          TEXT NOT NULL,
+  -- Stripe's own creation time, in seconds. Used to reject an event that is
+  -- older than the state already applied: retries and parallel deliveries mean
+  -- events do NOT arrive in order, and a delayed `subscription.updated` landing
+  -- after a cancellation would resurrect the subscription.
+  created_at    TIMESTAMPTZ NOT NULL,
+  agency_id     TEXT REFERENCES agencies(id) ON DELETE SET NULL,
+  processed_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS stripe_events_agency_idx ON stripe_events (agency_id, created_at DESC);
+
+-- The Stripe event that last wrote this agency's billing columns. An event
+-- created before this one is stale and must not be applied.
+ALTER TABLE agencies ADD COLUMN IF NOT EXISTS billing_synced_at TIMESTAMPTZ;
+

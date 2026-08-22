@@ -73,7 +73,26 @@ const PUBLIC_ACTIONS = new Set([
  *  • voice   — Twilio's webhook; authenticated by request signature instead,
  *              and refuses to answer at all when telephony is unconfigured
  */
-const PUBLIC_ROUTES = new Set(["src/app/api/health/route.ts", "src/app/api/voice/[action]/route.ts"]);
+/**
+ * Routes with no session check, each with a stated reason.
+ *
+ * A reason, not a bare list: an endpoint reaching this set has stopped being
+ * checked by the suite above, so the justification has to survive being read
+ * back. Being here is an exemption from checking for a *session* — not from
+ * being authorised at all, which the blocks below still insist on.
+ */
+const PUBLIC_ROUTES: Record<string, string> = {
+  "src/app/api/health/route.ts":
+    "reports booleans and timings so a deploy can be verified before anyone " +
+    "signs in. Reads no customer data.",
+  "src/app/api/voice/[action]/route.ts":
+    "a telephony webhook: the provider has no session, and the dialled number " +
+    "is what resolves the tenant.",
+  "src/app/api/stripe/webhook/route.ts":
+    "a Stripe webhook: no session exists, and the request is authorised by its " +
+    "signature instead. See the block below, which checks exactly that — this " +
+    "is the only unauthenticated endpoint in the app that WRITES.",
+};
 
 /**
  * Server-action modules, found by the `"use server"` directive rather than by
@@ -143,7 +162,7 @@ describe("every API route is authorised", () => {
   });
 
   for (const file of routeFiles) {
-    if (PUBLIC_ROUTES.has(file)) continue;
+    if (file in PUBLIC_ROUTES) continue;
 
     it(`${file.replace("src/app/", "")} rejects unauthenticated callers`, () => {
       const src = read(file);
@@ -167,6 +186,56 @@ describe("every API route is authorised", () => {
       }
     });
   }
+});
+
+describe("the Stripe webhook is authorised by signature", () => {
+  /**
+   * The one unauthenticated endpoint that writes.
+   *
+   * Without a verified signature, anybody who learns the URL can post a JSON
+   * body putting their agency on the top tier, for free, permanently. It is a
+   * single missing call between working billing and giving the product away, so
+   * it is checked here rather than trusted to review.
+   */
+  const FILE = "src/app/api/stripe/webhook/route.ts";
+  const body = () => bodyOf(read(FILE), "POST");
+
+  it("verifies the signature before doing anything with the event", () => {
+    const src = body();
+    expect(src, "the webhook never verifies the signature").toMatch(/constructEvent\(/);
+
+    // Before the database, not after. Verification that runs once the row is
+    // written is not verification.
+    expect(
+      src.indexOf("constructEvent("),
+      "the event reaches the database before its signature is checked"
+    ).toBeLessThan(src.indexOf("handleStripeEvent"));
+  });
+
+  it("reads the raw body, because the signature covers the exact bytes", () => {
+    const src = body();
+    expect(src, "the body is parsed as JSON — that invalidates the signature").not.toMatch(
+      /request\.json\(\)/
+    );
+    expect(src).toMatch(/request\.text\(\)/);
+  });
+
+  it("refuses when the signing secret is absent", () => {
+    // A deployment with no secret must not fall back to trusting the caller.
+    // That is the shape where billing "works" in a preview environment and the
+    // endpoint is an open write in production.
+    const src = body();
+    expect(src).toMatch(/webhookSecret\(\)/);
+    expect(src, "a missing secret does not stop the request").toMatch(
+      /if\s*\(![^)]*secret[^)]*\)|!secret/
+    );
+  });
+
+  it("rejects rather than reporting success when the signature is wrong", () => {
+    const src = body();
+    const rejection = src.slice(src.indexOf("catch"));
+    expect(rejection, "a bad signature is not answered with an error status").toMatch(/400/);
+  });
 });
 
 describe("the guard itself", () => {

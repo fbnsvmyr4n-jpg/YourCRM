@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { authSecretConfigured } from "@/server/auth";
+import { stripeConfigured, webhookSecret } from "@/server/billing/stripe";
+import { PLANS, priceIdFor } from "@/server/billing/plans";
 import { checkIsolation, pingDatabase } from "@/server/db";
 import { storageEngine } from "@/server/store";
 
@@ -40,7 +42,23 @@ export async function GET() {
   // A green health check while every policy is bypassed is the false green this
   // endpoint exists to prevent, so isolation counts towards readiness.
   const isolated = isolation === null ? true : isolation.ok;
-  const ready = secretOk && persistent && isolated;
+  /**
+   * Billing, and specifically the half-configured state.
+   *
+   * Not having Stripe at all is fine — the app says so and the plan buttons are
+   * unavailable. The dangerous configuration is a secret key WITHOUT a webhook
+   * secret: checkout works, customers are charged, and every subscription event
+   * is then refused by the endpoint. Payments succeed and no account ever
+   * activates, with nothing on screen to suggest why.
+   *
+   * A missing price id is the same shape one step further along: the plan
+   * cannot be bought, and the only symptom is a button that does nothing.
+   */
+  const billingOn = stripeConfigured();
+  const missingPrices = billingOn ? PLANS.filter((p) => !priceIdFor(p)) : [];
+  const billingBroken = billingOn && (!webhookSecret() || missingPrices.length > 0);
+
+  const ready = secretOk && persistent && isolated && !billingBroken;
 
   return NextResponse.json(
     {
@@ -63,6 +81,13 @@ export async function GET() {
               : isolation.bypassesRls || isolation.superuser
                 ? `INERT: role "${isolation.role}" ${isolation.bypassesRls ? "has BYPASSRLS" : "is a superuser"} — every row-level policy is skipped. Connect as a role without it.`
                 : `INERT: no tables have row-level security enabled`,
+        billing: !billingOn
+          ? "not configured — plans cannot be changed (STRIPE_SECRET_KEY unset)"
+          : !webhookSecret()
+            ? "BROKEN: a secret key is set but STRIPE_WEBHOOK_SECRET is not — customers can be charged and no account will ever activate"
+            : missingPrices.length > 0
+              ? `BROKEN: no Stripe price configured for ${missingPrices.join(", ")} — those plans cannot be bought`
+              : "ok: checkout, webhook and all prices configured",
       },
       engine,
     },

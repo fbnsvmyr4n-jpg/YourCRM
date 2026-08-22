@@ -3,6 +3,8 @@
 import { revalidateApp } from "@/server/revalidate";
 import { isValidTimeZone, updateSettings } from "@/server/repos/settings";
 import { changePassword, updateProfile } from "@/server/repos/users";
+import { billingPortal, startCheckout } from "@/server/billing/checkout";
+import { isPlan } from "@/server/billing/plans";
 import { roleCan } from "@/server/permissions";
 import { createSubAccount } from "@/server/sub-accounts";
 import { withSystem } from "@/server/tenant";
@@ -10,7 +12,17 @@ import { requireTenant, SUB_ACCOUNT_COOKIE, withCurrentTenant } from "@/server/t
 import { count, email as validEmail, money, text } from "@/server/validate";
 import { cookies } from "next/headers";
 
-export type FormState = { ok?: string; error?: string } | undefined;
+/**
+ * `redirect` is a URL the browser should be sent to — Stripe's checkout or
+ * billing portal.
+ *
+ * Not an actual `redirect()` call: that throws a control-flow signal, and
+ * `useActionState` cannot render an error next to a form whose action never
+ * returns. A refusal would leave the customer looking at a page where nothing
+ * happened and nothing explained why. Handed back so the component navigates
+ * only when there is somewhere to go.
+ */
+export type FormState = { ok?: string; error?: string; redirect?: string } | undefined;
 
 export async function updateTargetsAction(_prev: FormState, formData: FormData): Promise<FormState> {
   return withCurrentTenant(async (q) => {
@@ -151,4 +163,56 @@ export async function switchWorkspaceAction(_prev: FormState, formData: FormData
   // Everything on screen belongs to the previous workspace.
   revalidateApp();
   return { ok: `Now working in ${owned.name}.` };
+}
+
+
+/**
+ * Start checkout for a plan.
+ *
+ * Billing is the owner's. An admin runs the agency day to day and is trusted
+ * with the work, not with changing what the business pays every month.
+ *
+ * Returns the Stripe URL rather than redirecting from the action. A redirect
+ * here throws a control-flow signal that `useActionState` cannot show an error
+ * beside, so a refusal would leave the customer on a page where nothing
+ * happened and nothing said why.
+ */
+export async function startCheckoutAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  const me = await requireTenant();
+  if (!roleCan(me.role, "manage_billing")) {
+    return { error: "Only the account owner can change the subscription." };
+  }
+
+  const plan = text(formData.get("plan"), 20);
+  if (!plan || !isPlan(plan)) return { error: "Choose a plan." };
+
+  const user = await withSystem((q) =>
+    q.one<{ email: string }>(`SELECT email FROM users WHERE id = $1`, [me.userId])
+  );
+
+  const result = await withSystem((q) =>
+    startCheckout(q, me.agencyId, plan, user?.email ?? "")
+  );
+  if (!result.ok) return { error: result.error };
+
+  return { redirect: result.url };
+}
+
+/**
+ * Open Stripe's billing portal.
+ *
+ * Cards, invoices, cancellation and plan changes all live there. Rebuilding any
+ * of it here would mean handling card details, which is a compliance burden
+ * this product has no reason to take on.
+ */
+export async function billingPortalAction(_prev: FormState, _formData: FormData): Promise<FormState> {
+  const me = await requireTenant();
+  if (!roleCan(me.role, "manage_billing")) {
+    return { error: "Only the account owner can manage billing." };
+  }
+
+  const result = await withSystem((q) => billingPortal(q, me.agencyId));
+  if (!result.ok) return { error: result.error };
+
+  return { redirect: result.url };
 }

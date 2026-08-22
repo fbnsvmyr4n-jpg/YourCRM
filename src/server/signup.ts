@@ -1,3 +1,4 @@
+import { trialEndsAt } from "./billing/plans";
 import { createUser, type SafeUser } from "./repos/users";
 import { withSystem, type SystemQuery } from "./tenant";
 
@@ -34,7 +35,19 @@ export async function signUpNewTenant(
   const agencyId = `ag-${slug(input.name)}-${suffix}`;
   const subAccountId = `sa-${slug(input.name)}-${suffix}`;
 
-  await q.rows(`INSERT INTO agencies (id, name) VALUES ($1, $2)`, [agencyId, `${input.name}'s account`]);
+  /**
+   * The trial is given an end date here, at the moment the account is created.
+   *
+   * It used to be left NULL, and `entitlementsFor` only expires a trial that
+   * has an end — so every account signed up was on a free trial that never
+   * finished. Nothing errored, nobody complained, and no invoice was ever due.
+   * That is the "revenue quietly leaking" case, and it was already shipping.
+   */
+  await q.rows(
+    `INSERT INTO agencies (id, name, plan, plan_status, trial_ends_at)
+     VALUES ($1, $2, 'starter', 'trialing', $3)`,
+    [agencyId, `${input.name}'s account`, trialEndsAt()]
+  );
 
   // The customer's own workspace is sub-account #1, marked primary. Their own
   // business is not a special case — it is the first of the accounts they may

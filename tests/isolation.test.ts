@@ -40,6 +40,12 @@ const NOT_TENANT_SCOPED: Record<string, string> = {
     "agency, keyed by (plan, feature), written by a migration and only read by " +
     "the app. Scoping it per tenant would meanevery customer carrying their " +
     "own copy of the pricing, which is how one of them ends up on last year's.",
+  stripe_events:
+    "a webhook arrives before anything has resolved which customer it belongs " +
+    "to — that resolution is what the handler does. Holds a Stripe event id, a " +
+    "type, a timestamp and a nullable agency reference; never customer records " +
+    "and never anything from a card. It exists to make a redelivered event a " +
+    "no-op, which is a platform-wide guarantee, not a per-tenant one.",
   voice_sessions:
     "pre-tenant: a telephony webhook arrives before anything has resolved which " +
     "customer the call belongs to — that resolution reads the dialled number and " +
@@ -85,6 +91,27 @@ describe("the price list stays a price list", () => {
       "plan_entitlements gained a per-customer column; it is no longer a shared " +
         "price list and its exemption from tenant isolation no longer holds"
     ).toBe(false);
+  });
+});
+
+describe("the billing event log stays a log", () => {
+  /**
+   * `stripe_events` is exempt from tenancy because it records deliveries, not
+   * records. The exemption holds only while that is true — a column carrying
+   * what a customer bought, or anything from an invoice, makes it customer data
+   * sitting in a table with no policy over it.
+   */
+  it("holds identifiers and timing, nothing else", () => {
+    const body = tableBody(SCHEMA, "stripe_events");
+    expect(body, "the billing event log is missing").toContain("stripe_events");
+
+    for (const column of ["amount", "invoice", "card", "payload", "body", "email", "receipt"]) {
+      expect(
+        new RegExp(`\\b${column}\\w*\\s+(TEXT|JSONB|INTEGER|NUMERIC)`, "i").test(body),
+        `stripe_events gained a "${column}" column — it now holds billing detail, ` +
+          `and its exemption from tenant isolation no longer holds`
+      ).toBe(false);
+    }
   });
 });
 
