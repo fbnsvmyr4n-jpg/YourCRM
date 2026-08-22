@@ -2,7 +2,14 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { mapStatus, readSubscription } from "../src/server/billing/subscription";
 import { PLANS, isPlan, planForPriceId, priceIdFor, trialEndsAt, TRIAL_DAYS } from "../src/server/billing/plans";
 import { checkoutParams, trialDaysLeft, trialSecondsLeft } from "../src/server/billing/checkout";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { startTestDb, type TestDb, AGENCY } from "./helpers/pg";
+
+const SCHEMA_SQL = readFileSync(
+  join(__dirname, "..", "src", "server", "schema.sql"),
+  "utf8"
+);
 
 /**
  * Subscriptions, trials, and the events that change them.
@@ -572,6 +579,88 @@ describe("a new account is on a trial that actually ends", () => {
     const days = (new Date(e.trialEndsAt!).getTime() - Date.now()) / 86_400_000;
     expect(days).toBeGreaterThan(TRIAL_DAYS - 1);
     expect(days).toBeLessThanOrEqual(TRIAL_DAYS);
+  });
+
+  it("does not lock out an account that predates the fix", async () => {
+    /**
+     * Both live agencies were `trialing` with no end date when this shipped.
+     * Making an unbounded trial count as over — correct in itself — would have
+     * locked them out on the next request, including the account belonging to
+     * the person deploying it.
+     *
+     * The schema backfills those rows with fourteen days from the moment it
+     * runs. Not from `created_at`: nobody was ever told their trial had
+     * started, so backdating the clock would expire accounts on the same day
+     * the fix arrived.
+     *
+     * The whole schema is re-applied here, which is also what proves the
+     * backfill is safe to re-run.
+     */
+    await db.seed(
+      `UPDATE agencies SET plan_status = 'trialing', trial_ends_at = NULL WHERE id = '${AGENCY}'`
+    );
+    await db.seed(SCHEMA_SQL);
+
+    const after = await withSystem((q) =>
+      q.one<{ trial_ends_at: Date | null }>(
+        `SELECT trial_ends_at FROM agencies WHERE id = $1`,
+        [AGENCY]
+      )
+    );
+    expect(after?.trial_ends_at, "an existing account was left with no trial end").not.toBeNull();
+
+    const e = await withSystem((q) => entitlementsFor(q, AGENCY));
+    expect(e.active, "an account that predates the fix was locked out").toBe(true);
+  });
+
+  it("gives a long-standing account the full fourteen days, not a backdated one", async () => {
+    /**
+     * The live accounts are weeks old. Dating the backfill from `created_at`
+     * would hand them a trial that expired before the fix even shipped —
+     * technically consistent, and it locks the customer out the moment they
+     * next load a page. They were never told a trial had started, so the clock
+     * starts when the rule does.
+     */
+    await db.seed(
+      `INSERT INTO agencies (id, name, plan_status, trial_ends_at, created_at)
+       VALUES ('ag_old', 'Long-standing', 'trialing', NULL, now() - interval '90 days')
+       ON CONFLICT (id) DO UPDATE
+         SET plan_status = 'trialing', trial_ends_at = NULL,
+             created_at = now() - interval '90 days'`
+    );
+    await db.seed(SCHEMA_SQL);
+
+    const e = await withSystem((q) => entitlementsFor(q, "ag_old"));
+    expect(
+      e.active,
+      "an account created three months ago was expired the moment the fix shipped"
+    ).toBe(true);
+
+    const days =
+      (new Date(e.trialEndsAt!).getTime() - Date.now()) / 86_400_000;
+    expect(days).toBeGreaterThan(13);
+  });
+
+  it("does not extend a trial a second time when the schema is re-applied", async () => {
+    // Self-limiting, not merely idempotent: the WHERE clause stops matching
+    // once it has run. Re-applying the schema every deploy must not hand every
+    // trialing account another fortnight, forever.
+    await db.seed(
+      `UPDATE agencies SET plan_status = 'trialing', trial_ends_at = NULL WHERE id = '${AGENCY}'`
+    );
+    await db.seed(SCHEMA_SQL);
+    const first = await withSystem((q) =>
+      q.one<{ t: Date }>(`SELECT trial_ends_at AS t FROM agencies WHERE id = $1`, [AGENCY])
+    );
+
+    await db.seed(SCHEMA_SQL);
+    const second = await withSystem((q) =>
+      q.one<{ t: Date }>(`SELECT trial_ends_at AS t FROM agencies WHERE id = $1`, [AGENCY])
+    );
+
+    expect(second?.t.getTime(), "the trial was extended by re-running the schema").toBe(
+      first?.t.getTime()
+    );
   });
 
   it("treats a trial with no end date as over", async () => {

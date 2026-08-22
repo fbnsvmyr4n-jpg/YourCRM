@@ -709,3 +709,26 @@ CREATE INDEX IF NOT EXISTS stripe_events_agency_idx ON stripe_events (agency_id,
 -- created before this one is stale and must not be applied.
 ALTER TABLE agencies ADD COLUMN IF NOT EXISTS billing_synced_at TIMESTAMPTZ;
 
+-- ---------------------------------------------------------------------------
+-- Backfill: give existing trials an end date.
+--
+-- Signup used to leave `trial_ends_at` NULL, and entitlements only expired a
+-- trial that had one — so every account created before 22 Aug 2026 was on a
+-- trial that never finished. Both live agencies were in that state.
+--
+-- Now that an unbounded trial counts as OVER, deploying the fix without this
+-- would lock those accounts out on the next request. Fourteen days from the
+-- moment this runs, rather than from `created_at`: nobody was ever told their
+-- trial had started, so starting the clock retroactively would expire accounts
+-- the same day the fix shipped.
+--
+-- Self-limiting rather than merely idempotent — the WHERE clause stops matching
+-- as soon as it has run, so re-applying the schema cannot extend a trial a
+-- second time.
+-- ---------------------------------------------------------------------------
+UPDATE agencies
+   SET trial_ends_at = now() + interval '14 days'
+ WHERE plan_status = 'trialing'
+   AND trial_ends_at IS NULL
+   AND deleted_at IS NULL;
+
