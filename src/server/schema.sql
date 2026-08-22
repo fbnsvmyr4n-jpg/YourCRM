@@ -247,12 +247,10 @@ ALTER TABLE deals    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE deals     FORCE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS contacts_tenant_isolation ON contacts;
-DROP POLICY IF EXISTS contacts_tenant_isolation ON contacts;
 CREATE POLICY contacts_tenant_isolation ON contacts
   USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
   WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
 
-DROP POLICY IF EXISTS deals_tenant_isolation ON deals;
 DROP POLICY IF EXISTS deals_tenant_isolation ON deals;
 CREATE POLICY deals_tenant_isolation ON deals
   USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
@@ -422,36 +420,30 @@ ALTER TABLE settings   ENABLE ROW LEVEL SECURITY;
 ALTER TABLE settings    FORCE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS companies_tenant_isolation ON companies;
-DROP POLICY IF EXISTS companies_tenant_isolation ON companies;
 CREATE POLICY companies_tenant_isolation ON companies
   USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
   WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
 
-DROP POLICY IF EXISTS meetings_tenant_isolation ON meetings;
 DROP POLICY IF EXISTS meetings_tenant_isolation ON meetings;
 CREATE POLICY meetings_tenant_isolation ON meetings
   USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
   WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
 
 DROP POLICY IF EXISTS messages_tenant_isolation ON messages;
-DROP POLICY IF EXISTS messages_tenant_isolation ON messages;
 CREATE POLICY messages_tenant_isolation ON messages
   USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
   WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
 
-DROP POLICY IF EXISTS activities_tenant_isolation ON activities;
 DROP POLICY IF EXISTS activities_tenant_isolation ON activities;
 CREATE POLICY activities_tenant_isolation ON activities
   USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
   WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
 
 DROP POLICY IF EXISTS calls_tenant_isolation ON calls;
-DROP POLICY IF EXISTS calls_tenant_isolation ON calls;
 CREATE POLICY calls_tenant_isolation ON calls
   USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
   WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
 
-DROP POLICY IF EXISTS settings_tenant_isolation ON settings;
 DROP POLICY IF EXISTS settings_tenant_isolation ON settings;
 CREATE POLICY settings_tenant_isolation ON settings
   USING (sub_account_id = current_setting('app.sub_account_id', TRUE))

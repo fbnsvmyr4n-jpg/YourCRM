@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { authSecretConfigured } from "@/server/auth";
 import { stripeConfigured, webhookSecret } from "@/server/billing/stripe";
 import { PLANS, priceIdFor } from "@/server/billing/plans";
-import { checkIsolation, pingDatabase } from "@/server/db";
+import { checkIsolation, checkSchema, pingDatabase } from "@/server/db";
 import { storageEngine } from "@/server/store";
 
 export const dynamic = "force-dynamic";
@@ -38,6 +38,16 @@ export async function GET() {
    * go and look.
    */
   const isolation = engine === "postgres" && db?.ok ? await checkIsolation().catch(() => null) : null;
+
+  /**
+   * Whether the database has the schema this build expects.
+   *
+   * Deploying code and migrating a database are two steps, and a process with
+   * two steps will eventually do one of them. On 22 Aug that is precisely what
+   * happened: the code shipped, the schema did not, and this endpoint reported
+   * "ok" while `plan_entitlements` — read on every Settings load — was absent.
+   */
+  const schema = engine === "postgres" && db?.ok ? await checkSchema().catch(() => null) : null;
   const persistent = engine === "postgres" && db?.ok === true;
   // A green health check while every policy is bypassed is the false green this
   // endpoint exists to prevent, so isolation counts towards readiness.
@@ -58,7 +68,8 @@ export async function GET() {
   const missingPrices = billingOn ? PLANS.filter((p) => !priceIdFor(p)) : [];
   const billingBroken = billingOn && (!webhookSecret() || missingPrices.length > 0);
 
-  const ready = secretOk && persistent && isolated && !billingBroken;
+  const schemaOk = schema === null ? true : schema.ok;
+  const ready = secretOk && persistent && isolated && schemaOk && !billingBroken;
 
   return NextResponse.json(
     {
@@ -81,6 +92,15 @@ export async function GET() {
               : isolation.bypassesRls || isolation.superuser
                 ? `INERT: role "${isolation.role}" ${isolation.bypassesRls ? "has BYPASSRLS" : "is a superuser"} — every row-level policy is skipped. Connect as a role without it.`
                 : `INERT: no tables have row-level security enabled`,
+        schema:
+          schema === null
+            ? "not checked"
+            : schema.ok
+              ? "ok: the database matches this build"
+              : `STALE: run \`npm run db:migrate\` — missing ${[
+                  ...schema.missingTables,
+                  ...schema.missingColumns,
+                ].join(", ")}`,
         billing: !billingOn
           ? "not configured — plans cannot be changed (STRIPE_SECRET_KEY unset)"
           : !webhookSecret()

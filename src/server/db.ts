@@ -1,4 +1,5 @@
 import { Pool } from "pg";
+import { EXPECTED_COLUMNS, EXPECTED_TABLES, type SchemaCheck } from "./schema-check";
 
 /**
  * Postgres-backed storage.
@@ -27,6 +28,45 @@ export function isLocal(connectionString: string): boolean {
     // connection to a remote database in plain text.
     return false;
   }
+}
+
+/**
+ * Does the database have the schema this build expects?
+ *
+ * Lives here rather than beside its lists because `db.ts` owns the pool, and
+ * every other module reaches the database through a tenant-scoped querier.
+ *
+ * The check exists because on 22 Aug 2026 three commits changed the schema, the
+ * code deployed, and the schema did not. Production ran new code against an old
+ * database, and this endpoint reported "ok" throughout — it checked the
+ * connection and the policies, and had no opinion about the shape.
+ */
+export async function checkSchema(): Promise<SchemaCheck> {
+  const { rows } = await getPool().query<{ table_name: string }>(
+    `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'`
+  );
+  const have = new Set(rows.map((r) => r.table_name));
+  const missingTables = EXPECTED_TABLES.filter((t) => !have.has(t));
+
+  const missingColumns: string[] = [];
+  if (missingTables.length === 0) {
+    // Only worth asking once the tables are there; a missing table already
+    // means the schema is stale, and this query would be noise.
+    const cols = await getPool().query<{ table_name: string; column_name: string }>(
+      `SELECT table_name, column_name FROM information_schema.columns
+       WHERE table_schema = 'public'`
+    );
+    const present = new Set(cols.rows.map((r) => `${r.table_name}.${r.column_name}`));
+    for (const [table, column] of EXPECTED_COLUMNS) {
+      if (!present.has(`${table}.${column}`)) missingColumns.push(`${table}.${column}`);
+    }
+  }
+
+  return {
+    ok: missingTables.length === 0 && missingColumns.length === 0,
+    missingTables: [...missingTables],
+    missingColumns,
+  };
 }
 
 export function getPool(): Pool {
