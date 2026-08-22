@@ -5,6 +5,7 @@ import { answer } from "@/server/chat-agent";
 import { appendChat, clearChat, listChat } from "@/server/repos/chat";
 import { multiline } from "@/server/validate";
 import { requireTenant, withCurrentTenant } from "@/server/tenant-session";
+import { requireActivePlan } from "@/server/plan-gate";
 import { withSystem } from "@/server/tenant";
 import { findUserById } from "@/server/repos/users";
 import { withTenant } from "@/server/tenant";
@@ -17,6 +18,18 @@ const MAX_QUESTION = 4000;
 
 export async function sendChatAction(text: string) {
   const ctx = await requireTenant();
+
+  /**
+   * The plan gate, explicitly, because this action resolves the tenant itself
+   * rather than going through `withCurrentTenant`.
+   *
+   * It is the one bypass that costs money per use: every message here is a
+   * call to Anthropic's API, billed to us. A cancelled account still running
+   * the assistant is not merely using a feature it has not paid for — it is
+   * spending our money to do it.
+   */
+  await requireActivePlan(ctx.agencyId, "chat");
+
   const question = multiline(text, MAX_QUESTION);
   if (!question) return null;
 

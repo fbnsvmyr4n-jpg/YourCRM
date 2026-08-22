@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { readSessionToken, SESSION_COOKIE } from "./auth";
 import { logDenied } from "./log";
+import { requireActivePlan } from "./plan-gate";
 import { findUserById, type SafeUser } from "./repos/users";
 import { withSystem, withTenant, type TenantContext, type TenantQuery } from "./tenant";
 
@@ -130,8 +131,29 @@ export async function requireTenant(): Promise<TenantContext> {
  * there is no arrangement of calls that reaches the database having done only
  * half of that.
  */
-export async function withCurrentTenant<T>(fn: (q: TenantQuery) => Promise<T>): Promise<T> {
+export async function withCurrentTenant<T>(
+  fn: (q: TenantQuery) => Promise<T>,
+  options: { allowInactive?: boolean } = {}
+): Promise<T> {
   const ctx = await requireTenant();
+
+  /**
+   * The plan gate, here rather than in each of the 49 call sites.
+   *
+   * A cancelled subscription and an expired trial both used to keep the whole
+   * CRM. Putting the check at the shared entry point means a new action is
+   * gated by existing, not by somebody remembering — the same reasoning that
+   * made `withCurrentTenant` the authorisation guard in the first place.
+   *
+   * `allowInactive` is for the handful of actions that must keep working while
+   * lapsed, above all the ones that take payment. Locking somebody out of the
+   * page where they would fix the problem turns a lapsed card into a lost
+   * customer. Every use of it is listed and justified in the guard suite.
+   */
+  if (!options.allowInactive) {
+    await requireActivePlan(ctx.agencyId, "server action");
+  }
+
   return withTenant(ctx, fn);
 }
 
@@ -154,7 +176,17 @@ export async function withTenantPage<T>(fn: (q: TenantQuery) => Promise<T>): Pro
   // `redirect` throws a control-flow signal Next understands, so nothing below
   // this line runs — and no error surfaces.
   if (!user) redirect("/login");
-  return withCurrentTenant(fn);
+
+  /**
+   * Pages are NOT plan-gated here; the app layout redirects instead.
+   *
+   * Throwing from a page renders an error boundary, which tells somebody whose
+   * card expired that the product is broken rather than that they need to
+   * choose a plan. The layout sends them to Settings, where they can fix it —
+   * and the layout runs before any page in the group, so there is no route that
+   * skips it.
+   */
+  return withCurrentTenant(fn, { allowInactive: true });
 }
 
 /** Same, for a page that needs the context rather than a querier. */
