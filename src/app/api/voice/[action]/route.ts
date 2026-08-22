@@ -3,6 +3,7 @@ import { getSettings } from "@/server/repos/settings";
 import { processCall } from "@/server/process-call";
 import { tenantForDialledNumber } from "@/server/telephony-tenant";
 import { withTenant } from "@/server/tenant";
+import { recordUsage, voiceCostMicros } from "@/server/usage";
 import { wallClockToInstant } from "@/lib/zoned";
 import { sayAndGather, sayAndHangUp, telephonyConfigured, twiml, verifyTwilioSignature } from "@/server/telephony";
 import {
@@ -137,6 +138,25 @@ export async function POST(req: Request, ctx: { params: Promise<{ action: string
         const requestedAt = captured.requestedWhen
           ? wallClockToInstant(day.toISOString().slice(0, 10), captured.requestedTime ?? "10:00", timeZone)
           : null;
+
+        /**
+         * Metered before the call is written, from the carrier's own duration.
+         *
+         * Telephony is the other half of the margin question: inbound minutes
+         * are billed to us per minute while the plans sell the feature flat.
+         * Recorded per workspace, because an agency reselling to its clients
+         * needs to know WHICH client is generating the cost — that is also the
+         * input rebilling will need.
+         */
+        await recordUsage(q, {
+          kind: "voice_minute",
+          // Carriers bill whole minutes, so that is what is counted. Recording
+          // a 20-second call as a third of a minute would under-report the real
+          // cost by two-thirds and make telephony look cheaper than it is.
+          quantity: Math.ceil(captured.durationSec / 60),
+          costMicros: voiceCostMicros(captured.durationSec),
+          detail: { provider: "twilio", durationSec: captured.durationSec },
+        });
 
         const call = await logCall(q, {
           callerName: captured.callerName,

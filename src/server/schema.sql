@@ -702,6 +702,56 @@ CREATE INDEX IF NOT EXISTS stripe_events_agency_idx ON stripe_events (agency_id,
 ALTER TABLE agencies ADD COLUMN IF NOT EXISTS billing_synced_at TIMESTAMPTZ;
 
 -- ---------------------------------------------------------------------------
+-- Usage
+--
+-- What each workspace actually consumes, recorded as it happens.
+--
+-- The tiers sell "unlimited contacts and users" alongside an AI assistant and
+-- inbound telephony, and both of those cost real money per use. Nobody knows
+-- how much, because nothing has ever measured it — and a plan priced against a
+-- cost nobody has measured is a guess that only shows up as a margin.
+--
+-- So this MEASURES and does not limit. Deciding a policy before there is a
+-- month of data would be inventing the number twice.
+--
+-- Tenant-scoped: an agency reselling to its clients needs to know which client
+-- is generating the cost, not merely that the cost exists. That is also the
+-- rebilling input.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS usage_events (
+  id              TEXT PRIMARY KEY,
+  sub_account_id  TEXT NOT NULL REFERENCES sub_accounts(id) ON DELETE CASCADE,
+
+  kind            TEXT NOT NULL CHECK (kind IN ('ai_message', 'voice_minute', 'sms')),
+
+  -- The unit being counted: messages, minutes, segments. Stored rather than
+  -- derived so a change in how cost is calculated cannot rewrite history.
+  quantity        NUMERIC(12, 3) NOT NULL DEFAULT 1 CHECK (quantity >= 0),
+
+  -- Micro-cents (1/1,000,000 of a currency unit). A single AI message can cost
+  -- a fraction of a cent, and rounding each one to whole cents would report
+  -- zero for the first several thousand — the exact figure this table exists
+  -- to produce.
+  cost_micros     BIGINT NOT NULL DEFAULT 0 CHECK (cost_micros >= 0),
+
+  -- Free-form detail: the model, the provider, the number of tokens. Enough to
+  -- recompute a cost later when the rates change, without a schema migration.
+  detail          JSONB NOT NULL DEFAULT '{}'::jsonb,
+
+  occurred_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS usage_events_tenant_idx ON usage_events (sub_account_id, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS usage_events_kind_idx ON usage_events (sub_account_id, kind, occurred_at DESC);
+
+ALTER TABLE usage_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE usage_events FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS usage_events_tenant_isolation ON usage_events;
+CREATE POLICY usage_events_tenant_isolation ON usage_events
+  USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
+  WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
+
+-- ---------------------------------------------------------------------------
 -- Backfill: give existing trials an end date.
 --
 -- Signup used to leave `trial_ends_at` NULL, and entitlements only expired a

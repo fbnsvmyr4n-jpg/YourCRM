@@ -8,6 +8,7 @@ import { listCalls } from "./repos/calls";
 import { getSettings } from "./repos/settings";
 import { instantToWallClock } from "@/lib/zoned";
 import type { TenantQuery } from "./tenant";
+import { aiCostMicros, recordUsage } from "./usage";
 import { CONFIDENT, findEntity, rankIntents } from "./chat-intents";
 import { INTENTS, SUGGESTION_POOL } from "./chat-answers";
 
@@ -202,7 +203,37 @@ export async function answer(
         .join("\n")
         .trim();
 
-      if (text) return { text, live: true };
+      if (text) {
+        /**
+         * Metered here, from the response's own token counts, rather than
+         * estimated from the question's length.
+         *
+         * This is the number the pricing question turns on: "unlimited" at $97
+         * alongside an assistant billed per token is only sustainable at some
+         * usage, and nobody knows what that usage is. Recorded before anything
+         * is decided about it — measuring and limiting are separate jobs, and
+         * doing the second first means inventing the number twice.
+         *
+         * `recordUsage` never throws: the customer's answer is already in hand,
+         * and losing a bookkeeping row must not cost them it.
+         */
+        await recordUsage(q, {
+          kind: "ai_message",
+          quantity: 1,
+          costMicros: aiCostMicros(
+            response.usage?.input_tokens ?? 0,
+            response.usage?.output_tokens ?? 0
+          ),
+          // Enough to recompute the cost when the rates change, and nothing
+          // about what was asked or answered.
+          detail: {
+            model: MODEL,
+            inputTokens: response.usage?.input_tokens ?? 0,
+            outputTokens: response.usage?.output_tokens ?? 0,
+          },
+        });
+        return { text, live: true };
+      }
     } catch (err) {
       const detail = err instanceof Error ? err.message : "unknown error";
       return {

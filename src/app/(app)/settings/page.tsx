@@ -3,6 +3,8 @@ import { Database, HardDrive, ShieldAlert, ShieldCheck } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { authSecretConfigured } from "@/server/auth";
+import { UsageCard } from "@/components/billing/UsageCard";
+import { usageThisMonth } from "@/server/usage";
 import { agencyBilling, trialDaysLeft } from "@/server/billing/checkout";
 import { PLAN_INFO, PLANS } from "@/server/billing/plans";
 import { stripeConfigured } from "@/server/billing/stripe";
@@ -37,7 +39,11 @@ export default async function SettingsPage() {
   if (!user) redirect("/login");
   const engine = storageEngine();
   const secretOk = authSecretConfigured();
-  const settings = await withTenantPage((q) => getSettings(q));
+  // One tenant round trip for both — they render on the same page.
+  const { settings, usage } = await withTenantPage(async (q) => ({
+    settings: await getSettings(q),
+    usage: await usageThisMonth(q),
+  }));
 
   // The workspace list and the plan behind it. Read here rather than in the
   // client component so the cap comes from the database on every render — a
@@ -109,6 +115,7 @@ export default async function SettingsPage() {
 
       <div className="flex flex-col gap-5">
         <ProfileForm user={user} />
+        <UsageCard usage={usage} />
         <BillingCard billing={billing} canManage={roleCan(user.role, "manage_billing")} />
         <WorkspacesCard
           workspaces={workspaces}
