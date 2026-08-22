@@ -18,8 +18,15 @@ export type NavItem = {
   label: string;
   href: string;
   icon: LucideIcon;
-  badge?: string;
-  dot?: boolean;
+  /**
+   * Which live count this item shows, if any.
+   *
+   * Not a number. This file is a static config, and the one number it used to
+   * hold — `badge: "12"` on Inbox — was shown to every customer regardless of
+   * what was in their inbox. Naming the count instead means the value can only
+   * come from the database.
+   */
+  count?: "inbox" | "calendarToday";
 };
 
 export type NavSection = {
@@ -37,8 +44,8 @@ export const NAV: NavSection[] = [
       { label: "Chat", href: "/chat", icon: MessageSquare },
       { label: "Voice Agents", href: "/voice-agents", icon: Headphones },
       { label: "Contacts", href: "/contacts", icon: Users },
-      { label: "Inbox", href: "/inbox", icon: Inbox, badge: "12" },
-      { label: "Calendar", href: "/calendar", icon: CalendarDays, dot: true },
+      { label: "Inbox", href: "/inbox", icon: Inbox, count: "inbox" },
+      { label: "Calendar", href: "/calendar", icon: CalendarDays, count: "calendarToday" },
     ],
   },
   {

@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/shell/AppShell";
+import { navCounts } from "@/server/nav-counts";
 import { listNotifications } from "@/server/notifications";
 import { currentUser, withTenantPage } from "@/server/tenant-session";
 
@@ -13,7 +14,13 @@ export default async function AppGroupLayout({ children }: { children: React.Rea
   // Derived on the server from live records, so the bell is accurate the
   // moment any page renders rather than depending on a client fetch. Read
   // inside the tenant, so it can only ever count this customer's work.
-  const notifications = await withTenantPage((q) => listNotifications(q));
+  // One round trip for both: the bell and the sidebar counts are the same
+  // question — what is waiting in this workspace — and the layout renders on
+  // every navigation.
+  const { notifications, counts } = await withTenantPage(async (q) => ({
+    notifications: await listNotifications(q),
+    counts: await navCounts(q),
+  }));
 
   return (
     <AppShell
@@ -31,6 +38,7 @@ export default async function AppGroupLayout({ children }: { children: React.Rea
             .toUpperCase() || "?",
       }}
       notifications={notifications}
+      counts={counts}
     >
       {children}
     </AppShell>

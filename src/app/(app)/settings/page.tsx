@@ -3,8 +3,12 @@ import { Database, HardDrive, ShieldAlert, ShieldCheck } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { authSecretConfigured } from "@/server/auth";
+import { entitlementsFor, limitOf } from "@/server/entitlements";
+import { roleCan } from "@/server/permissions";
 import { getSettings } from "@/server/repos/settings";
-import { currentUser, withTenantPage } from "@/server/tenant-session";
+import { listSubAccounts } from "@/server/sub-accounts";
+import { withSystem } from "@/server/tenant";
+import { currentUser, requireTenantPage, withTenantPage } from "@/server/tenant-session";
 import { storageEngine } from "@/server/store";
 import {
   AppearanceCard,
@@ -12,9 +16,17 @@ import {
   ProfileForm,
   SignOutCard,
   TargetsForm,
+  WorkspacesCard,
 } from "./SettingsForms";
 
 export const dynamic = "force-dynamic";
+
+/** The names on the pricing page, not the identifiers in the column. */
+const PLAN_NAMES: Record<string, string> = {
+  starter: "Starter",
+  unlimited: "Unlimited",
+  saas_pro: "SaaS Pro",
+};
 
 export default async function SettingsPage() {
   const user = await currentUser();
@@ -22,6 +34,23 @@ export default async function SettingsPage() {
   const engine = storageEngine();
   const secretOk = authSecretConfigured();
   const settings = await withTenantPage((q) => getSettings(q));
+
+  // The workspace list and the plan behind it. Read here rather than in the
+  // client component so the cap comes from the database on every render — a
+  // limit cached in the bundle is a limit that stays wrong after an upgrade.
+  const tenant = await requireTenantPage();
+  const { workspaces, plan, limit } = await withSystem(async (q) => {
+    const rows = await listSubAccounts(q, user.agencyId);
+    const e = await entitlementsFor(q, user.agencyId);
+    const cap = limitOf(e, "sub_accounts");
+    return {
+      workspaces: rows,
+      plan: PLAN_NAMES[e.plan] ?? e.plan,
+      // `0` means the plan does not include extra workspaces at all; the one
+      // they already have is their own business, so show it as the limit.
+      limit: cap === 0 ? rows.length : cap,
+    };
+  });
 
   return (
     <div className="mx-auto max-w-[900px] animate-fade-up">
@@ -63,6 +92,13 @@ export default async function SettingsPage() {
 
       <div className="flex flex-col gap-5">
         <ProfileForm user={user} />
+        <WorkspacesCard
+          workspaces={workspaces}
+          current={tenant.subAccountId}
+          limit={limit}
+          planName={plan}
+          canManage={roleCan(user.role, "manage_workspaces")}
+        />
         <TargetsForm settings={settings} />
         <PasswordForm />
         <AppearanceCard />

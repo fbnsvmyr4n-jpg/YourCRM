@@ -96,3 +96,38 @@ export async function createSubAccount(
   logWrite("create", "sub_account", { id, detail: `agency ${agencyId}` });
   return { ok: true, id };
 }
+
+export type WorkspaceRow = {
+  id: string;
+  name: string;
+  isPrimary: boolean;
+  phoneNumber: string | null;
+};
+
+/**
+ * The workspaces belonging to one agency.
+ *
+ * `agency_id = $1` is the whole security of this function: without it, the
+ * settings page would list every customer on the platform. It takes the agency
+ * as an argument rather than reading it from a session so the filter is visible
+ * at the call site and testable without standing up a request.
+ */
+export async function listSubAccounts(q: SystemQuery, agencyId: string): Promise<WorkspaceRow[]> {
+  const rows = await q.rows<{
+    id: string;
+    name: string;
+    is_primary: boolean;
+    phone_number: string | null;
+  }>(
+    `SELECT id, name, is_primary, phone_number FROM sub_accounts
+     WHERE agency_id = $1 AND deleted_at IS NULL
+     ORDER BY is_primary DESC, created_at ASC`,
+    [agencyId]
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    isPrimary: r.is_primary,
+    phoneNumber: r.phone_number,
+  }));
+}

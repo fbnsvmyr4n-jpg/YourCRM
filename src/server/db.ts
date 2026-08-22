@@ -16,6 +16,19 @@ import { Pool } from "pg";
 let pool: Pool | null = null;
 let ready: Promise<void> | null = null;
 
+/** Loopback, by hostname — the one case where there is no TLS to negotiate. */
+export function isLocal(connectionString: string): boolean {
+  try {
+    const host = new URL(connectionString).hostname;
+    return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]";
+  } catch {
+    // An unparseable URL is not something to guess about. Assuming TLS is the
+    // safe direction: the worst case is a clear handshake error, rather than a
+    // connection to a remote database in plain text.
+    return false;
+  }
+}
+
 export function getPool(): Pool {
   if (!pool) {
     const connectionString = process.env.DATABASE_URL;
@@ -23,9 +36,23 @@ export function getPool(): Pool {
     pool = new Pool({
       connectionString,
       // Hosted Postgres (Neon, Supabase, Railway, RDS) terminates TLS at the
-      // proxy with a certificate this client doesn't need to verify.
-      ssl: connectionString.includes("localhost") ? undefined : { rejectUnauthorized: false },
-      max: 3, // serverless-friendly: keep the pool small
+      // proxy with a certificate this client doesn't need to verify. A local
+      // database has no TLS at all and refuses the handshake outright.
+      //
+      // Matched on the parsed hostname, not on the string containing
+      // "localhost": the local dev database is reached at 127.0.0.1 and was
+      // asked for SSL it does not speak, which surfaced as "the server does not
+      // support SSL connections" and looked like a database fault rather than a
+      // client assumption. Substring matching also says yes to a hosted name
+      // that merely contains the word.
+      ssl: isLocal(connectionString) ? undefined : { rejectUnauthorized: false },
+      // Serverless-friendly: keep the pool small. Configurable because the
+      // local dev database (PGlite over a socket) serves ONE connection at a
+      // time — Next renders a layout and its page concurrently, so a pool of
+      // three opened a second connection and the first was reset mid-query.
+      // It surfaced as ECONNRESET from every page at once, which looks like a
+      // database falling over rather than a pool sized for a different server.
+      max: Number(process.env.PG_POOL_MAX ?? 3),
       // A hung query used to hang the request that issued it — nothing bounded
       // it. These turn a stalled database into a fast, visible failure rather
       // than a page that never returns.

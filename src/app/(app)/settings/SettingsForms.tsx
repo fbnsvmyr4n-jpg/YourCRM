@@ -1,14 +1,17 @@
 "use client";
 
 import { useActionState } from "react";
-import { AlertCircle, Check, KeyRound, LogOut, Target, UserRound } from "lucide-react";
+import { AlertCircle, Building2, Check, KeyRound, LogOut, Plus, Target, UserRound } from "lucide-react";
 import { signOutAction } from "@/app/(auth)/actions";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import type { Settings } from "@/server/repos/settings";
 import type { SafeUser } from "@/server/repos/users";
+import type { WorkspaceRow } from "@/server/sub-accounts";
 import {
   changePasswordAction,
+  createWorkspaceAction,
+  switchWorkspaceAction,
   updateProfileAction,
   updateTargetsAction,
   type FormState,
@@ -196,6 +199,132 @@ export function SignOutCard() {
           </button>
         </form>
       </div>
+    </Card>
+  );
+}
+
+/**
+ * The client workspaces on this account, and the limit that applies to them.
+ *
+ * The count against the cap is shown before anyone hits it. A limit a customer
+ * only discovers by being refused is a limit that feels like a fault.
+ *
+ * The switcher is a form rather than a link because switching sets a cookie
+ * that changes what every other page reads — that is a write, and it should
+ * look like one.
+ */
+export function WorkspacesCard({
+  workspaces,
+  current,
+  limit,
+  planName,
+  canManage,
+}: {
+  workspaces: WorkspaceRow[];
+  current: string | null;
+  /** `null` means unlimited on this plan. */
+  limit: number | null;
+  planName: string;
+  canManage: boolean;
+}) {
+  const [createState, create, creating] = useActionState<FormState, FormData>(
+    createWorkspaceAction,
+    undefined
+  );
+  const [switchState, doSwitch, switching] = useActionState<FormState, FormData>(
+    switchWorkspaceAction,
+    undefined
+  );
+  const atLimit = limit !== null && workspaces.length >= limit;
+
+  return (
+    <Card>
+      <CardHeader
+        title="Client workspaces"
+        icon={<Building2 className="h-[18px] w-[18px] text-accent" />}
+      />
+
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <p className="text-xs text-faint">
+          Each client&apos;s contacts, deals and calls are kept entirely separate.
+        </p>
+        <span
+          className="rounded-full px-3 py-1 text-xs font-semibold"
+          style={{
+            background: atLimit ? "var(--amber-soft)" : "var(--accent-soft)",
+            color: atLimit ? "var(--amber)" : "var(--accent)",
+          }}
+        >
+          {limit === null
+            ? `${workspaces.length} · ${planName}`
+            : `${workspaces.length} of ${limit} · ${planName}`}
+        </span>
+      </div>
+
+      <Banner state={switchState} />
+
+      <ul className="flex flex-col gap-2">
+        {workspaces.map((w) => {
+          const active = w.id === current;
+          return (
+            <li
+              key={w.id}
+              className="flex flex-wrap items-center justify-between gap-3 rounded-xl px-3.5 py-3"
+              style={{ background: active ? "var(--accent-soft)" : "var(--surface-2)" }}
+            >
+              <div className="min-w-0 leading-tight">
+                <p className="truncate text-sm font-medium">
+                  {w.name}
+                  {w.isPrimary && (
+                    <span className="ml-2 text-xs font-normal text-faint">your own business</span>
+                  )}
+                </p>
+                <p className="mt-0.5 truncate text-xs text-faint">
+                  {w.phoneNumber ?? "No number — inbound calls will not route here"}
+                </p>
+              </div>
+              {active ? (
+                <span className="text-xs font-semibold text-accent">Current</span>
+              ) : (
+                <form action={doSwitch}>
+                  <input type="hidden" name="subAccountId" value={w.id} />
+                  <button
+                    type="submit"
+                    disabled={switching}
+                    className="btn-soft focus-ring rounded-lg px-3 py-1.5 text-xs font-medium disabled:opacity-60"
+                  >
+                    Switch
+                  </button>
+                </form>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+
+      {canManage && (
+        <form action={create} className="mt-4 space-y-4 border-t border-[var(--border)] pt-4">
+          <Banner state={createState} />
+          <div className="grid grid-cols-1 gap-4 @min-[440px]:grid-cols-2">
+            <Field label="Client name" name="name" required />
+            <Field label="Phone number (optional)" name="phoneNumber" />
+          </div>
+          <p className="text-xs text-faint">
+            A number routes that client&apos;s inbound calls to their own workspace. It has to be
+            unique, because a call can only belong to one of them.
+          </p>
+          <div className="flex justify-end">
+            <button
+              type="submit"
+              disabled={creating}
+              className="btn-accent focus-ring flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold disabled:opacity-60"
+            >
+              <Plus className="h-4 w-4" />
+              {creating ? "Adding…" : "Add workspace"}
+            </button>
+          </div>
+        </form>
+      )}
     </Card>
   );
 }

@@ -330,10 +330,25 @@ describe("every repository scopes itself, without relying on the database", () =
    * upgrade. The table is the boundary, so the check follows the table.
    */
   it("no server module reads sub_accounts without an agency filter", () => {
-    const files = readdirSync(SERVER)
-      .filter((f) => f.endsWith(".ts"))
-      .map((f) => join(SERVER, f))
-      .concat(existsSync(REPOS) ? readdirSync(REPOS).filter((f) => f.endsWith(".ts")).map((f) => join(REPOS, f)) : []);
+    /**
+     * Server actions are included, not only `src/server`.
+     *
+     * The first version of this check scanned the server directory alone, and
+     * `switchWorkspaceAction` — which looks a workspace up by an id the browser
+     * supplied — lives under `src/app`. That is precisely the query that must
+     * be constrained by agency: it decides which customer's data the session
+     * then reads.
+     */
+    const walk = (dir: string): string[] =>
+      !existsSync(dir)
+        ? []
+        : readdirSync(dir).flatMap((f) => {
+            const full = join(dir, f);
+            if (statSync(full).isDirectory()) return walk(full);
+            return f.endsWith(".ts") || f.endsWith(".tsx") ? [full] : [];
+          });
+
+    const files = [...walk(SERVER), ...walk(join(SERVER, "..", "app"))];
     expect(files.length, "found no server modules to check").toBeGreaterThan(0);
 
     /**

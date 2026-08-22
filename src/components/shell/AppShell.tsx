@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import type { NavCounts } from "@/server/nav-counts";
 import type { Notification } from "@/server/notifications";
 import { CommandPalette } from "./CommandPalette";
 import { Sidebar } from "./Sidebar";
@@ -12,10 +13,12 @@ export function AppShell({
   children,
   user,
   notifications,
+  counts,
 }: {
   children: React.ReactNode;
   user: ShellUser;
   notifications: Notification[];
+  counts: NavCounts;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -28,6 +31,7 @@ export function AppShell({
         onToggle={() => setCollapsed((v) => !v)}
         mobileOpen={mobileOpen}
         onMobileClose={() => setMobileOpen(false)}
+        counts={counts}
       />
 
       {/* Mobile backdrop */}

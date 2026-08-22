@@ -9,6 +9,7 @@ import { Logo, Wordmark } from "./Logo";
 import { signOutAction } from "@/app/(auth)/actions";
 import { clsx } from "@/lib/clsx";
 import type { ShellUser } from "./AppShell";
+import type { NavCounts } from "@/server/nav-counts";
 
 function isActive(pathname: string, href: string) {
   if (href === "/") return pathname === "/";
@@ -21,12 +22,14 @@ export function Sidebar({
   onToggle,
   mobileOpen,
   onMobileClose,
+  counts,
 }: {
   user: ShellUser;
   collapsed: boolean;
   onToggle: () => void;
   mobileOpen: boolean;
   onMobileClose: () => void;
+  counts: NavCounts;
 }) {
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -60,6 +63,9 @@ export function Sidebar({
               {section.items.map((item) => {
                 const active = isActive(pathname, item.href);
                 const Icon = item.icon;
+                // The config names a count; the value comes from the database.
+                const unread = item.count === "inbox" ? counts.inbox : 0;
+                const today = item.count === "calendarToday" && counts.calendarToday;
                 return (
                   <li key={item.href}>
                     <Link
@@ -87,15 +93,18 @@ export function Sidebar({
                         ].join(" ")}
                       />
                       {!collapsed && <span className="relative z-10 flex-1">{item.label}</span>}
-                      {!collapsed && item.badge && (
+                      {/* Nothing waiting, nothing shown. A badge reading 0 is
+                          an invitation to check something that is already
+                          clear. */}
+                      {!collapsed && unread > 0 && (
                         <span className="relative z-10 rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[11px] font-semibold text-accent">
-                          {item.badge}
+                          {unread > 99 ? "99+" : unread}
                         </span>
                       )}
-                      {!collapsed && item.dot && (
+                      {!collapsed && today && (
                         <span className="relative z-10 h-2 w-2 rounded-full bg-[var(--purple)]" />
                       )}
-                      {collapsed && item.badge && (
+                      {collapsed && (unread > 0 || today) && (
                         <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-[var(--accent)]" />
                       )}
                     </Link>

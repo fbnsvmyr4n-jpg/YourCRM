@@ -47,3 +47,4 @@ next-env.d.ts
 # Local credential notes — never commit
 CREDENTIALS.local.txt
 *.local.txt
+.dev-db/

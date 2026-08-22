@@ -3,9 +3,12 @@
 import { revalidateApp } from "@/server/revalidate";
 import { isValidTimeZone, updateSettings } from "@/server/repos/settings";
 import { changePassword, updateProfile } from "@/server/repos/users";
+import { roleCan } from "@/server/permissions";
+import { createSubAccount } from "@/server/sub-accounts";
 import { withSystem } from "@/server/tenant";
-import { requireTenant, withCurrentTenant } from "@/server/tenant-session";
+import { requireTenant, SUB_ACCOUNT_COOKIE, withCurrentTenant } from "@/server/tenant-session";
 import { count, email as validEmail, money, text } from "@/server/validate";
+import { cookies } from "next/headers";
 
 export type FormState = { ok?: string; error?: string } | undefined;
 
@@ -74,4 +77,78 @@ export async function changePasswordAction(_prev: FormState, formData: FormData)
   if (result.error) return { error: result.error };
 
   return { ok: "Password changed." };
+}
+
+
+/**
+ * Create a client workspace.
+ *
+ * Two separate refusals, deliberately not merged:
+ *
+ *  - **Who is asking.** Only an owner or admin creates workspaces. A member is
+ *    somebody's employee working inside one client's data; letting them add
+ *    another is both a permissions hole and, on a metered plan, a bill.
+ *  - **What the plan allows.** Enforced inside `createSubAccount`, in the same
+ *    transaction as the insert, because the limit is about a count of rows and
+ *    checking it out here would leave a gap between the check and the write.
+ *
+ * The action does not enforce the cap itself. A gate that lives in the action
+ * is a gate that a second caller — an API route, an import, a signup flow —
+ * simply does not have.
+ */
+export async function createWorkspaceAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  const me = await requireTenant();
+  if (!roleCan(me.role, "manage_workspaces")) {
+    return { error: "Only an owner or admin can add a workspace." };
+  }
+
+  const name = text(formData.get("name"), 80);
+  if (!name) return { error: "Give the workspace a name." };
+  const phoneNumber = text(formData.get("phoneNumber"), 40);
+
+  const result = await withSystem((q) =>
+    createSubAccount(q, me.agencyId, name, { phoneNumber })
+  );
+  if (!result.ok) return { error: result.error };
+
+  revalidateApp();
+  return { ok: `${name} is ready.` };
+}
+
+/**
+ * Switch which client's workspace the session is looking at.
+ *
+ * The cookie is a *request*, not a decision: `resolveSubAccount` re-checks it
+ * against the user's own agency on every request, so a hand-edited value
+ * resolves to their default rather than to somebody else's data. It is still
+ * validated here, so the person gets an answer instead of silently landing
+ * back where they started.
+ */
+export async function switchWorkspaceAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  const me = await requireTenant();
+
+  const requested = text(formData.get("subAccountId"), 120);
+  if (!requested) return { error: "Choose a workspace." };
+
+  const owned = await withSystem((q) =>
+    q.one<{ name: string }>(
+      `SELECT name FROM sub_accounts
+       WHERE id = $1 AND agency_id = $2 AND deleted_at IS NULL`,
+      [requested, me.agencyId]
+    )
+  );
+  if (!owned) return { error: "That workspace is not available on this account." };
+
+  const store = await cookies();
+  store.set(SUB_ACCOUNT_COOKIE, requested, {
+    httpOnly: true,
+    sameSite: "lax",
+    path: "/",
+    secure: process.env.NODE_ENV === "production",
+    maxAge: 60 * 60 * 24 * 365,
+  });
+
+  // Everything on screen belongs to the previous workspace.
+  revalidateApp();
+  return { ok: `Now working in ${owned.name}.` };
 }
