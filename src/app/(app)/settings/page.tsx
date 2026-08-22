@@ -4,7 +4,7 @@ import { Avatar } from "@/components/ui/Avatar";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { authSecretConfigured } from "@/server/auth";
 import { UsageCard } from "@/components/billing/UsageCard";
-import { usageThisMonth } from "@/server/usage";
+import { usageByWorkspace, usageThisMonth } from "@/server/usage";
 import { agencyBilling, trialDaysLeft } from "@/server/billing/checkout";
 import { PLAN_INFO, PLANS } from "@/server/billing/plans";
 import { stripeConfigured } from "@/server/billing/stripe";
@@ -62,11 +62,13 @@ export default async function SettingsPage() {
     configured: stripeConfigured(),
     plans: PLANS.map((p) => PLAN_INFO[p]),
   };
-  const { workspaces, plan, limit } = await withSystem(async (q) => {
+  const { workspaces, perWorkspace, plan, limit } = await withSystem(async (q) => {
     const rows = await listSubAccounts(q, user.agencyId);
+    const perWorkspace = await usageByWorkspace(q, user.agencyId);
     const e = await entitlementsFor(q, user.agencyId);
     const cap = limitOf(e, "sub_accounts");
     return {
+      perWorkspace,
       workspaces: rows,
       plan: PLAN_NAMES[e.plan] ?? e.plan,
       // `0` means the plan does not include extra workspaces at all; the one
@@ -115,7 +117,7 @@ export default async function SettingsPage() {
 
       <div className="flex flex-col gap-5">
         <ProfileForm user={user} />
-        <UsageCard usage={usage} />
+        <UsageCard usage={usage} byWorkspace={perWorkspace} />
         <BillingCard billing={billing} canManage={roleCan(user.role, "manage_billing")} />
         <WorkspacesCard
           workspaces={workspaces}

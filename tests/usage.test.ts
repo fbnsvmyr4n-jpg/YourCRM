@@ -246,6 +246,107 @@ describe("usage is recorded against the workspace that generated it", () => {
   });
 });
 
+describe("an agency can see what each of its clients costs", () => {
+  /**
+   * The rebilling input. An agency on SaaS Pro charges its own clients and
+   * cannot do that from a single total — it needs to know which client
+   * generated which cost. That is why usage is recorded per workspace rather
+   * than per agency.
+   */
+  let usageByWorkspace: typeof import("../src/server/usage").usageByWorkspace;
+  let withSystem: typeof import("../src/server/tenant").withSystem;
+
+  beforeAll(async () => {
+    ({ usageByWorkspace } = await import("../src/server/usage"));
+    ({ withSystem } = await import("../src/server/tenant"));
+  });
+
+  it("breaks the month down by workspace, dearest first", async () => {
+    await withTenant(ctx(TENANT_A), (q) =>
+      recordUsage(q, { kind: "ai_message", quantity: 1, costMicros: 100 })
+    );
+    await withTenant(ctx(TENANT_B), (q) =>
+      recordUsage(q, { kind: "voice_minute", quantity: 5, costMicros: 900 })
+    );
+
+    const rows = await withSystem((q) => usageByWorkspace(q, "ag_test"));
+    expect(rows.length).toBe(2);
+    expect(rows[0].costMicros, "the dearest workspace is not first").toBe(900);
+    expect(rows[0].voiceMinutes).toBe(5);
+    expect(rows[1].aiMessages).toBe(1);
+  });
+
+  it("shows a workspace that has used nothing, at zero", async () => {
+    // An idle client vanishing from the agency's own list reads as the
+    // workspace having been deleted.
+    await withTenant(ctx(TENANT_A), (q) =>
+      recordUsage(q, { kind: "ai_message", quantity: 1, costMicros: 100 })
+    );
+    const rows = await withSystem((q) => usageByWorkspace(q, "ag_test"));
+    expect(rows.length, "an unused workspace disappeared").toBe(2);
+    expect(rows.find((r) => r.subAccountId === TENANT_B)?.costMicros).toBe(0);
+  });
+
+  it("never reaches outside the agency", async () => {
+    /**
+     * `agency_id = $1` is the entire security of this function — it runs
+     * through `withSystem`, so row-level security is not scoping it. Without
+     * that predicate an agency owner would see every other agency's clients
+     * and what they spend.
+     */
+    await db.seed(
+      `INSERT INTO agencies (id, name) VALUES ('ag_other_usage', 'Other')
+         ON CONFLICT (id) DO NOTHING;
+       INSERT INTO sub_accounts (id, agency_id, name, is_primary)
+         VALUES ('sa_other_usage', 'ag_other_usage', 'Someone Else', TRUE)
+         ON CONFLICT (id) DO NOTHING;`
+    );
+    await db.seed(
+      `INSERT INTO usage_events (id, sub_account_id, kind, quantity, cost_micros)
+       VALUES ('u_other', 'sa_other_usage', 'ai_message', 1, 5555)`
+    );
+
+    const rows = await withSystem((q) => usageByWorkspace(q, "ag_test"));
+    expect(
+      rows.map((r) => r.subAccountId),
+      "another agency's workspace appeared in this agency's costs"
+    ).not.toContain("sa_other_usage");
+    expect(rows.every((r) => r.costMicros !== 5555)).toBe(true);
+
+    await db.seed(`DELETE FROM sub_accounts WHERE id = 'sa_other_usage';
+                   DELETE FROM agencies WHERE id = 'ag_other_usage'`);
+  });
+
+  it("counts only this month", async () => {
+    await withTenant(ctx(TENANT_A), (q) =>
+      recordUsage(q, { kind: "ai_message", quantity: 1, costMicros: 400 })
+    );
+    await db.seed(
+      `UPDATE usage_events SET occurred_at = date_trunc('month', now()) - interval '1 day'`
+    );
+    const rows = await withSystem((q) => usageByWorkspace(q, "ag_test"));
+    expect(rows.every((r) => r.costMicros === 0), "last month was counted").toBe(true);
+  });
+
+  it("leaves out a workspace the agency has removed", async () => {
+    // A churned client's costs stop appearing the moment the workspace is
+    // removed. Left in, the agency would go on rebilling somebody who is no
+    // longer a customer — and the figure would never stop growing, because
+    // nothing is ever hard-deleted.
+    await db.seed(`UPDATE sub_accounts SET deleted_at = now() WHERE id = '${TENANT_B}'`);
+    const rows = await withSystem((q) => usageByWorkspace(q, "ag_test"));
+    expect(
+      rows.map((r) => r.subAccountId),
+      "a removed workspace was still billed"
+    ).not.toContain(TENANT_B);
+    await db.seed(`UPDATE sub_accounts SET deleted_at = NULL WHERE id = '${TENANT_B}'`);
+  });
+
+  it("reports an agency with no workspaces as empty, not as an error", async () => {
+    expect(await withSystem((q) => usageByWorkspace(q, "ag_nonexistent"))).toEqual([]);
+  });
+});
+
 describe("the paths that cost money are metered", () => {
   const SRC = join(__dirname, "..", "src");
 

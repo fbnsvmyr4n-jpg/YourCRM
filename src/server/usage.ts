@@ -1,4 +1,4 @@
-import type { TenantQuery } from "./tenant";
+import type { SystemQuery, TenantQuery } from "./tenant";
 
 /**
  * What each workspace actually costs to run.
@@ -158,4 +158,72 @@ export function formatMicros(micros: number): string {
   // AI messages reads as a broken counter rather than as a small bill.
   if (dollars < 0.01) return "<$0.01";
   return `$${dollars.toFixed(2)}`;
+}
+
+export type WorkspaceUsage = {
+  subAccountId: string;
+  name: string;
+  isPrimary: boolean;
+  aiMessages: number;
+  voiceMinutes: number;
+  costMicros: number;
+};
+
+/**
+ * What each of an agency's client workspaces cost this month.
+ *
+ * This is the rebilling input. An agency on SaaS Pro charges its own clients,
+ * and it cannot do that from a single total — it needs to know which client
+ * generated which cost. Recording usage per workspace rather than per agency is
+ * what makes that possible at all; this is the query that reads it back.
+ *
+ * Deliberately NOT a tenant-scoped query. It spans every workspace in one
+ * agency, which is the whole point, so it runs through `withSystem` and the
+ * `agency_id = $1` join is what keeps it inside one customer. That predicate is
+ * the entire security of this function: without it, an agency owner would see
+ * every other agency's clients and what they spend.
+ *
+ * Costs only. It reports what a workspace consumed, never anything from inside
+ * it — the CRM records themselves stay behind row-level security.
+ */
+export async function usageByWorkspace(
+  q: SystemQuery,
+  agencyId: string
+): Promise<WorkspaceUsage[]> {
+  const rows = await q.rows<{
+    sub_account_id: string;
+    name: string;
+    is_primary: boolean;
+    ai_messages: string;
+    voice_minutes: string;
+    cost_micros: string;
+  }>(
+    `SELECT sa.id AS sub_account_id,
+            sa.name,
+            sa.is_primary,
+            COALESCE(sum(u.quantity) FILTER (WHERE u.kind = 'ai_message'), 0)::text   AS ai_messages,
+            COALESCE(sum(u.quantity) FILTER (WHERE u.kind = 'voice_minute'), 0)::text AS voice_minutes,
+            COALESCE(sum(u.cost_micros), 0)::text                                     AS cost_micros
+       FROM sub_accounts sa
+       -- LEFT JOIN so a workspace that has used nothing still appears at zero.
+       -- Dropping it would make an idle client vanish from the agency's own
+       -- list, which reads as the workspace having been deleted.
+       LEFT JOIN usage_events u
+              ON u.sub_account_id = sa.id
+             AND u.occurred_at >= date_trunc('month', now())
+      WHERE sa.agency_id = $1
+        AND sa.deleted_at IS NULL
+      GROUP BY sa.id, sa.name, sa.is_primary
+      ORDER BY sum(u.cost_micros) DESC NULLS LAST, sa.is_primary DESC, sa.name ASC`,
+    [agencyId]
+  );
+
+  return rows.map((r) => ({
+    subAccountId: r.sub_account_id,
+    name: r.name,
+    isPrimary: r.is_primary,
+    aiMessages: Number(r.ai_messages),
+    voiceMinutes: Number(r.voice_minutes),
+    costMicros: Number(r.cost_micros),
+  }));
 }

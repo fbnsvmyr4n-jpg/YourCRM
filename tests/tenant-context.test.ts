@@ -477,8 +477,21 @@ describe("every repository scopes itself, without relying on the database", () =
         namesTenant || delegates,
         `${name} neither scopes its own queries nor delegates to a repository`
       ).toBe(true);
-      // A caller-supplied tenant id is an authorisation bug wearing a parameter.
-      expect(src, `${name} accepts a tenant id as an argument`).not.toMatch(
+      /**
+       * A caller-supplied tenant id is an authorisation bug wearing a
+       * parameter. Checked against PARAMETER lists, not the whole file.
+       *
+       * Matching anywhere flagged `usage.ts` for a RETURN type — the
+       * per-workspace cost breakdown names the workspace each figure belongs
+       * to, which is the opposite of the problem: it reports which tenant a
+       * row came from rather than being told which tenant to read. A guard
+       * that fires on correct code gets weakened or ignored, and both are
+       * worse than the false positive.
+       */
+      const params = [...src.matchAll(/\(([^)]*)\)\s*(?::\s*Promise<|\{|=>)/g)]
+        .map((m) => m[1])
+        .join("\n");
+      expect(params, `${name} accepts a tenant id as an argument`).not.toMatch(
         /\bsubAccountId\s*:\s*string\b/
       );
     });
