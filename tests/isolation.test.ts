@@ -35,6 +35,11 @@ const NOT_TENANT_SCOPED: Record<string, string> = {
   login_attempts:
     "pre-authentication: rate limiting must work before the account is even " +
     "identified, which is the point of it. Holds a key and a counter.",
+  plan_entitlements:
+    "the published price list, not customer data. Identical rows for every " +
+    "agency, keyed by (plan, feature), written by a migration and only read by " +
+    "the app. Scoping it per tenant would meanevery customer carrying their " +
+    "own copy of the pricing, which is how one of them ends up on last year's.",
   voice_sessions:
     "pre-tenant: a telephony webhook arrives before anything has resolved which " +
     "customer the call belongs to — that resolution reads the dialled number and " +
@@ -62,6 +67,24 @@ function tableBody(sql: string, name: string): string {
 describe("the schema is discoverable", () => {
   it("finds the tables (a suite matching nothing proves nothing)", () => {
     expect(tableNames(SCHEMA).length).toBeGreaterThanOrEqual(10);
+  });
+});
+
+describe("the price list stays a price list", () => {
+  /**
+   * `plan_entitlements` is exempt from tenancy because it holds no customer
+   * data. That is a property of the table, not a promise — the moment it gains
+   * an agency or sub-account column it IS customer data, sitting in a table
+   * with no policy protecting it. So the exemption checks its own premise.
+   */
+  it("carries no per-customer identifier", () => {
+    const body = tableBody(SCHEMA, "plan_entitlements");
+    expect(body, "the price list is empty or missing").toContain("plan");
+    expect(
+      /\b(agency_id|sub_account_id|user_id|owner_user_id)\b/.test(body),
+      "plan_entitlements gained a per-customer column; it is no longer a shared " +
+        "price list and its exemption from tenant isolation no longer holds"
+    ).toBe(false);
   });
 });
 

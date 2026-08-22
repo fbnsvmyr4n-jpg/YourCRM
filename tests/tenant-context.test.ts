@@ -267,6 +267,12 @@ describe("every repository scopes itself, without relying on the database", () =
     "users.ts":
       "sign-in happens before a tenant exists, and users are agency-level anyway; " +
       "scoped by agency_id explicitly, or by the user's own id.",
+    "entitlements.ts":
+      "entitlements are bought by the AGENCY, one level above sub-accounts, so " +
+      "there is no sub_account_id to filter by. It also has to answer before a " +
+      "tenant exists — at signup, and for a billing webhook that arrives with " +
+      "nothing but a customer id. Touches agencies (by id) and plan_entitlements " +
+      "(the shared price list); no customer records.",
     "tenant-session.ts":
       "resolves WHICH tenant a request is in; it cannot already be inside one. " +
       "Touches only sub_accounts, always filtered by the user's own agency_id — " +
@@ -312,6 +318,69 @@ describe("every repository scopes itself, without relying on the database", () =
       }
     });
   }
+
+  /**
+   * Every module that reads `sub_accounts` constrains it by agency — not only
+   * the allowlisted ones.
+   *
+   * Discovery here is by TenantQuery, so a module taking a SystemQuery was
+   * never examined at all. `sub-accounts.ts` is exactly that shape: it counts
+   * workspaces to enforce a plan limit, and a count that forgot `agency_id`
+   * would charge one agency for another's workspaces while telling them to
+   * upgrade. The table is the boundary, so the check follows the table.
+   */
+  it("no server module reads sub_accounts without an agency filter", () => {
+    const files = readdirSync(SERVER)
+      .filter((f) => f.endsWith(".ts"))
+      .map((f) => join(SERVER, f))
+      .concat(existsSync(REPOS) ? readdirSync(REPOS).filter((f) => f.endsWith(".ts")).map((f) => join(REPOS, f)) : []);
+    expect(files.length, "found no server modules to check").toBeGreaterThan(0);
+
+    /**
+     * One module legitimately looks a workspace up without an agency.
+     *
+     * An inbound call arrives from Twilio with no session and no agency — the
+     * dialled number IS the identifier, and it is unique across the platform.
+     * There is nothing to filter by, and the query returns the agency_id it
+     * finds rather than assuming one. The exemption is checked below rather
+     * than trusted.
+     */
+    const NUMBER_LOOKUP = "telephony-tenant.ts";
+
+    let checked = 0;
+    for (const path of files) {
+      if (path.endsWith(NUMBER_LOOKUP)) continue;
+      const src = readFileSync(path, "utf8")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^\s*\/\/.*$/gm, "");
+      for (const [, sql] of src.matchAll(/`([^`]*FROM sub_accounts[^`]*)`/gi)) {
+        checked++;
+        expect(
+          /agency_id = \$/.test(sql),
+          `${path.split("/").pop()} reads sub_accounts without filtering by agency_id:\n${sql.trim().slice(0, 160)}`
+        ).toBe(true);
+      }
+    }
+    expect(checked, "matched no sub_accounts queries — the detector is broken").toBeGreaterThan(0);
+  });
+
+  it("the telephony lookup refuses an ambiguous number rather than guessing", () => {
+    /**
+     * Its exemption rests entirely on refusing when it cannot tell. Writing a
+     * caller into whichever workspace sorted first is a cross-tenant leak that
+     * arrives as somebody else's customer appearing in your CRM — so if the
+     * refusal ever goes, the exemption goes with it.
+     */
+    const src = readFileSync(join(SERVER, "telephony-tenant.ts"), "utf8");
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    expect(code, "the number lookup no longer returns the agency it found").toMatch(
+      /agency_id/
+    );
+    expect(code, "the fallback no longer bounds itself to a single workspace").toMatch(
+      /LIMIT 2/
+    );
+    expect(code, "the ambiguous case no longer refuses").toMatch(/return null/);
+  });
 
   for (const path of repoFiles()) {
     const name = path.split("/").pop()!;

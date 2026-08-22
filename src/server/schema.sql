@@ -616,3 +616,66 @@ CREATE TABLE IF NOT EXISTS voice_sessions (
 -- status callback. Indexed so a sweep of stale sessions stays cheap.
 CREATE INDEX IF NOT EXISTS voice_sessions_stale_idx ON voice_sessions (updated_at);
 
+
+-- ---------------------------------------------------------------------------
+-- What each plan grants
+--
+-- Entitlements live in a table, not in `if (plan === "saas_pro")` scattered
+-- through the code. A row means the plan is entitled to that feature; no row
+-- means it is not. `limit_value` is the cap where one applies and NULL means
+-- unlimited — so "3 sub-accounts" and "unlimited sub-accounts" are the same
+-- feature with a different number, rather than two branches.
+--
+-- The point is that changing the pricing is editing rows. A tier that gains a
+-- feature should not require finding every place the old tier was named, and
+-- the day somebody negotiates a custom plan, that is a row too.
+--
+-- Seeded below with the published pricing. Deliberately NOT tenant-scoped:
+-- these are the product's terms, identical for every customer, and a tenant
+-- that could edit its own entitlements would be a tenant that grants itself
+-- whatever it likes.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS plan_entitlements (
+  plan        TEXT NOT NULL CHECK (plan IN ('starter', 'unlimited', 'saas_pro')),
+  feature     TEXT NOT NULL,
+  -- NULL means no limit. A number is the cap.
+  limit_value INTEGER,
+  PRIMARY KEY (plan, feature)
+);
+
+-- The published tiers, 17 Aug 2026. Each tier includes everything below it,
+-- written out in full rather than inherited: an inheritance rule is one more
+-- thing that can be wrong, and there are only three tiers.
+INSERT INTO plan_entitlements (plan, feature, limit_value) VALUES
+  -- Starter, $97/mo
+  ('starter',   'crm',              NULL),
+  ('starter',   'pipelines',        NULL),
+  ('starter',   'online_booking',   NULL),
+  ('starter',   'contacts',         NULL),
+  ('starter',   'users',            NULL),
+  ('starter',   'sub_accounts',        3),
+
+  -- Unlimited, $297/mo
+  ('unlimited', 'crm',              NULL),
+  ('unlimited', 'pipelines',        NULL),
+  ('unlimited', 'online_booking',   NULL),
+  ('unlimited', 'contacts',         NULL),
+  ('unlimited', 'users',            NULL),
+  ('unlimited', 'sub_accounts',     NULL),
+  ('unlimited', 'api_access',       NULL),
+  ('unlimited', 'white_label',      NULL),
+
+  -- SaaS Pro, $497/mo
+  ('saas_pro',  'crm',              NULL),
+  ('saas_pro',  'pipelines',        NULL),
+  ('saas_pro',  'online_booking',   NULL),
+  ('saas_pro',  'contacts',         NULL),
+  ('saas_pro',  'users',            NULL),
+  ('saas_pro',  'sub_accounts',     NULL),
+  ('saas_pro',  'api_access',       NULL),
+  ('saas_pro',  'white_label',      NULL),
+  ('saas_pro',  'saas_mode',        NULL),
+  ('saas_pro',  'rebilling',        NULL)
+ON CONFLICT (plan, feature) DO UPDATE SET limit_value = EXCLUDED.limit_value;
+
