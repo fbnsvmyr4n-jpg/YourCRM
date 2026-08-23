@@ -713,15 +713,30 @@ function ContactCard({
   const tel = message.phone.replace(/[^\d+]/g, "");
   const hasEmail = message.email && message.email !== "—";
 
-  // First and latest contact were stored strings that nothing recomputed. They
-  // are now derived from the messages themselves, so they can't go stale.
+  /**
+   * First and latest contact, derived from the messages themselves so they
+   * cannot go stale — they used to be stored strings nothing recomputed.
+   *
+   * Gathered by CONTACT ID. It used to match on the sender's email or their
+   * name, and a name is not an identity: correcting a spelling split one
+   * person's history in two, and nothing said it had happened. Email is the
+   * fallback only for messages that arrived before the sender was a contact,
+   * where there is no id to match on and an address is the best available
+   * identity.
+   */
   const thread = useMemo(() => {
+    const sameSender = (m: (typeof messages)[number]) => {
+      if (message.contactId && m.contactId) return m.contactId === message.contactId;
+      if (!message.email || message.email === "—") return m.id === message.id;
+      return m.email.toLowerCase() === message.email.toLowerCase();
+    };
+
     const mine = messages
-      .filter((m) => m.at && (m.email.toLowerCase() === message.email.toLowerCase() || m.name === message.name))
+      .filter((m) => m.at && sameSender(m))
       .map((m) => m.at)
       .sort();
     return { first: mine[0], latest: mine[mine.length - 1], count: mine.length };
-  }, [messages, message.email, message.name]);
+  }, [messages, message.contactId, message.email, message.id]);
 
   const actions = [
     { label: "Call", icon: Phone, href: tel ? `tel:${tel}` : undefined, why: tel ? `Call ${message.phone}` : "No phone number" },

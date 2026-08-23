@@ -32,6 +32,15 @@ export type Attachment = {
 
 export type Message = {
   id: string;
+  /**
+   * The contact this message belongs to, by id.
+   *
+   * The thread on the reader used to be gathered by matching the sender's
+   * EMAIL or NAME. A rename broke it silently: the same person's history split
+   * in two and nothing said why. The link is a foreign key on the row, so it
+   * is carried through to the screen rather than reconstructed from text.
+   */
+  contactId: string | null;
   initials: string;
   color: AvatarColor;
   name: string;
