@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { clsx } from "@/lib/clsx";
 import {
   Building2,
   CalendarCheck,
@@ -15,6 +16,8 @@ import { Avatar } from "@/components/ui/Avatar";
 import { AreaChart } from "@/components/ui/AreaChart";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { companyRollups } from "@/server/repos/companies";
+import { getSettings } from "@/server/repos/settings";
+import { PERIODS, PERIOD_LABELS, isPeriod, resolvePeriod, type PeriodId } from "@/server/report-period";
 import { referralCredits } from "@/server/referrals";
 import { reportView } from "@/server/reports-view";
 import { withTenantPage } from "@/server/tenant-session";
@@ -39,14 +42,33 @@ const barFill = (color: string) =>
 /** A rate nobody has data for reads as "—", never as an unearned 0%. */
 const rate = (v: number | null) => (v === null ? "—" : `${v}%`);
 
-export default async function ReportsPage() {
+export default async function ReportsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ period?: string }>;
+}) {
+  /**
+   * The window comes from the URL.
+   *
+   * So a period can be linked to and survives a refresh — "look at July" is a
+   * link somebody can send, rather than a sequence of clicks they have to
+   * describe. Checked rather than trusted: the value arrives from a browser.
+   */
+  const requested = (await searchParams).period ?? "";
+  const periodId: PeriodId = isPeriod(requested) ? requested : "all-time";
   // Both in one tenant transaction — a referrer's credit cannot describe deals
   // a different read would not return.
-  const { r, referrers, accounts } = await withTenantPage(async (q) => ({
-    r: await reportView(q),
-    referrers: await referralCredits(q),
-    accounts: await companyRollups(q),
-  }));
+  const { r, referrers, accounts } = await withTenantPage(async (q) => {
+    // The business's own time zone, so "July" is July where they are — read in
+    // the same transaction as the figures it defines.
+    const { timeZone } = await getSettings(q);
+    const period = resolvePeriod(periodId, timeZone || "UTC");
+    return {
+      r: await reportView(q, period),
+      referrers: await referralCredits(q),
+      accounts: await companyRollups(q),
+    };
+  });
 
   const kpis = [
     {
@@ -59,9 +81,12 @@ export default async function ReportsPage() {
     },
     {
       icon: <Wallet className="h-5 w-5" />,
+      // Deliberately not filtered by the period: there is no such thing as
+      // "the open pipeline of July" — those deals have since closed or are
+      // still open today. The sub-label says so.
       label: "Open Pipeline",
       value: money(r.openPipeline),
-      sub: `${r.openCount} deal${r.openCount === 1 ? "" : "s"} in play`,
+      sub: `${r.openCount} deal${r.openCount === 1 ? "" : "s"} in play${r.period ? " · right now" : ""}`,
       tone: "var(--accent)",
       soft: "var(--accent-soft)",
     },
@@ -141,6 +166,43 @@ export default async function ReportsPage() {
             Every figure below is counted from your own records — deals, leads and meetings. Nothing
             is estimated.
           </p>
+
+          {/**
+            * Period links, not a dropdown.
+            *
+            * Each is a real URL, so a period can be linked to and survives a
+            * refresh — "look at July" becomes something to send rather than a
+            * sequence of clicks to describe.
+            */}
+          <div className="mt-3 flex flex-wrap items-center gap-1">
+            {PERIODS.map((id) => (
+              <Link
+                key={id}
+                href={id === "all-time" ? "/reports" : `/reports?period=${id}`}
+                scroll={false}
+                className={clsx(
+                  "focus-ring rounded-full px-3 py-1 text-xs font-medium transition-colors",
+                  periodId === id ? "text-accent" : "text-muted hover:text-[var(--text)]"
+                )}
+                style={periodId === id ? { background: "var(--accent-soft)" } : undefined}
+              >
+                {PERIOD_LABELS[id]}
+              </Link>
+            ))}
+          </div>
+
+          {r.period?.previousLabel && (
+            /* What changed, in words as well as a number. A rise from nothing
+               is not "+100%" — it is a first sale, and saying so is the honest
+               version of a figure that would otherwise read as infinite. */
+            <p className="mt-2 text-xs text-faint">
+              {r.period.revenueChange === null
+                ? r.revenueWon > 0
+                  ? `Nothing won in ${r.period.previousLabel}, so there is nothing to compare against.`
+                  : `Nothing won in this period or ${r.period.previousLabel}.`
+                : `${r.period.revenueChange >= 0 ? "Up" : "Down"} ${Math.abs(r.period.revenueChange)}% on ${r.period.previousLabel} (${money(r.period.previousRevenue ?? 0)}).`}
+            </p>
+          )}
         </div>
         <ExportButton rows={csv} filename={`yourcrm-report-${new Date().toISOString().slice(0, 10)}.csv`} />
       </div>

@@ -1,6 +1,7 @@
 import { reportData } from "./analytics";
 import { meetingAnalytics, type MeetingAnalytics } from "./meeting-analytics";
 import { stageMeta } from "@/data/pipeline";
+import { changeAgainst, type Period } from "./report-period";
 import type { AvatarColor } from "@/components/ui/Avatar";
 import type { TenantQuery } from "./tenant";
 
@@ -44,6 +45,15 @@ const SOURCE_COLOR: Record<string, string> = {
 };
 
 export type ReportView = {
+  /** The window these figures cover, and how it compares. Null for all time. */
+  period: {
+    id: string;
+    label: string;
+    previousLabel: string | null;
+    revenueChange: number | null;
+    wonCountChange: number | null;
+    previousRevenue: number | null;
+  } | null;
   revenueWon: number;
   wonCount: number;
   openPipeline: number;
@@ -79,8 +89,23 @@ export type ReportView = {
   };
 };
 
-export async function reportView(q: TenantQuery): Promise<ReportView> {
-  const r = await reportData(q);
+export async function reportView(q: TenantQuery, period?: Period): Promise<ReportView> {
+  const window = { from: period?.from ?? null, to: period?.to ?? null };
+  const r = await reportData(q, window);
+
+  /**
+   * The same figures over the window immediately before.
+   *
+   * A number on its own says almost nothing: £12,000 is a good month or a bad
+   * one depending entirely on what last month was. Read as a second query
+   * rather than derived, because "revenue in June" is not something that can be
+   * calculated from "revenue in July".
+   *
+   * Skipped for all-time, which has no previous — see `resolvePeriod`.
+   */
+  const before = period?.previous
+    ? await reportData(q, { from: period.previous.from, to: period.previous.to })
+    : null;
   const meetings = await meetingAnalytics(q);
   const tenant = q.ctx.subAccountId;
 
@@ -183,6 +208,18 @@ export async function reportView(q: TenantQuery): Promise<ReportView> {
   const totalPeople = r.contacts.total;
 
   return {
+    period: period
+      ? {
+          id: period.id,
+          label: period.label,
+          previousLabel: period.previousLabel,
+          // Compared on the same measures the tiles show, so the arrow and the
+          // number can never disagree about which way things went.
+          revenueChange: before ? changeAgainst(r.revenue.wonCents, before.revenue.wonCents) : null,
+          wonCountChange: before ? changeAgainst(r.revenue.wonCount, before.revenue.wonCount) : null,
+          previousRevenue: before ? toUnits(before.revenue.wonCents) : null,
+        }
+      : null,
     revenueWon: toUnits(r.revenue.wonCents),
     wonCount: r.revenue.wonCount,
     openPipeline: toUnits(r.revenue.openPipelineCents),

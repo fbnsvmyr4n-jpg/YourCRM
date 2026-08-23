@@ -98,8 +98,30 @@ export type ReportData = {
 
 const n = (v: string | number | null | undefined): number => (v == null ? 0 : Number(v));
 
-export async function reportData(q: TenantQuery): Promise<ReportData> {
+/**
+ * A window to report over, as a SQL fragment plus its parameters.
+ *
+ * Applied ONLY to figures that are about a period. Open Pipeline, deals by
+ * stage and contact counts are point-in-time facts — what is true now — and
+ * "Open Pipeline for July" is not a number that exists. Filtering them by a
+ * date would produce something that looks like a figure and is not one, which
+ * is the failure this codebase keeps finding.
+ */
+export type ReportWindow = { from: Date | null; to: Date | null };
+
+const wonWithin = (w: ReportWindow, next: number): { sql: string; params: (Date)[] } => {
+  if (!w.from || !w.to) return { sql: "", params: [] };
+  // Half-open: a deal won at exactly midnight on the 1st belongs to one month,
+  // not to both.
+  return { sql: ` AND won_at >= $${next} AND won_at < $${next + 1}`, params: [w.from, w.to] };
+};
+
+export async function reportData(
+  q: TenantQuery,
+  window: ReportWindow = { from: null, to: null }
+): Promise<ReportData> {
   const tenant = q.ctx.subAccountId;
+  const won = wonWithin(window, 3);
 
   /**
    * Issued one at a time, deliberately.
@@ -118,15 +140,23 @@ export async function reportData(q: TenantQuery): Promise<ReportData> {
         open_count: string;
         lost_count: string;
       }>(
+        /**
+         * Won and lost respect the window; open does not.
+         *
+         * Open Pipeline is what is in play RIGHT NOW. There is no such thing
+         * as "the open pipeline of July" — those deals have since closed or
+         * are still open today — so it is deliberately unfiltered, and the
+         * screen says so rather than implying the window applies to it.
+         */
         `SELECT
-           COALESCE(SUM(value_cents) FILTER (WHERE won_at IS NOT NULL), 0)::text AS won_cents,
-           count(*) FILTER (WHERE won_at IS NOT NULL)::text                      AS won_count,
-           COALESCE(SUM(value_cents) FILTER (WHERE stage = ANY($2)), 0)::text    AS open_cents,
-           count(*) FILTER (WHERE stage = ANY($2))::text                         AS open_count,
-           count(*) FILTER (WHERE stage = 'lost')::text                          AS lost_count
+           COALESCE(SUM(value_cents) FILTER (WHERE won_at IS NOT NULL${won.sql}), 0)::text AS won_cents,
+           count(*) FILTER (WHERE won_at IS NOT NULL${won.sql})::text                      AS won_count,
+           COALESCE(SUM(value_cents) FILTER (WHERE stage = ANY($2)), 0)::text              AS open_cents,
+           count(*) FILTER (WHERE stage = ANY($2))::text                                   AS open_count,
+           count(*) FILTER (WHERE stage = 'lost')::text                                    AS lost_count
          FROM deals
          WHERE sub_account_id = $1 AND deleted_at IS NULL`,
-        [tenant, [...OPEN_STAGES]]
+        [tenant, [...OPEN_STAGES], ...won.params]
   );
 
   const stages = await q.rows<{ stage: Stage; count: string; value_cents: string }>(
@@ -138,14 +168,17 @@ export async function reportData(q: TenantQuery): Promise<ReportData> {
   );
 
   const sources = await q.rows<{ source: Source; deals: string; won_deals: string; won_cents: string }>(
+        // Revenue by source is a period question: "where did July's money come
+        // from". The deal COUNT stays all-time, because a source's total
+        // history is what makes its conversion rate meaningful.
         `SELECT source,
                 count(*)::text AS deals,
-                count(*) FILTER (WHERE won_at IS NOT NULL)::text AS won_deals,
-                COALESCE(SUM(value_cents) FILTER (WHERE won_at IS NOT NULL), 0)::text AS won_cents
+                count(*) FILTER (WHERE won_at IS NOT NULL${wonWithin(window, 2).sql})::text AS won_deals,
+                COALESCE(SUM(value_cents) FILTER (WHERE won_at IS NOT NULL${wonWithin(window, 2).sql}), 0)::text AS won_cents
          FROM deals
          WHERE sub_account_id = $1 AND deleted_at IS NULL
          GROUP BY source`,
-        [tenant]
+        [tenant, ...wonWithin(window, 2).params]
   );
 
   const losses = await q.rows<{ reason: string; count: string }>(
