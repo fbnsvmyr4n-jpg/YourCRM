@@ -1,69 +1,22 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Coins, GripVertical, HandCoins, Plus, Trash2, Wallet, X } from "lucide-react";
+import { Coins, Flame, GripVertical, HandCoins, Plus, Trash2, Wallet, X } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Overlay } from "@/components/ui/Overlay";
 import { BOARD_STAGES as STAGES, carriesMoney } from "@/data/pipeline";
-import type { DealRecord, Stage as StageId } from "@/server/repos/deals";
-import type { AvatarColor } from "@/components/ui/Avatar";
+import type { Stage as StageId } from "@/server/repos/deals";
+import type { Deal } from "@/server/decorate-deal";
+export type { Deal } from "@/server/decorate-deal";
 
-/**
- * A deal, decorated with what the card shows and the record does not store.
- *
- * `contact`, `company`, `initials` and `color` were columns on the old deal —
- * a copy of the person's details sitting on the opportunity, which is how they
- * drifted apart from the contact record. The link is a foreign key now, so the
- * name is looked up rather than duplicated.
- *
- * Money stays in cents all the way to the formatter. Converting on the way in
- * and again on the way out is how a figure ends up 100× wrong.
- */
-export type Deal = DealRecord & {
-  contact: string;
-  company: string;
-  initials: string;
-  color: AvatarColor;
-  /** Whole-unit value for display only; the source of truth is `valueCents`. */
-  value: number;
-  splitTotal?: number;
-  closeDate: string;
-};
-
-const AVATAR_COLORS: AvatarColor[] = ["blue", "green", "amber", "purple", "pink", "teal"];
-
-function paletteFor(id: string): AvatarColor {
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) | 0;
-  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
-}
-
-export function decorateDeal(
-  d: DealRecord,
-  contacts: { id: string; name: string; info: string | null }[]
-): Deal {
-  const person = contacts.find((c) => c.id === d.contactId);
-  const name = person?.name ?? "";
-  const parts = name.split(/\s+/).filter(Boolean);
-  return {
-    ...d,
-    contact: name,
-    company: person?.info ?? "",
-    initials: ((parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "")).toUpperCase() || "—",
-    color: paletteFor(d.id),
-    value: d.valueCents / 100,
-    splitTotal: d.splitTotalCents == null ? undefined : d.splitTotalCents / 100,
-    // The close date the old model stored was an expectation nobody read.
-    // What is shown now is the date the deal actually closed, or nothing.
-    closeDate: d.wonAt ? new Date(d.wonAt).toLocaleDateString() : "",
-  };
-}
 import { clsx } from "@/lib/clsx";
 import {
   addDealAction,
+  addPainPointsAction,
   deleteDealAction,
   moveDealAction,
   recordPaymentAction,
+  removePainPointAction,
   setDealValueAction,
 } from "./actions";
 
@@ -377,12 +330,26 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
       )}
 
       {active && (
+        /**
+         * Rendered from the LIVE item, not from the snapshot taken when the
+         * card was clicked.
+         *
+         * Capturing a pain point saved it and the open panel went on saying
+         * "Nothing was captured in Discovery" — so the obvious next move is to
+         * type it again, and now it is in there twice. Looking the deal up by
+         * id on every render means anything that changes it shows immediately.
+         */
         <DealModal
-          deal={active}
+          deal={items.find((d) => d.id === active.id) ?? active}
           busy={busy}
           onClose={() => setActive(null)}
           onPay={(fd) => handlePayment(active, fd)}
           onSetValue={(fd) => handleSetValue(active, fd)}
+          onPainPoints={(painPoints) =>
+            setItems((prev) =>
+              prev.map((d) => (d.id === active.id ? { ...d, painPoints } : d))
+            )
+          }
         />
       )}
     </div>
@@ -479,10 +446,30 @@ function DealCard({
         </div>
       </div>
 
+      {/**
+        * What the prospect said hurts, at a glance.
+        *
+        * A card in Demo with nothing captured is the one worth seeing from
+        * across the board: it means Discovery did not really happen, and the
+        * call is about to be a feature tour. Counting them is the cheap half;
+        * flagging the absence is the half that changes what somebody does.
+        */}
+      {(deal.painPoints?.length ?? 0) > 0 ? (
+        <p className="mt-2 flex items-center gap-1.5 text-[11px] text-faint">
+          <Flame className="h-3 w-3" />
+          {deal.painPoints.length === 1 ? "1 pain point" : `${deal.painPoints.length} pain points`}
+        </p>
+      ) : deal.stage === "demo" ? (
+        <p className="mt-2 flex items-center gap-1.5 text-[11px]" style={{ color: "var(--amber)" }}>
+          <Flame className="h-3 w-3" />
+          No pain captured
+        </p>
+      ) : null}
+
       <div className="mt-3 flex items-center justify-between gap-2 border-t border-[var(--border)] pt-2.5">
         {showsMoney ? (
           needsValue ? (
-            // Arrived from Qualified, which carries no figure. Say what's
+            // Arrived from Prospect, which carries no figure. Say what's
             // missing rather than printing a $0 that looks like a valuation.
             <span className="text-xs font-medium text-accent">Set value →</span>
           ) : (
@@ -526,12 +513,14 @@ function DealModal({
   onClose,
   onPay,
   onSetValue,
+  onPainPoints,
 }: {
   deal: Deal;
   busy: boolean;
   onClose: () => void;
   onPay: (formData: FormData) => Promise<string | null>;
   onSetValue: (formData: FormData) => void | Promise<void>;
+  onPainPoints: (points: string[]) => void;
 }) {
   const [error, setError] = useState<string | null>(null);
   // Payment is recorded against a deal that has been presented — Discovery or
@@ -556,6 +545,8 @@ function DealModal({
               <X className="h-5 w-5" />
             </button>
           </div>
+
+          <PainPoints deal={deal} busy={busy} onChange={onPainPoints} />
 
           {isPartiallyPaid(deal) && deal.splitTotal && (
             <div className="mb-4 rounded-xl p-3" style={{ background: "rgba(249,115,22,0.10)" }}>
@@ -654,6 +645,167 @@ function DealModal({
         </div>
       </div>
     </Overlay>
+  );
+}
+
+/**
+ * Pain points — captured in Discovery, and what the Demo is built from.
+ *
+ * The mechanic at the centre of the process, and the thing a generic CRM does
+ * not do. Discovery exists to find out what actually hurts; the Demo exists to
+ * show that those specific things stop hurting. Without this the demo is a
+ * feature tour, which is the presentation everybody gives and nobody
+ * remembers.
+ *
+ * So the same record reads differently by stage: in Discovery it asks, in Demo
+ * it tells you what to build the presentation around — and says so loudly when
+ * there is nothing there, because a Demo with no captured pain means Discovery
+ * did not happen and the call is about to be a feature tour.
+ */
+function PainPoints({
+  deal,
+  busy,
+  onChange,
+}: {
+  deal: Deal;
+  busy: boolean;
+  /** The server's new list, so the panel shows the capture straight away. */
+  onChange: (points: string[]) => void;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const points = deal.painPoints ?? [];
+  const inDemo = deal.stage === "demo";
+  const inDiscovery = deal.stage === "discovery";
+
+  return (
+    <section className="mb-3 rounded-xl border border-[var(--border)] p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold">
+            {inDemo ? "Build the demo around these" : "What hurts"}
+          </p>
+          <p className="mt-0.5 text-xs text-muted">
+            {inDemo
+              ? "Their words, captured in Discovery. Show each one stopping."
+              : "Captured in Discovery, in their words — not yours."}
+          </p>
+        </div>
+        {!adding && (
+          <button
+            type="button"
+            onClick={() => setAdding(true)}
+            className="btn-soft focus-ring shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium"
+          >
+            Add
+          </button>
+        )}
+      </div>
+
+      {points.length > 0 ? (
+        <ul className="mt-3 flex flex-col gap-1.5">
+          {points.map((point, i) => (
+            /* Keyed by text AND index: the same complaint captured twice is
+               real, and a text-only key would collapse the two into one row. */
+            <li
+              key={`${point}-${i}`}
+              className="group flex items-start justify-between gap-2 rounded-lg px-3 py-2"
+              style={{ background: inDemo ? "var(--amber-soft)" : "var(--surface-2)" }}
+            >
+              <span className="min-w-0 text-sm">{point}</span>
+              <form
+                action={async () => {
+                  setError(null);
+                  const result = await removePainPointAction(deal.id, point);
+                  if ("error" in result && result.error) setError(result.error);
+                  else if (result.painPoints) onChange(result.painPoints);
+                }}
+              >
+                <button
+                  type="submit"
+                  disabled={busy}
+                  aria-label={`Remove "${point}"`}
+                  className="shrink-0 text-faint opacity-0 transition-opacity hover:text-[var(--red)] focus:opacity-100 group-hover:opacity-100 disabled:opacity-40"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </form>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p
+          className="mt-3 rounded-lg px-3 py-2 text-xs"
+          style={
+            inDemo
+              ? { background: "var(--amber-soft)", color: "var(--amber)" }
+              : { color: "var(--faint)" }
+          }
+        >
+          {inDemo
+            ? "Nothing was captured in Discovery, so this demo has nothing to anchor to. It will be a feature tour."
+            : inDiscovery
+              ? "Ask what is costing them time or money, and write it down as they say it."
+              : "Nothing captured yet."}
+        </p>
+      )}
+
+      {adding && (
+        <form
+          action={async (formData: FormData) => {
+            setError(null);
+            const result = await addPainPointsAction(deal.id, formData);
+            if ("error" in result && result.error) setError(result.error);
+            else if (result.painPoints) {
+              onChange(result.painPoints);
+              setAdding(false);
+            }
+          }}
+          className="mt-3"
+        >
+          <label className="block">
+            <span className="mb-1.5 block text-xs font-medium text-muted">
+              One per line — how they said it
+            </span>
+            <textarea
+              name="painPoints"
+              rows={3}
+              required
+              autoFocus
+              placeholder={"Leads go cold before anyone calls them\nNo idea which ads actually pay"}
+              className="field-input resize-y"
+            />
+          </label>
+          {error && (
+            <p className="mt-2 text-xs" style={{ color: "var(--red)" }}>
+              {error}
+            </p>
+          )}
+          <div className="mt-2 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => { setAdding(false); setError(null); }}
+              className="btn-soft focus-ring rounded-lg px-3 py-1.5 text-xs font-medium"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={busy}
+              className="btn-accent focus-ring rounded-lg px-3 py-1.5 text-xs font-semibold disabled:opacity-60"
+            >
+              Capture
+            </button>
+          </div>
+        </form>
+      )}
+
+      {error && !adding && (
+        <p className="mt-2 text-xs" style={{ color: "var(--red)" }}>
+          {error}
+        </p>
+      )}
+    </section>
   );
 }
 

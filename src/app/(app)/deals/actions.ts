@@ -3,6 +3,7 @@
 import { revalidateApp } from "@/server/revalidate";
 import {
   addPainPoints,
+  removePainPoint,
   assignOwner,
   createDeal,
   deleteDeal,
@@ -176,6 +177,31 @@ export async function addPainPointsAction(id: string, formData: FormData) {
  * stored — a server action's arguments are as forgeable as any form field, and
  * this one moves money between columns.
  */
+export async function removePainPointAction(id: string, point: string) {
+  return withCurrentTenant(async (q) => {
+    const dealId = validId(id);
+    const text = multiline(point, 500);
+    if (!dealId || !text) return { error: "Nothing to remove." };
+
+    const updated = await removePainPoint(q, dealId, text);
+    if (!updated) return { error: "That deal no longer exists." };
+
+    // Logged like the capture is. A pain point disappearing from the demo
+    // without a trace is the kind of thing two people blame each other for.
+    await logActivity(q, {
+      entityType: "deal",
+      entityId: dealId,
+      kind: "note",
+      title: "Pain point removed",
+      detail: text,
+      actorUserId: q.ctx.userId,
+    });
+
+    revalidateApp();
+    return { ok: true as const, painPoints: updated.painPoints };
+  });
+}
+
 export async function recordPaymentAction(id: string, formData: FormData) {
   return withCurrentTenant(async (q) => {
     const dealId = validId(id);

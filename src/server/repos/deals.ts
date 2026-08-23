@@ -317,6 +317,42 @@ export async function addPainPoints(
   return row ? toRecord(row) : null;
 }
 
+/**
+ * Remove one pain point, by its text rather than its position.
+ *
+ * Index-based removal looks simpler and is wrong: `addPainPoints` appends, so
+ * a colleague finishing a call between the render and the click shifts every
+ * index down and the wrong point disappears. Matching the value removes what
+ * the person was actually looking at.
+ *
+ * Only the first occurrence goes, so capturing the same phrase twice — which
+ * happens when two people hear the same complaint — does not silently delete
+ * both.
+ */
+export async function removePainPoint(
+  q: TenantQuery,
+  id: string,
+  point: string
+): Promise<DealRecord | null> {
+  const deal = await getDeal(q, id);
+  if (!deal) return null;
+
+  const at = deal.painPoints.indexOf(point);
+  if (at === -1) return deal;
+
+  const remaining = [...deal.painPoints.slice(0, at), ...deal.painPoints.slice(at + 1)];
+  const row = await q.one<Row>(
+    `WITH updated AS (
+       UPDATE deals SET pain_points = $3::jsonb, updated_at = now()
+       WHERE id = $2 AND sub_account_id = $1 AND deleted_at IS NULL
+       RETURNING *
+     )
+     ${SELECT.replace("FROM deals d", "FROM updated d")}`,
+    [q.ctx.subAccountId, id, JSON.stringify(remaining)]
+  );
+  return row ? toRecord(row) : null;
+}
+
 export async function deleteDeal(q: TenantQuery, id: string): Promise<boolean> {
   const row = await q.one<{ id: string }>(
     `UPDATE deals SET deleted_at = now(), updated_at = now()

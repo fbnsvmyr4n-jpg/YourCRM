@@ -1,7 +1,8 @@
 import { listDeals } from "@/server/repos/deals";
 import { listContacts } from "@/server/repos/contacts";
 import { withTenantPage } from "@/server/tenant-session";
-import { DealsBoard, decorateDeal } from "./DealsBoard";
+import { decorateDeal } from "@/server/decorate-deal";
+import { DealsBoard } from "./DealsBoard";
 
 export const dynamic = "force-dynamic";
 

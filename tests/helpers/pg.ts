@@ -85,7 +85,24 @@ export async function startTestDb(): Promise<TestDb> {
   let port = 0;
   for (let attempt = 0; attempt < 20 && !server; attempt++) {
     port = 49_000 + Math.floor(Math.random() * 9_000);
-    const candidate = new PGLiteSocketServer({ db, port, host: "127.0.0.1" });
+    const candidate = new PGLiteSocketServer({
+      db,
+      port,
+      host: "127.0.0.1",
+      /**
+       * The socket server accepts ONE connection by default and resets the
+       * previous one when a second arrives.
+       *
+       * That makes concurrency untestable — and concurrency is exactly what
+       * several of these repositories are written to survive. A test issuing
+       * two simultaneous captures against one deal died with ECONNRESET, which
+       * reads as a flaky harness rather than as a server configured for a
+       * single client. Queries are still serialised inside the one WASM
+       * database, so this changes what can be *attempted*, not what the
+       * database does with it.
+       */
+      maxConnections: 10,
+    });
     try {
       await candidate.start();
       server = candidate;
