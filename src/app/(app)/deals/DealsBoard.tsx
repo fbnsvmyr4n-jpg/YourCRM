@@ -54,6 +54,9 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
   const [addOpen, setAddOpen] = useState<StageId | true | null>(null);
   const [active, setActive] = useState<Deal | null>(null);
   const [busy, setBusy] = useState(false);
+  // A refused move, said out loud. Silently snapping the card back would look
+  // like the drag failed to register rather than like the server said no.
+  const [moveError, setMoveError] = useState<string | null>(null);
 
   /**
    * Header totals, each defined by a stage's own exit condition.
@@ -91,7 +94,7 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
     };
   }, [items]);
 
-  function handleDrop(stage: StageId) {
+  async function handleDrop(stage: StageId) {
     setOverStage(null);
     const id = dragId;
     setDragId(null);
@@ -99,6 +102,11 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
 
     const current = items.find((d) => d.id === id);
     if (!current || current.stage === stage) return;
+
+    // The whole board before the move, so a refusal can be undone exactly. A
+    // per-card revert cannot express the split merge below, which removes one
+    // card and changes the value of another.
+    const before = items;
 
     // Settling the remainder merges it into the record holding the part already
     // paid. Mirrored here so the board doesn't briefly show two cards before
@@ -118,7 +126,18 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
           )
     );
 
-    moveDealAction(id, stage);
+    /**
+     * The result was thrown away, and the action can refuse — from this board,
+     * by the deal having been deleted somewhere else in the meantime. The card
+     * stayed in its new column regardless, and the totals across the top are
+     * summed from these same cards, so a refused move quietly shifted money
+     * between "Open pipeline" and "Closed won" on screen and nowhere else.
+     */
+    const result = await moveDealAction(id, stage);
+    if (result?.error) {
+      setItems(before);
+      setMoveError(result.error);
+    }
   }
 
   async function handleAdd(formData: FormData) {
@@ -136,9 +155,31 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
     }
   }
 
-  function handleDelete(id: string) {
+  /**
+   * Deleting a deal was one click with no confirmation and no check that it
+   * worked: the card was removed locally and the action fired without being
+   * awaited. A mis-click destroyed a deal instantly, and a failure destroyed
+   * only the card while the deal stayed in the database.
+   *
+   * The card still leaves immediately — waiting on a round trip to acknowledge
+   * a drag-and-drop board is worse — but the removal is now undone if the
+   * server says the deal is still there.
+   */
+  async function handleDelete(id: string) {
+    const deal = items.find((d) => d.id === id);
+    if (!deal) return;
+    if (
+      !confirm(
+        `Delete "${deal.title}"? You can put it back from Settings → Recently deleted.`
+      )
+    )
+      return;
+
     setItems((prev) => prev.filter((d) => d.id !== id));
-    deleteDealAction(id);
+    const gone = await deleteDealAction(id);
+    // Put it back exactly where it was rather than leaving the board claiming
+    // something happened that did not.
+    if (!gone) setItems((prev) => (prev.some((d) => d.id === id) ? prev : [...prev, deal]));
   }
 
   async function handlePayment(deal: Deal, formData: FormData) {
@@ -217,6 +258,23 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
           <Plus className="h-[16px] w-[16px]" /> Add Deal
         </button>
       </div>
+
+      {moveError ? (
+        <div
+          role="alert"
+          className="mb-4 flex items-center justify-between gap-3 rounded-xl px-4 py-3 text-sm"
+          style={{ background: "var(--red-soft)", color: "var(--red)" }}
+        >
+          <span>{moveError}</span>
+          <button
+            type="button"
+            onClick={() => setMoveError(null)}
+            className="focus-ring rounded-lg px-2 py-1 text-xs font-semibold"
+          >
+            Dismiss
+          </button>
+        </div>
+      ) : null}
 
       <div className="mb-4 grid grid-cols-2 gap-3 @min-[880px]:grid-cols-4">
         <SummaryTile

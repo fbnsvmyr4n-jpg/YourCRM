@@ -288,15 +288,27 @@ export async function assignDealAction(id: string, ownerUserId: string | null) {
   });
 }
 
-export async function deleteDealAction(id: string) {
+/**
+ * Says whether the deal actually went.
+ *
+ * It used to return nothing, and the board removed the card before calling it
+ * and never awaited the result. A delete that failed therefore left the card
+ * gone from the screen and the deal in the database, until a refresh brought it
+ * back with no explanation. The board could not tell success from failure
+ * because it was given nothing to tell them apart with.
+ */
+export async function deleteDealAction(id: string): Promise<boolean> {
   return withCurrentTenant(async (q) => {
     const dealId = validId(id);
-    if (!dealId) return;
-    // Soft, and therefore undoable — see `restoreDealAction`.
-    if (await deleteDeal(q, dealId)) {
+    if (!dealId) return false;
+    // Soft, and therefore undoable — from Settings → Recently deleted, or
+    // `restoreDealAction`.
+    const deleted = await deleteDeal(q, dealId);
+    if (deleted) {
       logWrite("delete", "deal", { id: dealId, actor: q.ctx.userId });
     }
     revalidateApp();
+    return deleted;
   });
 }
 
