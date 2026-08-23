@@ -36,6 +36,8 @@ export type ContactRecord = {
   email: string | null;
   phone: string | null;
   companyId: string | null;
+  /** Read from the company row; null when the contact has no company. */
+  companyName: string | null;
   info: string | null;
   location: string | null;
   ownerUserId: string | null;
@@ -66,6 +68,7 @@ type Row = {
   email: string | null;
   phone: string | null;
   company_id: string | null;
+  company_name: string | null;
   info: string | null;
   location: string | null;
   owner_user_id: string | null;
@@ -86,6 +89,10 @@ type Row = {
  */
 const SELECT = `
   SELECT c.id, c.first_name, c.last_name, c.email, c.phone, c.company_id,
+         -- The company real name, from the row it points at. The old text
+         -- column is kept only as a fallback, for contacts that predate the
+         -- backfill or genuinely have no company.
+         co.name AS company_name,
          c.info, c.location, c.owner_user_id, c.created_at, c.updated_at,
          EXISTS (
            SELECT 1 FROM deals d
@@ -97,6 +104,10 @@ const SELECT = `
              AND d.stage IN ('prospect', 'discovery', 'demo')
          ) AS has_open_deal
   FROM contacts c
+  LEFT JOIN companies co
+         ON co.id = c.company_id
+        AND co.sub_account_id = c.sub_account_id
+        AND co.deleted_at IS NULL
   WHERE c.deleted_at IS NULL AND c.sub_account_id = $1`;
 
 function toRecord(r: Row): ContactRecord {
@@ -107,6 +118,7 @@ function toRecord(r: Row): ContactRecord {
     email: r.email,
     phone: r.phone,
     companyId: r.company_id,
+    companyName: r.company_name,
     info: r.info,
     location: r.location,
     ownerUserId: r.owner_user_id,

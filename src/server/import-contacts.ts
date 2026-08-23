@@ -1,3 +1,4 @@
+import { findOrCreateCompany } from "./repos/companies";
 import { createContact, listContacts } from "./repos/contacts";
 import type { TenantQuery } from "./tenant";
 import { guessMapping, parseCsv, splitName, type ImportField } from "./csv";
@@ -220,14 +221,24 @@ export async function importContacts(
       continue;
     }
 
+    /**
+     * The company becomes a row, matched case-insensitively by name.
+     *
+     * An import is where duplicate companies are born: five hundred contacts
+     * whose spreadsheet says "Acme Ltd", "Acme Ltd." and "acme ltd" would
+     * otherwise arrive as three companies, which is precisely the mess the
+     * entity exists to prevent.
+     */
+    const company = row.company ? await findOrCreateCompany(q, row.company) : null;
+
     await createContact(q, {
       firstName: row.firstName,
       lastName: row.lastName,
       email: row.email,
       phone: row.phone,
-      // Company is a string on the contact today. When companies become a real
-      // entity this is where the lookup goes — noted so the import is not the
-      // reason that change gets missed.
+      companyId: company?.id ?? null,
+      // Kept as well as the link. It costs nothing and it is the only copy if
+      // the company row is ever removed.
       info: row.company,
       location: row.location,
       ownerUserId: opts.ownerUserId ?? null,

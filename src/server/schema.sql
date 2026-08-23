@@ -752,6 +752,52 @@ CREATE POLICY usage_events_tenant_isolation ON usage_events
   WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
 
 -- ---------------------------------------------------------------------------
+-- Backfill: turn company names into company rows.
+--
+-- The name lived in `contacts.info` — the same text repeated on every person
+-- who worked there. So there was no way to see every deal for one company, and
+-- correcting a spelling on one contact silently detached them from the rest.
+--
+-- Matched case-insensitively per workspace: "Acme Ltd" and "acme ltd" are one
+-- company, and creating both would produce exactly the mess this is fixing.
+-- The first spelling encountered wins, because a company whose name changes
+-- depending on who was added last is worse than one that is slightly wrong.
+--
+-- Self-limiting: only contacts with a name in `info` and no `company_id` are
+-- touched, so re-applying the schema on every deploy cannot duplicate anything.
+-- `info` is deliberately left in place — nothing reads it as the company any
+-- more, and clearing it would destroy the only copy if this is ever reverted.
+-- ---------------------------------------------------------------------------
+
+INSERT INTO companies (id, sub_account_id, name)
+SELECT DISTINCT ON (c.sub_account_id, lower(btrim(c.info)))
+       'co-' || substr(md5(c.sub_account_id || lower(btrim(c.info))), 1, 16),
+       c.sub_account_id,
+       btrim(c.info)
+  FROM contacts c
+ WHERE c.deleted_at IS NULL
+   AND c.company_id IS NULL
+   AND btrim(COALESCE(c.info, '')) <> ''
+   AND NOT EXISTS (
+     SELECT 1 FROM companies co
+      WHERE co.sub_account_id = c.sub_account_id
+        AND co.deleted_at IS NULL
+        AND lower(co.name) = lower(btrim(c.info))
+   )
+ ORDER BY c.sub_account_id, lower(btrim(c.info)), c.created_at ASC
+ON CONFLICT (id) DO NOTHING;
+
+UPDATE contacts c
+   SET company_id = co.id
+  FROM companies co
+ WHERE c.company_id IS NULL
+   AND c.deleted_at IS NULL
+   AND co.sub_account_id = c.sub_account_id
+   AND co.deleted_at IS NULL
+   AND lower(co.name) = lower(btrim(COALESCE(c.info, '')))
+   AND btrim(COALESCE(c.info, '')) <> '';
+
+-- ---------------------------------------------------------------------------
 -- Backfill: give existing trials an end date.
 --
 -- Signup used to leave `trial_ends_at` NULL, and entitlements only expired a

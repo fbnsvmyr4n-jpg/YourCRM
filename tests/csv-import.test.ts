@@ -266,7 +266,7 @@ afterAll(async () => {
   await db.stop();
 });
 
-beforeEach(() => db.seed(`DELETE FROM contacts`));
+beforeEach(() => db.seed(`DELETE FROM contacts; DELETE FROM companies;`));
 
 const FILE = [
   "First Name,Last Name,Email,Mobile,Company",
@@ -326,6 +326,28 @@ describe("importing into a workspace", () => {
     const result = await withTenant(ctx(TENANT_A), (q) => imports.importContacts(q, dupes));
     expect(result.imported).toBe(1);
     expect(result.skipped).toBe(1);
+  });
+
+  it("links each contact to a real company, not just a text field", async () => {
+    /**
+     * An import is where duplicate companies are born. Five hundred rows whose
+     * spreadsheet says "Acme Ltd" and "acme ltd" arrive as ONE company, or the
+     * entity has bought nothing.
+     */
+    const two = [
+      "First Name,Last Name,Email,Company",
+      "Ana,Silva,ana@x.co,Acme Ltd",
+      "Ben,Cole,ben@x.co,acme ltd",
+    ].join("\n");
+    await withTenant(ctx(TENANT_A), (q) => imports.importContacts(q, two));
+
+    const companies = await import("../src/server/repos/companies");
+    const list = await withTenant(ctx(TENANT_A), (q) => companies.listCompanies(q));
+    expect(list.length, "two spellings created two companies").toBe(1);
+
+    const people = await withTenant(ctx(TENANT_A), (q) => contacts.listContacts(q));
+    expect(people.every((p) => p.companyId === list[0].id), "a contact was not linked").toBe(true);
+    expect(people.every((p) => p.companyName === "Acme Ltd")).toBe(true);
   });
 
   it("imports into one workspace only", async () => {

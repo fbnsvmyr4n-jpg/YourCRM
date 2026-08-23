@@ -1,5 +1,6 @@
 import Link from "next/link";
 import {
+  Building2,
   CalendarCheck,
   Headset,
   HelpCircle,
@@ -13,6 +14,7 @@ import {
 import { Avatar } from "@/components/ui/Avatar";
 import { AreaChart } from "@/components/ui/AreaChart";
 import { Card, CardHeader } from "@/components/ui/Card";
+import { companyRollups } from "@/server/repos/companies";
 import { referralCredits } from "@/server/referrals";
 import { reportView } from "@/server/reports-view";
 import { withTenantPage } from "@/server/tenant-session";
@@ -40,9 +42,10 @@ const rate = (v: number | null) => (v === null ? "—" : `${v}%`);
 export default async function ReportsPage() {
   // Both in one tenant transaction — a referrer's credit cannot describe deals
   // a different read would not return.
-  const { r, referrers } = await withTenantPage(async (q) => ({
+  const { r, referrers, accounts } = await withTenantPage(async (q) => ({
     r: await reportView(q),
     referrers: await referralCredits(q),
+    accounts: await companyRollups(q),
   }));
 
   const kpis = [
@@ -619,6 +622,39 @@ export default async function ReportsPage() {
           </Card>
       </div>
       {/* Only rendered when there is more than one owner to compare. */}
+      {accounts.length > 0 && (
+        <div className="mt-5">
+          <Card>
+            <CardHeader
+              title="By company"
+              icon={<Building2 className="h-[18px] w-[18px] text-accent" />}
+            />
+            {/* The question that could not be asked while the company was a
+                string on each contact: what is this company worth to us across
+                everyone who works there. Deals reach a company through the
+                person they belong to. */}
+            <div className="space-y-3 pt-1">
+              {accounts.map((a) => (
+                <div key={a.id} className="flex flex-wrap items-center gap-3">
+                  <span className="w-40 shrink-0 truncate text-sm font-medium">{a.name}</span>
+                  <span className="flex-1 text-xs text-faint tabular-nums">
+                    {a.contacts} {a.contacts === 1 ? "person" : "people"}
+                    {a.openDeals > 0 &&
+                      ` · ${a.openDeals} open worth ${money(a.openCents / 100)}`}
+                  </span>
+                  <span
+                    className="shrink-0 text-sm font-semibold tabular-nums"
+                    style={{ color: a.wonCents > 0 ? "var(--green)" : "var(--muted)" }}
+                  >
+                    {money(a.wonCents / 100)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </Card>
+        </div>
+      )}
+
       {referrers.length > 0 && (
         <div className="mt-5">
           <Card>
