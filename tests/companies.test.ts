@@ -367,3 +367,136 @@ describe("the backfill turns old text into real companies", () => {
     expect(myPerson[0].companyId).toBe(a[0].id);
   });
 });
+
+describe("removing a company", () => {
+  it("takes it off the list and detaches the people, keeping them", async () => {
+    /**
+     * Soft, and the contacts keep every record. The first thing anybody does
+     * with the management screen is clear out rows that were never companies —
+     * the backfill turned an overloaded text column into both — and "I removed
+     * the wrong one" has to be survivable.
+     */
+    const co = await withTenant(ctx(TENANT_A), (q) => companies.findOrCreateCompany(q, "Notes Not A Company"));
+    await withTenant(ctx(TENANT_A), (q) =>
+      contacts.createContact(q, {
+        firstName: "Ana",
+        lastName: "S",
+        email: null,
+        phone: null,
+        info: "Notes Not A Company",
+        companyId: co!.id,
+      })
+    );
+
+    expect(await withTenant(ctx(TENANT_A), (q) => companies.removeCompany(q, co!.id))).toBe(true);
+
+    expect((await withTenant(ctx(TENANT_A), (q) => companies.listCompanies(q))).length).toBe(0);
+
+    const people = await withTenant(ctx(TENANT_A), (q) => contacts.listContacts(q));
+    expect(people.length, "removing a company deleted its contacts").toBe(1);
+    expect(people[0].companyId, "the contact still points at a removed company").toBeNull();
+    expect(people[0].companyName).toBeNull();
+    // The original text is the only copy left. Clearing it would destroy it.
+    expect(people[0].info).toBe("Notes Not A Company");
+  });
+
+  it("keeps the row, so a removal can be undone", async () => {
+    /**
+     * Soft is the whole promise. Somebody clearing twenty rows that were never
+     * companies will remove one that was, and a hard delete makes that
+     * permanent — the row is gone and the contacts that pointed at it have had
+     * the link nulled, so there is nothing left to restore from.
+     */
+    const co = await withTenant(ctx(TENANT_A), (q) => companies.findOrCreateCompany(q, "Acme"));
+    await withTenant(ctx(TENANT_A), (q) => companies.removeCompany(q, co!.id));
+
+    const row = await withTenant(ctx(TENANT_A), (q) =>
+      q.one<{ id: string; deleted_at: Date | null }>(
+        `SELECT id, deleted_at FROM companies WHERE id = $2 AND sub_account_id = $1`,
+        [TENANT_A, co!.id]
+      )
+    );
+    expect(row, "the company was deleted outright rather than marked removed").not.toBeNull();
+    expect(row!.deleted_at).not.toBeNull();
+  });
+
+  it("does not take the money off the deals", async () => {
+    const co = await withTenant(ctx(TENANT_A), (q) => companies.findOrCreateCompany(q, "Acme"));
+    const person = await withTenant(ctx(TENANT_A), (q) =>
+      contacts.createContact(q, {
+        firstName: "Ana", lastName: "S", email: null, phone: null, info: null, companyId: co!.id,
+      })
+    );
+    const d = await withTenant(ctx(TENANT_A), (q) =>
+      deals.createDeal(q, { contactId: person.id, title: "A", valueCents: 500000, stage: "demo" })
+    );
+    await withTenant(ctx(TENANT_A), (q) => deals.moveStage(q, d.id, "won"));
+
+    await withTenant(ctx(TENANT_A), (q) => companies.removeCompany(q, co!.id));
+
+    const all = await withTenant(ctx(TENANT_A), (q) => deals.listDeals(q));
+    expect(all.length, "removing a company deleted its deals").toBe(1);
+    expect(all[0].valueCents).toBe(500000);
+    expect(all[0].wonAt).not.toBeNull();
+  });
+
+  it("refuses twice, so a double click is not an error the second time", async () => {
+    const co = await withTenant(ctx(TENANT_A), (q) => companies.findOrCreateCompany(q, "Acme"));
+    expect(await withTenant(ctx(TENANT_A), (q) => companies.removeCompany(q, co!.id))).toBe(true);
+    expect(await withTenant(ctx(TENANT_A), (q) => companies.removeCompany(q, co!.id))).toBe(false);
+  });
+
+  it("cannot remove another workspace's company", async () => {
+    const theirs = await withTenant(ctx(TENANT_B), (q) => companies.findOrCreateCompany(q, "Theirs"));
+    expect(await withTenant(ctx(TENANT_A), (q) => companies.removeCompany(q, theirs!.id))).toBe(false);
+    expect((await withTenant(ctx(TENANT_B), (q) => companies.listCompanies(q))).length).toBe(1);
+  });
+
+  it("frees the name, so it can be created again", async () => {
+    // Otherwise removing a mistake makes the correct name permanently
+    // unusable — the row is still there, just invisible.
+    const co = await withTenant(ctx(TENANT_A), (q) => companies.findOrCreateCompany(q, "Acme"));
+    await withTenant(ctx(TENANT_A), (q) => companies.removeCompany(q, co!.id));
+    const again = await withTenant(ctx(TENANT_A), (q) => companies.findOrCreateCompany(q, "Acme"));
+    expect(again, "the name stayed taken after removal").not.toBeNull();
+    expect(again!.id).not.toBe(co!.id);
+  });
+});
+
+describe("one company's people and deals", () => {
+  it("lists everyone at it and every deal they are on", async () => {
+    const co = await withTenant(ctx(TENANT_A), (q) => companies.findOrCreateCompany(q, "Acme"));
+    const ana = await withTenant(ctx(TENANT_A), (q) =>
+      contacts.createContact(q, { firstName: "Ana", lastName: "S", email: "a@x.co", phone: null, info: null, companyId: co!.id })
+    );
+    const ben = await withTenant(ctx(TENANT_A), (q) =>
+      contacts.createContact(q, { firstName: "Ben", lastName: "C", email: null, phone: null, info: null, companyId: co!.id })
+    );
+    const won = await withTenant(ctx(TENANT_A), (q) =>
+      deals.createDeal(q, { contactId: ana.id, title: "Retainer", valueCents: 400000, stage: "demo" })
+    );
+    await withTenant(ctx(TENANT_A), (q) => deals.moveStage(q, won.id, "won"));
+    await withTenant(ctx(TENANT_A), (q) =>
+      deals.createDeal(q, { contactId: ben.id, title: "Website", valueCents: 200000, stage: "demo" })
+    );
+
+    const detail = await withTenant(ctx(TENANT_A), (q) => companies.companyDetail(q, co!.id));
+    expect(detail).not.toBeNull();
+    expect(detail!.people.length).toBe(2);
+    expect(detail!.people[0].name, "the person who has bought most is not first").toBe("Ana S");
+    expect(detail!.people[0].wonCents).toBe(400000);
+    expect(detail!.deals.length).toBe(2);
+    expect(detail!.deals.map((d) => d.contactName).sort()).toEqual(["Ana S", "Ben C"]);
+  });
+
+  it("returns nothing for another workspace's company", async () => {
+    const theirs = await withTenant(ctx(TENANT_B), (q) => companies.findOrCreateCompany(q, "Theirs"));
+    expect(await withTenant(ctx(TENANT_A), (q) => companies.companyDetail(q, theirs!.id))).toBeNull();
+  });
+
+  it("returns nothing once it has been removed", async () => {
+    const co = await withTenant(ctx(TENANT_A), (q) => companies.findOrCreateCompany(q, "Acme"));
+    await withTenant(ctx(TENANT_A), (q) => companies.removeCompany(q, co!.id));
+    expect(await withTenant(ctx(TENANT_A), (q) => companies.companyDetail(q, co!.id))).toBeNull();
+  });
+});

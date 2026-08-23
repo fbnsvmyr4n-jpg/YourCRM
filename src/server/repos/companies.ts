@@ -177,3 +177,128 @@ export async function companyRollups(q: TenantQuery): Promise<CompanyRollup[]> {
     wonCents: Number(r.won_cents),
   }));
 }
+
+/**
+ * Remove a company.
+ *
+ * Soft, like everything else here. The contacts stay exactly where they are —
+ * they simply stop showing a company, and the original text on each of them is
+ * untouched. That matters because the first thing anybody does with this screen
+ * is clear out rows that were never companies, and a hard delete would make
+ * "I removed the wrong one" unrecoverable.
+ *
+ * The link on each contact is cleared too. Leaving it pointing at a removed row
+ * means restoring the company silently re-attaches people who may since have
+ * been moved somewhere else.
+ */
+export async function removeCompany(q: TenantQuery, id: string): Promise<boolean> {
+  const row = await q.one<{ id: string }>(
+    `UPDATE companies SET deleted_at = now(), updated_at = now()
+     WHERE id = $2 AND sub_account_id = $1 AND deleted_at IS NULL
+     RETURNING id`,
+    [q.ctx.subAccountId, id]
+  );
+  if (!row) return false;
+
+  await q.rows(
+    `UPDATE contacts SET company_id = NULL, updated_at = now()
+     WHERE company_id = $2 AND sub_account_id = $1 AND deleted_at IS NULL`,
+    [q.ctx.subAccountId, id]
+  );
+  return true;
+}
+
+export type CompanyPerson = {
+  id: string;
+  name: string;
+  email: string | null;
+  deals: number;
+  wonCents: number;
+};
+
+export type CompanyDeal = {
+  id: string;
+  title: string;
+  stage: string;
+  valueCents: number;
+  wonAt: string | null;
+  contactName: string;
+};
+
+/** One company, with everyone at it and every deal they are on. */
+export async function companyDetail(
+  q: TenantQuery,
+  id: string
+): Promise<{ people: CompanyPerson[]; deals: CompanyDeal[] } | null> {
+  const company = await q.one<{ id: string }>(
+    `SELECT id FROM companies
+     WHERE id = $2 AND sub_account_id = $1 AND deleted_at IS NULL`,
+    [q.ctx.subAccountId, id]
+  );
+  if (!company) return null;
+
+  const people = await q.rows<{
+    id: string;
+    name: string;
+    email: string | null;
+    deals: string;
+    won_cents: string;
+  }>(
+    `SELECT c.id,
+            btrim(c.first_name || ' ' || c.last_name) AS name,
+            c.email,
+            count(d.id)::text AS deals,
+            COALESCE(sum(d.value_cents) FILTER (WHERE d.won_at IS NOT NULL), 0)::text AS won_cents
+       FROM contacts c
+       LEFT JOIN deals d
+              ON d.contact_id = c.id
+             AND d.sub_account_id = $1
+             AND d.deleted_at IS NULL
+      WHERE c.company_id = $2
+        AND c.sub_account_id = $1
+        AND c.deleted_at IS NULL
+      GROUP BY c.id, c.first_name, c.last_name, c.email
+      ORDER BY sum(d.value_cents) FILTER (WHERE d.won_at IS NOT NULL) DESC NULLS LAST, name ASC`,
+    [q.ctx.subAccountId, id]
+  );
+
+  const deals = await q.rows<{
+    id: string;
+    title: string;
+    stage: string;
+    value_cents: string;
+    won_at: Date | null;
+    contact_name: string;
+  }>(
+    `SELECT d.id, d.title, d.stage, d.value_cents::text, d.won_at,
+            btrim(c.first_name || ' ' || c.last_name) AS contact_name
+       FROM deals d
+       JOIN contacts c
+         ON c.id = d.contact_id
+        AND c.sub_account_id = $1
+        AND c.deleted_at IS NULL
+      WHERE c.company_id = $2
+        AND d.sub_account_id = $1
+        AND d.deleted_at IS NULL
+      ORDER BY d.won_at DESC NULLS FIRST, d.value_cents DESC`,
+    [q.ctx.subAccountId, id]
+  );
+
+  return {
+    people: people.map((r) => ({
+      id: r.id,
+      name: r.name,
+      email: r.email,
+      deals: Number(r.deals),
+      wonCents: Number(r.won_cents),
+    })),
+    deals: deals.map((r) => ({
+      id: r.id,
+      title: r.title,
+      stage: r.stage,
+      valueCents: Number(r.value_cents),
+      wonAt: r.won_at ? r.won_at.toISOString() : null,
+      contactName: r.contact_name,
+    })),
+  };
+}

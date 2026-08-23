@@ -1,5 +1,6 @@
 import {
   BarChart3,
+  Building2,
   CalendarDays,
   Handshake,
   Headphones,
@@ -44,6 +45,7 @@ export const NAV: NavSection[] = [
       { label: "Chat", href: "/chat", icon: MessageSquare },
       { label: "Voice Agents", href: "/voice-agents", icon: Headphones },
       { label: "Contacts", href: "/contacts", icon: Users },
+      { label: "Companies", href: "/companies", icon: Building2 },
       { label: "Inbox", href: "/inbox", icon: Inbox, count: "inbox" },
       { label: "Calendar", href: "/calendar", icon: CalendarDays, count: "calendarToday" },
     ],
