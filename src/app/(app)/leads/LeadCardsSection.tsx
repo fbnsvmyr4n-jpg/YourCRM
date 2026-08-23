@@ -84,7 +84,15 @@ export function LeadCardsSection({ leads }: { leads: LeadCard[] }) {
 
   async function handleDelete(id: string) {
     setOpenMenu(null);
-    if (!confirm("Delete this lead? This can't be undone.")) return;
+    // This said "This can't be undone", which was simply untrue — the delete
+    // beneath it has been soft for weeks. A false warning is worse than none:
+    // it stops somebody looking for a record that was there all along.
+    if (
+      !confirm(
+        "Delete this lead? You can put it back from Settings → Recently deleted."
+      )
+    )
+      return;
     setBusy(true);
     try {
       await deleteLeadAction(id);

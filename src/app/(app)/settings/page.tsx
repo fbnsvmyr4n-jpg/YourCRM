@@ -5,6 +5,7 @@ import { Card, CardHeader } from "@/components/ui/Card";
 import { authSecretConfigured } from "@/server/auth";
 import { ReferralCard } from "@/components/billing/ReferralCard";
 import { UsageCard } from "@/components/billing/UsageCard";
+import { TrashCard } from "@/components/ui/TrashCard";
 import { applicableCredit, creditSummary, referralCodeFor } from "@/server/referral-rewards";
 import { usageByWorkspace, usageThisMonth } from "@/server/usage";
 import { agencyBilling, trialDaysLeft } from "@/server/billing/checkout";
@@ -14,6 +15,7 @@ import { entitlementsFor, limitOf } from "@/server/entitlements";
 import { roleCan } from "@/server/permissions";
 import { getSettings } from "@/server/repos/settings";
 import { listSubAccounts } from "@/server/sub-accounts";
+import { listTrash } from "@/server/trash";
 import { withSystem } from "@/server/tenant";
 import { currentUser, requireTenantPage, withTenantPage } from "@/server/tenant-session";
 import { storageEngine } from "@/server/store";
@@ -42,9 +44,12 @@ export default async function SettingsPage() {
   const engine = storageEngine();
   const secretOk = authSecretConfigured();
   // One tenant round trip for both — they render on the same page.
-  const { settings, usage } = await withTenantPage(async (q) => ({
+  const { settings, usage, trash } = await withTenantPage(async (q) => ({
     settings: await getSettings(q),
     usage: await usageThisMonth(q),
+    // Recovery lives here because this is where somebody looks after deleting
+    // the wrong thing, and it costs one more query on a page already open.
+    trash: await listTrash(q),
   }));
 
   // The workspace list and the plan behind it. Read here rather than in the
@@ -158,6 +163,7 @@ export default async function SettingsPage() {
           canManage={roleCan(user.role, "manage_workspaces")}
         />
         <TargetsForm settings={settings} />
+        <TrashCard items={trash} />
         <PasswordForm />
         <AppearanceCard />
 

@@ -208,6 +208,24 @@ export async function removeCompany(q: TenantQuery, id: string): Promise<boolean
   return true;
 }
 
+/**
+ * Put a removed company back.
+ *
+ * It returns EMPTY, and that is a decision rather than an omission. Removing it
+ * cleared `company_id` on everyone who belonged to it — see the note above — so
+ * nothing records who the members were, and re-attaching by guesswork would be
+ * worse than an honest empty company. The screen says this before you restore.
+ */
+export async function restoreCompany(q: TenantQuery, id: string): Promise<boolean> {
+  const row = await q.one<{ id: string }>(
+    `UPDATE companies SET deleted_at = NULL, updated_at = now()
+     WHERE id = $2 AND sub_account_id = $1 AND deleted_at IS NOT NULL
+     RETURNING id`,
+    [q.ctx.subAccountId, id]
+  );
+  return row !== null;
+}
+
 export type CompanyPerson = {
   id: string;
   name: string;

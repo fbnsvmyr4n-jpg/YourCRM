@@ -269,6 +269,13 @@ export function CompaniesView({ companies }: { companies: CompanyRollup[] }) {
                 {confirming.wonCents > 0 &&
                   ` The ${money(confirming.wonCents)} of won work stays on the deals.`}
               </p>
+              {/* The way back, said before the click rather than discovered
+                  after it. It comes back empty, which is the part worth knowing
+                  in advance — see `restoreCompany`. */}
+              <p className="mt-2 text-xs text-faint">
+                You can put it back from Settings → Recently deleted, though it returns without
+                its people.
+              </p>
               <div className="mt-4 flex justify-end gap-2">
                 <button type="button" onClick={() => setConfirming(null)} className="btn-soft focus-ring rounded-xl px-4 py-2 text-sm font-medium">
                   Cancel

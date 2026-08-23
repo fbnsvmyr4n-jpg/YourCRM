@@ -118,7 +118,17 @@ export function ContactsView({
   }
 
   async function handleDelete(id: string) {
-    if (!confirm("Delete this contact? Their activity history goes with them.")) return;
+    // Says where it goes, not just that it goes. The delete has always been
+    // soft, but this line read as though it were final — so the honest response
+    // to a mis-click was to assume the record was lost rather than to look for
+    // it. Settings is where it now waits.
+    if (
+      !confirm(
+        "Delete this contact? They come off every list, and their activity goes with them. " +
+          "You can put them back from Settings → Recently deleted."
+      )
+    )
+      return;
     setBusy(true);
     try {
       await deleteContactAction(id);

@@ -11,6 +11,7 @@ import { roleCan } from "@/server/permissions";
 import { createSubAccount } from "@/server/sub-accounts";
 import { withSystem } from "@/server/tenant";
 import { requireTenant, SUB_ACCOUNT_COOKIE, withCurrentTenant } from "@/server/tenant-session";
+import { isTrashKind, nounFor, restoreFromTrash } from "@/server/trash";
 import { count, email as validEmail, money, text } from "@/server/validate";
 import { cookies } from "next/headers";
 
@@ -252,5 +253,40 @@ export async function applyReferralCreditAction(
 
     revalidateApp();
     return { ok: `$${(amount / 100).toFixed(2)} applied to your next invoice.` };
+  });
+}
+
+/**
+ * Put one deleted record back.
+ *
+ * Not gated on a capability. Anyone who can delete a record can restore one,
+ * and restoring is strictly the less destructive of the two — a permission that
+ * let someone delete but not undo would be a trap rather than a safeguard.
+ *
+ * The kind is validated against the list before it reaches the dispatch table,
+ * so a hand-edited value selects nothing rather than a table of its own
+ * choosing. Row-level security handles the rest: an id from another workspace
+ * matches no row, and the answer is the same "no longer there" a stale id gets.
+ *
+ * That validation happens INSIDE the tenant call, not before it. Written the
+ * other way round the authorisation suite went red, and it was right to: an
+ * unauthenticated caller could tell a recognised kind from an unrecognised one
+ * by the wording of the refusal. The rule that the guard is the first statement
+ * exists precisely so it never has to be argued case by case.
+ */
+export async function restoreDeletedAction(kind: string, id: string): Promise<FormState> {
+  return withCurrentTenant(async (q) => {
+    if (!isTrashKind(kind)) return { error: "That is not something this can restore." };
+    const recordId = text(id, 64);
+    if (!recordId) return { error: "That record could not be identified." };
+
+    const restored = await restoreFromTrash(q, kind, recordId);
+    if (!restored) {
+      return { error: "That record is no longer in the deleted list." };
+    }
+
+    // It reappears on its own page, not this one, so refresh the group.
+    revalidateApp();
+    return { ok: `${nounFor(kind)} restored.` };
   });
 }

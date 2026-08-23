@@ -96,7 +96,12 @@ export function VoiceAgentConsole({
   }
 
   async function handleDelete(id: string) {
-    if (!confirm("Delete this call record?")) return;
+    if (
+      !confirm(
+        "Delete this call record? You can put it back from Settings → Recently deleted."
+      )
+    )
+      return;
     setBusy(true);
     try {
       await deleteCallAction(id);

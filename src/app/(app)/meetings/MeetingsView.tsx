@@ -637,7 +637,14 @@ function UpcomingTable({
   }
 
   async function handleDelete(id: string, name: string) {
-    if (!confirm(`Delete the meeting with ${name}? They'll be told it's cancelled if they have an email on file.`)) return;
+    if (
+      !confirm(
+        `Delete the meeting with ${name}? They'll be told it's cancelled if they have an email ` +
+          `on file. You can put the meeting back from Settings → Recently deleted, but that ` +
+          `cancellation has already gone.`
+      )
+    )
+      return;
     setBusyId(id);
     try {
       const res = await deleteMeetingAction(id);
