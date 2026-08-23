@@ -40,6 +40,12 @@ const NOT_TENANT_SCOPED: Record<string, string> = {
     "agency, keyed by (plan, feature), written by a migration and only read by " +
     "the app. Scoping it per tenant would meanevery customer carrying their " +
     "own copy of the pricing, which is how one of them ends up on last year's.",
+  referral_credits:
+    "billing, which belongs to the AGENCY — one level above sub-accounts, like " +
+    "the plan and the Stripe customer. An agency's credit is not the property " +
+    "of any one of its client workspaces, and scoping it to one would mean the " +
+    "same balance appearing under whichever client happened to be selected. " +
+    "Holds amounts and agency references; never customer records.",
   stripe_events:
     "a webhook arrives before anything has resolved which customer it belongs " +
     "to — that resolution is what the handler does. Holds a Stripe event id, a " +
@@ -91,6 +97,42 @@ describe("the price list stays a price list", () => {
       "plan_entitlements gained a per-customer column; it is no longer a shared " +
         "price list and its exemption from tenant isolation no longer holds"
     ).toBe(false);
+  });
+});
+
+describe("the credit ledger stays a ledger", () => {
+  /**
+   * `referral_credits` is exempt from tenancy because it is agency-level
+   * billing. That holds only while it stays a ledger of amounts — a column
+   * carrying a contact, a deal or anything from a workspace makes it customer
+   * data sitting in a table with no policy over it.
+   */
+  it("holds amounts and agency references, nothing from a workspace", () => {
+    const body = tableBody(SCHEMA, "referral_credits");
+    expect(body).toContain("amount_cents");
+
+    for (const column of ["contact", "deal", "meeting", "sub_account", "email", "phone"]) {
+      expect(
+        new RegExp(`\\b${column}\\w*\\s+(TEXT|JSONB|INTEGER|BIGINT)`, "i").test(body),
+        `referral_credits gained a "${column}" column — it now holds workspace data, ` +
+          `and its exemption from tenant isolation no longer holds`
+      ).toBe(false);
+    }
+  });
+
+  it("records a sign rather than a direction", () => {
+    // One signed column, so an amount and a separate "is this a debit" flag
+    // cannot disagree with each other.
+    //
+    // SQL comments are stripped first: the note explaining this decision
+    // contains the very word the check looks for, so matching the raw text
+    // failed on the comment that justifies it. Fourth time this shape has
+    // caught a guard here.
+    const body = tableBody(SCHEMA, "referral_credits").replace(/--[^\n]*/g, "");
+    expect(body).toMatch(/amount_cents\s+BIGINT NOT NULL/);
+    expect(body, "a separate direction column reintroduces the disagreement").not.toMatch(
+      /\b(direction|is_debit|credit_type)\b/
+    );
   });
 });
 

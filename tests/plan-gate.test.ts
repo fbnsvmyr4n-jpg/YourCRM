@@ -161,6 +161,10 @@ describe("no server action escapes the gate by accident", () => {
       "customer on a screen asking them to do the thing they cannot do.",
     billingPortalAction:
       "same: cards, invoices and reactivation all live in Stripe's portal.",
+    applyReferralCreditAction:
+      "puts earned credit against the next invoice, which is one of the ways " +
+      "somebody affords to reactivate. Gating it would withhold the money that " +
+      "pays the bill from the account that cannot pay the bill.",
     updateProfileAction:
       "account management, not product use. Somebody must be able to correct " +
       "their own name or email while sorting out a payment.",

@@ -3,7 +3,9 @@ import { Database, HardDrive, ShieldAlert, ShieldCheck } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { authSecretConfigured } from "@/server/auth";
+import { ReferralCard } from "@/components/billing/ReferralCard";
 import { UsageCard } from "@/components/billing/UsageCard";
+import { applicableCredit, creditSummary, referralCodeFor } from "@/server/referral-rewards";
 import { usageByWorkspace, usageThisMonth } from "@/server/usage";
 import { agencyBilling, trialDaysLeft } from "@/server/billing/checkout";
 import { PLAN_INFO, PLANS } from "@/server/billing/plans";
@@ -53,6 +55,26 @@ export default async function SettingsPage() {
   // Read on every render rather than cached: a cancellation should take effect
   // on the next page load, not whenever somebody signs out.
   const account = await withSystem((q) => agencyBilling(q, user.agencyId));
+
+  // The referral programme: their own code, what it has earned, and how much of
+  // it can go against the next bill.
+  const referral = await withSystem(async (q) => {
+    const code = await referralCodeFor(q, user.agencyId);
+    const summary = await creditSummary(q, user.agencyId);
+    const counted = await q.one<{ n: string }>(
+      `SELECT count(*)::text AS n FROM agencies
+       WHERE referred_by_agency_id = $1 AND deleted_at IS NULL`,
+      [user.agencyId]
+    );
+    const price = PLAN_INFO[(account?.plan ?? "starter") as keyof typeof PLAN_INFO]?.priceCents ?? 0;
+    return {
+      code,
+      balanceCents: summary.balanceCents,
+      earnedCents: summary.earnedCents,
+      referred: Number(counted?.n ?? 0),
+      applicableCents: applicableCredit(summary.balanceCents, price),
+    };
+  });
   const billing = {
     plan: account?.plan ?? "starter",
     planName: PLAN_NAMES[account?.plan ?? "starter"] ?? "Starter",
@@ -118,6 +140,15 @@ export default async function SettingsPage() {
       <div className="flex flex-col gap-5">
         <ProfileForm user={user} />
         <UsageCard usage={usage} byWorkspace={perWorkspace} />
+        <ReferralCard
+          code={referral.code}
+          balanceCents={referral.balanceCents}
+          earnedCents={referral.earnedCents}
+          referred={referral.referred}
+          applicableCents={referral.applicableCents}
+          canManage={roleCan(user.role, "manage_billing")}
+          configured={stripeConfigured()}
+        />
         <BillingCard billing={billing} canManage={roleCan(user.role, "manage_billing")} />
         <WorkspacesCard
           workspaces={workspaces}

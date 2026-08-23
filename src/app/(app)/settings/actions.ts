@@ -3,7 +3,9 @@
 import { revalidateApp } from "@/server/revalidate";
 import { isValidTimeZone, updateSettings } from "@/server/repos/settings";
 import { changePassword, updateProfile } from "@/server/repos/users";
-import { billingPortal, startCheckout } from "@/server/billing/checkout";
+import { agencyBilling, applyCreditToStripe, billingPortal, startCheckout } from "@/server/billing/checkout";
+import { PLAN_INFO } from "@/server/billing/plans";
+import { applicableCredit, creditSummary } from "@/server/referral-rewards";
 import { isPlan } from "@/server/billing/plans";
 import { roleCan } from "@/server/permissions";
 import { createSubAccount } from "@/server/sub-accounts";
@@ -215,4 +217,40 @@ export async function billingPortalAction(_prev: FormState, _formData: FormData)
   if (!result.ok) return { error: result.error };
 
   return { redirect: result.url };
+}
+
+
+/**
+ * Spend referral credit against the next invoice.
+ *
+ * The cap is applied server-side, not trusted from the form: the amount is
+ * derived from the balance and the invoice, so a hand-edited number cannot
+ * spend credit that was never earned.
+ */
+export async function applyReferralCreditAction(
+  _prev: FormState,
+  _formData: FormData
+): Promise<FormState> {
+  const me = await requireTenant();
+  if (!roleCan(me.role, "manage_billing")) {
+    return { error: "Only the account owner can use referral credit." };
+  }
+
+  return withSystem(async (q) => {
+    const summary = await creditSummary(q, me.agencyId);
+    const account = await agencyBilling(q, me.agencyId);
+    const plan = account?.plan ?? "starter";
+    const invoiceCents = PLAN_INFO[plan as keyof typeof PLAN_INFO]?.priceCents ?? 0;
+
+    const amount = applicableCredit(summary.balanceCents, invoiceCents);
+    if (amount <= 0) {
+      return { error: "There is no credit to apply to your next invoice yet." };
+    }
+
+    const result = await applyCreditToStripe(q, me.agencyId, amount);
+    if (!result.ok) return { error: result.error };
+
+    revalidateApp();
+    return { ok: `$${(amount / 100).toFixed(2)} applied to your next invoice.` };
+  });
 }

@@ -120,7 +120,12 @@ export async function signUpAction(_prev: AuthState, formData: FormData): Promis
   // owner inside it — not just a row in `users`. All three in one transaction,
   // because a half-created tenant is somebody who can sign in and has nowhere
   // to work.
-  const { user, error } = await signUp({ name, email, password });
+  // A referral code, if they arrived through somebody's link. Never required,
+  // and a code matching nothing is ignored rather than refused — a typo should
+  // not stop somebody creating an account.
+  const referralCode = text(formData.get("referralCode"), 16);
+
+  const { user, error } = await signUp({ name, email, password, referralCode });
   if (error || !user) {
     logAuth("signup.failed", { email, reason: error ?? "unknown" });
     return { error: error ?? "Could not create the account." };

@@ -1,6 +1,7 @@
 import { logDenied, logWrite } from "../log";
 import type { SystemQuery } from "../tenant";
 import { agencyForCustomer, applySubscription, claimEvent, linkCustomer } from "./apply";
+import { earnFromPayment } from "../referral-rewards";
 import { isPlan, type Plan } from "./plans";
 import { readSubscription, type StripeSubscriptionLike } from "./subscription";
 
@@ -23,10 +24,13 @@ import { readSubscription, type StripeSubscriptionLike } from "./subscription";
  *                                       scheduled. Most state changes are this.
  *   `customer.subscription.deleted`   — it is over.
  *
- * Invoice events are deliberately NOT handled. `invoice.payment_failed` and
- * `invoice.paid` are always accompanied by a subscription status change, and
- * handling both means two sources deciding the same column — which is how an
- * account ends up `past_due` after the payment has already been recovered.
+ * `invoice.payment_failed` is deliberately NOT handled: it always arrives with
+ * a subscription status change, and two sources deciding the same column is how
+ * an account ends up `past_due` after the payment has already been recovered.
+ *
+ * `invoice.paid` IS handled, but only to accrue referral credit. It writes to
+ * the credit ledger and never to `plan_status`, so it cannot argue with the
+ * subscription events about what state an account is in.
  */
 
 export type HandledEvent = {
@@ -75,6 +79,39 @@ export async function handleStripeEvent(
     await linkCustomer(q, agencyId, customerId);
     logWrite("update", "agency_billing", { id: agencyId, detail: "customer linked" });
     return { ok: true, action: "linked", agencyId };
+  }
+
+  if (event.type === "invoice.paid") {
+    /**
+     * The one invoice event handled, and only for referral credit.
+     *
+     * Plan status is decided by the subscription events alone — two sources
+     * writing the same column is how an account ends up `past_due` after the
+     * payment has already been recovered. This touches nothing but the credit
+     * ledger, which is why it can live alongside them safely.
+     */
+    const invoiceId = typeof object.id === "string" ? object.id : null;
+    const paid = typeof object.amount_paid === "number" ? object.amount_paid : 0;
+    const customerId =
+      typeof object.customer === "string"
+        ? object.customer
+        : ((object.customer as { id?: string } | null)?.id ?? null);
+
+    const payerId = await agencyForCustomer(q, customerId);
+    if (!payerId || !invoiceId) {
+      await claimEvent(q, event, null);
+      return { ok: true, action: "ignored", reason: "invoice for an unknown customer" };
+    }
+
+    if (!(await claimEvent(q, event, payerId))) {
+      return { ok: true, action: "ignored", reason: "duplicate" };
+    }
+
+    const { earned, referrerId } = await earnFromPayment(q, payerId, paid, invoiceId);
+    if (earned > 0 && referrerId) {
+      return { ok: true, action: "applied", agencyId: referrerId };
+    }
+    return { ok: true, action: "ignored", reason: "no referrer to credit" };
   }
 
   if (!SUBSCRIPTION_EVENTS.has(event.type)) {

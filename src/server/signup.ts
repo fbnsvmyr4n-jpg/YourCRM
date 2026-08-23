@@ -1,4 +1,5 @@
 import { trialEndsAt } from "./billing/plans";
+import { attributeSignup } from "./referral-rewards";
 import { createUser, type SafeUser } from "./repos/users";
 import { withSystem, type SystemQuery } from "./tenant";
 
@@ -29,7 +30,7 @@ function slug(name: string): string {
 
 export async function signUpNewTenant(
   q: SystemQuery,
-  input: { name: string; email: string; password: string }
+  input: { name: string; email: string; password: string; referralCode?: string | null }
 ): Promise<SignUpResult> {
   const suffix = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
   const agencyId = `ag-${slug(input.name)}-${suffix}`;
@@ -74,10 +75,28 @@ export async function signUpNewTenant(
   // above roll back with it rather than being left orphaned.
   if (error || !user) return { error: error ?? "The account could not be created." };
 
+  /**
+   * Who sent them, if anybody.
+   *
+   * Recorded here and never afterwards: attribution belongs to the moment of
+   * signup, and letting it be set later would mean an agency could claim a
+   * customer somebody else had already brought in. A code that matches nothing
+   * is ignored rather than refused — a mistyped code should not stop somebody
+   * creating an account.
+   */
+  if (input.referralCode?.trim()) {
+    await attributeSignup(q, agencyId, input.referralCode);
+  }
+
   return { user, agencyId };
 }
 
 /** Convenience wrapper: sign-up happens before any tenant exists. */
-export function signUp(input: { name: string; email: string; password: string }) {
+export function signUp(input: {
+  name: string;
+  email: string;
+  password: string;
+  referralCode?: string | null;
+}) {
   return withSystem((q) => signUpNewTenant(q, input));
 }

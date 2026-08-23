@@ -702,6 +702,55 @@ CREATE INDEX IF NOT EXISTS stripe_events_agency_idx ON stripe_events (agency_id,
 ALTER TABLE agencies ADD COLUMN IF NOT EXISTS billing_synced_at TIMESTAMPTZ;
 
 -- ---------------------------------------------------------------------------
+-- Referral rewards
+--
+-- An agency that sends another agency to YourCRM earns credit against their own
+-- subscription. Credit rather than a discount, deliberately: a discount cuts
+-- the price permanently and quietly reduces MRR, while credit is a one-off
+-- balance that is spent and gone. The customer gets the same value; the revenue
+-- line stays honest about what the product costs.
+--
+-- Held as a LEDGER, not a running total on the agency. A balance is derived
+-- from entries that can each be explained — "where did this £97 come from" has
+-- an answer, and an adjustment is a new row rather than an edit that erases
+-- what it replaced.
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE agencies ADD COLUMN IF NOT EXISTS referral_code TEXT;
+ALTER TABLE agencies ADD COLUMN IF NOT EXISTS referred_by_agency_id TEXT
+  REFERENCES agencies(id) ON DELETE SET NULL;
+
+-- Codes are unique across the platform, since they are how a signup is
+-- attributed. Partial, so the many agencies without one do not collide.
+CREATE UNIQUE INDEX IF NOT EXISTS agencies_referral_code_key
+  ON agencies (referral_code) WHERE referral_code IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS referral_credits (
+  id              TEXT PRIMARY KEY,
+  -- Who earned it.
+  agency_id       TEXT NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
+  -- Who they referred. Null for a manual adjustment, which is why this is not
+  -- NOT NULL — support has to be able to grant or claw back credit.
+  from_agency_id  TEXT REFERENCES agencies(id) ON DELETE SET NULL,
+
+  -- Positive earns credit, negative spends or reverses it. One column rather
+  -- than an amount plus a direction: a sign cannot disagree with itself.
+  amount_cents    BIGINT NOT NULL,
+  reason          TEXT NOT NULL,
+
+  -- The Stripe invoice this was earned from, when it came from one. Unique so
+  -- a redelivered webhook cannot pay the same referral twice — the same
+  -- at-least-once problem the subscription events have.
+  stripe_invoice_id TEXT,
+
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS referral_credits_agency_idx
+  ON referral_credits (agency_id, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS referral_credits_invoice_key
+  ON referral_credits (stripe_invoice_id) WHERE stripe_invoice_id IS NOT NULL;
+
+-- ---------------------------------------------------------------------------
 -- Usage
 --
 -- What each workspace actually consumes, recorded as it happens.

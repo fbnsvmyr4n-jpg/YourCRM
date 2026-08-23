@@ -176,6 +176,58 @@ export async function billingPortal(
   }
 }
 
+/**
+ * Put an agency's referral credit onto their Stripe balance.
+ *
+ * Stripe holds a per-customer balance and spends it automatically on the next
+ * invoice, which is why credit is the right shape for this: the money is
+ * applied by the same system that bills, rather than by a discount this code
+ * would have to remember to remove.
+ *
+ * A NEGATIVE balance is a credit in Stripe's model — the customer owes less.
+ * Getting the sign wrong bills them extra, which is the single worst thing this
+ * function could do, so it is stated here and pinned by a test.
+ *
+ * The ledger entry is written first. If Stripe then fails, the customer has
+ * credit recorded that has not been applied — recoverable, and visible. The
+ * other order would spend credit in Stripe that the ledger never knew about.
+ */
+export async function applyCreditToStripe(
+  q: SystemQuery,
+  agencyId: string,
+  amountCents: number
+): Promise<{ ok: true; applied: number } | { ok: false; error: string }> {
+  const client = stripe();
+  if (!client) return { ok: false, error: "Billing is not configured on this deployment." };
+  if (amountCents <= 0) return { ok: true, applied: 0 };
+
+  const agency = await agencyBilling(q, agencyId);
+  if (!agency?.stripe_customer_id) {
+    return { ok: false, error: "There is no billing account to credit yet." };
+  }
+
+  await q.rows(
+    `INSERT INTO referral_credits (id, agency_id, amount_cents, reason)
+     VALUES ($1, $2, $3, 'applied to the Stripe balance')`,
+    [`rc-use-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`, agencyId, -amountCents]
+  );
+
+  try {
+    await client.customers.createBalanceTransaction(agency.stripe_customer_id, {
+      // Negative: in Stripe a credit REDUCES what the customer owes. A positive
+      // amount here would charge them extra.
+      amount: -amountCents,
+      currency: "usd",
+      description: "YourCRM referral credit",
+    });
+    logWrite("update", "referral_credit", { id: agencyId, detail: `applied ${amountCents} cents` });
+    return { ok: true, applied: amountCents };
+  } catch (err) {
+    logDenied("referral-credit", `Stripe refused the credit: ${(err as Error).message}`);
+    return { ok: false, error: "Could not apply the credit. Please try again." };
+  }
+}
+
 /** Whole days left on a trial, for display. Never negative. */
 export function trialDaysLeft(trialEndsAt: Date | string | null, now: Date = new Date()): number {
   if (!trialEndsAt) return 0;

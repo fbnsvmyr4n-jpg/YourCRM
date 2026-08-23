@@ -43,12 +43,15 @@ export const EXPECTED_TABLES = [
   "plan_entitlements",
   "stripe_events",
   "usage_events",
+  "referral_credits",
 ] as const;
 
 /** Columns added by `ALTER TABLE … ADD COLUMN IF NOT EXISTS`, which a stale
  *  database is most likely to be missing while still having the table. */
 export const EXPECTED_COLUMNS: ReadonlyArray<[string, string]> = [
   ["agencies", "billing_synced_at"],
+  ["agencies", "referral_code"],
+  ["agencies", "referred_by_agency_id"],
 ];
 
 export type SchemaCheck = {
