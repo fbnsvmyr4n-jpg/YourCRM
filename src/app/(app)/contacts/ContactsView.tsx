@@ -18,7 +18,6 @@ import {
   Phone,
   Plus,
   StickyNote,
-  ArrowUpDown,
   Trash2,
   Upload,
   User,
@@ -27,6 +26,7 @@ import {
 } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Overlay } from "@/components/ui/Overlay";
+import { SortMenu } from "@/components/ui/SortMenu";
 import { TimeAgo } from "@/components/ui/TimeAgo";
 
 /**
@@ -900,7 +900,6 @@ function ContactsList({
   onBulk: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const [sortOpen, setSortOpen] = useState(false);
   const [sort, setSort] = useState<SortId>("recent");
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -968,18 +967,7 @@ function ContactsList({
             <ChevronDown className={clsx("h-4 w-4 transition-transform", grouped && "rotate-180")} />
           </button>
 
-          <button
-            onClick={() => setSortOpen((o) => !o)}
-            title="Sort"
-            aria-expanded={sortOpen}
-            className={clsx(
-              "focus-ring grid h-9 w-9 place-items-center rounded-full transition-colors",
-              sort !== "recent" ? "text-accent" : "btn-soft text-muted"
-            )}
-            style={sort !== "recent" ? { background: "var(--accent-soft)" } : undefined}
-          >
-            <ArrowUpDown className="h-4 w-4" />
-          </button>
+          <SortMenu options={SORTS} value={sort} onChange={setSort} defaultId="recent" />
 
           <button
             onClick={() => setMenuOpen((m) => !m)}
@@ -1009,32 +997,6 @@ function ContactsList({
           <button onClick={onAdd} className="btn-accent focus-ring grid h-9 w-9 place-items-center rounded-full" aria-label="Add contact">
             <Plus className="h-[18px] w-[18px]" />
           </button>
-
-          {sortOpen && (
-            <div
-              className="absolute right-0 top-11 z-20 w-52 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--panel-solid)] py-1 shadow-lg"
-              role="menu"
-            >
-              {SORTS.map((o) => (
-                <button
-                  key={o.id}
-                  role="menuitemradio"
-                  aria-checked={sort === o.id}
-                  onClick={() => {
-                    setSort(o.id);
-                    setSortOpen(false);
-                  }}
-                  className={clsx(
-                    "flex w-full items-center justify-between px-3.5 py-2 text-left text-sm transition-colors hover:bg-[var(--surface-2)]",
-                    sort === o.id && "text-accent"
-                  )}
-                >
-                  {o.label}
-                  {sort === o.id && <Check className="h-3.5 w-3.5" />}
-                </button>
-              ))}
-            </div>
-          )}
 
           {menuOpen && (
             <div

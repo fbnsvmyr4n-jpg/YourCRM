@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { useOpenFromQuery } from "@/lib/useOpenFromQuery";
+import { SortMenu } from "@/components/ui/SortMenu";
 
 import { useState } from "react";
 import { Mail, MapPin, MoreHorizontal, Pencil, Phone, Plus, Trash2, Users, X } from "lucide-react";
@@ -14,6 +15,22 @@ import { addLeadAction, deleteLeadAction, updateLeadAction } from "./actions";
 
 type ModalState = null | "new" | LeadCard;
 
+/**
+ * How the lead cards can be ordered.
+ *
+ * Newest first by default — a lead nobody has called yet is the one that
+ * matters, and it is the one that just arrived. Source is here because "where
+ * did these come from" is a question the cards can answer at a glance once they
+ * are grouped by it.
+ */
+const LEAD_SORTS = [
+  { id: "newest", label: "Newest first" },
+  { id: "name", label: "Name (A–Z)" },
+  { id: "company", label: "Company" },
+  { id: "source", label: "Source" },
+] as const;
+type LeadSort = (typeof LEAD_SORTS)[number]["id"];
+
 export function LeadCardsSection({ leads }: { leads: LeadCard[] }) {
   const [modal, setModal] = useState<ModalState>(null);
   // Arriving from the dashboard Quick Action opens the form directly.
@@ -21,6 +38,7 @@ export function LeadCardsSection({ leads }: { leads: LeadCard[] }) {
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [filter, setFilter] = useState<"All" | LeadStatus>("All");
+  const [sort, setSort] = useState<LeadSort>("newest");
 
   const counts = {
     All: leads.length,
@@ -29,7 +47,29 @@ export function LeadCardsSection({ leads }: { leads: LeadCard[] }) {
     ),
   } as Record<"All" | LeadStatus, number>;
 
-  const visible = filter === "All" ? leads : leads.filter((l) => l.status === filter);
+  const visible = useMemo(() => {
+    const byStatus = filter === "All" ? leads : leads.filter((l) => l.status === filter);
+    // Copied before sorting: `sort` mutates, and this array comes from props.
+    const out = [...byStatus];
+    switch (sort) {
+      case "name":
+        return out.sort((a, b) => a.name.localeCompare(b.name));
+      case "company":
+        // Leads with no company sink rather than sorting under "" at the top,
+        // where they push everything else out of view.
+        return out.sort((a, b) => {
+          if (!a.company && !b.company) return a.name.localeCompare(b.name);
+          if (!a.company) return 1;
+          if (!b.company) return -1;
+          return a.company.localeCompare(b.company) || a.name.localeCompare(b.name);
+        });
+      case "source":
+        return out.sort((a, b) => a.source.localeCompare(b.source) || a.name.localeCompare(b.name));
+      case "newest":
+      default:
+        return out.sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
+    }
+  }, [leads, filter, sort]);
 
   async function handleSubmit(formData: FormData) {
     setBusy(true);
@@ -103,12 +143,15 @@ export function LeadCardsSection({ leads }: { leads: LeadCard[] }) {
           {filter === "All" ? "All Leads" : filter}
           <span className="ml-2 text-sm font-normal text-faint">{visible.length}</span>
         </h2>
-        <button
-          onClick={() => setModal("new")}
-          className="btn-accent focus-ring flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold"
-        >
-          <Plus className="h-[16px] w-[16px]" /> Add Lead
-        </button>
+        <div className="flex items-center gap-2">
+          <SortMenu options={LEAD_SORTS} value={sort} onChange={setSort} defaultId="newest" />
+          <button
+            onClick={() => setModal("new")}
+            className="btn-accent focus-ring flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold"
+          >
+            <Plus className="h-[16px] w-[16px]" /> Add Lead
+          </button>
+        </div>
       </div>
 
       {leads.length === 0 ? (

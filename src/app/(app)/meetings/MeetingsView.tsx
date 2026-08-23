@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useOpenFromQuery } from "@/lib/useOpenFromQuery";
 import {
@@ -24,6 +24,7 @@ import { Avatar } from "@/components/ui/Avatar";
 import { Card } from "@/components/ui/Card";
 import { PersonField, type Person } from "@/components/ui/PersonField";
 import { clsx } from "@/lib/clsx";
+import { SortMenu } from "@/components/ui/SortMenu";
 import { minutesOfDay, parseTime, toDisplayTime } from "@/lib/time";
 import {
   LOSS_REASONS,
@@ -567,6 +568,21 @@ function WorkloadCapacity({
 
 const TABS = ["All", "Today", "Tomorrow", "This Week"] as const;
 
+/**
+ * How the meeting list can be ordered.
+ *
+ * Soonest first is the default and is what a schedule means — the next thing
+ * you have to do is the next row. The others are for looking back: "outcome"
+ * groups the no-shows together, which is the fastest way to see a pattern.
+ */
+const MEETING_SORTS = [
+  { id: "soonest", label: "Soonest first" },
+  { id: "latest", label: "Latest first" },
+  { id: "name", label: "Name (A–Z)" },
+  { id: "outcome", label: "Outcome" },
+] as const;
+type MeetingSort = (typeof MEETING_SORTS)[number]["id"];
+
 function UpcomingTable({
   meetings,
   people,
@@ -575,13 +591,35 @@ function UpcomingTable({
   people: Person[];
 }) {
   const [tab, setTab] = useState<(typeof TABS)[number]>("All");
+  const [sort, setSort] = useState<MeetingSort>("soonest");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [editing, setEditing] = useState<UpcomingMeeting | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const rows = meetings
-    .filter((m) => tab === "All" || m.when === tab)
-    .sort((a, b) => (a.date ?? "").localeCompare(b.date ?? "") || minutesOfDay(a.time) - minutesOfDay(b.time));
+  const rows = useMemo(() => {
+    const byTab = meetings.filter((m) => tab === "All" || m.when === tab);
+    const byDate = (a: UpcomingMeeting, b: UpcomingMeeting) =>
+      (a.date ?? "").localeCompare(b.date ?? "") || minutesOfDay(a.time) - minutesOfDay(b.time);
+
+    // Copied before sorting: `sort` mutates, and this array comes from props.
+    const out = [...byTab];
+    switch (sort) {
+      case "name":
+        return out.sort((a, b) => a.name.localeCompare(b.name) || byDate(a, b));
+      case "outcome":
+        // Grouped by what happened, then soonest first inside each group.
+        // `outcome` is optional on the record — an unrecorded meeting sorts
+        // with the others rather than throwing, and stays in date order.
+        return out.sort(
+          (a, b) => (a.outcome ?? "").localeCompare(b.outcome ?? "") || byDate(a, b)
+        );
+      case "latest":
+        return out.sort((a, b) => byDate(b, a));
+      case "soonest":
+      default:
+        return out.sort(byDate);
+    }
+  }, [meetings, tab, sort]);
 
   /**
    * Say exactly what happened to the notification.
@@ -629,9 +667,12 @@ function UpcomingTable({
               {t}
             </button>
           ))}
+          <span className="ml-1">
+            <SortMenu options={MEETING_SORTS} value={sort} onChange={setSort} defaultId="soonest" />
+          </span>
           <Link
             href="/calendar"
-            className="btn-soft focus-ring ml-2 flex items-center gap-2 rounded-xl px-3 py-1.5 text-xs font-medium"
+            className="btn-soft focus-ring ml-1 flex items-center gap-2 rounded-xl px-3 py-1.5 text-xs font-medium"
           >
             <Calendar className="h-3.5 w-3.5" /> View Calendar
           </Link>

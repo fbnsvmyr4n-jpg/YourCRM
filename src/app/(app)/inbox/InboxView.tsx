@@ -40,6 +40,7 @@ import {
   type MsgCategory,
 } from "@/data/inbox";
 import { clsx } from "@/lib/clsx";
+import { SortMenu } from "@/components/ui/SortMenu";
 import { useOpenFromQuery } from "@/lib/useOpenFromQuery";
 import {
   addMessageAction,
@@ -58,6 +59,34 @@ const CHIP_META: Record<MsgCategory, { icon: typeof Mail; tone: string; soft: st
   Enquiries: { icon: MessageCircle, tone: "var(--purple)", soft: "var(--purple-soft)" },
 };
 
+const INBOX_SORTS = [
+  { id: "newest", label: "Newest first" },
+  { id: "oldest", label: "Oldest first" },
+  { id: "unread", label: "Unread first" },
+  { id: "sender", label: "Sender (A–Z)" },
+] as const;
+type InboxSort = (typeof INBOX_SORTS)[number]["id"];
+
+function sortMessages(rows: Message[], sort: InboxSort): Message[] {
+  // Copied before sorting: `sort` mutates, and this array comes from props.
+  const out = [...rows];
+  switch (sort) {
+    case "oldest":
+      return out.sort((a, b) => a.at.localeCompare(b.at));
+    case "unread":
+      // Unread first, still newest-first inside each group — otherwise the
+      // read half arrives in an order nobody chose.
+      return out.sort(
+        (a, b) => Number(b.unread) - Number(a.unread) || b.at.localeCompare(a.at)
+      );
+    case "sender":
+      return out.sort((a, b) => a.name.localeCompare(b.name) || b.at.localeCompare(a.at));
+    case "newest":
+    default:
+      return out.sort((a, b) => b.at.localeCompare(a.at));
+  }
+}
+
 export function InboxView({
   messages,
   contactFor,
@@ -74,11 +103,20 @@ export function InboxView({
   const [filter, setFilter] = useState<InboxFilter>("All");
   const [category, setCategory] = useState<MsgCategory | null>(null);
   const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<InboxSort>("newest");
   const [selectedId, setSelectedId] = useState(messages[0]?.id ?? "");
   const [composeOpen, setComposeOpen] = useState(false);
   useOpenFromQuery("compose", useCallback(() => setComposeOpen(true), []));
   const [busy, setBusy] = useState(false);
 
+  /**
+   * How the inbox can be ordered.
+   *
+   * Newest first is the default because an inbox is a queue — the thing that
+   * arrived last is the thing nobody has dealt with. "Unread first" is the one
+   * that earns its place on a busy account: it puts the work at the top without
+   * hiding anything, which a filter would.
+   */
   const list = useMemo(() => {
     const byFolder = (() => {
       switch (filter) {
@@ -100,16 +138,19 @@ export function InboxView({
     const byCategory = category ? byFolder.filter((m) => m.category === category) : byFolder;
 
     const q = query.trim().toLowerCase();
-    if (!q) return byCategory;
+    if (!q) return sortMessages(byCategory, sort);
 
     // Search covers the body too — the useful search is usually for something
     // said inside a message, not just its subject line.
-    return byCategory.filter((m) =>
-      [m.name, m.subject, m.preview, m.company, m.email, ...m.body].some((f) =>
-        f.toLowerCase().includes(q)
-      )
+    return sortMessages(
+      byCategory.filter((m) =>
+        [m.name, m.subject, m.preview, m.company, m.email, ...m.body].some((f) =>
+          f.toLowerCase().includes(q)
+        )
+      ),
+      sort
     );
-  }, [filter, category, query, messages]);
+  }, [filter, category, query, messages, sort]);
 
   // Counts come from the same folder the user is looking at, so a chip never
   // promises results that the current folder would filter away.
@@ -264,6 +305,8 @@ export function InboxView({
           query={query}
           setQuery={setQuery}
           channelFor={channelFor}
+          sort={sort}
+          setSort={setSort}
         />
         {selected ? (
           <Reader
@@ -313,6 +356,8 @@ function MessageList({
   setQuery,
   channelFor,
   className,
+  sort,
+  setSort,
 }: {
   list: Message[];
   selectedId: string;
@@ -321,10 +366,13 @@ function MessageList({
   setQuery: (q: string) => void;
   channelFor: Record<string, ContactChannel>;
   className?: string;
+  sort: InboxSort;
+  setSort: (s: InboxSort) => void;
 }) {
   return (
     <div className={clsx("card flex min-h-0 flex-col overflow-hidden p-3", className)}>
-      <div className="mb-2 flex items-center gap-2 rounded-xl border border-[var(--border)] px-3 py-2">
+      <div className="mb-2 flex items-center gap-2">
+        <div className="flex flex-1 items-center gap-2 rounded-xl border border-[var(--border)] px-3 py-2">
         <Search className="h-4 w-4 shrink-0 text-faint" />
         {/* Was a decorative input wired to nothing. */}
         <input
@@ -338,6 +386,8 @@ function MessageList({
             <X className="h-3.5 w-3.5" />
           </button>
         )}
+        </div>
+        <SortMenu options={INBOX_SORTS} value={sort} onChange={setSort} defaultId="newest" />
       </div>
       <div className="-m-1 flex flex-1 scroll-p-1 flex-col gap-2 overflow-y-auto p-1">
         {list.length === 0 && <p className="mt-8 text-center text-sm text-faint">No messages here.</p>}
