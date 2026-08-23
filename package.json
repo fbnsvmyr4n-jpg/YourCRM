@@ -10,7 +10,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "dev:db": "tsx scripts/dev-db.ts",
-    "db:migrate": "tsx scripts/db-migrate.ts"
+    "db:migrate": "tsx scripts/db-migrate.ts",
+    "db:backup": "tsx scripts/db-backup.ts",
+    "db:restore": "tsx scripts/db-restore.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",
