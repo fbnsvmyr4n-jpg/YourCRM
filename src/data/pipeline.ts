@@ -52,7 +52,15 @@ const META: Record<StageId, Omit<StageMeta, "id">> = {
     label: "Closed Won",
     color: "var(--green)",
     soft: "var(--green-soft)",
-    exit: "Exits on payment",
+    /**
+     * Not "exits on payment". Payment is what puts a deal HERE: recording one
+     * creates the won record and stamps `won_at`, and dragging a card in does
+     * the same. A card sitting in this column is money already counted as
+     * revenue, so an exit condition of "payment" described the entry and made
+     * the board contradict the app — which then refused to record a payment
+     * against the very column whose exit it claimed to be.
+     */
+    exit: "Won and counted — exits when delivery starts",
   },
   delivery: {
     label: "Delivery",

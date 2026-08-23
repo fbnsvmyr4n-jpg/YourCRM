@@ -36,12 +36,18 @@ export const faqs: Faq[] = [
   {
     category: "Pipeline & deals",
     q: "How do I move a deal through the pipeline?",
-    a: "Open Deals and drag any card into another stage column — Lead In, Qualified, Proposal, Negotiation, or Closed Won. The move saves automatically, and the column totals plus the summary tiles at the top recalculate instantly.",
+    a: "Open Deals and drag any card into another column — Prospect, Discovery, Demo, Closed Won, Delivery or Referral. Each column shows what has to happen for a card to leave it. The move saves automatically and the totals recalculate straight away. Moving a deal to Lost asks for a reason, because the loss analysis is built from every loss rather than the ones somebody remembered to annotate.",
   },
   {
     category: "Pipeline & deals",
-    q: "What is the Weighted Forecast?",
-    a: "It's your pipeline adjusted for likelihood. Each stage carries a win probability — Lead In 10%, Qualified 30%, Proposal 50%, Negotiation 70%, Closed Won 100% — and the forecast is the sum of every deal's value times its stage probability. Move a deal forward and the forecast rises straight away.",
+    q: "What do the totals at the top of the pipeline mean?",
+    /**
+     * This replaced an answer describing a "Weighted Forecast" that no longer
+     * exists — it multiplied each deal by an invented win probability and
+     * presented the result as money. A help page describing a feature that was
+     * removed is worse than no help page: somebody goes looking for it.
+     */
+    a: "Open Pipeline is Discovery plus Demo — live work that has a number on it but is not yet won. Prospect is deliberately excluded, because a prospect nobody has spoken to has no value worth adding up. In Delivery is work already won and being delivered. Closed Won is every deal with a recorded win, so it keeps counting through Delivery and Referral rather than dropping the moment delivery starts.",
   },
   {
     category: "Pipeline & deals",

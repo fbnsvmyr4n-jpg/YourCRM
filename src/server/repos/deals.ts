@@ -418,6 +418,10 @@ export async function recordPayment(
 
   // Payment belongs to a deal that has been presented. Taking money against a
   // prospect nobody has spoken to means the board is not describing reality.
+  //
+  // Recording a payment is what CLOSES a deal — it creates the won record and
+  // stamps `won_at`. So Won is not a valid source stage: a deal there is
+  // already won, and the money already counted.
   if (deal.stage !== "demo" && deal.stage !== "discovery") {
     return { error: "Payments are recorded against a deal that has reached Discovery or Demo." };
   }

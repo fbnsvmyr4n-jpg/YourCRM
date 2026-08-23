@@ -102,26 +102,34 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
   const [busy, setBusy] = useState(false);
 
   /**
-   * Header totals.
+   * Header totals, each defined by a stage's own exit condition.
    *
-   * Open Pipeline is the Proposals column alone — work quoted but not yet
-   * committed. What used to sit here was every non-won deal added together,
-   * including leads nobody had spoken to.
+   * These were named for a pipeline that no longer exists. "Negotiations Owed —
+   * invoiced, awaiting payment" was summing the DISCOVERY column: nobody has
+   * invoiced a deal they are still qualifying, so the tile reported money owed
+   * that had never been asked for. The label was stale; the number was false.
    *
-   * Negotiations Owed replaces "Weighted Forecast", which multiplied each deal
-   * by a made-up probability (a lead counted for 10% of a number that was
-   * itself a guess) and presented the result as money. This is the real sum of
-   * what has been invoiced and is still outstanding.
+   * The definitions now follow the process:
+   *
+   *   Open pipeline  Discovery + Demo. Live work, not yet won.
+   *   In delivery    The Delivery column — won, and being delivered. Post-close
+   *                  work is where the referrals come from, so it is worth its
+   *                  own number rather than being folded into the won total.
+   *   Won            Read from the recorded fact, not the column, so it
+   *                  survives Delivery and Referral rather than falling the
+   *                  moment delivery begins. Matches what Reports calls
+   *                  revenue.
+   *
+   * Prospect carries no money on purpose: a prospect nobody has spoken to has
+   * no value worth adding up, and inventing one puts imaginary money in the
+   * total.
    */
   const summary = useMemo(() => {
     const sum = (stage: StageId) =>
       items.filter((d) => d.stage === stage).reduce((s, d) => s + d.value, 0);
     return {
-      // Presented but not yet closed — the work that has had a number put on
-      // it. "Proposals" and "Negotiations" were stages in a pipeline nobody
-      // actually ran.
-      proposals: sum("demo"),
-      owed: sum("discovery"),
+      open: sum("discovery") + sum("demo"),
+      inDelivery: sum("delivery"),
       // Won is read from the recorded fact, so it survives Delivery and
       // Referral rather than falling the moment delivery begins.
       won: items.filter(isWon).reduce((s, d) => s + d.value, 0),
@@ -244,7 +252,8 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
         <div>
           <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Deals Pipeline</h1>
           <p className="mt-1 text-sm text-muted">
-            Drag deals across stages. Click one in Negotiations to record a payment.
+            Drag deals across stages. Each column says what has to happen for a
+            card to leave it.
           </p>
         </div>
         <button
@@ -259,23 +268,23 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
         <SummaryTile
           icon={<Wallet className="h-5 w-5" />}
           label="Open Pipeline"
-          sub="Proposals out"
-          value={fullMoney(summary.proposals)}
+          sub="Discovery and Demo"
+          value={fullMoney(summary.open)}
           tone="var(--amber)"
           soft="var(--amber-soft)"
         />
         <SummaryTile
           icon={<HandCoins className="h-5 w-5" />}
-          label="Negotiations Owed"
-          sub="Invoiced, awaiting payment"
-          value={fullMoney(summary.owed)}
+          label="In Delivery"
+          sub="Won, being delivered"
+          value={fullMoney(summary.inDelivery)}
           tone={PARTIAL}
           soft="rgba(249,115,22,0.12)"
         />
         <SummaryTile
           icon={<Coins className="h-5 w-5" />}
           label="Closed Won"
-          sub="Money received"
+          sub="Won, all time"
           value={fullMoney(summary.won)}
           tone="var(--green)"
           soft="var(--green-soft)"
@@ -525,8 +534,9 @@ function DealModal({
   onSetValue: (formData: FormData) => void | Promise<void>;
 }) {
   const [error, setError] = useState<string | null>(null);
-  // Payment is recorded once a deal has been presented — Discovery or Demo.
-  // "Negotiations" was a stage in a pipeline nobody actually ran.
+  // Payment is recorded against a deal that has been presented — Discovery or
+  // Demo. Recording one is what CLOSES it: the won record is created and
+  // `won_at` stamped, so a deal already in Won has nothing left to pay.
   const canPay = (deal.stage === "demo" || deal.stage === "discovery") && deal.value > 0;
   const canValue = carriesMoney(deal.stage) && !isWon(deal);
 
@@ -638,7 +648,7 @@ function DealModal({
             <p className="rounded-xl border border-[var(--border)] p-4 text-sm text-muted">
               {deal.stage === "won"
                 ? "This deal is settled in full."
-                : "Deals in this stage don't carry a value yet — move it to Proposals once you've quoted."}
+                : "Deals in this stage don't carry a value yet — move it to Discovery once there's a number to put on it."}
             </p>
           )}
         </div>
