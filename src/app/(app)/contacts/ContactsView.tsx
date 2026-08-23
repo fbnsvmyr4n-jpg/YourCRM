@@ -19,6 +19,7 @@ import {
   Plus,
   StickyNote,
   Trash2,
+  Upload,
   User,
   UserRound,
   X,
@@ -26,8 +27,6 @@ import {
 import { Avatar } from "@/components/ui/Avatar";
 import { Overlay } from "@/components/ui/Overlay";
 import { TimeAgo } from "@/components/ui/TimeAgo";
-import type { ContactRecord } from "@/server/repos/contacts";
-import type { AvatarColor } from "@/components/ui/Avatar";
 
 /**
  * A contact, decorated with what the screen needs and the record no longer stores.
@@ -38,63 +37,15 @@ import type { AvatarColor } from "@/components/ui/Avatar";
  * at the edge, where being wrong is a redraw rather than a wrong number in a
  * database.
  */
-export type ContactType = "lead" | "client";
-
-export type Contact = Omit<ContactRecord, "email" | "phone" | "location" | "info"> & {
-  /**
-   * Nullable in the database, never null here.
-   *
-   * The columns are genuinely optional — plenty of contacts have no phone
-   * number — but a screen renders text, and threading `| null` through forty
-   * JSX expressions buys nothing. Flattened once, at the boundary.
-   */
-  email: string;
-  phone: string;
-  location: string;
-  initials: string;
-  color: AvatarColor;
-  type: ContactType;
-  status: string;
-  /** The old `company` and `companyInfo` both read from this one column now. */
-  info: string;
-  company: string;
-  companyInfo: string;
-  owner: string;
-};
-
-const AVATAR_COLORS: AvatarColor[] = ["blue", "green", "amber", "purple", "pink", "teal"];
-
-/** Stable per contact: the same person keeps the same colour between renders. */
-function paletteFor(id: string): AvatarColor {
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) | 0;
-  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
-}
-
-export function decorate(c: ContactRecord, people: { id: string; name: string }[]): Contact {
-  const first = c.firstName.trim();
-  const last = c.lastName.trim();
-  return {
-    ...c,
-    email: c.email ?? "",
-    info: c.info ?? "",
-    phone: c.phone ?? "",
-    location: c.location ?? "",
-    initials: ((first[0] ?? "") + (last[0] ?? "") || first.slice(0, 2)).toUpperCase(),
-    color: paletteFor(c.id),
-    // Derived from deals, which is the whole point: somebody is a client
-    // because they bought something, not because a dropdown says so.
-    type: c.isClient ? "client" : "lead",
-    status: c.isClient ? "Client" : c.hasOpenDeal ? "In progress" : "No open deal",
-    company: c.info ?? "",
-    companyInfo: c.info ?? "",
-    owner: people.find((p) => p.id === c.ownerUserId)?.name ?? "Unassigned",
-  };
-}
 import type { ContactSummary, TimelineEntry } from "@/server/contact-summaries";
+import type { Contact, ContactType } from "@/server/decorate-contact";
+export type { Contact, ContactType } from "@/server/decorate-contact";
 import { clsx } from "@/lib/clsx";
+import type { ImportPreview, ImportResult } from "@/server/import-contacts";
 import {
   addContactAction,
+  importContactsAction,
+  previewImportAction,
   addNoteAction,
   deleteContactAction,
   logOutreachAction,
@@ -102,7 +53,7 @@ import {
 } from "./actions";
 
 /** null = closed, "new" = add mode, Contact = edit mode */
-type ModalState = null | "new" | Contact;
+type ModalState = null | "new" | "import" | Contact;
 type Panel = null | "note" | "revenue";
 
 /** Takes integer cents, because that is what the database stores. */
@@ -135,7 +86,7 @@ export function ContactsView({
       if (modal === "new") {
         const newId = await addContactAction(formData);
         if (newId) setSelectedId(newId);
-      } else if (modal) {
+      } else if (modal && modal !== "import") {
         await updateContactAction(modal.id, formData);
       }
       setModal(null);
@@ -157,7 +108,9 @@ export function ContactsView({
   }
 
   const modalEl =
-    modal !== null ? (
+    modal === "import" ? (
+      <ImportModal onClose={() => setModal(null)} />
+    ) : modal !== null ? (
       <ContactModal
         contact={modal === "new" ? undefined : modal}
         onClose={() => setModal(null)}
@@ -171,9 +124,18 @@ export function ContactsView({
       <div className="grid h-[calc(100vh-104px)] place-items-center">
         <div className="text-center">
           <p className="text-muted">No contacts yet.</p>
-          <button onClick={() => setModal("new")} className="btn-accent mt-4 rounded-xl px-5 py-2.5 text-sm font-semibold">
-            Add your first contact
-          </button>
+          {/* Import sits beside "add one" on the empty screen, because an
+              agency arriving with an existing book of business is not going to
+              type five hundred people in one at a time — and if they cannot
+              find the import they do not report it, they leave. */}
+          <div className="mt-4 flex items-center justify-center gap-2">
+            <button onClick={() => setModal("new")} className="btn-accent rounded-xl px-5 py-2.5 text-sm font-semibold">
+              Add your first contact
+            </button>
+            <button onClick={() => setModal("import")} className="btn-soft focus-ring flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-medium">
+              <Upload className="h-4 w-4" /> Import a CSV
+            </button>
+          </div>
         </div>
         {modalEl}
       </div>
@@ -216,6 +178,7 @@ export function ContactsView({
         selectedId={contact.id}
         onSelect={setSelectedId}
         onAdd={() => setModal("new")}
+        onImport={() => setModal("import")}
         filter={filter}
         setFilter={setFilter}
         grouped={grouped}
@@ -807,6 +770,7 @@ function ContactsList({
   selectedId,
   onSelect,
   onAdd,
+  onImport,
   filter,
   setFilter,
   grouped,
@@ -817,6 +781,7 @@ function ContactsList({
   selectedId: string;
   onSelect: (id: string) => void;
   onAdd: () => void;
+  onImport: () => void;
   filter: "all" | ContactType;
   setFilter: (f: "all" | ContactType) => void;
   grouped: boolean;
@@ -894,6 +859,18 @@ function ContactsList({
             <Filter className="h-4 w-4" />
           </button>
 
+          {/* Import lives beside Add, not only on the empty screen. An agency
+              with fifty contacts still has four hundred and fifty in a
+              spreadsheet, and an import they cannot find is one they do not
+              believe exists. */}
+          <button
+            onClick={onImport}
+            className="btn-soft focus-ring grid h-9 w-9 place-items-center rounded-full"
+            aria-label="Import contacts from a CSV"
+            title="Import from CSV"
+          >
+            <Upload className="h-4 w-4" />
+          </button>
           <button onClick={onAdd} className="btn-accent focus-ring grid h-9 w-9 place-items-center rounded-full" aria-label="Add contact">
             <Plus className="h-[18px] w-[18px]" />
           </button>
@@ -1118,5 +1095,209 @@ function ModalSelect({
         ))}
       </select>
     </label>
+  );
+}
+
+/**
+ * Bringing an existing book of business in.
+ *
+ * Preview, then import — never straight to writing. A mapping that put phone
+ * numbers in the email column is obvious on a few sample rows and invisible in
+ * a summary, and by the time anybody notices, the contacts are already in.
+ *
+ * The file is read in the browser rather than posted as multipart. It is text,
+ * it is small, and reading it here means the person sees "no rows found" before
+ * a request is made rather than after one.
+ */
+function ImportModal({ onClose }: { onClose: () => void }) {
+  const [csv, setCsv] = useState("");
+  const [fileName, setFileName] = useState("");
+  const [preview, setPreview] = useState<ImportPreview | null>(null);
+  const [result, setResult] = useState<ImportResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function onFile(file: File) {
+    setError(null);
+    setResult(null);
+    setFileName(file.name);
+    const text = await file.text();
+    setCsv(text);
+
+    setBusy(true);
+    const fd = new FormData();
+    fd.set("csv", text);
+    const res = await previewImportAction(fd);
+    setBusy(false);
+
+    if ("error" in res && res.error) {
+      setError(res.error);
+      setPreview(null);
+    } else if (res.ok) {
+      setPreview(res.preview);
+    }
+  }
+
+  async function commit() {
+    setBusy(true);
+    setError(null);
+    const fd = new FormData();
+    fd.set("csv", csv);
+    const res = await importContactsAction(fd);
+    setBusy(false);
+
+    if ("error" in res && res.error) setError(res.error);
+    else if ("imported" in res) {
+      setResult(res);
+      setPreview(null);
+    }
+  }
+
+  const willImport = preview ? preview.total - preview.duplicates : 0;
+
+  return (
+    <Overlay>
+      <div className="fixed inset-0 z-50 grid place-items-center p-4" role="dialog" aria-modal="true">
+        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+        <div className="modal-surface relative z-10 max-h-[85vh] w-full max-w-lg overflow-y-auto p-6">
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold tracking-tight">Import contacts</h2>
+              <p className="mt-0.5 text-xs text-faint">
+                A CSV exported from your current system. The columns are matched
+                by their headings.
+              </p>
+            </div>
+            <button type="button" onClick={onClose} className="shrink-0 text-faint hover:text-[var(--text)]" aria-label="Close">
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+
+          {!result && (
+            <label className="block cursor-pointer rounded-xl border border-dashed border-[var(--border)] p-6 text-center transition-colors hover:border-[var(--accent)]">
+              <input
+                type="file"
+                accept=".csv,text/csv,text/plain"
+                className="sr-only"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void onFile(f);
+                }}
+              />
+              <Upload className="mx-auto h-5 w-5 text-faint" />
+              <p className="mt-2 text-sm font-medium">
+                {fileName || "Choose a CSV file"}
+              </p>
+              <p className="mt-0.5 text-xs text-faint">Nothing is saved until you confirm.</p>
+            </label>
+          )}
+
+          {error && (
+            <p className="mt-3 rounded-xl px-3.5 py-2.5 text-sm" style={{ background: "var(--red-soft)", color: "var(--red)" }}>
+              {error}
+            </p>
+          )}
+
+          {preview && (
+            <div className="mt-4">
+              <p className="text-sm">
+                <strong>{preview.total}</strong> {preview.total === 1 ? "row" : "rows"} found
+                {preview.duplicates > 0 && (
+                  <>
+                    {" · "}
+                    <span style={{ color: "var(--amber)" }}>
+                      {preview.duplicates} already on file
+                    </span>
+                  </>
+                )}
+              </p>
+
+              {/* Named columns, so a wrong guess is visible before it is
+                  applied rather than after. */}
+              <p className="mt-1 text-xs text-faint">
+                Reading:{" "}
+                {Object.keys(preview.mapping).length === 0
+                  ? "no columns recognised"
+                  : (Object.keys(preview.mapping) as (keyof typeof preview.mapping)[])
+                      .map((f) => `${f} ← "${preview.headers[preview.mapping[f]!]}"`)
+                      .join(", ")}
+              </p>
+
+              {preview.sample.length > 0 && (
+                <div className="mt-3 overflow-x-auto rounded-xl border border-[var(--border)]">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-[var(--border)] text-faint">
+                        <th className="px-3 py-2 font-medium">Name</th>
+                        <th className="px-3 py-2 font-medium">Email</th>
+                        <th className="px-3 py-2 font-medium">Phone</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {preview.sample.map((r) => (
+                        <tr key={r.line} className="border-b border-[var(--border)] last:border-0">
+                          <td className="px-3 py-2">{`${r.firstName} ${r.lastName}`.trim()}</td>
+                          <td className="px-3 py-2 text-muted">{r.email ?? "—"}</td>
+                          <td className="px-3 py-2 text-muted">{r.phone ?? "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {preview.issues.length > 0 && (
+                /* Every refused row, with its line number. "412 imported" out
+                   of 500 with no account of the rest looks like success. */
+                <div className="mt-3 rounded-xl px-3.5 py-2.5 text-xs" style={{ background: "var(--amber-soft)", color: "var(--amber)" }}>
+                  <p className="font-semibold">
+                    {preview.issues.length} {preview.issues.length === 1 ? "row" : "rows"} cannot be imported
+                  </p>
+                  <ul className="mt-1 space-y-0.5">
+                    {preview.issues.slice(0, 5).map((i) => (
+                      <li key={i.line}>Line {i.line}: {i.reason}</li>
+                    ))}
+                    {preview.issues.length > 5 && <li>…and {preview.issues.length - 5} more</li>}
+                  </ul>
+                </div>
+              )}
+
+              <div className="mt-4 flex justify-end gap-2">
+                <button type="button" onClick={onClose} className="btn-soft focus-ring rounded-xl px-4 py-2 text-sm font-medium">
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void commit()}
+                  disabled={busy || willImport === 0}
+                  className="btn-accent focus-ring rounded-xl px-4 py-2 text-sm font-semibold disabled:opacity-60"
+                >
+                  {busy
+                    ? "Importing…"
+                    : willImport === 0
+                      ? "Nothing new to import"
+                      : `Import ${willImport} ${willImport === 1 ? "contact" : "contacts"}`}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {result && (
+            <div className="mt-2">
+              <p className="rounded-xl px-3.5 py-2.5 text-sm" style={{ background: "var(--green-soft)", color: "var(--green)" }}>
+                {result.imported} imported
+                {result.skipped > 0 && `, ${result.skipped} already on file`}
+                {result.issues.length > 0 && `, ${result.issues.length} refused`}.
+              </p>
+              <div className="mt-4 flex justify-end">
+                <button type="button" onClick={onClose} className="btn-accent focus-ring rounded-xl px-4 py-2 text-sm font-semibold">
+                  Done
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </Overlay>
   );
 }

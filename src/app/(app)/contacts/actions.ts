@@ -14,6 +14,7 @@ import { logActivity } from "@/server/repos/activity";
 import { withCurrentTenant } from "@/server/tenant-session";
 import { email as validEmail, id as validId, multiline, text } from "@/server/validate";
 import { logWrite } from "@/server/log";
+import { importContacts, previewImport } from "@/server/import-contacts";
 
 /**
  * Contact actions, on the relational schema.
@@ -216,5 +217,60 @@ export async function restoreContactAction(id: string) {
       logWrite("restore", "contact", { id: contactId, actor: q.ctx.userId });
     }
     revalidateApp();
+  });
+}
+
+
+/** How much CSV the server will read in one go. */
+const MAX_IMPORT_BYTES = 5_000_000;
+
+/**
+ * Look at an uploaded file without writing anything.
+ *
+ * A mapping that put phone numbers in the email column is obvious on ten
+ * sample rows and invisible in a summary, so the person sees the rows before
+ * anything touches their account.
+ */
+export async function previewImportAction(formData: FormData) {
+  return withCurrentTenant(async (q) => {
+    const csv = String(formData.get("csv") ?? "");
+    if (!csv.trim()) return { error: "Choose a CSV file." };
+    if (csv.length > MAX_IMPORT_BYTES) {
+      // Named with the actual limit. "File too large" leaves somebody
+      // guessing whether to split it into two or twenty.
+      return { error: `That file is over ${MAX_IMPORT_BYTES / 1_000_000}MB. Split it and import each part.` };
+    }
+
+    const preview = await previewImport(q, csv);
+    if (preview.total === 0 && preview.issues.length === 0) {
+      return { error: "No rows found. Is the first line a header?" };
+    }
+    return { ok: true as const, preview };
+  });
+}
+
+/**
+ * Import the file.
+ *
+ * The whole import runs in one tenant transaction: a failure part-way leaves
+ * nothing behind, rather than half a contact list nobody can tell apart from a
+ * whole one.
+ */
+export async function importContactsAction(formData: FormData) {
+  return withCurrentTenant(async (q) => {
+    const csv = String(formData.get("csv") ?? "");
+    if (!csv.trim()) return { error: "Choose a CSV file." };
+    if (csv.length > MAX_IMPORT_BYTES) {
+      return { error: `That file is over ${MAX_IMPORT_BYTES / 1_000_000}MB. Split it and import each part.` };
+    }
+
+    const result = await importContacts(q, csv, { ownerUserId: q.ctx.userId });
+
+    logWrite("create", "contact_import", {
+      id: q.ctx.subAccountId,
+      detail: `${result.imported} imported, ${result.skipped} skipped`,
+    });
+    revalidateApp();
+    return { ok: true as const, ...result };
   });
 }

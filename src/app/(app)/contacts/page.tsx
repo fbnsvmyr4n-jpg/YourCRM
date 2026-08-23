@@ -3,7 +3,8 @@ import { listUsers } from "@/server/repos/users";
 import { contactSummaries } from "@/server/contact-summaries";
 import { withSystem } from "@/server/tenant";
 import { requireTenantPage, withTenantPage } from "@/server/tenant-session";
-import { ContactsView, decorate } from "./ContactsView";
+import { decorate } from "@/server/decorate-contact";
+import { ContactsView,  } from "./ContactsView";
 
 export const dynamic = "force-dynamic";
 
