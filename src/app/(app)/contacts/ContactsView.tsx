@@ -18,6 +18,7 @@ import {
   Phone,
   Plus,
   StickyNote,
+  ArrowUpDown,
   Trash2,
   Upload,
   User,
@@ -44,6 +45,9 @@ import { clsx } from "@/lib/clsx";
 import type { ImportPreview, ImportResult } from "@/server/import-contacts";
 import {
   addContactAction,
+  bulkAssignContactsAction,
+  bulkDeleteContactsAction,
+  bulkSetCompanyAction,
   importContactsAction,
   previewImportAction,
   addNoteAction,
@@ -63,10 +67,13 @@ export function ContactsView({
   contacts,
   summaries,
   currentUserId,
+  people = [],
+  companies = [],
 }: {
   contacts: Contact[];
   /** Colleagues who can own a record, for the assign control. */
   people?: { id: string; name: string }[];
+  companies?: { id: string; name: string }[];
   summaries: Record<string, ContactSummary>;
   currentUserId: string | null;
 }) {
@@ -75,6 +82,21 @@ export function ContactsView({
   const [panel, setPanel] = useState<Panel>(null);
   const [busy, setBusy] = useState(false);
   const [filter, setFilter] = useState<"all" | ContactType>("all");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
+
+  /**
+   * Won value per contact, for the "most valuable" order.
+   *
+   * Read from the summaries the page already loads rather than fetched again —
+   * the figure on the card and the figure the sort uses have to be the same
+   * number, or the order looks wrong to the person reading it.
+   */
+  const values = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const [id, s] of Object.entries(summaries)) out[id] = s.wonValueCents;
+    return out;
+  }, [summaries]);
   const [grouped, setGrouped] = useState(false);
 
   const contact = contacts.find((c) => c.id === selectedId) ?? contacts[0];
@@ -138,6 +160,20 @@ export function ContactsView({
           </div>
         </div>
         {modalEl}
+      {bulkOpen && (
+        <BulkActions
+          count={selected.size}
+          people={people}
+          companies={companies}
+          onClose={() => setBulkOpen(false)}
+          onDone={() => {
+            setSelected(new Set());
+            setBulkOpen(false);
+          }}
+          ids={[...selected]}
+        />
+      )}
+
       </div>
     );
   }
@@ -183,8 +219,26 @@ export function ContactsView({
         setFilter={setFilter}
         grouped={grouped}
         toggleGrouped={() => setGrouped((g) => !g)}
+        values={values}
+        selected={selected}
+        setSelected={setSelected}
+        onBulk={() => setBulkOpen(true)}
       />
       {modalEl}
+      {bulkOpen && (
+        <BulkActions
+          count={selected.size}
+          people={people}
+          companies={companies}
+          onClose={() => setBulkOpen(false)}
+          onDone={() => {
+            setSelected(new Set());
+            setBulkOpen(false);
+          }}
+          ids={[...selected]}
+        />
+      )}
+
     </div>
   );
 }
@@ -765,6 +819,54 @@ function ActivityPanel({
 
 /* ---------------- RIGHT: contacts list ---------------- */
 
+/**
+ * How the list can be ordered.
+ *
+ * There were no sort controls on any of twelve screens. Invisible at ten
+ * records and unusable at five hundred — which is exactly what a CSV import
+ * now produces on day one, so the two arrived together.
+ *
+ * "Recently added" is the default rather than alphabetical: after an import or
+ * a call, the person you want is the one you just created, and finding them
+ * alphabetically means knowing their surname.
+ */
+const SORTS = [
+  { id: "recent", label: "Recently added" },
+  { id: "name", label: "Name (A–Z)" },
+  { id: "company", label: "Company" },
+  { id: "value", label: "Most valuable" },
+] as const;
+type SortId = (typeof SORTS)[number]["id"];
+
+function sortContacts(rows: Contact[], sort: SortId, values: Record<string, number>): Contact[] {
+  const byName = (a: Contact, b: Contact) =>
+    `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`);
+
+  // Copied before sorting: `sort` mutates, and the array is React state
+  // rendered elsewhere on the page.
+  const out = [...rows];
+  switch (sort) {
+    case "name":
+      return out.sort(byName);
+    case "company":
+      // Contacts with no company sink rather than sorting under "" at the top,
+      // where they push everything else out of view.
+      return out.sort((a, b) => {
+        const ac = a.companyName ?? a.info ?? "";
+        const bc = b.companyName ?? b.info ?? "";
+        if (!ac && !bc) return byName(a, b);
+        if (!ac) return 1;
+        if (!bc) return -1;
+        return ac.localeCompare(bc) || byName(a, b);
+      });
+    case "value":
+      return out.sort((a, b) => (values[b.id] ?? 0) - (values[a.id] ?? 0) || byName(a, b));
+    case "recent":
+    default:
+      return out.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+}
+
 function ContactsList({
   contacts,
   selectedId,
@@ -776,6 +878,10 @@ function ContactsList({
   grouped,
   toggleGrouped,
   className,
+  values,
+  selected,
+  setSelected,
+  onBulk,
 }: {
   contacts: Contact[];
   selectedId: string;
@@ -787,8 +893,15 @@ function ContactsList({
   grouped: boolean;
   toggleGrouped: () => void;
   className?: string;
+  /** Won value per contact, for the "most valuable" order. */
+  values: Record<string, number>;
+  selected: Set<string>;
+  setSelected: (next: Set<string>) => void;
+  onBulk: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [sortOpen, setSortOpen] = useState(false);
+  const [sort, setSort] = useState<SortId>("recent");
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -805,10 +918,19 @@ function ContactsList({
     };
   }, [menuOpen]);
 
-  const visible = useMemo(
-    () => (filter === "all" ? contacts : contacts.filter((c) => c.type === filter)),
-    [contacts, filter]
-  );
+  const visible = useMemo(() => {
+    const filtered = filter === "all" ? contacts : contacts.filter((c) => c.type === filter);
+    return sortContacts(filtered, sort, values);
+  }, [contacts, filter, sort, values]);
+
+  const allShown = visible.length > 0 && visible.every((c) => selected.has(c.id));
+
+  const toggle = (id: string) => {
+    const next = new Set(selected);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelected(next);
+  };
 
   const groups = useMemo(() => {
     if (!grouped) return null;
@@ -847,6 +969,19 @@ function ContactsList({
           </button>
 
           <button
+            onClick={() => setSortOpen((o) => !o)}
+            title="Sort"
+            aria-expanded={sortOpen}
+            className={clsx(
+              "focus-ring grid h-9 w-9 place-items-center rounded-full transition-colors",
+              sort !== "recent" ? "text-accent" : "btn-soft text-muted"
+            )}
+            style={sort !== "recent" ? { background: "var(--accent-soft)" } : undefined}
+          >
+            <ArrowUpDown className="h-4 w-4" />
+          </button>
+
+          <button
             onClick={() => setMenuOpen((m) => !m)}
             title="Filter by type"
             aria-expanded={menuOpen}
@@ -875,6 +1010,32 @@ function ContactsList({
             <Plus className="h-[18px] w-[18px]" />
           </button>
 
+          {sortOpen && (
+            <div
+              className="absolute right-0 top-11 z-20 w-52 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--panel-solid)] py-1 shadow-lg"
+              role="menu"
+            >
+              {SORTS.map((o) => (
+                <button
+                  key={o.id}
+                  role="menuitemradio"
+                  aria-checked={sort === o.id}
+                  onClick={() => {
+                    setSort(o.id);
+                    setSortOpen(false);
+                  }}
+                  className={clsx(
+                    "flex w-full items-center justify-between px-3.5 py-2 text-left text-sm transition-colors hover:bg-[var(--surface-2)]",
+                    sort === o.id && "text-accent"
+                  )}
+                >
+                  {o.label}
+                  {sort === o.id && <Check className="h-3.5 w-3.5" />}
+                </button>
+              ))}
+            </div>
+          )}
+
           {menuOpen && (
             <div
               ref={menuRef}
@@ -899,6 +1060,39 @@ function ContactsList({
         </div>
       </div>
 
+      {/**
+        * The selection bar, shown only once something is selected.
+        *
+        * Always-visible checkboxes on a list you mostly click through are
+        * clutter; a bar that appears when it is relevant is not. Selecting is
+        * done by the checkbox that appears on hover or focus, so a keyboard
+        * user can reach it.
+        */}
+      {selected.size > 0 && (
+        <div
+          className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl px-3.5 py-2.5"
+          style={{ background: "var(--accent-soft)" }}
+        >
+          <span className="text-sm font-medium text-accent">
+            {selected.size} selected
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSelected(allShown ? new Set() : new Set(visible.map((c) => c.id)))}
+              className="focus-ring rounded-lg px-2.5 py-1 text-xs font-medium text-accent"
+            >
+              {allShown ? "Clear" : `Select all ${visible.length}`}
+            </button>
+            <button
+              onClick={onBulk}
+              className="btn-accent focus-ring rounded-lg px-3 py-1.5 text-xs font-semibold"
+            >
+              Actions
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="-mx-2 -my-1 flex flex-1 scroll-p-1 flex-col gap-2 overflow-y-auto px-2 py-1">
         {visible.length === 0 && <p className="mt-6 text-center text-sm text-faint">No contacts match this filter.</p>}
 
@@ -911,13 +1105,27 @@ function ContactsList({
                 </p>
                 <div className="flex flex-col gap-2">
                   {g.rows.map((c) => (
-                    <ContactRow key={c.id} contact={c} active={c.id === selectedId} onSelect={onSelect} />
+                    <ContactRow
+                      key={c.id}
+                      contact={c}
+                      active={c.id === selectedId}
+                      onSelect={onSelect}
+                      checked={selected.has(c.id)}
+                      onToggle={() => toggle(c.id)}
+                    />
                   ))}
                 </div>
               </div>
             ))
           : visible.map((c) => (
-              <ContactRow key={c.id} contact={c} active={c.id === selectedId} onSelect={onSelect} />
+              <ContactRow
+                key={c.id}
+                contact={c}
+                active={c.id === selectedId}
+                onSelect={onSelect}
+                checked={selected.has(c.id)}
+                onToggle={() => toggle(c.id)}
+              />
             ))}
       </div>
     </aside>
@@ -928,21 +1136,54 @@ function ContactRow({
   contact,
   active,
   onSelect,
+  checked,
+  onToggle,
 }: {
   contact: Contact;
   active: boolean;
   onSelect: (id: string) => void;
+  checked: boolean;
+  onToggle: () => void;
 }) {
   const isLead = contact.type === "lead";
   return (
-    <button
+    /**
+     * A div, not a button.
+     *
+     * The row used to be one button, and a checkbox inside a button is invalid
+     * HTML that browsers resolve by dropping the inner control — the box would
+     * render and refuse to be clicked. The row keeps its keyboard behaviour
+     * through role and key handling instead.
+     */
+    <div
+      role="button"
+      tabIndex={0}
       onClick={() => onSelect(contact.id)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect(contact.id);
+        }
+      }}
       className={clsx(
-        "focus-ring flex items-center gap-3 rounded-2xl border p-3 text-left transition-colors",
+        "group focus-ring flex cursor-pointer items-center gap-3 rounded-2xl border p-3 text-left transition-colors",
         active ? "border-[var(--border-strong)]" : "border-[var(--border)] hover:border-[var(--border-strong)]"
       )}
       style={active ? { background: "var(--accent-soft)" } : undefined}
     >
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={onToggle}
+        onClick={(e) => e.stopPropagation()}
+        aria-label={`Select ${contact.firstName} ${contact.lastName}`}
+        className={clsx(
+          "h-4 w-4 shrink-0 cursor-pointer accent-[var(--accent)] transition-opacity",
+          // Revealed on hover OR focus OR when already checked. Focus matters:
+          // hover-only leaves a keyboard user tabbing onto an invisible control.
+          checked ? "opacity-100" : "opacity-0 focus:opacity-100 group-hover:opacity-100"
+        )}
+      />
       <Avatar initials={contact.initials} color={contact.color} />
       <div className="min-w-0 flex-1 leading-tight">
         <p className="truncate text-sm font-semibold">
@@ -960,7 +1201,7 @@ function ContactRow({
         {isLead ? "LEAD" : "CLIENT"}
       </span>
       <ChevronRight className="h-4 w-4 shrink-0 text-faint" />
-    </button>
+    </div>
   );
 }
 
@@ -1294,6 +1535,152 @@ function ImportModal({ onClose }: { onClose: () => void }) {
                   Done
                 </button>
               </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </Overlay>
+  );
+}
+
+/**
+ * What can be done to a selection.
+ *
+ * Assign, move to a company, delete. Three because those are the three
+ * one-at-a-time operations somebody would otherwise repeat five hundred times
+ * after an import — the point at which a CRM stops being usable.
+ *
+ * Every action reports how many rows it ACTUALLY changed, not how many were
+ * selected. An id that no longer exists, or belongs to another workspace,
+ * matches nothing — and "12 updated" when 9 changed is the sort of confident
+ * wrong number that stops anybody checking.
+ */
+function BulkActions({
+  ids,
+  count,
+  people,
+  companies,
+  onClose,
+  onDone,
+}: {
+  ids: string[];
+  count: number;
+  people: { id: string; name: string }[];
+  companies: { id: string; name: string }[];
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  async function run(fn: () => Promise<{ error?: string; changed?: number }>) {
+    setBusy(true);
+    setError(null);
+    const result = await fn();
+    setBusy(false);
+    if (result.error) setError(result.error);
+    else onDone();
+  }
+
+  return (
+    <Overlay>
+      <div className="fixed inset-0 z-50 grid place-items-center p-4" role="dialog" aria-modal="true">
+        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+        <div className="modal-surface relative z-10 w-full max-w-sm p-6">
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <h2 className="text-lg font-semibold tracking-tight">
+              {count} {count === 1 ? "contact" : "contacts"}
+            </h2>
+            <button type="button" onClick={onClose} className="shrink-0 text-faint hover:text-[var(--text)]" aria-label="Close">
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+
+          {error && (
+            <p className="mb-3 rounded-xl px-3.5 py-2.5 text-sm" style={{ background: "var(--red-soft)", color: "var(--red)" }}>
+              {error}
+            </p>
+          )}
+
+          {confirmDelete ? (
+            <div>
+              {/* Soft, and it says so. Somebody who has just selected all five
+                  hundred needs to know this is recoverable before they press
+                  it, not after. */}
+              <p className="text-sm text-muted">
+                {count === 1 ? "This contact" : `These ${count} contacts`} will be removed from
+                the list. Their deals and history stay, and they can be restored.
+              </p>
+              <div className="mt-4 flex justify-end gap-2">
+                <button type="button" onClick={() => setConfirmDelete(false)} className="btn-soft focus-ring rounded-xl px-4 py-2 text-sm font-medium">
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void run(() => bulkDeleteContactsAction(ids))}
+                  className="btn-soft focus-ring rounded-xl px-4 py-2 text-sm font-semibold text-red disabled:opacity-60"
+                >
+                  {busy ? "Removing…" : "Remove"}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-4">
+              <label className="block">
+                <span className="mb-1.5 block text-xs font-medium text-muted">Assign to</span>
+                <select
+                  defaultValue=""
+                  disabled={busy}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v !== "") void run(() => bulkAssignContactsAction(ids, v === "none" ? null : v));
+                  }}
+                  className="field-input"
+                >
+                  <option value="" disabled>
+                    Choose somebody
+                  </option>
+                  <option value="none">Nobody (unassign)</option>
+                  {people.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="block">
+                <span className="mb-1.5 block text-xs font-medium text-muted">Move to company</span>
+                <select
+                  defaultValue=""
+                  disabled={busy || companies.length === 0}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v !== "") void run(() => bulkSetCompanyAction(ids, v === "none" ? null : v));
+                  }}
+                  className="field-input"
+                >
+                  <option value="" disabled>
+                    {companies.length === 0 ? "No companies yet" : "Choose a company"}
+                  </option>
+                  <option value="none">None</option>
+                  {companies.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <button
+                type="button"
+                onClick={() => setConfirmDelete(true)}
+                className="btn-soft focus-ring rounded-xl px-4 py-2.5 text-sm font-semibold text-red"
+              >
+                Remove {count === 1 ? "contact" : "contacts"}
+              </button>
             </div>
           )}
         </div>

@@ -15,6 +15,12 @@ import { withCurrentTenant } from "@/server/tenant-session";
 import { email as validEmail, id as validId, multiline, text } from "@/server/validate";
 import { logWrite } from "@/server/log";
 import { importContacts, previewImport } from "@/server/import-contacts";
+import {
+  BULK_LIMIT,
+  bulkAssignOwner,
+  bulkDeleteContacts,
+  bulkSetCompany,
+} from "@/server/repos/contacts";
 
 /**
  * Contact actions, on the relational schema.
@@ -272,5 +278,79 @@ export async function importContactsAction(formData: FormData) {
     });
     revalidateApp();
     return { ok: true as const, ...result };
+  });
+}
+
+
+/**
+ * Bulk actions.
+ *
+ * Every one reports how many rows it actually changed, not how many were
+ * selected. An id from another workspace matches nothing, and saying "12
+ * updated" when 12 were selected and 9 changed is the kind of confident wrong
+ * number that stops anybody checking.
+ */
+type BulkResult = { error: string } | { ok: true; changed: number };
+
+/** Ids arrive from a browser: cleaned, capped, and de-duplicated here. */
+function readIds(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const ids = raw
+    .map((v) => (typeof v === "string" ? validId(v) : null))
+    .filter((v): v is string => !!v);
+  return [...new Set(ids)].slice(0, BULK_LIMIT);
+}
+
+export async function bulkAssignContactsAction(
+  ids: string[],
+  ownerUserId: string | null
+): Promise<BulkResult> {
+  return withCurrentTenant(async (q) => {
+    const clean = readIds(ids);
+    if (clean.length === 0) return { error: "Nothing selected." };
+
+    const owner = ownerUserId ? validId(ownerUserId) : null;
+    if (ownerUserId && !owner) return { error: "That person is not on this account." };
+
+    const changed = await bulkAssignOwner(q, clean, owner);
+    logWrite("update", "contact", { id: `${changed} contacts`, detail: "bulk assign" });
+    revalidateApp();
+    return { ok: true as const, changed };
+  });
+}
+
+export async function bulkSetCompanyAction(
+  ids: string[],
+  companyId: string | null
+): Promise<BulkResult> {
+  return withCurrentTenant(async (q) => {
+    const clean = readIds(ids);
+    if (clean.length === 0) return { error: "Nothing selected." };
+
+    const company = companyId ? validId(companyId) : null;
+    if (companyId && !company) return { error: "That company no longer exists." };
+
+    const changed = await bulkSetCompany(q, clean, company);
+    if (changed === 0 && company) {
+      // The company predicate is all-or-nothing, so zero changed with a company
+      // named means the company itself was rejected — worth saying, rather than
+      // reporting a cheerful "0 updated".
+      return { error: "That company no longer exists." };
+    }
+    logWrite("update", "contact", { id: `${changed} contacts`, detail: "bulk company" });
+    revalidateApp();
+    return { ok: true as const, changed };
+  });
+}
+
+export async function bulkDeleteContactsAction(ids: string[]): Promise<BulkResult> {
+  return withCurrentTenant(async (q) => {
+    const clean = readIds(ids);
+    if (clean.length === 0) return { error: "Nothing selected." };
+
+    const changed = await bulkDeleteContacts(q, clean);
+    logWrite("delete", "contact", { id: `${changed} contacts`, detail: "bulk delete" });
+    revalidateApp();
+    return { ok: true as const, changed };
   });
 }

@@ -243,6 +243,79 @@ export async function deleteContact(q: TenantQuery, id: string): Promise<boolean
   return row !== null;
 }
 
+/**
+ * The most rows one bulk action may touch.
+ *
+ * Not a performance limit — the statements below are single queries. It is a
+ * blast radius: a mis-click on "select all" after importing five hundred
+ * contacts should not be able to delete an entire book of business in one
+ * request, and a cap means the mistake is partial and obvious rather than total
+ * and silent.
+ */
+export const BULK_LIMIT = 500;
+
+/**
+ * Bulk operations, as one statement each.
+ *
+ * `= ANY($2)` rather than a loop: five hundred contacts is five hundred round
+ * trips otherwise, and — far worse — a failure halfway leaves half the
+ * selection changed with nothing to say which half. One statement is atomic.
+ *
+ * Every one filters `sub_account_id` itself. The ids arrive from a browser, so
+ * an id from another workspace simply matches nothing rather than being acted
+ * on; the count that comes back is the count that was actually changed, which
+ * is what the caller reports.
+ */
+export async function bulkAssignOwner(
+  q: TenantQuery,
+  ids: string[],
+  ownerUserId: string | null
+): Promise<number> {
+  if (ids.length === 0) return 0;
+  const rows = await q.rows<{ id: string }>(
+    `UPDATE contacts SET owner_user_id = $3, updated_at = now()
+     WHERE id = ANY($2) AND sub_account_id = $1 AND deleted_at IS NULL
+     RETURNING id`,
+    [q.ctx.subAccountId, ids.slice(0, BULK_LIMIT), ownerUserId]
+  );
+  return rows.length;
+}
+
+export async function bulkSetCompany(
+  q: TenantQuery,
+  ids: string[],
+  companyId: string | null
+): Promise<number> {
+  if (ids.length === 0) return 0;
+  const rows = await q.rows<{ id: string }>(
+    `UPDATE contacts SET company_id = $3, updated_at = now()
+     WHERE id = ANY($2) AND sub_account_id = $1 AND deleted_at IS NULL
+       -- A company from another workspace matches nothing here, so the whole
+       -- statement changes no rows rather than moving people into a stranger's
+       -- account.
+       AND ($3::text IS NULL OR EXISTS (
+         SELECT 1 FROM companies co
+         WHERE co.id = $3 AND co.sub_account_id = $1 AND co.deleted_at IS NULL
+       ))
+     RETURNING id`,
+    [q.ctx.subAccountId, ids.slice(0, BULK_LIMIT), companyId]
+  );
+  return rows.length;
+}
+
+export async function bulkDeleteContacts(q: TenantQuery, ids: string[]): Promise<number> {
+  if (ids.length === 0) return 0;
+  // Soft, like every delete here. The audit found a record destroyed and only
+  // partly reconstructed because there was nothing to restore from.
+  const rows = await q.rows<{ id: string }>(
+    `UPDATE contacts SET deleted_at = now(), updated_at = now()
+     WHERE id = ANY($2) AND sub_account_id = $1 AND deleted_at IS NULL
+     RETURNING id`,
+    [q.ctx.subAccountId, ids.slice(0, BULK_LIMIT)]
+  );
+  return rows.length;
+}
+
 export async function restoreContact(q: TenantQuery, id: string): Promise<boolean> {
   // The point of a tombstone. The audit found a record destroyed during it and
   // only partly reconstructed, because there was nothing to restore from.

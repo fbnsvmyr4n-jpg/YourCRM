@@ -1,3 +1,4 @@
+import { listCompanies } from "@/server/repos/companies";
 import { listContacts } from "@/server/repos/contacts";
 import { listUsers } from "@/server/repos/users";
 import { contactSummaries } from "@/server/contact-summaries";
@@ -18,11 +19,14 @@ export default async function ContactsPage() {
   // through the system path because users are agency-level, not tenant-level.
   const people = await withSystem((q) => listUsers(q, ctx.agencyId));
 
-  const { contacts, summaries } = await withTenantPage(async (q) => {
+  const { contacts, summaries, companies } = await withTenantPage(async (q) => {
     const rows = await listContacts(q);
     return {
       contacts: rows.map((c) => decorate(c, people)),
       summaries: await contactSummaries(q, rows.map((c) => c.id)),
+      // For the bulk "move to company" action. Read in the same transaction,
+      // so the list cannot offer a company the same request would not find.
+      companies: await listCompanies(q),
     };
   });
 
@@ -32,6 +36,7 @@ export default async function ContactsPage() {
       summaries={summaries}
       currentUserId={ctx.userId}
       people={people.map((p) => ({ id: p.id, name: p.name }))}
+      companies={companies.map((c) => ({ id: c.id, name: c.name }))}
     />
   );
 }
