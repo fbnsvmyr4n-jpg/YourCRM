@@ -17,6 +17,7 @@ import {
   type Stage,
 } from "@/server/repos/deals";
 import { logActivity } from "@/server/repos/activity";
+import { recordReferral } from "@/server/referrals";
 import { withCurrentTenant } from "@/server/tenant-session";
 import { id as validId, money, multiline, pick, text } from "@/server/validate";
 import { logWrite } from "@/server/log";
@@ -177,6 +178,53 @@ export async function addPainPointsAction(id: string, formData: FormData) {
  * stored — a server action's arguments are as forgeable as any form field, and
  * this one moves money between columns.
  */
+/**
+ * Record a referral: a new prospect, attributed to whoever sent them.
+ *
+ * The Referral stage's exit condition is "Feeds back into Prospect", and
+ * nothing made that happen — the cycle ran in somebody's head, or more usually
+ * did not run at all.
+ *
+ * One transaction, because the person and the opportunity must not half-exist:
+ * a contact with no deal is a name nobody follows up, and a deal with no
+ * contact is a card with nobody to call.
+ */
+export async function recordReferralAction(fromDealId: string, formData: FormData) {
+  return withCurrentTenant(async (q) => {
+    const dealId = validId(fromDealId);
+    if (!dealId) return { error: "Deal not found." };
+
+    // The referrer is taken from the deal being viewed, not from the form. A
+    // form field would be an id the browser controls, and attributing a
+    // referral to an arbitrary contact is how a reward programme gets gamed.
+    const deal = await getDeal(q, dealId);
+    if (!deal?.contactId) {
+      return { error: "This deal has no contact, so there is nobody to credit." };
+    }
+
+    const firstName = text(formData.get("firstName"), 80);
+    const lastName = text(formData.get("lastName"), 80);
+    const email = text(formData.get("email"), 160);
+    const phone = text(formData.get("phone"), 40);
+    const note = multiline(formData.get("note"), 500);
+
+    if (!firstName && !lastName) return { error: "Give the person a name." };
+
+    const result = await recordReferral(q, {
+      referrerContactId: deal.contactId,
+      firstName: firstName ?? "",
+      lastName: lastName ?? "",
+      email,
+      phone,
+      note,
+    });
+    if (!result.ok) return { error: result.error };
+
+    revalidateApp();
+    return { ok: true as const, dealId: result.deal.id };
+  });
+}
+
 export async function removePainPointAction(id: string, point: string) {
   return withCurrentTenant(async (q) => {
     const dealId = validId(id);

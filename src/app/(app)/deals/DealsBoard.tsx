@@ -16,6 +16,7 @@ import {
   deleteDealAction,
   moveDealAction,
   recordPaymentAction,
+  recordReferralAction,
   removePainPointAction,
   setDealValueAction,
 } from "./actions";
@@ -548,6 +549,8 @@ function DealModal({
 
           <PainPoints deal={deal} busy={busy} onChange={onPainPoints} />
 
+          <AskForReferral deal={deal} busy={busy} />
+
           {isPartiallyPaid(deal) && deal.splitTotal && (
             <div className="mb-4 rounded-xl p-3" style={{ background: "rgba(249,115,22,0.10)" }}>
               <p className="text-sm font-semibold" style={{ color: PARTIAL }}>
@@ -636,10 +639,23 @@ function DealModal({
           )}
 
           {!canPay && !canValue && (
+            /**
+             * Every post-close stage, not just Won.
+             *
+             * This branch tested `stage === "won"` and sent everything else to
+             * "deals in this stage don't carry a value yet" — so a delivered
+             * deal worth $12,000 was told it had no value. Delivery and
+             * Referral are won stages; they came after this message was
+             * written and inherited the wrong half of it.
+             */
             <p className="rounded-xl border border-[var(--border)] p-4 text-sm text-muted">
               {deal.stage === "won"
                 ? "This deal is settled in full."
-                : "Deals in this stage don't carry a value yet — move it to Discovery once there's a number to put on it."}
+                : deal.stage === "delivery"
+                  ? "Won and being delivered. This is where the referral comes from."
+                  : deal.stage === "referral"
+                    ? "Won, delivered, and asked. Anyone they name starts again at Prospect."
+                    : "Deals in this stage don't carry a value yet — move it to Discovery once there's a number to put on it."}
             </p>
           )}
         </div>
@@ -803,6 +819,130 @@ function PainPoints({
       {error && !adding && (
         <p className="mt-2 text-xs" style={{ color: "var(--red)" }}>
           {error}
+        </p>
+      )}
+    </section>
+  );
+}
+
+/**
+ * Closing the loop: who else has this problem?
+ *
+ * Offered in Delivery and Referral, and nowhere else. Asking during Discovery
+ * is asking a stranger for a favour; asking once the work is done and visibly
+ * working is asking a happy customer an easy question — and it is the cheapest
+ * pipeline there is.
+ *
+ * The Referral column's exit condition has always read "Feeds back into
+ * Prospect". Nothing made that happen, so the cycle ran in somebody's head or,
+ * far more often, not at all. This is the step that makes the board's own
+ * promise true.
+ *
+ * What the referrer says about the person is kept as the new prospect's first
+ * pain point. It is the closest thing to Discovery that exists before Discovery
+ * happens, and it is exactly what to open the first call with.
+ */
+function AskForReferral({ deal, busy }: { deal: Deal; busy: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState<string | null>(null);
+
+  // Post-close only. `wonAt` rather than the column, so a deal that has moved
+  // on to Delivery or Referral still qualifies.
+  if (deal.stage !== "delivery" && deal.stage !== "referral") return null;
+
+  return (
+    <section className="mb-3 rounded-xl border border-[var(--border)] p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold">Who else has this problem?</p>
+          <p className="mt-0.5 text-xs text-muted">
+            {done
+              ? "Added to Prospect, credited to this client."
+              : "The work is done and working. This is the moment to ask."}
+          </p>
+        </div>
+        {!open && !done && (
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            className="btn-accent focus-ring shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold"
+          >
+            Add referral
+          </button>
+        )}
+      </div>
+
+      {open && (
+        <form
+          action={async (formData: FormData) => {
+            setError(null);
+            const result = await recordReferralAction(deal.id, formData);
+            if ("error" in result && result.error) setError(result.error);
+            else {
+              setDone(result.dealId ?? "");
+              setOpen(false);
+            }
+          }}
+          className="mt-3 space-y-3"
+        >
+          <div className="grid grid-cols-1 gap-3 @min-[420px]:grid-cols-2">
+            <label className="block">
+              <span className="mb-1.5 block text-xs font-medium text-muted">First name</span>
+              <input name="firstName" required autoFocus className="field-input" />
+            </label>
+            <label className="block">
+              <span className="mb-1.5 block text-xs font-medium text-muted">Last name</span>
+              <input name="lastName" className="field-input" />
+            </label>
+            <label className="block">
+              <span className="mb-1.5 block text-xs font-medium text-muted">Email (optional)</span>
+              <input name="email" type="email" className="field-input" />
+            </label>
+            <label className="block">
+              <span className="mb-1.5 block text-xs font-medium text-muted">Phone (optional)</span>
+              <input name="phone" className="field-input" />
+            </label>
+          </div>
+          <label className="block">
+            <span className="mb-1.5 block text-xs font-medium text-muted">
+              What did they say about them?
+            </span>
+            <textarea
+              name="note"
+              rows={2}
+              placeholder="Same problem with missed calls — runs two branches"
+              className="field-input resize-y"
+            />
+          </label>
+
+          {error && <p className="text-xs" style={{ color: "var(--red)" }}>{error}</p>}
+
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => { setOpen(false); setError(null); }}
+              className="btn-soft focus-ring rounded-lg px-3 py-1.5 text-xs font-medium"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={busy}
+              className="btn-accent focus-ring rounded-lg px-3 py-1.5 text-xs font-semibold disabled:opacity-60"
+            >
+              Create prospect
+            </button>
+          </div>
+        </form>
+      )}
+
+      {done && (
+        <p
+          className="mt-3 rounded-lg px-3 py-2 text-xs"
+          style={{ background: "var(--green-soft)", color: "var(--green)" }}
+        >
+          They are in Prospect now, and this client is credited with the referral.
         </p>
       )}
     </section>

@@ -190,7 +190,7 @@ describe("statistics count only what is known", () => {
 
     const s = await inA((q) => repo.meetingStats(q));
     expect(s).toMatchObject({ total: 3, pending: 1, recorded: 2, attended: 1, noShow: 1 });
-    expect(s.showRate, "pending meetings leaked into the denominator").toBe(0.5);
+    expect(s.showRate, "pending meetings leaked into the denominator").toBe(50);
   });
 
   it("counts every attended outcome as attended, not just 'showed'", async () => {
@@ -204,7 +204,7 @@ describe("statistics count only what is known", () => {
 
     const s = await inA((q) => repo.meetingStats(q));
     expect(s.attended, "a meeting that advanced or was lost still happened").toBe(4);
-    expect(s.showRate).toBe(1);
+    expect(s.showRate).toBe(100);
   });
 
   it("computes win rate out of decided meetings only", async () => {
@@ -217,7 +217,7 @@ describe("statistics count only what is known", () => {
     await inA((q) => repo.recordOutcome(q, open.id, "showed"));
 
     const s = await inA((q) => repo.meetingStats(q));
-    expect(s.winRate, "an undecided meeting was counted as a loss").toBe(0.5);
+    expect(s.winRate, "an undecided meeting was counted as a loss").toBe(50);
   });
 
   it("ignores deleted meetings", async () => {

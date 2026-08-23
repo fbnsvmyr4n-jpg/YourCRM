@@ -98,9 +98,10 @@ export async function meetingAnalytics(q: TenantQuery): Promise<MeetingAnalytics
     advanced,
     won,
     lost,
-    showRate: decided > 0 ? attended / decided : null,
+    // Percentages, 0–100. See the note on `winRate` in analytics.ts.
+    showRate: decided > 0 ? Math.round((attended / decided) * 100) : null,
     // Out of decided meetings, not out of everything ever booked.
-    conversion: decided > 0 ? won / decided : null,
+    conversion: decided > 0 ? Math.round((won / decided) * 100) : null,
     lossRate: decided > 0 ? lossTotal / decided : null,
 
     // The funnel is in process order: booked → showed → advanced → won. Each

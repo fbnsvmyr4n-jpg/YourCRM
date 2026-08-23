@@ -355,11 +355,12 @@ export async function meetingStats(q: TenantQuery): Promise<MeetingStats> {
     attended,
     won,
     lost,
-    showRate: recorded > 0 ? attended / recorded : null,
+    showRate: recorded > 0 ? Math.round((attended / recorded) * 100) : null,
     // Out of decided meetings only. Including still-open ones would make the
     // win rate fall every time a meeting is booked, which is the arithmetic
     // error the deal pipeline had.
-    winRate: won + lost > 0 ? won / (won + lost) : null,
+    // Percentage, 0–100 — the unit every rate in the product uses.
+    winRate: won + lost > 0 ? Math.round((won / (won + lost)) * 100) : null,
   };
 }
 

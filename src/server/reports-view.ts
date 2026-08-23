@@ -232,7 +232,8 @@ export async function reportView(q: TenantQuery): Promise<ReportView> {
 
     // Null rather than zero with nobody on file: a 0% conversion on an empty
     // account is a number that looks like a verdict.
-    leadConversion: totalPeople > 0 ? r.contacts.clients / totalPeople : null,
+    // Percentage, 0–100 — the unit every rate in the product uses.
+    leadConversion: totalPeople > 0 ? Math.round((r.contacts.clients / totalPeople) * 100) : null,
 
     followUps: followUps.map((f) => ({
       id: f.id,

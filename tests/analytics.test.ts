@@ -122,7 +122,8 @@ describe("win rate is out of decided deals", () => {
       ('d5','${TENANT_A}',NULL,NULL,'O2',100000,'discovery','other',NULL,NULL),
       ('d6','${TENANT_A}',NULL,NULL,'O3',100000,'demo','other',NULL,NULL)`);
 
-    expect((await report()).winRate).toBeCloseTo(2 / 3, 10);
+    // A percentage, not a ratio: 2 of 3 is 67, and it is printed with a % sign.
+    expect((await report()).winRate).toBe(67);
   });
 
   it("does not move when an open deal is added", async () => {

@@ -233,7 +233,16 @@ export async function reportData(q: TenantQuery): Promise<ReportData> {
       avgWonDealCents: wonCount > 0 ? Math.round(n(totals?.won_cents) / wonCount) : null,
     },
 
-    winRate: decided > 0 ? wonCount / decided : null,
+    /**
+     * A PERCENTAGE, 0–100 — not a ratio.
+     *
+     * This returned `wonCount / decided` while every formatter printed
+     * `${v}%`, so a perfect record rendered as "1%" and a two-in-three record
+     * as "0.67%". Three different producers returned ratios, one returned a
+     * percentage, and a single formatter appended the sign to all of them.
+     * Every rate in the product now means the same thing.
+     */
+    winRate: decided > 0 ? Math.round((wonCount / decided) * 100) : null,
 
     // Every stage appears, including the empty ones: a pipeline chart that
     // silently drops a stage with no deals in it makes the funnel look shorter

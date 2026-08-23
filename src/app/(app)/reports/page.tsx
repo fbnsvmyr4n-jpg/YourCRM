@@ -4,6 +4,7 @@ import {
   Headset,
   HelpCircle,
   Radar,
+  Share2,
   TrendingUp,
   Trophy,
   UserPlus,
@@ -12,6 +13,7 @@ import {
 import { Avatar } from "@/components/ui/Avatar";
 import { AreaChart } from "@/components/ui/AreaChart";
 import { Card, CardHeader } from "@/components/ui/Card";
+import { referralCredits } from "@/server/referrals";
 import { reportView } from "@/server/reports-view";
 import { withTenantPage } from "@/server/tenant-session";
 import { ExportButton } from "./ExportButton";
@@ -36,7 +38,12 @@ const barFill = (color: string) =>
 const rate = (v: number | null) => (v === null ? "—" : `${v}%`);
 
 export default async function ReportsPage() {
-  const r = await withTenantPage((q) => reportView(q));
+  // Both in one tenant transaction — a referrer's credit cannot describe deals
+  // a different read would not return.
+  const { r, referrers } = await withTenantPage(async (q) => ({
+    r: await reportView(q),
+    referrers: await referralCredits(q),
+  }));
 
   const kpis = [
     {
@@ -612,6 +619,37 @@ export default async function ReportsPage() {
           </Card>
       </div>
       {/* Only rendered when there is more than one owner to compare. */}
+      {referrers.length > 0 && (
+        <div className="mt-5">
+          <Card>
+            <CardHeader
+              title="Who sends you work"
+              icon={<Share2 className="h-[18px] w-[18px] text-accent" />}
+            />
+            {/* Counted from the foreign key on each referred deal, so it cannot
+                drift from the deals it describes. Won and open are kept apart:
+                a referrer who sent five that went nowhere is not the same as
+                one who sent two that closed, and a blended number would hide
+                the difference exactly when it is being used to decide who gets
+                thanked. */}
+            <div className="space-y-3 pt-1">
+              {referrers.map((p) => (
+                <div key={p.contactId} className="flex flex-wrap items-center gap-3">
+                  <span className="w-40 shrink-0 truncate text-sm font-medium">{p.name}</span>
+                  <span className="flex-1 text-xs text-faint tabular-nums">
+                    {p.referrals} referred · {p.won} won
+                    {p.openCents > 0 && ` · ${money(p.openCents / 100)} still open`}
+                  </span>
+                  <span className="shrink-0 text-sm font-semibold tabular-nums" style={{ color: "var(--green)" }}>
+                    {money(p.wonCents / 100)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </Card>
+        </div>
+      )}
+
       {r.owners.length > 0 && (
         <div className="mt-5">
           <Card>
