@@ -89,8 +89,23 @@ export function ridge(value: number, from: number, peak: number, to: number): nu
  * person can reason about and a monitor cannot change.
  */
 export function approach(current: number, target: number, halfLifeMs: number, elapsedMs: number): number {
-  if (halfLifeMs <= 0 || elapsedMs <= 0) return target;
+  // No easing configured: there is nothing to travel through, so arrive.
+  if (halfLifeMs <= 0) return target;
+  // Nothing to ease FROM.
   if (!Number.isFinite(current)) return target;
+
+  /**
+   * No time passed means no movement — not instant arrival.
+   *
+   * This returned `target` at first, which is a jump dressed as an easing. Two
+   * ways it fires, and the second is the one that matters: two frames landing
+   * in the same millisecond on a fast machine, and the system clock stepping
+   * BACKWARDS — an NTP correction, the end of daylight saving, or somebody
+   * setting their clock. §20 lists that last case in the test matrix, and the
+   * old behaviour answered it with the exact hard cut §29 forbids.
+   */
+  if (elapsedMs <= 0) return current;
+
   const remaining = Math.pow(0.5, elapsedMs / halfLifeMs);
   return target + (current - target) * remaining;
 }

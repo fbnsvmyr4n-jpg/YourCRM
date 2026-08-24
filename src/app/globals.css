@@ -1482,11 +1482,19 @@ textarea.field-input {
   inset: 0;
   background: radial-gradient(
     150% 55% at 50% 102%,
-    color-mix(in oklab, #ffb066 calc(var(--env-warmth, 0) * 100%), #6fb2ea)
-      calc(var(--env-haze, 0) * 6%),
+    color-mix(in oklab, #ffb066 calc(var(--env-warmth, 0) * 100%), #6fb2ea) 0%,
     transparent 70%
   );
-  opacity: calc(0.25 + var(--env-haze, 0) * 0.55);
+  /*
+     No floor, and scaled by DAYLIGHT as well as haze.
+
+     This was `0.25 + haze * 0.55`, which never went below a quarter — so a
+     light blue sat across the bottom of the frame at midnight, brightest on a
+     tall phone where 55% of the viewport is a long way. Haze is scattered
+     sunlight: with no sun there is none of it, and the floor was painting the
+     one thing night should not have.
+  */
+  opacity: calc(var(--env-haze, 0) * var(--env-daylight, 0) * 0.85);
 }
 
 /* ---------------- The sun ---------------- */
@@ -1650,12 +1658,20 @@ textarea.field-input {
     ),
     /* The cool scattered rim everywhere else, which never fully leaves. */
     radial-gradient(
-      140% 20% at 50% 100%,
+      140% calc(9% + var(--env-limb-intensity, 0.18) * 13%) at 50% 100%,
       rgba(150, 200, 255, 0.5) 0%,
       rgba(90, 150, 220, 0.16) 42%,
       transparent 76%
     );
-  opacity: calc(0.35 + var(--env-limb-intensity, 0.18) * 0.65);
+  /*
+     Steeply scaled, and the floor is low on purpose.
+     At `0.35 + intensity * 0.65` the night floor landed near 0.47, which over a
+     tall phone viewport painted a broad blue wash across the bottom third — a
+     glow where the reference frames show a thin bright arc on black. Squared,
+     the rim stays present at night without lighting the sky it is supposed to
+     be separating from space.
+  */
+  opacity: calc(0.06 + var(--env-limb-intensity, 0.18) * var(--env-limb-intensity, 0.18) * 0.94);
   mix-blend-mode: screen;
 }
 
