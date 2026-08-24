@@ -19,12 +19,22 @@ import type { Coordinates, MoonSnapshot, SolarSnapshot } from "../../solar/types
 /**
  * How far above the surface the camera sits.
  *
- * 620km, a little above the ISS. The number is chosen for the curve: lower and
- * the horizon flattens into a line, higher and the planet shrinks into a ball
- * with space around it. This is the altitude at which the limb reads as a world
- * curving away, which is the whole vantage.
+ * 5,500km, and the number is resolution rather than composition.
+ *
+ * At the ISS-like 620km this started from, the frame spanned about 7.8° of
+ * longitude. An equirectangular texture 2048 pixels wide holds 2048 texels for
+ * all 360°, so that is 44 texels stretched across a 1087-pixel frame —
+ * **25× magnification**, which is exactly why the planet looked like a
+ * low-resolution game asset. There was no detail there to show, at any texture
+ * size that could reasonably be shipped.
+ *
+ * Height is the lever. Twice as far away is twice as much surface across the
+ * same field of view, and therefore twice the texel density. At 5,500km the
+ * frame spans about 68°, which against a 4096-wide texture is roughly 1.4×
+ * magnification — near enough native that the limit becomes the source imagery
+ * rather than the geometry.
  */
-const CAMERA_HEIGHT_M = 620_000;
+const CAMERA_HEIGHT_M = 5_500_000;
 
 /** Vertical field of view. Wide, for the same reason the CSS scene's was. */
 const FOV_RAD = (58 * Math.PI) / 180;
@@ -32,13 +42,13 @@ const FOV_RAD = (58 * Math.PI) / 180;
 /**
  * How far the camera tilts down, putting the limb across the lower frame.
  *
- * Very little, and that is geometry rather than taste. At 620km the horizon
- * already sits 24° below horizontal — `acos(R / (R + h))` — so a camera looking
- * straight ahead puts the limb near the bottom of a 58° frame all by itself.
- * The first value here was −19°, which pitched down almost to the horizon and
- * filled half the picture with planet.
+ * Follows directly from the height, and has to be recomputed whenever that
+ * changes. The planet's angular radius is `asin(R / (R + h))`, so its limb sits
+ * `90° − that` below horizontal: 24° at 620km, but 57° at 5,500km. To leave the
+ * limb about three-quarters of the way down a 58° frame, the camera pitches to
+ * make up the difference.
  */
-const PITCH_RAD = (-4 * Math.PI) / 180;
+const PITCH_RAD = (-41 * Math.PI) / 180;
 
 export type SceneQuality = "full" | "low";
 
@@ -121,7 +131,25 @@ export class PlanetScene {
    * arrive the CSS scene is what is on screen. Roughly 900kB total, which is
    * why they are loaded after first paint rather than blocking it.
    */
+  /**
+   * Which texture set this device should carry.
+   *
+   * The 4K set is 2.8MB and the 2K set is 920KB, on a page that has to load
+   * before anybody can do anything. A phone gains almost nothing from 4K — the
+   * frame is a third the width — and a metered connection loses real money for
+   * it, so `saveData` is honoured as the explicit request it is.
+   */
+  private static chooseSet(): "4k" | "2k" {
+    if (typeof window === "undefined") return "2k";
+    const connection = (navigator as { connection?: { saveData?: boolean } }).connection;
+    if (connection?.saveData) return "2k";
+    if (window.innerWidth < 900) return "2k";
+    if (window.devicePixelRatio > 2.5 && window.innerWidth < 1400) return "2k";
+    return "4k";
+  }
+
   async loadTextures(base = "/scene"): Promise<boolean> {
+    const set = PlanetScene.chooseSet();
     /**
      * `onload`, not `decode()`.
      *
@@ -156,9 +184,9 @@ export class PlanetScene {
 
     try {
       const [day, night, clouds] = await Promise.all([
-        load("earth-day.jpg"),
-        load("earth-night.jpg"),
-        load("earth-clouds.jpg"),
+        load(`earth-day-${set}.jpg`),
+        load(`earth-night-${set}.jpg`),
+        load(`earth-clouds-${set}.jpg`),
       ]);
       if (this.disposed) return false;
       this.textures = {
@@ -173,8 +201,30 @@ export class PlanetScene {
     }
   }
 
+  /**
+   * The extension that actually fixes grazing angles, if the driver has it.
+   *
+   * Without it the GPU picks one mip level from whichever axis is worse. Near
+   * the limb the surface is compressed enormously in one direction and barely
+   * at all in the other, so it selects a level appropriate for the compressed
+   * axis and blurs the sharp one to match — the horizon goes soft precisely
+   * where the eye is looking. Anisotropic filtering samples along the axis
+   * instead of averaging across it.
+   *
+   * Read once and reused: querying an extension per texture is three lookups
+   * for one answer.
+   */
+  private anisotropy: { ext: EXT_texture_filter_anisotropic; max: number } | null = null;
+
   private upload(image: HTMLImageElement, unit: number): WebGLTexture {
     const gl = this.gl;
+
+    if (this.anisotropy === null) {
+      const ext = gl.getExtension("EXT_texture_filter_anisotropic");
+      this.anisotropy = ext
+        ? { ext, max: gl.getParameter(ext.MAX_TEXTURE_MAX_ANISOTROPY_EXT) as number }
+        : ({ ext: null, max: 0 } as never);
+    }
     const texture = gl.createTexture()!;
     gl.activeTexture(gl.TEXTURE0 + unit);
     gl.bindTexture(gl.TEXTURE_2D, texture);
@@ -186,6 +236,17 @@ export class PlanetScene {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+    const aniso = this.anisotropy;
+    if (aniso?.ext) {
+      // Capped at 8: past that the returns are invisible and the cost is not.
+      gl.texParameterf(
+        gl.TEXTURE_2D,
+        aniso.ext.TEXTURE_MAX_ANISOTROPY_EXT,
+        Math.min(8, aniso.max)
+      );
+    }
+
     gl.generateMipmap(gl.TEXTURE_2D);
     return texture;
   }

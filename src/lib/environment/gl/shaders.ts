@@ -58,10 +58,31 @@ uniform sampler2D uClouds;
 
 const float PI = 3.141592653589793;
 
-/* Earth, and an atmosphere 100km deep. Real figures: the scattering constants
-   below are calibrated to these and mean nothing without them. */
+/*
+   Earth, and an atmosphere deliberately three and a half times too deep.
+
+   The real one is 100km on a 6,371km planet — one and a half percent of the
+   radius. Seen from 5,500km that is about half a degree of a 58° frame: five
+   pixels. Rendered honestly it is almost invisible, and the planet meets the
+   sky at a hard edge, which is the one join in this composition nobody can be
+   allowed to see.
+
+   Every space visualisation exaggerates this and so does this one — to 900km,
+   which sounds absurd until you do the angles. From 5,500km the planet's
+   angular radius is 32.4°; a real atmosphere reaches 33.0°, a band of 0.6°, or
+   about nine pixels in a 58° frame. Rendering it honestly produced a hard edge
+   and nothing else, which I could only prove by hiding the CSS scene and
+   finding the shader's sky completely black. At 900km the band is 5.4° — around
+   eighty pixels — which is what the reference frames actually show.
+
+   The scale heights below are stretched by the same factor so the density
+   profile still fills the shell rather than hugging the ground inside a
+   suddenly enormous void. Scaling the shell alone thins the band out instead of
+   thickening it, which is the trap here: the shell says where air can be, the
+   scale height says where it actually is.
+*/
 const float R_PLANET = 6371000.0;
-const float R_ATMOS  = 6471000.0;
+const float R_ATMOS  = 7271000.0;
 
 /* Rayleigh scattering per metre at sea level, per channel. Blue scatters an
    order of magnitude more than red — this triple IS why the sky is blue and
@@ -69,9 +90,9 @@ const float R_ATMOS  = 6471000.0;
 const vec3  BETA_RAYLEIGH = vec3(5.8e-6, 13.5e-6, 33.1e-6);
 const float BETA_MIE      = 21e-6;
 
-/* How fast each falls off with altitude. */
-const float H_RAYLEIGH = 8000.0;
-const float H_MIE      = 1200.0;
+/* How fast each falls off with altitude, stretched to match the shell above. */
+const float H_RAYLEIGH = 72000.0;
+const float H_MIE      = 11000.0;
 
 /* Mie asymmetry: aerosols scatter strongly forward, which is what puts the
    bright halo immediately around the sun rather than spreading it evenly. */
@@ -177,11 +198,13 @@ void main() {
        with lights on it, so a threshold of 0.16 passed over half the picture
        through as "emissive" and lit the whole night side.
 
-       Cut at 0.30 — above the 99th percentile — and multiplied back up, only
-       what is genuinely a light survives. The gamma curve at the end of this
+       The texture is now Black Marble 2016, whose histogram is better but not
+       clean either: median 0.059, then a broad plateau at 0.325 which is the
+       land it draws under the lights. Cut at 0.36 — above that plateau — and
+       multiplied back up, only what is genuinely a light survives. The gamma curve at the end of this
        shader lifts near-black to mid-grey, so anything left in that floor is
        not subtle; it is the difference between night and dusk. */
-    vec3 cities = max(vec3(0.0), night - 0.30) * 4.5 * (1.0 - lit) * (1.0 - cloud * 0.75);
+    vec3 cities = max(vec3(0.0), night - 0.36) * 5.0 * (1.0 - lit) * (1.0 - cloud * 0.75);
 
     // Lambert, with a little wrap so the limb does not go abruptly black.
     float diffuse = max(0.0, (sunCos + 0.08) / 1.08);
@@ -233,7 +256,7 @@ void main() {
      atmosphere reads AGAINST the surface. Too high and the planet washes out
      into the haze in front of it, which is what 22 did — a pale blue smear
      where there should be ocean, cloud and coast. */
-  vec3 colour = surface * transmittance + scattered * 15.0;
+  vec3 colour = surface * transmittance + scattered * 19.0;
 
   /* Moonlight: a cool wash on the lit hemisphere of the night side, far below
      the sun's contribution and gated on the moon being up and full enough. */
@@ -250,8 +273,24 @@ void main() {
   colour = colour / (colour + vec3(1.0));
   colour = pow(colour, vec3(1.0 / 2.2));
 
-  /* Alpha carries "is there anything here": above the atmosphere the shader
-     contributes nothing and the star field behind must show through. */
-  float coverage = hitGround ? 1.0 : clamp(length(scattered) * 90.0, 0.0, 1.0);
+  /*
+     Alpha carries "is there anything here".
+
+     Above the atmosphere the shader contributes nothing and the star field
+     behind has to show through — which is why this is computed from the
+     scattering rather than being 1 everywhere.
+
+     The multiplier was 90 and that was far too low: the air just above the limb
+     scatters strongly and should be an opaque luminous band, but it was
+     rendering at a few percent alpha and letting the flat CSS sky through
+     instead. The result was a hard edge where the planet met the sky — the one
+     place this whole scene is looking. At 320 the band above the horizon is
+     solid, thinning to nothing near the top of the frame, so the stars still
+     come through where there is genuinely nothing in the way.
+
+     At night the scattering really is near zero, so this collapses to
+     transparent on its own and the Milky Way is undisturbed.
+  */
+  float coverage = hitGround ? 1.0 : clamp(length(scattered) * 320.0, 0.0, 1.0);
   outColour = vec4(colour, coverage);
 }`;
