@@ -315,12 +315,41 @@ void main() {
     float specular = pow(max(0.0, dot(n, halfway)), 34.0);
     vec3 glint = vec3(1.0, 0.97, 0.9) * specular * water * lit * 2.6;
 
-    // Cloud tops are bright and lit from the same sun; the shadow they cast
-    // falls on the ground, not on themselves.
-    vec3 litCloud = vec3(1.0) * cloud * diffuse * sunlight * 0.95;
+    /*
+       Clouds with FORM, rather than a flat mask multiplied in.
+       
+       A cloud sampled as one number and painted white has no thickness, no
+       sunlit side and no shaded side — it reads as fog lying on the surface,
+       which is what it looked like. Real cloud from orbit is the most
+       three-dimensional thing in the frame: bright tops, grey flanks turned
+       away from the sun, and dark bases.
+       
+       The texture holds no normals, but it holds height implicitly — thicker
+       cloud is brighter — so the gradient of the cloud field IS the shape of
+       its tops. Two extra samples give that gradient, and lighting the implied
+       slope by the sun is what turns a smear into a mass.
+    */
+    float cloudDu = texture(uClouds, uv + vec2(0.0012, 0.0)).r - texture(uClouds, uv - vec2(0.0012, 0.0)).r;
+    float cloudDv = texture(uClouds, uv + vec2(0.0, 0.0012)).r - texture(uClouds, uv - vec2(0.0, 0.0012)).r;
+
+    /* The slope in the same east/north frame the shadow offset uses, so the two
+       agree about which way the light is coming from. */
+    vec3 cloudNormal = normalize(n - (eastAt * cloudDu - northAt * cloudDv) * 5.5);
+    float cloudLambert = max(0.0, (dot(cloudNormal, uSunDir) + 0.18) / 1.18);
+
+    /* Thicker cloud is brighter, and the relationship is not linear: a thin
+       veil transmits, a deep tower reflects almost everything. */
+    float cloudDepth = cloud * cloud * (3.0 - 2.0 * cloud);
+
+    vec3 litCloud =
+        vec3(1.0, 0.995, 0.985) * cloudDepth * cloudLambert * sunlight * 1.25
+      + vec3(0.55, 0.63, 0.78) * cloudDepth * skyLight * 1.6;
     float groundShade = 1.0 - shadowCloud * 0.42 * lit;
 
-    surface = litSurface * (1.0 - cloud * 0.85) * groundShade + litCloud + glint + cities;
+    /* Cloud hides what is under it in proportion to its depth, not its bare
+       value — the same curve that decides how much light it returns decides how
+       much it stops, because they are the same physical fact. */
+    surface = litSurface * (1.0 - cloudDepth * 0.92) * groundShade + litCloud + glint + cities;
   }
 
   /* March the atmosphere. The far end is the ground if we hit it, otherwise
@@ -460,6 +489,24 @@ void main() {
   // where the scattering is most interesting.
   colour = colour / (colour + vec3(1.0));
   colour = pow(colour, vec3(1.0 / 2.2));
+
+  /*
+     Dither, and it is not optional at this quality.
+     
+     An eight-bit channel has 256 levels. The atmosphere is a smooth gradient
+     across hundreds of pixels, so consecutive bands of it round to the same
+     level and the eye — which is extremely good at finding edges — reads the
+     boundaries as contour lines. It is the single most recognisable tell of an
+     amateur render, and it is invisible in a screenshot scaled down for review
+     while being perfectly obvious on the real display.
+     
+     A little under one level of noise, hashed off the pixel position so it is
+     stable rather than crawling, breaks the rounding into a stipple the eye
+     integrates back into a continuous ramp. This is what film grain was doing
+     by accident for a century.
+  */
+  float dither = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+  colour += (dither - 0.5) / 255.0;
 
   /*
      Alpha carries "is there anything here".

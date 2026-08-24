@@ -36,6 +36,7 @@ uniform float uPixelRatio;
 
 out vec3  vColour;
 out float vBrightness;
+out float vSpike;    // how strongly this star shows diffraction spikes
 
 const float R_PLANET = 6371000.0;
 
@@ -97,6 +98,7 @@ void main() {
     gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
     gl_PointSize = 0.0;
     vBrightness = 0.0;
+    vSpike = 0.0;
     vColour = vec3(0.0);
     return;
   }
@@ -126,7 +128,21 @@ void main() {
      coverage depends on where the centre fell, so a field of them twinkles as
      the camera moves and vanishes at some sizes. Two is the smallest dot that
      renders consistently. */
-  gl_PointSize = clamp(2.0 + sqrt(flux) * 1.7, 2.0, 8.0) * uPixelRatio;
+  /*
+     Only the bright ones get spikes, and that is how it works in reality.
+     
+     Diffraction spikes are an artefact of the instrument, not the star — light
+     bending around the aperture. They appear on bright sources because the
+     spike is orders of magnitude fainter than the core, so only a very bright
+     core leaves a spike above the noise. Putting them on everything is the
+     usual mistake and turns a sky into a sheet of asterisks.
+  */
+  vSpike = smoothstep(2.6, -0.5, aMag);
+
+  /* Bright stars are drawn larger, which is how a camera records them too:
+     the disc is the instrument's, not the star's. Square-rooted so the very
+     brightest do not become blobs. Spiked stars need room for the spike. */
+  gl_PointSize = clamp(2.0 + sqrt(flux) * 1.7 + vSpike * 7.0, 2.0, 15.0) * uPixelRatio;
   vColour = blackbody(aTemp);
 }`;
 
@@ -135,6 +151,7 @@ precision highp float;
 
 in vec3  vColour;
 in float vBrightness;
+in float vSpike;
 out vec4 outColour;
 
 void main() {
@@ -149,7 +166,25 @@ void main() {
 
   float core = exp(-r2 * 6.5);
   float halo = exp(-r2 * 1.6) * 0.35;
-  float intensity = (core + halo) * vBrightness;
+
+  /*
+     Four spikes, at right angles, thin and long.
+     
+     Their shape is not arbitrary: a spike runs perpendicular to each straight
+     edge in the aperture, which is why a four-bladed instrument gives a cross
+     and why every photograph of a bright star has one. Multiplied rather than
+     added, so a spike is always fainter than the core it comes from — an
+     additive spike survives after its own star has faded out, which looks like
+     a defect because it is one.
+  */
+  float spikes = 0.0;
+  if (vSpike > 0.0) {
+    float horizontal = exp(-abs(d.y) * 34.0) * exp(-abs(d.x) * 1.6);
+    float vertical   = exp(-abs(d.x) * 34.0) * exp(-abs(d.y) * 1.6);
+    spikes = (horizontal + vertical) * vSpike * 0.55;
+  }
+
+  float intensity = (core + halo + spikes) * vBrightness;
 
   outColour = vec4(vColour * intensity, intensity);
 }`;
