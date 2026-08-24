@@ -67,13 +67,15 @@ const float PI = 3.141592653589793;
    sky at a hard edge, which is the one join in this composition nobody can be
    allowed to see.
 
-   Every space visualisation exaggerates this and so does this one — to 900km,
+   Every space visualisation exaggerates this and so does this one — to 1600km,
    which sounds absurd until you do the angles. From 5,500km the planet's
    angular radius is 32.4°; a real atmosphere reaches 33.0°, a band of 0.6°, or
    about nine pixels in a 58° frame. Rendering it honestly produced a hard edge
    and nothing else, which I could only prove by hiding the CSS scene and
-   finding the shader's sky completely black. At 900km the band is 5.4° — around
-   eighty pixels — which is what the reference frames actually show.
+   finding the shader's sky completely black. At 900km the band was 5.4°, which
+   read at night but left daylight a thin blue line under a black sky. At 1600km
+   it is closer to 9°, and the day side finally has the depth of blue the
+   reference frames show — which was the remaining complaint about daytime.
 
    The scale heights below are stretched by the same factor so the density
    profile still fills the shell rather than hugging the ground inside a
@@ -82,7 +84,7 @@ const float PI = 3.141592653589793;
    scale height says where it actually is.
 */
 const float R_PLANET = 6371000.0;
-const float R_ATMOS  = 7271000.0;
+const float R_ATMOS  = 7971000.0;
 
 /* Rayleigh scattering per metre at sea level, per channel. Blue scatters an
    order of magnitude more than red — this triple IS why the sky is blue and
@@ -91,8 +93,8 @@ const vec3  BETA_RAYLEIGH = vec3(5.8e-6, 13.5e-6, 33.1e-6);
 const float BETA_MIE      = 21e-6;
 
 /* How fast each falls off with altitude, stretched to match the shell above. */
-const float H_RAYLEIGH = 72000.0;
-const float H_MIE      = 11000.0;
+const float H_RAYLEIGH = 128000.0;
+const float H_MIE      = 19000.0;
 
 /* Mie asymmetry: aerosols scatter strongly forward, which is what puts the
    bright halo immediately around the sun rather than spreading it evenly. */
@@ -228,7 +230,15 @@ void main() {
        multiplied back up, only what is genuinely a light survives. The gamma curve at the end of this
        shader lifts near-black to mid-grey, so anything left in that floor is
        not subtle; it is the difference between night and dusk. */
-    vec3 cities = max(vec3(0.0), night - 0.36) * 5.0 * (1.0 - lit) * (1.0 - cloud * 0.75);
+    /* WARM, and clustered rather than scattered.
+
+       Rendered neutral they read as stars lying on the planet, which is exactly
+       how they were mistaken. Sodium and high-pressure lighting is amber — that
+       is what Black Marble records and what makes a night-side city look like a
+       city rather than a hole in the occlusion. The tint is applied AFTER the
+       threshold so it colours the lights and not the floor they sit on. */
+    float lightMask = max(0.0, night.r - 0.36) * 5.0;
+    vec3 cities = lightMask * vec3(1.0, 0.72, 0.38) * (1.0 - lit) * (1.0 - cloud * 0.75);
 
     // Lambert, with a little wrap so the limb does not go abruptly black.
     float diffuse = max(0.0, (sunCos + 0.08) / 1.08);
@@ -244,7 +254,11 @@ void main() {
     float grazing = 1.0 - smoothstep(0.0, 0.42, sunCos);
     vec3 sunlight = mix(vec3(1.0), vec3(1.32, 0.78, 0.46), grazing * lit);
 
-    vec3 litSurface = day * diffuse * 1.7 * sunlight;
+    /* Contrast lifted around a mid grey rather than brightness raised. Blue
+       Marble is a flat, evenly-lit mosaic by design — good for mapping, muted
+       as a photograph — and simply scaling it makes a brighter flat image. */
+    vec3 surfaceColour = clamp((day - 0.5) * 1.22 + 0.5, 0.0, 1.0);
+    vec3 litSurface = surfaceColour * diffuse * 1.8 * sunlight;
 
     /*
        Ocean glint: the sun reflecting off water, and the single strongest cue
@@ -331,8 +345,13 @@ void main() {
   /* Haze in FRONT of the planet is cut for the same reason the transmittance
      is: it comes from the exaggerated shell and would bury the surface. The
      rim — where the ray misses the ground entirely — keeps its full strength,
-     because that is the thing the exaggeration exists to show. */
-  float hazeAhead = hitGround ? 0.3 : 1.0;
+     because that is the thing the exaggeration exists to show.
+
+     Cut harder as the shell grew. Thickening the atmosphere to 1600km made the
+     rim right and the ground correspondingly worse: the surface was being
+     looked at through sixteen times too much air, which is what "still a bit
+     blurry and hazy" was. */
+  float hazeAhead = hitGround ? 0.16 : 1.0;
   vec3 colour = surface * transmittance + scattered * 13.0 * hazeAhead;
 
   /*
