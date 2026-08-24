@@ -502,19 +502,38 @@ export class PlanetScene {
     */
     gl.uniform1f(u.uExposure, 1.0);
     /*
-       Weather's own clock, from the same instant as everything else.
-       
-       A full wrap takes twenty minutes of scene time, which over the twenty
-       seconds somebody spends signing in is a visible drift of a few degrees of
-       longitude — present if you look, never asking to be looked at. It follows
-       SIMULATED time, so scrubbing the panel at 600x sends the weather racing,
-       which is both correct and rather nice to watch.
-       
-       Held still for reduced motion. Cloud drift is decoration and carries no
-       information; it is exactly what that preference is asking to be spared.
+       Weather's own clock, read from the hour and the minute.
+
+       The phase is a function of clock TIME rather than of elapsed frames, so
+       the clouds are where the hour says they are: reproducible, the same on
+       every device looking at the same moment, and continuous across a reload
+       instead of snapping back to wherever the page started.
+
+       ## The rate
+
+       A lap every two hours. That works out at three degrees of longitude a
+       minute, and across a 68° frame on a 1100-pixel-wide screen it is a little
+       under one pixel per second.
+
+       The first version wrapped in twenty minutes, which is six times that —
+       about five pixels a second. Five pixels a second is above the threshold
+       where ambient movement stops being ambient: the eye locks on and tracks
+       it, and on a page somebody is trying to read a password field on, that is
+       a real cost rather than a flourish. Below roughly a pixel a second the
+       motion registers only if you go looking for it, which is where drift
+       belongs.
+
+       Two hours also divides the day cleanly, so the pattern repeats on a whole
+       hour rather than at some arbitrary offset from an epoch nobody chose.
     */
-    const CLOUD_WRAP_MS = 20 * 60_000;
-    const phase = this.reducedMotion ? 0 : (sun.timestamp % CLOUD_WRAP_MS) / CLOUD_WRAP_MS;
+    const CLOUD_LAP_HOURS = 2;
+    const at = new Date(sun.timestamp);
+    const hoursIntoLap =
+      (at.getUTCHours() % CLOUD_LAP_HOURS) +
+      at.getUTCMinutes() / 60 +
+      at.getUTCSeconds() / 3600 +
+      at.getUTCMilliseconds() / 3_600_000;
+    const phase = this.reducedMotion ? 0 : hoursIntoLap / CLOUD_LAP_HOURS;
     gl.uniform1f(u.uCloudPhase, phase);
 
     gl.uniform1i(u.uSteps, steps);

@@ -29,6 +29,26 @@ coordinates — or handed to the compositor as custom properties. Any real
 performance problem will be fill rate: blurs and large gradients, which is
 exactly what low-power mode drops.
 
+## Cloud drift rate
+
+A lap every **two hours**, and the phase is a function of the hour and the
+minute rather than of elapsed frames — so the clouds are where the clock says
+they are: reproducible, identical on every device at the same moment, and
+continuous across a reload instead of snapping back to wherever the page
+started. Two hours also divides the day cleanly, so the pattern repeats on a
+whole hour rather than at an arbitrary offset from an epoch nobody chose.
+
+Three degrees of longitude a minute works out at a little under **one pixel per
+second** on a 1100-pixel frame. The first attempt wrapped in twenty minutes —
+about five pixels a second — and that is above the threshold where ambient
+movement stops being ambient: the eye locks on and tracks it. On a page where
+somebody is trying to read a password field, that is a cost rather than a
+flourish.
+
+If this is ever retuned, the number to reason about is pixels per second on
+screen, not minutes per lap. The lap time means nothing without the field of
+view and the display width.
+
 ## Rejected
 
 **Weather (§17).** Optional in the specification; out of scope here. The login
