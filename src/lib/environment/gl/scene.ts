@@ -77,12 +77,32 @@ export class PlanetScene {
     this.gl = gl;
     this.program = program;
 
+    /**
+     * Every uniform, and a complaint about any that did not resolve.
+     *
+     * `getUniformLocation` returns null for a name the linked program does not
+     * have — a typo, a rename, or a uniform the compiler removed because
+     * nothing read it. `gl.uniform1i(null, x)` is then a silent no-op, the
+     * uniform keeps its default of zero, and the failure surfaces as a picture
+     * that is subtly or completely wrong with nothing logged anywhere.
+     *
+     * That is not hypothetical here: `uSteps` at zero makes the scattering loop
+     * break on its first iteration, so the atmosphere integrates to exactly
+     * nothing and the sky renders black. Worth one loop at startup to never
+     * wonder about again.
+     */
+    const missing: string[] = [];
     for (const name of [
       "uResolution", "uSunDir", "uMoonDir", "uMoonLight", "uCameraHeight",
       "uFov", "uPitch", "uYaw", "uEnuToEcef", "uExposure", "uSteps",
       "uLightSteps", "uDay", "uNight", "uClouds",
     ]) {
-      this.uniforms[name] = gl.getUniformLocation(program, name);
+      const location = gl.getUniformLocation(program, name);
+      if (location === null) missing.push(name);
+      this.uniforms[name] = location;
+    }
+    if (missing.length > 0) {
+      console.warn("[scene] uniforms did not resolve, they will read as zero:", missing.join(", "));
     }
   }
 

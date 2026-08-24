@@ -1915,3 +1915,45 @@ textarea.field-input {
 @media (prefers-reduced-motion: reduce) {
   .planet-canvas { transition: none; }
 }
+
+/* ---------------- When the shader owns the sky ---------------- */
+
+/*
+   Two models of one sky cannot both be right.
+
+   The CSS scene paints a blue gradient from the top of the frame to the
+   horizon. The shader computes that the air only reaches so far and space above
+   it is black. Composited together they fought, and the seam showed as a DARK
+   RING around the limb — the shader's black space, at full alpha, laid over the
+   CSS layer's bright blue.
+
+   Once the planet is drawing it is the one computing the answer, so the CSS sky
+   steps almost entirely out of the way. A trace is kept rather than none at all:
+   it fills the very top of the frame, where the shader's rays miss the
+   atmosphere and return nothing, and it is what the scene falls back to
+   instantly if the context is ever lost.
+*/
+:root[data-planet="live"] .sky-wash { opacity: 0.18; }
+:root[data-planet="live"] .sky-wash::after { opacity: 0; }
+
+/* The CSS limb and its halo are entirely superseded by a real one.
+
+   The horizon glow goes to ZERO rather than merely dim. It is the one CSS layer
+   drawn ABOVE the canvas, and it blends with `screen` — so even at a fifth
+   opacity it was brightening every pixel of the planet underneath, washing the
+   continents out to a pale smear. A layer that only ever adds light cannot be
+   left partly on over something that is now computing its own. */
+:root[data-planet="live"] .earth { opacity: 0; }
+:root[data-planet="live"] .horizon-glow { opacity: 0; }
+
+/* The sun and moon are drawn by neither — the shader has no disc for them —
+   so those layers stay, and only their scale is trimmed now that the real
+   atmosphere is carrying the glow near the horizon. */
+:root[data-planet="live"] .sun-glow { scale: calc(0.22 + var(--env-warmth, 0) * 0.5); }
+
+.sky-wash,
+.sky-wash::after,
+.earth,
+.horizon-glow {
+  transition: opacity 1.6s ease;
+}

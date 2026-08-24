@@ -222,6 +222,9 @@ void main() {
 
   vec3 scattered = vec3(0.0);
   vec3 transmittance = vec3(1.0);
+  /* Kept outside the block below so the airglow term can use it: how much air
+     this ray crossed is exactly what decides how much glow it picks up. */
+  float depthAlongViewLength = 0.0;
 
   if (far > near) {
     float step = (far - near) / float(uSteps);
@@ -249,14 +252,60 @@ void main() {
       scattered += attenuation * (BETA_RAYLEIGH * density.x * pr + BETA_MIE * density.y * pm);
     }
 
-    transmittance = exp(-(BETA_RAYLEIGH * depthAlongView.x + BETA_MIE * 1.1 * depthAlongView.y));
+    /*
+       Transmittance uses a FRACTION of the view path's optical depth.
+
+       The shell above is nine times thicker than the real atmosphere, which is
+       what makes the limb a visible band rather than nine pixels — but the same
+       exaggeration means the ground is being looked at through nine times too
+       much air, and the continents wash out into haze. The band and the haze
+       come from the same integral and want different answers, so they are
+       scaled apart: the rim keeps the full depth, the surface is seen through
+       roughly the real one.
+
+       Physically inconsistent, and deliberately. The alternative is choosing
+       between a planet you can see and an atmosphere you can.
+    */
+    transmittance = exp(
+      -(BETA_RAYLEIGH * depthAlongView.x + BETA_MIE * 1.1 * depthAlongView.y) * 0.22
+    );
+    depthAlongViewLength = depthAlongView.x;
   }
 
   /* Sunlight's intensity: the one free constant, and it sets how luminous the
      atmosphere reads AGAINST the surface. Too high and the planet washes out
-     into the haze in front of it, which is what 22 did — a pale blue smear
-     where there should be ocean, cloud and coast. */
-  vec3 colour = surface * transmittance + scattered * 19.0;
+     into the haze in front of it — a pale blue smear where there should be
+     ocean, cloud and coast. 22 did that, and so did 19 once the CSS glow above
+     it stopped hiding the difference. */
+  /* Haze in FRONT of the planet is cut for the same reason the transmittance
+     is: it comes from the exaggerated shell and would bury the surface. The
+     rim — where the ray misses the ground entirely — keeps its full strength,
+     because that is the thing the exaggeration exists to show. */
+  float hazeAhead = hitGround ? 0.3 : 1.0;
+  vec3 colour = surface * transmittance + scattered * 13.0 * hazeAhead;
+
+  /*
+     Airglow: the reason the night limb is not simply an edge.
+     
+     A faint emission from oxygen and hydroxyl around 90km up, and the thing
+     every photograph of Earth's night side shows as a thin green-blue arc above
+     the horizon. It is NOT scattered sunlight, which is why the scattering
+     integral above cannot produce it — no sun, no term — and why the night limb
+     came out as a hard silhouette against the stars.
+
+     Driven by how much atmosphere the ray crossed and faded out as the sun
+     comes up, when it is utterly swamped. The colour is the real one: the
+     557.7nm oxygen line is green, with the hydroxyl bands adding a little red.
+  */
+  float glowPath = clamp(depthAlongViewLength * 3.0e-6, 0.0, 1.0);
+  float sunGone = 1.0 - smoothstep(-0.30, 0.02, uSunDir.z);
+  /* A LIMB phenomenon. Looking down through the atmosphere you see almost none
+     of it; looking along it, edge-on, the path is hundreds of kilometres of
+     emitting air and it reads as an arc. Applied at full strength only to rays
+     that miss the ground — the first version used the path length alone and lit
+     the entire disc a uniform green. */
+  float glowEdge = hitGround ? 0.05 : 1.0;
+  colour += vec3(0.16, 0.40, 0.34) * glowPath * sunGone * glowEdge * 0.16;
 
   /* Moonlight: a cool wash on the lit hemisphere of the night side, far below
      the sun's contribution and gated on the moon being up and full enough. */
@@ -291,6 +340,8 @@ void main() {
      At night the scattering really is near zero, so this collapses to
      transparent on its own and the Milky Way is undisturbed.
   */
-  float coverage = hitGround ? 1.0 : clamp(length(scattered) * 320.0, 0.0, 1.0);
+  float coverage = hitGround
+    ? 1.0
+    : clamp(max(length(scattered) * 320.0, glowPath * sunGone * 1.9), 0.0, 1.0);
   outColour = vec4(colour, coverage);
 }`;

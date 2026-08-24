@@ -53,6 +53,8 @@ export function PlanetCanvas() {
     const onLost = (event: Event) => {
       event.preventDefault();
       setLive(false);
+      // Hand the sky back to CSS, or a lost context leaves a black frame.
+      delete document.documentElement.dataset.planet;
       unsubscribe?.();
     };
     canvas.addEventListener("webglcontextlost", onLost);
@@ -78,11 +80,25 @@ export function PlanetCanvas() {
       unsubscribe = clock.onPublish(draw);
       draw(); // Once immediately: the first frame must not wait for a tick.
       setLive(true);
+      /**
+       * Tell the document the planet is drawing.
+       *
+       * The CSS scene and the shader are two different models of the same sky —
+       * the shader says space above the atmosphere is black, the CSS says the
+       * sky is blue everywhere — and composited together they produced a dark
+       * ring around the limb where the two disagreed. Only one can be right at
+       * a time, and once the shader is live it is the one computing the answer.
+       *
+       * On the root rather than a class here, because `.sky-wash` is an EARLIER
+       * sibling and CSS can only select forwards.
+       */
+      document.documentElement.dataset.planet = "live";
     });
 
     return () => {
       cancelled = true;
       canvas.removeEventListener("webglcontextlost", onLost);
+      delete document.documentElement.dataset.planet;
       unsubscribe?.();
       scene.dispose();
     };
