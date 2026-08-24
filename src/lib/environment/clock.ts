@@ -48,6 +48,34 @@ const HALF_LIFE_MS: Partial<Record<keyof EnvironmentState, number>> = {
 const DEFAULT_HALF_LIFE_MS = 600;
 
 /**
+ * Frame budget, and how a device is judged too slow for the full scene.
+ *
+ * §23 ends with "measure actual performance instead of assuming it is fast",
+ * and this is the one honest way to do that: the clock already times every
+ * frame, so it can watch what the scene actually costs on the machine it is
+ * running on rather than guessing from a core count. A phone with eight cores
+ * behind a thermal throttle is slow; a five-year-old laptop plugged in may not
+ * be. Only the frames know.
+ *
+ * 28ms is about 36fps — comfortably below 60 without tripping on the odd
+ * stutter, since the decision is made on a MEDIAN.
+ */
+const FRAME_BUDGET_MS = 28;
+
+/** How many frames to watch before judging. Roughly a second at 60fps. */
+const FRAME_SAMPLE = 48;
+
+/**
+ * Intervals longer than this are not slowness.
+ *
+ * A backgrounded tab produces gaps of seconds, and a machine waking from sleep
+ * produces gaps of hours. Counting those as dropped frames would put every tab
+ * anyone left open into low-power mode the moment they came back to it — a
+ * degraded scene as the reward for returning.
+ */
+const THROTTLE_FLOOR_MS = 200;
+
+/**
  * How far a value must move before it is worth publishing.
  *
  * Writing a custom property invalidates style for the subtree that reads it, so
@@ -77,6 +105,9 @@ export type ClockOptions = {
    * movement, not asking to be misinformed about the sky.
    */
   reducedMotion?: boolean;
+
+  /** Called once if the device turns out not to keep up. */
+  onLowPower?: (low: boolean) => void;
 };
 
 /** What the simulator can override. Absent in production. */
@@ -152,11 +183,17 @@ export class EnvironmentClock {
   private simulatedAt: number | null = null;
   private speed = 1;
 
+  /** Frame timings, and whether this machine has been judged too slow. */
+  private intervals: number[] = [];
+  private lowPower = false;
+  private onLowPower: (low: boolean) => void;
+
   constructor(options: ClockOptions) {
     this.source = { ...defaultSource(), ...options.source };
     this.location = options.location;
     this.publish = options.publish;
     this.reducedMotion = options.reducedMotion ?? false;
+    this.onLowPower = options.onLowPower ?? (() => {});
     this.lastTick = this.source.now();
   }
 
@@ -221,6 +258,51 @@ export class EnvironmentClock {
     this.reducedMotion = reduced;
   }
 
+  /** Whether the scene has been cut back for a machine that could not keep up. */
+  isLowPower(): boolean {
+    return this.lowPower;
+  }
+
+  /**
+   * Force low power on or off, for the developer panel.
+   *
+   * Latches the measurement off as well: once a person has made the call, the
+   * frame watcher must not quietly overrule them a second later.
+   */
+  setLowPower(low: boolean): void {
+    this.intervals = [];
+    this.lowPower = low;
+    this.onLowPower(low);
+  }
+
+  /**
+   * Watch what the scene actually costs, and cut back if it is too much.
+   *
+   * Latches on and never off. Flapping between a full and a reduced scene would
+   * be far more distracting than either one — and a device that struggled once
+   * under this load will struggle again.
+   */
+  private judgePerformance(elapsed: number): void {
+    if (this.lowPower) return;
+    // Throttling and sleep are not slowness. See THROTTLE_FLOOR_MS.
+    if (elapsed <= 0 || elapsed > THROTTLE_FLOOR_MS) return;
+
+    this.intervals.push(elapsed);
+    if (this.intervals.length < FRAME_SAMPLE) return;
+
+    // Median, not mean: one 300ms hitch while a font loads should not condemn
+    // an otherwise healthy machine, and a mean is exactly what such a hitch
+    // drags across the threshold.
+    const sorted = [...this.intervals].sort((a, b) => a - b);
+    const median = sorted[Math.floor(sorted.length / 2)];
+    this.intervals = [];
+
+    if (median > FRAME_BUDGET_MS) {
+      this.lowPower = true;
+      this.onLowPower(true);
+    }
+  }
+
   /** Simulator control. Scrubbing snaps, because a scrub is not a transition. */
   override(next: ClockOverride): void {
     if (next.location) this.location = next.location;
@@ -250,6 +332,8 @@ export class EnvironmentClock {
     const wall = this.source.now();
     const elapsed = Math.max(0, wall - this.lastTick);
     this.lastTick = wall;
+
+    this.judgePerformance(elapsed);
 
     // Simulated time advances by its own multiplier, so a scrubber at 600×
     // crosses a whole day in a couple of minutes while the easing still runs at

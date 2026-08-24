@@ -43,6 +43,7 @@ export function DevEnvironmentPanel() {
   const [place, setPlace] = useState(PLACES[0]);
   const [minute, setMinute] = useState(12 * 60);
   const [reduced, setReduced] = useState(false);
+  const [lowPower, setLowPower] = useState(false);
 
   /**
    * The panel is the one thing that legitimately re-renders continuously — it
@@ -226,6 +227,18 @@ export function DevEnvironmentPanel() {
               }}
             />
             Reduced motion
+          </label>
+
+          <label style={line}>
+            <input
+              type="checkbox"
+              checked={lowPower || clock.isLowPower()}
+              onChange={(e) => {
+                setLowPower(e.target.checked);
+                clock.setLowPower(e.target.checked);
+              }}
+            />
+            Low power {clock.isLowPower() && !lowPower ? "(measured)" : ""}
           </label>
 
           <div style={{ opacity: simulating ? 1 : 0.4, pointerEvents: simulating ? "auto" : "none" }}>

@@ -48,6 +48,16 @@ export function EnvironmentProvider({ children }: { children: React.ReactNode })
       location: estimateLocationFromClock(),
       publish: (state) => publishToElement(host, state),
       reducedMotion: motion.matches,
+      /**
+       * The scene cuts itself back if this machine cannot keep up.
+       *
+       * An attribute rather than a property, because what it switches off is
+       * whole effects — blurs, the ray fan, the density of the star field —
+       * and those are selector-level decisions, not values to interpolate.
+       */
+      onLowPower: (low) => {
+        document.documentElement.dataset.lowPower = low ? "true" : "false";
+      },
     });
 
     clockRef.current = engine;

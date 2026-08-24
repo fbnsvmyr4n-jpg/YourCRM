@@ -1745,3 +1745,31 @@ textarea.field-input {
    the clock writes to that same attribute. See `EnvironmentProvider`.
 */
 .environment-host { display: contents; }
+
+/* ---------------- Low power ---------------- */
+
+/*
+   What a machine that cannot keep up stops paying for.
+
+   Chosen by measurement, not by guessing from a core count: the clock times
+   its own frames and latches this on if the median goes past its budget. See
+   `judgePerformance` in the clock.
+
+   The scene stays CORRECT in this mode — the sun is still where it belongs and
+   the sky is still the right colour. What goes is the expensive decoration:
+   large-radius blurs, the ray fan, and the backdrop filters, which are the
+   three things that actually cost compositor time here.
+*/
+:root[data-low-power="true"] .sun-rays { display: none; }
+
+:root[data-low-power="true"] .earth-halo { filter: none; }
+
+:root[data-low-power="true"] .orbit-field {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* The glows keep their shape but stop being enormous, which is where the
+   fill-rate goes on a weak GPU. */
+:root[data-low-power="true"] .sun-glow { width: 90vmax; height: 90vmax; }
+:root[data-low-power="true"] .moon-glow { width: 26vmax; height: 26vmax; }

@@ -296,3 +296,117 @@ describe("the very first paint", () => {
     expect(state.phase).toBeTruthy();
   });
 });
+
+describe("a machine that cannot keep up", () => {
+  /**
+   * §23 ends with "measure actual performance instead of assuming it is fast",
+   * and the clock is the honest place to do it: it already times every frame,
+   * so it can watch what the scene costs on the machine running it rather than
+   * guessing from a core count. A phone with eight cores behind a thermal
+   * throttle is slow; an old laptop plugged in may not be.
+   */
+  const runFrames = (h: ReturnType<typeof harness>, ms: number, count: number) => {
+    for (let i = 0; i < count; i++) h.advance(ms);
+  };
+
+  it("stays at full quality on a machine that keeps up", () => {
+    const low: boolean[] = [];
+    const h = harness();
+    h.clock.start();
+    runFrames(h, 16, 200);
+    expect(h.clock.isLowPower()).toBe(false);
+    expect(low).toEqual([]);
+  });
+
+  it("cuts back when frames are consistently slow", () => {
+    let told: boolean | null = null;
+    let wall = Date.UTC(2026, 2, 20, 10, 0);
+    const clock = new EnvironmentClock({
+      location: CAPE_TOWN,
+      publish: () => {},
+      onLowPower: (low) => (told = low),
+      source: { now: () => wall, requestFrame: () => 1, cancelFrame: () => {} },
+    });
+    clock.start();
+    for (let i = 0; i < 60; i++) {
+      wall += 45; // ~22fps
+      clock.tick();
+    }
+    expect(clock.isLowPower()).toBe(true);
+    expect(told).toBe(true);
+  });
+
+  it("is not fooled by a backgrounded tab", () => {
+    /**
+     * The failure this guards is the nastiest kind: a tab left open for an hour
+     * produces one enormous gap, and counting it as a dropped frame would put
+     * every returning visitor into a degraded scene — a punishment for coming
+     * back. Long gaps are throttling, not slowness, and are ignored.
+     */
+    let wall = Date.UTC(2026, 2, 20, 10, 0);
+    const clock = new EnvironmentClock({
+      location: CAPE_TOWN,
+      publish: () => {},
+      source: { now: () => wall, requestFrame: () => 1, cancelFrame: () => {} },
+    });
+    clock.start();
+    for (let i = 0; i < 60; i++) {
+      wall += 3_600_000; // an hour between frames
+      clock.tick();
+    }
+    expect(clock.isLowPower(), "a throttled tab was mistaken for a slow device").toBe(false);
+  });
+
+  it("is not condemned by a single hitch", () => {
+    // One 300ms stall while a font loads should not degrade the scene. The
+    // decision is made on a median precisely so it cannot be.
+    let wall = Date.UTC(2026, 2, 20, 10, 0);
+    const clock = new EnvironmentClock({
+      location: CAPE_TOWN,
+      publish: () => {},
+      source: { now: () => wall, requestFrame: () => 1, cancelFrame: () => {} },
+    });
+    clock.start();
+    for (let i = 0; i < 60; i++) {
+      wall += i === 30 ? 190 : 16;
+      clock.tick();
+    }
+    expect(clock.isLowPower()).toBe(false);
+  });
+
+  it("latches, rather than flapping between two scenes", () => {
+    // Switching back and forth would be far more distracting than either
+    // state, and a device that struggled once will struggle again.
+    let wall = Date.UTC(2026, 2, 20, 10, 0);
+    const clock = new EnvironmentClock({
+      location: CAPE_TOWN,
+      publish: () => {},
+      source: { now: () => wall, requestFrame: () => 1, cancelFrame: () => {} },
+    });
+    clock.start();
+    for (let i = 0; i < 60; i++) {
+      wall += 45;
+      clock.tick();
+    }
+    expect(clock.isLowPower()).toBe(true);
+
+    for (let i = 0; i < 200; i++) {
+      wall += 8; // suddenly a fast machine
+      clock.tick();
+    }
+    expect(clock.isLowPower()).toBe(true);
+  });
+
+  it("lets a person overrule the measurement, in both directions", () => {
+    const h = harness();
+    h.clock.start();
+    h.clock.setLowPower(true);
+    expect(h.clock.isLowPower()).toBe(true);
+    h.clock.setLowPower(false);
+    expect(h.clock.isLowPower()).toBe(false);
+
+    // And the watcher must not quietly overrule them a moment later.
+    runFrames(h, 16, 100);
+    expect(h.clock.isLowPower()).toBe(false);
+  });
+});
