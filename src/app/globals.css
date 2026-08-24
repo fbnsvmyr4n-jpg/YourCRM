@@ -1440,3 +1440,250 @@ textarea.field-input {
   filter: drop-shadow(0 0 22px rgba(70, 190, 255, 0.5));
 }
 
+
+/* ============================================================================
+   The adaptive solar environment
+   ----------------------------------------------------------------------------
+   Everything below is driven by the `--env-*` custom properties published by
+   the environment clock. There is no JavaScript in the render path: the clock
+   writes numbers onto one ancestor, these rules read them, and the compositor
+   does the rest. React never re-renders for a frame of this.
+
+   Fallbacks are given on every `var()`. The properties do not exist until the
+   clock's first tick, and without a fallback the very first paint would be
+   `initial` — which for a colour stop is transparent and for a position is
+   zero, i.e. a black frame with the sun in the corner.
+   ============================================================================ */
+
+/* The sky's own colour. Interpolated in oklab so a night-to-day ramp passes
+   through believable blues instead of the grey mud sRGB produces. */
+.sky-wash {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(
+      to bottom,
+      color-mix(in oklab, #0a2c56 calc(var(--env-sky-brightness, 0.04) * 62%), #01030a) 0%,
+      color-mix(in oklab, #1f6fae calc(var(--env-sky-brightness, 0.04) * 88%), #02040c) 78%,
+      color-mix(in oklab, #3f9bd6 calc(var(--env-sky-brightness, 0.04) * 96%), #030610) 100%
+    );
+}
+
+/* Haze: the atmosphere thickening near the horizon. Sits above the wash and
+   below everything else, and is strongest when the light is travelling
+   furthest through air. */
+.sky-wash::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    150% 55% at 50% 102%,
+    color-mix(in oklab, #ffb066 calc(var(--env-warmth, 0) * 100%), #6fb2ea)
+      calc(var(--env-haze, 0) * 6%),
+    transparent 70%
+  );
+  opacity: calc(0.25 + var(--env-haze, 0) * 0.55);
+}
+
+/* ---------------- The sun ---------------- */
+
+/* The glow, which is far bigger than the body and does most of the lighting.
+   Positioned at the sun even when the sun itself is under the limb — light
+   scatters over the horizon long before the disc clears it, which is why dawn
+   is bright before sunrise. */
+.sun-glow {
+  position: absolute;
+  left: calc(var(--env-sun-x, 0.5) * 100%);
+  top: calc(var(--env-sun-y, 1.2) * 100%);
+  width: 150vmax;
+  height: 150vmax;
+  translate: -50% -50%;
+  pointer-events: none;
+  background: radial-gradient(
+    closest-side,
+    color-mix(in oklab, #ff9440 calc(var(--env-warmth, 0) * 100%), #fffaf0) 0%,
+    color-mix(in oklab, #ff7a2e calc(var(--env-warmth, 0) * 100%), #ffe9c4) 9%,
+    color-mix(in oklab, rgba(255, 138, 58, 0.2) calc(var(--env-warmth, 0) * 100%),
+      rgba(214, 234, 255, 0.14)) 26%,
+    transparent 62%
+  );
+  /*
+    Sized and lit by WARMTH, not by how much sun there is.
+    A midday sun is a small hard bright spot; a setting one throws an enormous
+    warm wash across half the sky. Keying this to `--env-sun-intensity` — which
+    is near 1 all day — made noon look like a permanent sunset, an orange cloud
+    over a blue sky that read as a bug before it read as anything else.
+  */
+  scale: calc(0.3 + var(--env-warmth, 0) * 0.7);
+  opacity: calc(0.18 + var(--env-warmth, 0) * 0.82);
+  mix-blend-mode: screen;
+}
+
+/* The body. Rendered before the Earth so the planet occults it. */
+.sun-body {
+  position: absolute;
+  left: calc(var(--env-sun-x, 0.5) * 100%);
+  top: calc(var(--env-sun-y, 1.2) * 100%);
+  translate: -50% -50%;
+  pointer-events: none;
+  opacity: var(--env-sun-visible, 0);
+}
+
+.sun-disc {
+  width: 3.4vmax;
+  height: 3.4vmax;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    #fffdf6 0%,
+    #fff3cf 42%,
+    color-mix(in oklab, #ff8a3c calc(var(--env-warmth, 0) * 100%), #fff1cd) 76%,
+    transparent 100%
+  );
+  box-shadow:
+    0 0 6vmax 1.4vmax color-mix(in oklab, #ff8f3f calc(var(--env-warmth, 0) * 100%), #fff3d8),
+    0 0 16vmax 4vmax
+      color-mix(in oklab, rgba(255, 160, 80, 0.4) calc(var(--env-warmth, 0) * 100%),
+        rgba(230, 244, 255, 0.28));
+}
+
+/* Directional rays, strongest when the sun is low and raking through the most
+   atmosphere — which is exactly when they appear in the reference frames. */
+.sun-rays {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 42vmax;
+  height: 42vmax;
+  translate: -50% -50%;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    rgba(255, 220, 170, 0.13) 2deg,
+    transparent 7deg,
+    transparent 30deg,
+    rgba(255, 226, 186, 0.1) 33deg,
+    transparent 39deg,
+    transparent 68deg,
+    rgba(255, 214, 160, 0.14) 71deg,
+    transparent 77deg,
+    transparent 120deg,
+    rgba(255, 226, 186, 0.09) 123deg,
+    transparent 129deg,
+    transparent 190deg,
+    rgba(255, 220, 170, 0.12) 193deg,
+    transparent 199deg,
+    transparent 250deg,
+    rgba(255, 214, 160, 0.1) 253deg,
+    transparent 259deg,
+    transparent 310deg,
+    rgba(255, 226, 186, 0.11) 313deg,
+    transparent 319deg,
+    transparent 360deg
+  );
+  mask-image: radial-gradient(closest-side, #000 6%, rgba(0, 0, 0, 0.55) 26%, transparent 78%);
+  filter: blur(6px);
+  opacity: calc(var(--env-warmth, 0) * 0.9);
+}
+
+/* ---------------- The moon ---------------- */
+
+.moon-glow {
+  position: absolute;
+  left: calc(var(--env-moon-x, 0.5) * 100%);
+  top: calc(var(--env-moon-y, 1.2) * 100%);
+  width: 44vmax;
+  height: 44vmax;
+  translate: -50% -50%;
+  pointer-events: none;
+  background: radial-gradient(closest-side, rgba(198, 220, 255, 0.5), transparent 68%);
+  /* Scaled by how much light there actually is: a new moon glows at nothing,
+     and a full moon at midday is invisible because `--env-moonlight` already
+     accounts for the sun being up. */
+  opacity: calc(var(--env-moonlight, 0) * 5.5 * var(--env-moon-visible, 0));
+  mix-blend-mode: screen;
+}
+
+.moon-body {
+  position: absolute;
+  left: calc(var(--env-moon-x, 0.5) * 100%);
+  top: calc(var(--env-moon-y, 1.2) * 100%);
+  translate: -50% -50%;
+  pointer-events: none;
+  opacity: var(--env-moon-visible, 0);
+}
+
+.moon-disc {
+  width: 1.5vmax;
+  height: 1.5vmax;
+  border-radius: 50%;
+  background: radial-gradient(circle at 38% 34%, #fdfbf4 0%, #d8dfe8 58%, #9aa6b8 100%);
+  box-shadow:
+    0 0 1.6vmax 0.2vmax rgba(214, 230, 255, 0.55),
+    0 0 6vmax 1.4vmax rgba(150, 190, 250, 0.16);
+  /* Dimmed with the sky rather than switched off, so it stays faintly present
+     in daylight the way the real moon does. */
+  opacity: calc(0.35 + (1 - var(--env-daylight, 0)) * 0.65);
+}
+
+/* ---------------- The atmospheric limb ---------------- */
+
+/* The rim of scattered light along the horizon — the signature of the whole
+   reference set, present in every frame including full night, and brightest
+   where the sun sits behind it. Drawn AFTER the Earth because this is light
+   scattering in front of the limb, not behind it. */
+.horizon-glow {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    /* The warm bloom that tracks the sun along the curve. */
+    radial-gradient(
+      60% 26% at calc(var(--env-sun-x, 0.5) * 100%) 97%,
+      color-mix(in oklab, #ff8a3a calc(var(--env-limb-warmth, 0) * 100%), #cfe6ff)
+        calc(var(--env-limb-warmth, 0) * 24%),
+      transparent 72%
+    ),
+    /* The cool scattered rim everywhere else, which never fully leaves. */
+    radial-gradient(
+      140% 20% at 50% 100%,
+      rgba(150, 200, 255, 0.5) 0%,
+      rgba(90, 150, 220, 0.16) 42%,
+      transparent 76%
+    );
+  opacity: calc(0.35 + var(--env-limb-intensity, 0.18) * 0.65);
+  mix-blend-mode: screen;
+}
+
+/* ---------------- Existing layers, now reactive ---------------- */
+
+/* City lights come up as the terminator passes, on the unlit side only. */
+.earth-lights {
+  opacity: var(--env-city-lights, 1);
+}
+
+/* The rim brightens and warms with the sun. */
+.earth-rim {
+  opacity: calc(0.45 + var(--env-limb-intensity, 0.18) * 0.55);
+}
+
+/* The planet's own surface catches the light. Dark at night, visibly lit by
+   day — otherwise the Earth stays a black silhouette under a blue sky, which
+   is the one thing that would give the whole scene away. */
+.earth-body {
+  filter: brightness(calc(1 + var(--env-daylight, 0) * 2.6));
+}
+
+/* Stars and the Milky Way fade against the sky but are never switched off:
+   the daylight reference frame still shows the band faintly. */
+.constellations {
+  opacity: calc(0.08 + var(--env-star-visibility, 1) * 0.92);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Nothing here animates on its own — the clock stops easing instead, so the
+     environment stays correct and simply arrives without travelling. The rays
+     are the one element whose shape reads as motion, so they are calmed. */
+  .sun-rays { opacity: calc(var(--env-warmth, 0) * 0.45); }
+}

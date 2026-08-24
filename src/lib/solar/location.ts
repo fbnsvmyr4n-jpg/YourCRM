@@ -149,7 +149,38 @@ async function fromIp(
  * `source` carries how the answer was reached, so the interface can decline to
  * present a default as though it were the user's actual location.
  */
+/**
+ * The resolution currently in flight, if there is one.
+ *
+ * Two callers asking at the same moment get the same answer from one journey
+ * down the ladder, rather than two permission prompts and two requests. In
+ * development React's Strict Mode invokes effects twice and makes this visible
+ * immediately; in production the real case is two scenes mounted on one page,
+ * which is exactly the situation the shared backdrop makes possible.
+ *
+ * Deliberately NOT a cache of the result. It is cleared when the resolution
+ * settles, so a later caller — after a permission has since been granted, say —
+ * asks again rather than being handed a stale default for the life of the page.
+ */
+let inFlight: Promise<Coordinates> | null = null;
+
 export async function resolveLocation(deps: LocationDeps = {}): Promise<Coordinates> {
+  // Injected dependencies mean a caller is testing a specific path, and sharing
+  // a promise across those would make one test's answer leak into another's.
+  const shareable = deps.geolocation === undefined && deps.fetcher === undefined;
+  if (shareable && inFlight) return inFlight;
+
+  const run = resolveOnce(deps);
+  if (shareable) {
+    inFlight = run;
+    void run.finally(() => {
+      inFlight = null;
+    });
+  }
+  return run;
+}
+
+async function resolveOnce(deps: LocationDeps): Promise<Coordinates> {
   const {
     geolocation = typeof navigator !== "undefined" ? navigator.geolocation : null,
     fetcher = typeof fetch !== "undefined" ? fetch : null,

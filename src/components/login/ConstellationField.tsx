@@ -755,7 +755,7 @@ export function ConstellationField({ variant = "constellations" }: { variant?: "
     <canvas
       ref={canvasRef}
       aria-hidden
-      className="pointer-events-none absolute inset-0 h-full w-full"
+      className="constellations pointer-events-none absolute inset-0 h-full w-full"
       style={{ zIndex: 1 }}
     />
   );

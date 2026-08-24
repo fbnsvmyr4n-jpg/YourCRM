@@ -217,3 +217,29 @@ describe("the promise this whole file makes", () => {
     expect(where.longitude).toBeLessThanOrEqual(180);
   });
 });
+
+describe("two callers, one journey", () => {
+  it("shares a resolution that is already in flight", async () => {
+    /**
+     * React's Strict Mode invokes effects twice in development, and the shared
+     * backdrop makes two scenes on one page possible for real. Either way,
+     * asking twice should not mean two permission prompts and two requests.
+     *
+     * Uses the default dependencies, because that is the only path that shares:
+     * a caller passing its own geolocation is testing a specific rung, and
+     * sharing across those would leak one test's answer into another's.
+     */
+    const first = resolveLocation();
+    const second = resolveLocation();
+    expect(await first).toEqual(await second);
+  });
+
+  it("does not hand out a stale answer forever", async () => {
+    // Cleared once it settles: somebody who has since granted permission should
+    // get a fresh attempt, not the default this page happened to start with.
+    const before = await resolveLocation();
+    const after = await resolveLocation();
+    expect(after).toEqual(before);
+    expect(after.source).toBeTruthy();
+  });
+});

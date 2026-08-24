@@ -4,6 +4,7 @@ import { ConstellationField } from "./ConstellationField";
 import { EarthLimb } from "./EarthLimb";
 import { EnvironmentProvider } from "./EnvironmentProvider";
 import { EnvironmentDevTools } from "./EnvironmentDevTools";
+import { HorizonGlow, SolarBodies } from "./SolarBodies";
 
 /**
  * The shared backdrop for every signed-out screen.
@@ -27,9 +28,20 @@ export function OrbitScene() {
      */
     <EnvironmentProvider>
       <div className="orbit-sky" aria-hidden>
+        {/*
+          The layer order IS the physics, so it is worth reading top to bottom.
+          The sky is furthest away; the stars sit in it; the sun and moon are
+          beyond the planet, so the Earth draws OVER them and genuinely occults
+          a setting sun rather than dissolving it; and the horizon glow comes
+          last because it is light scattering in the air in FRONT of the limb,
+          which is why a sunrise seen from orbit lights the planet's edge
+          instead of being hidden behind it.
+        */}
+        <SolarBodies />
+        <ConstellationField variant="plain" />
         <EarthLimb />
+        <HorizonGlow />
       </div>
-      <ConstellationField variant="plain" />
       <EnvironmentDevTools />
     </EnvironmentProvider>
   );
