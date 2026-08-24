@@ -106,11 +106,22 @@ export function EnvironmentProvider({ children }: { children: React.ReactNode })
   return (
     <ClockContext.Provider value={clock}>
       {/*
-        The properties land here and inherit down. `display: contents` so this
-        wrapper takes part in nothing — it exists to hold custom properties and
-        must not introduce a box that changes any layout beneath it.
+        The properties land here and inherit down.
+
+        `display: contents` comes from a CLASS, not from a `style` prop, and
+        that is not a style preference — it is a correctness fix. React owns the
+        `style` attribute of any element it sets one on, and rewrites it in
+        full on every render. The clock writes its custom properties to this
+        same attribute imperatively, so a render — `setClock` below causes one,
+        immediately after mount — silently wiped every one of them. What was
+        left was the fallback palette: a night sky in broad daylight, restored
+        only on the next animation frame, and not at all while the tab was
+        hidden and frames were not being scheduled.
+
+        With no `style` prop, React never touches the attribute and the
+        properties survive. The wrapper still takes part in no layout.
       */}
-      <div ref={hostRef} style={{ display: "contents" }} data-environment>
+      <div ref={hostRef} className="environment-host" data-environment>
         {children}
       </div>
     </ClockContext.Provider>

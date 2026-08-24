@@ -136,3 +136,36 @@ function allFiles(dir: string, found: string[] = []): string[] {
   }
   return found;
 }
+
+describe("React must not own the element the clock writes to", () => {
+  /**
+   * A defect found by watching the page, not by reading the code.
+   *
+   * The provider's host originally carried `style={{ display: "contents" }}`.
+   * React rewrites the whole `style` attribute on every render of an element it
+   * sets one on — and the clock writes its custom properties to that same
+   * attribute imperatively. So a single re-render wiped every one of them, and
+   * what was left was the fallback palette: a night sky in broad daylight.
+   *
+   * It was survivable only because the next animation frame rewrote them. On a
+   * hidden tab there is no next frame, and the page sat in the wrong sky
+   * indefinitely — which is exactly how it was noticed.
+   *
+   * `setClock` causes a render immediately after mount, so this was never
+   * hypothetical; it happened on every load and was repaired a frame later.
+   */
+  it("sets no style prop on the host", () => {
+    const source = readFileSync("src/components/login/EnvironmentProvider.tsx", "utf8");
+    const host = source.slice(source.indexOf("<div ref={hostRef}"));
+    const tag = host.slice(0, host.indexOf(">"));
+    expect(tag, "React would rewrite the attribute the clock writes to").not.toMatch(/style=/);
+    expect(tag).toMatch(/className="environment-host"/);
+  });
+
+  it("gets `display: contents` from the stylesheet instead", () => {
+    // The wrapper must still take part in no layout — the fix cannot be to
+    // simply drop the property.
+    const css = readFileSync("src/app/globals.css", "utf8");
+    expect(css).toMatch(/\.environment-host\s*\{[^}]*display:\s*contents/);
+  });
+});

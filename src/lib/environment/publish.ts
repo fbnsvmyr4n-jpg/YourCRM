@@ -1,3 +1,4 @@
+import { scenePalette, scrimCss, toCss } from "./palette";
 import type { EnvironmentState } from "./model";
 
 /**
@@ -68,5 +69,24 @@ export function publishToElement(element: HTMLElement, state: EnvironmentState):
     if (typeof value !== "number" || !Number.isFinite(value)) continue;
     element.style.setProperty(propertyName(key), value.toFixed(3));
   }
+
+  /**
+   * The colours, computed rather than mixed in the stylesheet.
+   *
+   * These are the same values `tests/contrast.test.ts` measures, which is the
+   * whole point: the readability check operates on what the browser actually
+   * paints instead of on a second copy of the arithmetic that can drift from
+   * it. It also makes an entire class of mistake into a unit-test failure —
+   * the first version of the scene mixed its colours in CSS and put a 45%
+   * orange wash over a midday sky.
+   */
+  const palette = scenePalette(state);
+  for (const [key, colour] of Object.entries(palette)) {
+    element.style.setProperty(propertyName(key), toCss(colour));
+  }
+  // The scrim goes over the live gradient rather than replacing it, so it is
+  // published with its alpha intact and the browser composites it itself.
+  element.style.setProperty("--env-scrim", scrimCss(state));
+
   element.dataset.phase = state.phase;
 }

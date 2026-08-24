@@ -1461,13 +1461,16 @@ textarea.field-input {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background:
-    linear-gradient(
-      to bottom,
-      color-mix(in oklab, #0a2c56 calc(var(--env-sky-brightness, 0.04) * 62%), #01030a) 0%,
-      color-mix(in oklab, #1f6fae calc(var(--env-sky-brightness, 0.04) * 88%), #02040c) 78%,
-      color-mix(in oklab, #3f9bd6 calc(var(--env-sky-brightness, 0.04) * 96%), #030610) 100%
-    );
+  /* The stops come from `palette.ts`, mixed in linear light — which is also
+     what `tests/contrast.test.ts` measures. Mixing them here instead would be
+     a second copy of the decision, and the copy nobody looks at is the one
+     that drifts. */
+  background: linear-gradient(
+    to bottom,
+    var(--env-sky-top, #01030a) 0%,
+    var(--env-sky-mid, #02040c) 78%,
+    var(--env-sky-horizon, #030610) 100%
+  );
 }
 
 /* Haze: the atmosphere thickening near the horizon. Sits above the wash and
@@ -1687,3 +1690,58 @@ textarea.field-input {
      are the one element whose shape reads as motion, so they are calmed. */
   .sun-rays { opacity: calc(var(--env-warmth, 0) * 0.45); }
 }
+
+/* ---------------- The readability wash ---------------- */
+
+/*
+   The treatment §24 asks for, and the reason it is a wash and not a panel:
+   these fields sit directly on the sky, which is most of why the screen reads
+   as a window rather than a form. A rectangle behind the text would undo that
+   in one stroke.
+
+   So it is a wide, edgeless darkening centred on the column — atmosphere
+   rather than furniture. Its colour and alpha come from `palette.ts`, the same
+   values `tests/contrast.test.ts` measures, and CSS lays it over the live
+   gradient so the sun's glow still passes behind the text.
+*/
+.orbit-form::before {
+  content: "";
+  position: absolute;
+  /* Generously larger than the form on every side. A scrim whose edge can be
+     found is a box, however soft its corners are. */
+  inset: -18% -34%;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(
+    58% 46% at 50% 42%,
+    var(--env-scrim, transparent) 0%,
+    color-mix(in srgb, var(--env-scrim, transparent) 55%, transparent) 46%,
+    transparent 76%
+  );
+}
+
+/* Text and field colours come from the measured palette. */
+.orbit-title { color: var(--env-card-text, #f2f6ff); }
+.orbit-sub { color: var(--env-card-muted, #8f9bb3); }
+
+.orbit-field {
+  color: var(--env-card-text, #eef3ff);
+  border-color: var(--env-card-border, rgba(255, 255, 255, 0.1));
+  /* The pills darken with the scrim so they stay legible against a bright sky,
+     without the layout moving a pixel — §16's requirement is that the material
+     reacts, not the design. */
+  background: color-mix(in srgb, var(--env-scrim, transparent) 70%, rgba(255, 255, 255, 0.035));
+}
+
+.orbit-field::placeholder {
+  color: color-mix(in srgb, var(--env-card-muted, #7b8698) 78%, transparent);
+}
+
+/*
+   The environment's property holder.
+
+   `display: contents` via a class rather than a `style` prop: React rewrites
+   the whole style attribute on every render, which wiped the custom properties
+   the clock writes to that same attribute. See `EnvironmentProvider`.
+*/
+.environment-host { display: contents; }
