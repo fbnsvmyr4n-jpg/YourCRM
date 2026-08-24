@@ -1,4 +1,5 @@
 import { clamp01, ridge, smoothstep } from "./curves";
+import { projectBodies } from "./projection";
 import {
   ASTRONOMICAL_DEG,
   CIVIL_DEG,
@@ -65,6 +66,21 @@ export type EnvironmentState = {
   glassOpacity: number;
   /** How much extra scrim the text needs to stay readable. */
   textScrim: number;
+
+  /**
+   * Where the sun and moon sit in the frame, 0…1 from the left and the top.
+   *
+   * Carried on the state so the renderer never does astronomy and never does
+   * trigonometry — it reads two numbers and places a light. The projection
+   * itself lives in one calibrated module, per §12.
+   */
+  sunX: number;
+  sunY: number;
+  /** How much of the sun's disc is above the limb, 0…1 — a ramp, not a switch. */
+  sunVisible: number;
+  moonX: number;
+  moonY: number;
+  moonVisible: number;
 };
 
 /**
@@ -183,8 +199,18 @@ export function environmentFor(sun: SolarSnapshot, moon: MoonSnapshot): Environm
   const glassOpacity = 0.36 + 0.22 * daylight;
   const textScrim = clamp01(0.15 + 0.55 * skyBrightness);
 
+  // One camera for both bodies, so a full moon standing opposite the setting
+  // sun appears across the frame from it without anything arranging that.
+  const bodies = projectBodies(sun, moon);
+
   return {
     phase: classifyPhase(sun),
+    sunX: bodies.sun.x,
+    sunY: bodies.sun.y,
+    sunVisible: bodies.sun.visible,
+    moonX: bodies.moon.x,
+    moonY: bodies.moon.y,
+    moonVisible: bodies.moon.visible,
     daylight,
     skyBrightness,
     warmth,
@@ -202,8 +228,50 @@ export function environmentFor(sun: SolarSnapshot, moon: MoonSnapshot): Environm
   };
 }
 
-/** Every numeric field, for the sweeps and the developer panel's inspector. */
+/** Every numeric field, for the global finite sweep and the panel's inspector. */
 export function environmentValues(state: EnvironmentState): Record<string, number> {
   const { phase: _phase, ...numbers } = state;
   return numbers;
+}
+
+/**
+ * The quantities that describe LIGHT, as opposed to geometry.
+ *
+ * These are what §22's "no sudden colour jumps" is actually about, and what the
+ * seam sweep measures. The distinction matters because the fields left out are
+ * not sloppier — they are checked by a test that knows what smooth means for
+ * them:
+ *
+ *  - `sunX`/`sunY` and the moon's carry the projection's one real
+ *    discontinuity, at the antipode of the camera, which is permanently
+ *    off-screen. `tests/projection.test.ts` sweeps them scoped to the frame.
+ *  - `sunVisible`/`moonVisible` are continuous but genuinely STEEP: a disc half
+ *    a degree wide crosses the horizon in about two minutes, so the value
+ *    legitimately travels most of its range in that time. A per-minute
+ *    threshold tuned for light would read real physics as a fault.
+ *
+ * A single sweep over everything would have to loosen its threshold until it
+ * could no longer see the thing it exists to catch.
+ */
+export const LIGHT_VALUES = [
+  "daylight",
+  "skyBrightness",
+  "warmth",
+  "haze",
+  "limbIntensity",
+  "limbWarmth",
+  "sunIntensity",
+  "moonlight",
+  "reflection",
+  "starVisibility",
+  "cityLights",
+  "glassLightness",
+  "glassOpacity",
+  "textScrim",
+] as const;
+
+export function lightValues(state: EnvironmentState): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const key of LIGHT_VALUES) out[key] = state[key];
+  return out;
 }

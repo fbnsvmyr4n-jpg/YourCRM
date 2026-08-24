@@ -101,6 +101,7 @@ export function solarSnapshot(at: Date, where: Coordinates): SolarSnapshot {
 
   const sunrise = eventTime(times.sunrise);
   const sunset = eventTime(times.sunset);
+  const solarNoon = eventTime(times.solarNoon) ?? at.getTime();
 
   return {
     timestamp: at.getTime(),
@@ -114,7 +115,10 @@ export function solarSnapshot(at: Date, where: Coordinates): SolarSnapshot {
     // Solar noon is the moment the sun crosses the meridian, which happens
     // every day everywhere — including where it never rises. It is the one
     // event that can be relied on as the anchor for a polar day.
-    solarNoon: eventTime(times.solarNoon) ?? at.getTime(),
+    solarNoon,
+    solarNoonAzimuthDeg: normaliseBearing(
+      getPosition(new Date(solarNoon), latitude, longitude).azimuth
+    ),
     // `||` rather than `&&`, though nothing can currently tell them apart:
     // swept 60–80°N across a full year, this library returns both events or
     // neither, never one. Recorded rather than tested, because a test that

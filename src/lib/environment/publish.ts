@@ -35,6 +35,12 @@ export const ENV_PROPERTIES = [
   "glassLightness",
   "glassOpacity",
   "textScrim",
+  "sunX",
+  "sunY",
+  "sunVisible",
+  "moonX",
+  "moonY",
+  "moonVisible",
 ] as const;
 
 export type EnvProperty = (typeof ENV_PROPERTIES)[number];

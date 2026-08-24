@@ -74,6 +74,17 @@ export type SolarSnapshot = {
   solarNoon: number;
 
   /**
+   * The sun's compass bearing at solar noon.
+   *
+   * Due north from the southern hemisphere, due south from the northern. The
+   * scene projection points the camera along it so the day's arc crosses the
+   * frame instead of happening behind the viewer — and reading it from the sky
+   * rather than from a hemisphere test means the equator, where it flips across
+   * the year, is right without being a special case.
+   */
+  solarNoonAzimuthDeg: number;
+
+  /**
    * True while the sun is climbing.
    *
    * Carried on the snapshot because classification needs it and altitude alone

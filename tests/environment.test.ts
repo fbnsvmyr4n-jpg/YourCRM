@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { approach, clamp01, lerp, progress, ridge, smoothstep } from "../src/lib/environment/curves";
 import { classifyPhase, PHASE_SEQUENCE } from "../src/lib/environment/phases";
-import { environmentFor, environmentValues } from "../src/lib/environment/model";
+import { environmentFor, environmentValues, lightValues } from "../src/lib/environment/model";
 import { moonSnapshot, solarSnapshot } from "../src/lib/solar/suncalc";
 import { SOLAR_PHASES } from "../src/lib/solar/types";
 import type { Coordinates } from "../src/lib/solar/types";
@@ -183,7 +183,7 @@ describe("no seams anywhere in the day", () => {
 
     for (let minute = 0; minute < 1440; minute++) {
       const when = new Date(Date.UTC(date[0], date[1], date[2], 0, minute));
-      const values = environmentValues(stateAt(when, where));
+      const values = lightValues(stateAt(when, where));
 
       if (previous) {
         for (const [name, value] of Object.entries(values)) {
@@ -243,12 +243,25 @@ describe("no broken numbers anywhere on Earth", () => {
       for (let month = 0; month < 12; month++) {
         for (let hour = 0; hour < 24; hour += 2) {
           const when = new Date(Date.UTC(2026, month, 15, hour));
-          const values = environmentValues(stateAt(when, place(lat, 0)));
+          const state = stateAt(when, place(lat, 0));
+          const values = environmentValues(state);
 
           for (const [name, value] of Object.entries(values)) {
             if (!Number.isFinite(value)) {
               broken.push(`${name} not finite at lat ${lat}, month ${month + 1}, ${hour}h`);
-            } else if (value < 0 || value > 1) {
+            }
+          }
+
+          /**
+           * The 0…1 bound applies to LIGHT, not to position.
+           *
+           * `sunX` and `sunY` are frame coordinates, and a body outside the
+           * frame legitimately has one — that is how the renderer knows not to
+           * draw it. Asserting they stay inside would be asserting the sun never
+           * leaves the picture, which is the opposite of true.
+           */
+          for (const [name, value] of Object.entries(lightValues(state))) {
+            if (value < 0 || value > 1) {
               broken.push(`${name} = ${value} out of range at lat ${lat}, month ${month + 1}`);
             }
           }
