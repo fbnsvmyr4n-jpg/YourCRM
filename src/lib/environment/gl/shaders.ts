@@ -90,11 +90,20 @@ const float R_ATMOS  = 7971000.0;
    order of magnitude more than red — this triple IS why the sky is blue and
    why a low sun is orange. */
 const vec3  BETA_RAYLEIGH = vec3(5.8e-6, 13.5e-6, 33.1e-6);
-const float BETA_MIE      = 21e-6;
+/* Mie, deliberately below the textbook 21e-6.
+
+   Mie is the large-particle term — dust, droplets — and it scatters all
+   wavelengths about equally, so it is grey. At the exaggerated thickness this
+   scene uses it swamped the Rayleigh term and turned the limb into a dirty tan
+   haze instead of the blue band that makes the picture. Rayleigh is what is
+   worth exaggerating; Mie is what has to be held back when you do. */
+const float BETA_MIE      = 8e-6;
 
 /* How fast each falls off with altitude, stretched to match the shell above. */
 const float H_RAYLEIGH = 128000.0;
-const float H_MIE      = 19000.0;
+/* And kept LOW relative to Rayleigh, so the grey stays near the ground where
+   it belongs rather than spreading through the whole band. */
+const float H_MIE      = 9000.0;
 
 /* Mie asymmetry: aerosols scatter strongly forward, which is what puts the
    bright halo immediately around the sun rather than spreading it evenly. */
@@ -173,6 +182,24 @@ void main() {
   vec3 surface = vec3(0.0);
   bool hitGround = ground.x > 0.0;
 
+  /*
+     Soft coverage at the silhouette.
+
+     An analytic sphere intersection is exactly right and therefore exactly
+     hard: a pixel either hits or misses, so the limb is a stair of jagged
+     pixels — the "not clean around the edges". There is no geometry to
+     multisample and no depth buffer to resolve, so the edge is antialiased
+     analytically instead: take the ray's closest approach to the planet's
+     centre, compare it to the radius, and soften across one pixel's worth of
+     that quantity using its screen-space derivative.
+  */
+  float closest = length(origin - dot(origin, dir) * dir);
+  float edge = closest - R_PLANET;
+  float edgeWidth = max(fwidth(edge), 1.0);
+  float groundCoverage = (dot(origin, dir) < 0.0)
+    ? 1.0 - smoothstep(-edgeWidth, edgeWidth, edge)
+    : 0.0;
+
   if (hitGround) {
     vec3 p = origin + dir * ground.x;
     vec3 n = normalize(p);
@@ -240,8 +267,15 @@ void main() {
     float lightMask = max(0.0, night.r - 0.36) * 5.0;
     vec3 cities = lightMask * vec3(1.0, 0.72, 0.38) * (1.0 - lit) * (1.0 - cloud * 0.75);
 
-    // Lambert, with a little wrap so the limb does not go abruptly black.
-    float diffuse = max(0.0, (sunCos + 0.08) / 1.08);
+    /* Lambert with a generous wrap, plus a little ambient.
+
+       Real: the sky itself is a light source. Ground near the terminator is lit
+       by the whole blue dome above it, not only by the direct beam — which is
+       why an overcast dusk is not black. Without it the far half of the visible
+       disc fell away to nothing and took the coastlines with it, which is the
+       "detail on the Earth isn't visible" this is answering. */
+    float diffuse = max(0.0, (sunCos + 0.22) / 1.22);
+    float skyLight = smoothstep(-0.25, 0.35, sunCos) * 0.16;
 
     /*
        The terminator is WARM, and that is not a stylistic choice.
@@ -251,14 +285,18 @@ void main() {
        from above as a band following the curve. A plain Lambert falloff renders
        it grey and reads as a shadow rather than as evening.
     */
-    float grazing = 1.0 - smoothstep(0.0, 0.42, sunCos);
-    vec3 sunlight = mix(vec3(1.0), vec3(1.32, 0.78, 0.46), grazing * lit);
+    /* Narrow. The band was 0.42 wide in sunCos, and because this vantage
+       looks toward the limb most of the visible surface sits at a low sun
+       angle — so nearly the whole planet took the tint and went olive-brown.
+       Sunset is a line across a world, not a wash over one. */
+    float grazing = 1.0 - smoothstep(0.0, 0.16, sunCos);
+    vec3 sunlight = mix(vec3(1.0), vec3(1.28, 0.82, 0.55), grazing * lit);
 
     /* Contrast lifted around a mid grey rather than brightness raised. Blue
        Marble is a flat, evenly-lit mosaic by design — good for mapping, muted
        as a photograph — and simply scaling it makes a brighter flat image. */
     vec3 surfaceColour = clamp((day - 0.5) * 1.22 + 0.5, 0.0, 1.0);
-    vec3 litSurface = surfaceColour * diffuse * 1.8 * sunlight;
+    vec3 litSurface = surfaceColour * (diffuse * 1.75 * sunlight + vec3(0.42, 0.55, 0.78) * skyLight);
 
     /*
        Ocean glint: the sun reflecting off water, and the single strongest cue
@@ -351,8 +389,15 @@ void main() {
      rim right and the ground correspondingly worse: the surface was being
      looked at through sixteen times too much air, which is what "still a bit
      blurry and hazy" was. */
-  float hazeAhead = hitGround ? 0.16 : 1.0;
-  vec3 colour = surface * transmittance + scattered * 13.0 * hazeAhead;
+  float hazeAhead = mix(1.0, 0.16, groundCoverage);
+  /* The surface fades in over the same pixel the silhouette does, so the limb
+     resolves smoothly into the atmosphere in front of it rather than stepping. */
+  /* 9, not 13. Above about ten the three channels all reach the top of the
+     tone curve wherever the air is thickest, and a saturated blue clips to
+     WHITE — the band went pale and lost the colour that is the whole point of
+     computing Rayleigh scattering in the first place. Brightness past the point
+     of saturation does not add light, it removes hue. */
+  vec3 colour = surface * groundCoverage * transmittance + scattered * 9.0 * hazeAhead;
 
   /*
      Airglow: the reason the night limb is not simply an edge.
@@ -374,7 +419,7 @@ void main() {
      emitting air and it reads as an arc. Applied at full strength only to rays
      that miss the ground — the first version used the path length alone and lit
      the entire disc a uniform green. */
-  float glowEdge = hitGround ? 0.05 : 1.0;
+  float glowEdge = mix(1.0, 0.05, groundCoverage);
   colour += vec3(0.16, 0.40, 0.34) * glowPath * sunGone * glowEdge * 0.16;
 
   /* Moonlight: a cool wash on the lit hemisphere of the night side, far below
@@ -410,8 +455,10 @@ void main() {
      At night the scattering really is near zero, so this collapses to
      transparent on its own and the Milky Way is undisturbed.
   */
-  float coverage = hitGround
-    ? 1.0
-    : clamp(max(length(scattered) * 320.0, glowPath * sunGone * 1.9), 0.0, 1.0);
+  float coverage = clamp(
+    max(groundCoverage, max(length(scattered) * 320.0, glowPath * sunGone * 1.9)),
+    0.0,
+    1.0
+  );
   outColour = vec4(colour, coverage);
 }`;
