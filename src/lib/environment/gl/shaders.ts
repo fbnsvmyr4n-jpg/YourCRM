@@ -295,7 +295,13 @@ void main() {
     /* Contrast lifted around a mid grey rather than brightness raised. Blue
        Marble is a flat, evenly-lit mosaic by design — good for mapping, muted
        as a photograph — and simply scaling it makes a brighter flat image. */
-    vec3 surfaceColour = clamp((day - 0.5) * 1.22 + 0.5, 0.0, 1.0);
+    vec3 surfaceColour = clamp((day - 0.5) * 1.26 + 0.5, 0.0, 1.0);
+    /* Saturation lifted separately from contrast. Blue Marble is deliberately
+       desaturated for cartographic neutrality; the ocean in particular reads
+       grey where it should read blue, and greyness at this scale is
+       indistinguishable from haze. */
+    float grey = dot(surfaceColour, vec3(0.299, 0.587, 0.114));
+    surfaceColour = clamp(mix(vec3(grey), surfaceColour, 1.22), 0.0, 1.0);
     vec3 litSurface = surfaceColour * (diffuse * 1.75 * sunlight + vec3(0.42, 0.55, 0.78) * skyLight);
 
     /*
@@ -389,7 +395,25 @@ void main() {
      rim right and the ground correspondingly worse: the surface was being
      looked at through sixteen times too much air, which is what "still a bit
      blurry and hazy" was. */
-  float hazeAhead = mix(1.0, 0.16, groundCoverage);
+  /*
+     Aerial perspective, and it has to FALL OFF with nearness.
+
+     Scattered light is added over the planet as well as beside it, and a flat
+     multiplier lays the same veil on the near ground as on the limb — a
+     constant fog sitting on the whole disc, which is what read as blur. Real
+     aerial perspective is nothing at all on ground directly beneath you and
+     everything at the horizon, because the difference is how much air the light
+     crossed to reach you.
+
+     ground.x is exactly that distance. Near the bottom of the frame the
+     surface is a few thousand kilometres away; at the limb it is twice that
+     and through vastly more atmosphere. Scaled by it, the near ground comes
+     out clean and the limb keeps its depth.
+  */
+  float groundRange = hitGround
+    ? smoothstep(float(R_PLANET) * 0.75, float(R_PLANET) * 1.9, ground.x)
+    : 1.0;
+  float hazeAhead = mix(1.0, 0.02 + groundRange * 0.16, groundCoverage);
   /* The surface fades in over the same pixel the silhouette does, so the limb
      resolves smoothly into the atmosphere in front of it rather than stepping. */
   /* 9, not 13. Above about ten the three channels all reach the top of the
@@ -397,7 +421,7 @@ void main() {
      WHITE — the band went pale and lost the colour that is the whole point of
      computing Rayleigh scattering in the first place. Brightness past the point
      of saturation does not add light, it removes hue. */
-  vec3 colour = surface * groundCoverage * transmittance + scattered * 9.0 * hazeAhead;
+  vec3 colour = surface * groundCoverage * transmittance + scattered * 6.4 * hazeAhead;
 
   /*
      Airglow: the reason the night limb is not simply an edge.
