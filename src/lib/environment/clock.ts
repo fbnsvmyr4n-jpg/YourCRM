@@ -192,6 +192,7 @@ export class EnvironmentClock {
    * is, and a planet lit for a moment the sky has already left.
    */
   private subscribers = new Set<(state: EnvironmentState) => void>();
+  private tickListeners = new Set<() => void>();
 
   /** Frame timings, and whether this machine has been judged too slow. */
   private intervals: number[] = [];
@@ -276,6 +277,26 @@ export class EnvironmentClock {
 
   setReducedMotion(reduced: boolean): void {
     this.reducedMotion = reduced;
+  }
+
+  /**
+   * Listen for every tick, whether or not anything changed enough to publish.
+   *
+   * `onPublish` deliberately stays quiet when nothing has moved beyond the
+   * epsilon — that is what keeps the CSS layers cheap. But the planet has
+   * weather drifting across it, and weather advances whether or not the light
+   * did, so it needs a heartbeat rather than a change notification.
+   *
+   * Kept separate rather than loosening the epsilon: making `onPublish` fire
+   * every frame would write custom properties sixty times a second to express
+   * a difference no screen can show, which is the exact cost that rule exists
+   * to avoid.
+   */
+  onTick(listener: () => void): () => void {
+    this.tickListeners.add(listener);
+    return () => {
+      this.tickListeners.delete(listener);
+    };
   }
 
   /** Listen for published frames. Returns the unsubscribe. */
@@ -381,6 +402,7 @@ export class EnvironmentClock {
     }
 
     this.flush(false);
+    for (const listener of this.tickListeners) listener();
   }
 
   private flush(force: boolean): void {

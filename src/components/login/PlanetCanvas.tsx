@@ -43,6 +43,7 @@ export function PlanetCanvas() {
 
     let cancelled = false;
     let unsubscribe: (() => void) | null = null;
+    let motionCleanup: (() => void) | null = null;
 
     /**
      * A lost context is not an error to report; it is a laptop that slept, or a
@@ -68,6 +69,15 @@ export function PlanetCanvas() {
 
       scene.setQuality(clock.isLowPower() ? "low" : "full");
 
+      /* The clock already subscribes to the media query and is the single
+         source of truth for this; asking it each frame is cheaper than a second
+         listener that could disagree with the first. */
+      const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+      scene.setReducedMotion(motion.matches);
+      const onMotion = (e: MediaQueryListEvent) => scene.setReducedMotion(e.matches);
+      motion.addEventListener("change", onMotion);
+      motionCleanup = () => motion.removeEventListener("change", onMotion);
+
       const draw = () => {
         if (cancelled) return;
         scene.render(
@@ -81,7 +91,38 @@ export function PlanetCanvas() {
         );
       };
 
-      unsubscribe = clock.onPublish(draw);
+      /*
+         Twenty frames a second, not sixty.
+         
+         The planet needs redrawing continuously now that weather moves across
+         it — but this shader marches the atmosphere sixteen times per pixel,
+         each of those sampling the light path six more, over two million
+         pixels. Running it at sixty on a page somebody looks at for twenty
+         seconds is a real cost in battery for no visible gain: the clouds take
+         twenty minutes to cross the planet, so fifty milliseconds between
+         frames is far finer than the motion being shown.
+         
+         `onPublish` stays subscribed as well, so a scrub or a snap redraws at
+         once instead of waiting out the interval.
+      */
+      const MIN_FRAME_MS = 50;
+      let lastDraw = 0;
+      const drawThrottled = () => {
+        const now = performance.now();
+        if (now - lastDraw < MIN_FRAME_MS) return;
+        lastDraw = now;
+        draw();
+      };
+
+      const stopTicks = clock.onTick(drawThrottled);
+      const stopPublish = clock.onPublish(() => {
+        lastDraw = performance.now();
+        draw();
+      });
+      unsubscribe = () => {
+        stopTicks();
+        stopPublish();
+      };
       // A sharper surface arriving later must be drawn immediately rather than
       // waiting for the next tick — on a still scene the next tick may be a
       // while, and on a hidden tab it may never come.
@@ -107,6 +148,7 @@ export function PlanetCanvas() {
       cancelled = true;
       canvas.removeEventListener("webglcontextlost", onLost);
       delete document.documentElement.dataset.planet;
+      motionCleanup?.();
       unsubscribe?.();
       scene.dispose();
     };

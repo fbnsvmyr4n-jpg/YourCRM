@@ -85,6 +85,7 @@ export class PlanetScene {
   private uniforms: Record<string, WebGLUniformLocation | null> = {};
   private textures: Textures | null = null;
   private quality: SceneQuality = "full";
+  private reducedMotion = false;
   private disposed = false;
 
   /** The star pass: its own program, buffers and uniforms. */
@@ -120,7 +121,7 @@ export class PlanetScene {
     for (const name of [
       "uResolution", "uSunDir", "uMoonDir", "uMoonLight", "uCameraHeight",
       "uFov", "uPitch", "uYaw", "uEnuToEcef", "uExposure", "uSteps",
-      "uLightSteps", "uDay", "uNight", "uClouds",
+      "uLightSteps", "uCloudPhase", "uDay", "uNight", "uClouds",
     ]) {
       const location = gl.getUniformLocation(program, name);
       if (location === null) missing.push(name);
@@ -427,6 +428,11 @@ export class PlanetScene {
     this.quality = quality;
   }
 
+  /** Holds the weather still. See the note where the phase is computed. */
+  setReducedMotion(reduced: boolean): void {
+    this.reducedMotion = reduced;
+  }
+
   get ready(): boolean {
     return this.textures !== null && !this.disposed;
   }
@@ -495,6 +501,22 @@ export class PlanetScene {
        genuinely emissive, rather than by turning up the gain on nothing.
     */
     gl.uniform1f(u.uExposure, 1.0);
+    /*
+       Weather's own clock, from the same instant as everything else.
+       
+       A full wrap takes twenty minutes of scene time, which over the twenty
+       seconds somebody spends signing in is a visible drift of a few degrees of
+       longitude — present if you look, never asking to be looked at. It follows
+       SIMULATED time, so scrubbing the panel at 600x sends the weather racing,
+       which is both correct and rather nice to watch.
+       
+       Held still for reduced motion. Cloud drift is decoration and carries no
+       information; it is exactly what that preference is asking to be spared.
+    */
+    const CLOUD_WRAP_MS = 20 * 60_000;
+    const phase = this.reducedMotion ? 0 : (sun.timestamp % CLOUD_WRAP_MS) / CLOUD_WRAP_MS;
+    gl.uniform1f(u.uCloudPhase, phase);
+
     gl.uniform1i(u.uSteps, steps);
     gl.uniform1i(u.uLightSteps, lightSteps);
     gl.uniform1i(u.uDay, 0);

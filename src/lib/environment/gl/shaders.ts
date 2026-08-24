@@ -52,6 +52,7 @@ uniform float uExposure;
 uniform int   uSteps;         // view samples through the atmosphere
 uniform int   uLightSteps;    // light samples toward the sun
 
+uniform float uCloudPhase;   // weather's own offset, in texture units
 uniform sampler2D uDay;
 uniform sampler2D uNight;
 uniform sampler2D uClouds;
@@ -215,7 +216,31 @@ void main() {
 
     vec3 day = texture(uDay, uv).rgb;
     vec3 night = texture(uNight, uv).rgb;
-    float cloud = texture(uClouds, uv).r;
+
+    /*
+       Weather moves, and it does not move rigidly.
+       
+       Scrolling the cloud texture alone slides a sheet across the planet, which
+       reads worse than leaving it still — the eye immediately sees one picture
+       being dragged over another. Weather does not translate; it deforms.
+       
+       So the lookup is domain-warped: a second, much coarser sample of the same
+       texture displaces where the first one reads. Regions of the field then
+       drift at slightly different rates and shear against each other, and cloud
+       shapes evolve rather than merely arrive. One extra sample for the whole
+       effect.
+       
+       Only longitude wraps, so only u carries the drift. A v offset large
+       enough to matter would slide the tropics toward the poles, which is both
+       wrong and — because the texture is clamped vertically — visibly smeared.
+    */
+    float warp = texture(uClouds, vec2(uv.x * 0.42 - uCloudPhase * 0.35, uv.y * 0.42 + 0.2)).r;
+    vec2 cloudUv = vec2(
+      uv.x + uCloudPhase + (warp - 0.5) * 0.03,
+      uv.y + (warp - 0.5) * 0.006
+    );
+
+    float cloud = texture(uClouds, cloudUv).r;
 
     /*
        Where the water is, read out of the imagery rather than shipped as a
@@ -238,7 +263,7 @@ void main() {
     vec3 northAt = cross(n, eastAt);
     vec2 sunOnSurface = vec2(dot(uSunDir, eastAt), dot(uSunDir, northAt));
     float obliquity = sqrt(max(0.0, 1.0 - sunCos * sunCos));
-    vec2 shadowUv = uv - sunOnSurface * obliquity * 0.004 * vec2(1.0, -1.0);
+    vec2 shadowUv = cloudUv - sunOnSurface * obliquity * 0.004 * vec2(1.0, -1.0);
     float shadowCloud = texture(uClouds, shadowUv).r;
 
     /* City lights belong to the dark side only, and they are emissive: they do
@@ -329,8 +354,8 @@ void main() {
        its tops. Two extra samples give that gradient, and lighting the implied
        slope by the sun is what turns a smear into a mass.
     */
-    float cloudDu = texture(uClouds, uv + vec2(0.0012, 0.0)).r - texture(uClouds, uv - vec2(0.0012, 0.0)).r;
-    float cloudDv = texture(uClouds, uv + vec2(0.0, 0.0012)).r - texture(uClouds, uv - vec2(0.0, 0.0012)).r;
+    float cloudDu = texture(uClouds, cloudUv + vec2(0.0012, 0.0)).r - texture(uClouds, cloudUv - vec2(0.0012, 0.0)).r;
+    float cloudDv = texture(uClouds, cloudUv + vec2(0.0, 0.0012)).r - texture(uClouds, cloudUv - vec2(0.0, 0.0012)).r;
 
     /* The slope in the same east/north frame the shadow offset uses, so the two
        agree about which way the light is coming from. */
