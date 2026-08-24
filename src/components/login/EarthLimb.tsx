@@ -21,6 +21,23 @@ export function EarthLimb() {
     <div className="earth" aria-hidden>
       <div className="earth-halo" />
       <div className="earth-body">
+        {/*
+          The planet's surface, and the reason it is here.
+
+          Without it the Earth is a black disc under a blue sky, which is the
+          single detail that gives the whole scene away — the reference frames
+          all show cloud and ocean catching the light. Both layers are lit by
+          `--env-daylight`, so they appear as the terminator passes and are
+          genuinely absent at night, when the only thing on the dark side is
+          city light.
+
+          Drawn from fractal noise rather than an image: it is a few hundred
+          bytes, it stays crisp at any size, and `public/` holds no assets at
+          all. The noise is static — nothing here animates, so it costs one
+          rasterisation and nothing per frame.
+        */}
+        <div className="earth-ocean" />
+        <div className="earth-clouds" />
         <div className="earth-rim" />
         <div className="earth-lights" />
       </div>

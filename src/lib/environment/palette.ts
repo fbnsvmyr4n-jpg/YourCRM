@@ -168,14 +168,33 @@ export function scenePalette(state: EnvironmentState): ScenePalette {
    * along the horizon; look up and the sky is still deep blue. Weighting the
    * tint by height is what gives dawn its band instead of its haze.
    */
-  const blend = (night: Rgb, day: Rgb, warmShare: number) => {
-    const base = mix(night, day, brightness);
+  const blend = (night: Rgb, day: Rgb, warmShare: number, lit = brightness) => {
+    const base = mix(night, day, lit);
     return mix(base, WARM, warmth * warmShare);
   };
 
-  const skyTop = blend(SKY_NIGHT.top, SKY_DAY.top, 0.06);
-  const skyMid = blend(SKY_NIGHT.mid, SKY_DAY.mid, 0.2);
-  const skyHorizon = blend(SKY_NIGHT.horizon, SKY_DAY.horizon, 0.55);
+  /**
+   * The top of the frame darkens faster than the horizon does.
+   *
+   * Seen from orbit the upper frame is looking OUT, at space; the blue there is
+   * atmosphere seen edge-on, and it thins with altitude. So as the terminator
+   * passes, the top goes dark well before the limb does — which is exactly what
+   * the reference frames show: near-black above, an intense band below.
+   *
+   * Applied evenly, twilight came out a uniform mauve across the whole frame.
+   * Squaring the brightness for the top stop leaves full daylight untouched
+   * (1² = 1) and pulls everything below it down hard, which is the shape this
+   * needs: bright days stay bright, dusk falls off a cliff.
+   *
+   * The warm shares had to come down with it, and the tests are what said so.
+   * A darker base makes the same fraction of orange count for far more: the
+   * top went from a red-minus-blue bias of 2 to 21 without its share changing
+   * at all, because the blue it was competing with had gone. Warmth is a
+   * RATIO against what is already there, not an amount.
+   */
+  const skyTop = blend(SKY_NIGHT.top, SKY_DAY.top, 0.02, brightness * brightness);
+  const skyMid = blend(SKY_NIGHT.mid, SKY_DAY.mid, 0.18, Math.pow(brightness, 1.4));
+  const skyHorizon = blend(SKY_NIGHT.horizon, SKY_DAY.horizon, 0.62);
 
   /**
    * The card sits across the upper middle of the frame, so what is behind it is

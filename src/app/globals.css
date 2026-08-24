@@ -1137,7 +1137,13 @@ textarea.field-input {
      bottom and translating down put the arc at the top of the screen instead —
      the circle is ~3x the viewport wide, so a percentage translate moves it far
      further than it looks like it should. */
-  top: 93%;
+  /*
+     Raised from 93%. At 93% the planet showed 7% of the frame — a thin arc that
+     read as a line under the composition rather than as a world below it. The
+     reference frames give it closer to a sixth of the picture, which is what
+     makes the vantage legible: you are looking DOWN at something.
+  */
+  top: 88%;
   width: 340vw;
   max-width: 4600px;
   aspect-ratio: 1 / 1;
@@ -1405,7 +1411,8 @@ textarea.field-input {
      (`main` is the positioned ancestor) makes the horizon sit below the whole
      form, however tall it gets. */
   .orbit-sky { position: absolute; }
-  .earth { width: 620vw; top: 99%; }
+  /* Narrower viewports see a flatter, lower arc — the same planet, further away. */
+  .earth { width: 620vw; top: 94%; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1789,3 +1796,54 @@ textarea.field-input {
    fill-rate goes on a weak GPU. */
 :root[data-low-power="true"] .sun-glow { width: 90vmax; height: 90vmax; }
 :root[data-low-power="true"] .moon-glow { width: 26vmax; height: 26vmax; }
+
+/* ---------------- The planet's surface ---------------- */
+
+/*
+   Fractal noise standing in for cloud and ocean, generated inline rather than
+   loaded — a few hundred bytes, crisp at any size, and this project ships no
+   image assets at all. Static: it rasterises once and costs nothing per frame.
+
+   Both layers are masked to a band just inside the limb, so they follow the
+   curve instead of scattering across a disc that is mostly off-screen, and both
+   are lit by `--env-daylight`. At night they are genuinely gone; the only thing
+   on the dark side is city light, which is what the reference frames show.
+*/
+.earth-ocean,
+.earth-clouds {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background-repeat: repeat;
+  /*
+     Small tiles, and the reason is scale rather than taste. At 34% the noise
+     tiled at roughly a thousand pixels across a band only a hundred tall, so
+     the visible sliver of planet showed one flat patch of a very large cloud —
+     texture that was present, correct, and completely invisible. Sized to the
+     BAND, not to the disc.
+  */
+  background-size: 7% 7%;
+  /* The visible sliver only. Further inside the edge the planet has curved
+     away from us and nothing there would be catching light anyway. */
+  mask-image: radial-gradient(closest-side, transparent 95.4%, #000 97.2%, #000 99.6%, transparent 100%);
+  -webkit-mask-image: radial-gradient(closest-side, transparent 95.4%, #000 97.2%, #000 99.6%, transparent 100%);
+}
+
+/* Ocean and landmass: low frequency, cool, and dim even at noon — from orbit
+   the surface is far darker than the cloud sitting on top of it. */
+.earth-ocean {
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20width%3D%27700%27%20height%3D%27700%27%3E%3Cfilter%20id%3D%27n%27%3E%3CfeTurbulence%20type%3D%27fractalNoise%27%20baseFrequency%3D%270.0035%27%20numOctaves%3D%274%27%20seed%3D%273%27%2F%3E%3CfeColorMatrix%20values%3D%270%200%200%200%201%200%200%200%200%201%200%200%200%200%201%201%200%200%200%20-0.42%27%2F%3E%3C%2Ffilter%3E%3Crect%20width%3D%27100%25%27%20height%3D%27100%25%27%20filter%3D%27url%28%23n%29%27%2F%3E%3C%2Fsvg%3E");
+  background-color: #10314f;
+  opacity: calc(var(--env-daylight, 0) * 0.5);
+  filter: saturate(0.7);
+}
+
+/* Cloud: higher frequency, near-white, the brightest thing on the planet. */
+.earth-clouds {
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20width%3D%27700%27%20height%3D%27700%27%3E%3Cfilter%20id%3D%27n%27%3E%3CfeTurbulence%20type%3D%27fractalNoise%27%20baseFrequency%3D%270.009%27%20numOctaves%3D%275%27%20seed%3D%277%27%2F%3E%3CfeColorMatrix%20values%3D%270%200%200%200%201%200%200%200%200%201%200%200%200%200%201%201%200%200%200%20-0.32%27%2F%3E%3C%2Ffilter%3E%3Crect%20width%3D%27100%25%27%20height%3D%27100%25%27%20filter%3D%27url%28%23n%29%27%2F%3E%3C%2Fsvg%3E");
+  opacity: calc(var(--env-daylight, 0) * 0.72);
+  mix-blend-mode: screen;
+}
+
+/* Low power drops the ocean layer: the most fill for the least effect. */
+:root[data-low-power="true"] .earth-ocean { display: none; }
