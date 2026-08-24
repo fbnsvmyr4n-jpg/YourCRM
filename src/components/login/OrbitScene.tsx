@@ -2,6 +2,8 @@
 
 import { ConstellationField } from "./ConstellationField";
 import { EarthLimb } from "./EarthLimb";
+import { EnvironmentProvider } from "./EnvironmentProvider";
+import { EnvironmentDevTools } from "./EnvironmentDevTools";
 
 /**
  * The shared backdrop for every signed-out screen.
@@ -13,12 +15,23 @@ import { EarthLimb } from "./EarthLimb";
  */
 export function OrbitScene() {
   return (
-    <>
+    /**
+     * The environment wraps the scene HERE, not on the login page.
+     *
+     * The specification puts the whole feature under `app/login/`, but this
+     * component is the backdrop for sign-in, sign-up AND password reset — and
+     * the three have already drifted apart once, which is what the note above
+     * records. Building the environment onto one page would recreate that
+     * split, and this time the stragglers would also be showing the wrong time
+     * of day.
+     */
+    <EnvironmentProvider>
       <div className="orbit-sky" aria-hidden>
         <EarthLimb />
       </div>
       <ConstellationField variant="plain" />
-    </>
+      <EnvironmentDevTools />
+    </EnvironmentProvider>
   );
 }
 
