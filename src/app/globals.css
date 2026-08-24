@@ -1534,7 +1534,12 @@ textarea.field-input {
     over a blue sky that read as a bug before it read as anything else.
   */
   scale: calc(0.3 + var(--env-warmth, 0) * 0.7);
-  opacity: calc(0.18 + var(--env-warmth, 0) * 0.82);
+  /* Same gate as the moon's: a sun far outside the frame must not leave its
+     glow sitting in the middle of the picture. */
+  opacity: calc(
+    (0.18 + var(--env-warmth, 0) * 0.82) *
+    clamp(0, (0.5 - abs(var(--env-sun-y, 1.2) - 0.5)) * 2.5 + 1, 1)
+  );
   mix-blend-mode: screen;
 }
 
@@ -1619,7 +1624,31 @@ textarea.field-input {
   /* Scaled by how much light there actually is: a new moon glows at nothing,
      and a full moon at midday is invisible because `--env-moonlight` already
      accounts for the sun being up. */
-  opacity: calc(var(--env-moonlight, 0) * 5.5 * var(--env-moon-visible, 0));
+  /*
+     Gated on the moon actually being IN the frame, not merely above the horizon.
+     With the moon just past the top edge its glow still reached a third of the
+     way down the picture — a white smudge with nothing casting it, which is
+     what it looked like: a rendering fault rather than moonlight.
+
+     Measured as distance OUTSIDE the frame, and it has to be steep. The moon
+     sits above 70° of altitude for part of most nights, and a 70° vertical
+     field of view puts that off the top — so it is barely outside far more
+     often than it is far outside. A gentle falloff still left two thirds of
+     the glow sitting in the picture.
+  */
+  opacity: calc(
+    var(--env-moonlight, 0) * 5.5 * var(--env-moon-visible, 0) *
+    clamp(
+      0,
+      1 - max(0, 0 - var(--env-moon-y, 1.2), var(--env-moon-y, 1.2) - 1) / 0.05,
+      1
+    ) *
+    clamp(
+      0,
+      1 - max(0, 0 - var(--env-moon-x, 0.5), var(--env-moon-x, 0.5) - 1) / 0.12,
+      1
+    )
+  );
   mix-blend-mode: screen;
 }
 
@@ -1671,14 +1700,18 @@ textarea.field-input {
       transparent 76%
     );
   /*
-     Steeply scaled, and the floor is low on purpose.
-     At `0.35 + intensity * 0.65` the night floor landed near 0.47, which over a
-     tall phone viewport painted a broad blue wash across the bottom third — a
-     glow where the reference frames show a thin bright arc on black. Squared,
-     the rim stays present at night without lighting the sky it is supposed to
-     be separating from space.
+     Bright at night, and TIGHT at night — those are two different controls and
+     I confused them once already.
+
+     The first version washed a broad blue haze across the bottom third of a
+     tall phone. I answered that by squaring the opacity, which took the night
+     arc down to 9% — so the rim all but vanished, when the reference night
+     frame's single strongest feature is a crisp bright line separating the
+     planet from space. The problem had never been brightness; it was the
+     gradient's HEIGHT. Height is now what scales with the light, and the arc
+     stays bright throughout.
   */
-  opacity: calc(0.06 + var(--env-limb-intensity, 0.18) * var(--env-limb-intensity, 0.18) * 0.94);
+  opacity: calc(0.5 + var(--env-limb-intensity, 0.18) * 0.5);
   mix-blend-mode: screen;
 }
 
@@ -1691,7 +1724,9 @@ textarea.field-input {
 
 /* The rim brightens and warms with the sun. */
 .earth-rim {
-  opacity: calc(0.45 + var(--env-limb-intensity, 0.18) * 0.55);
+  /* Never dim. This hairline is the brightest edge in the frame at every hour,
+     and at night it is the only thing telling you there is a planet there. */
+  opacity: calc(0.8 + var(--env-limb-intensity, 0.18) * 0.2);
 }
 
 /* The planet's own surface catches the light. Dark at night, visibly lit by
