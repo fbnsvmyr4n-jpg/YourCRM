@@ -74,6 +74,18 @@ export type SolarSnapshot = {
   solarNoon: number;
 
   /**
+   * True while the sun is climbing.
+   *
+   * Carried on the snapshot because classification needs it and altitude alone
+   * cannot supply it: the sun is at 3° twice a day, once on the way up and once
+   * on the way down, and those two moments are dawn and dusk — the same number
+   * describing opposite halves of the cycle. Measured from the sun's own motion
+   * rather than compared against solar noon, so it stays correct through a
+   * polar day where noon is not a meaningful pivot.
+   */
+  rising: boolean;
+
+  /**
    * True when this date has no sunrise or no sunset at this latitude.
    *
    * Carried explicitly rather than left for each consumer to infer from nulls,

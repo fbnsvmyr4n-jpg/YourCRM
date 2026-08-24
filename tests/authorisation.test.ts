@@ -88,6 +88,11 @@ const PUBLIC_ROUTES: Record<string, string> = {
   "src/app/api/voice/[action]/route.ts":
     "a telephony webhook: the provider has no session, and the dialled number " +
     "is what resolves the tenant.",
+  "src/app/api/where/route.ts":
+    "the login screen's location fallback: it runs BEFORE anyone signs in, so " +
+    "requiring a session would make it useless. It reads nothing and writes " +
+    "nothing — it echoes back a coarse position the caller already disclosed " +
+    "by connecting, rounded to 0.1° and never cached.",
   "src/app/api/stripe/webhook/route.ts":
     "a Stripe webhook: no session exists, and the request is authorised by its " +
     "signature instead. See the block below, which checks exactly that — this " +

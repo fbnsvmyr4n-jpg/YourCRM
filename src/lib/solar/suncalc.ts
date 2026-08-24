@@ -51,6 +51,15 @@ import type { Coordinates, MoonSnapshot, SolarSnapshot } from "./types";
 export const HORIZON_DEG = -0.35;
 
 /**
+ * The step used to tell whether the sun is climbing or falling.
+ *
+ * Five minutes. Long enough that the altitude difference is far larger than any
+ * floating-point noise even at the turning point, short enough that the answer
+ * is about now rather than about later.
+ */
+const DIRECTION_STEP_MS = 5 * 60_000;
+
+/**
  * A `Date` from SunCalc, as a timestamp — or null when the event does not happen.
  *
  * Two different absences to survive, and they are not the same shape. Version
@@ -84,6 +93,12 @@ export function solarSnapshot(at: Date, where: Coordinates): SolarSnapshot {
   const position = getPosition(at, latitude, longitude);
   const times = getTimes(at, latitude, longitude);
 
+  // Is the sun climbing? Read from its own motion over a short step rather than
+  // from the clock. Comparing against solar noon breaks in exactly the place
+  // this has to work — a polar day, where the sun circles without ever setting
+  // and "before noon" says nothing about whether it is rising.
+  const later = getPosition(new Date(at.getTime() + DIRECTION_STEP_MS), latitude, longitude);
+
   const sunrise = eventTime(times.sunrise);
   const sunset = eventTime(times.sunset);
 
@@ -91,6 +106,7 @@ export function solarSnapshot(at: Date, where: Coordinates): SolarSnapshot {
     timestamp: at.getTime(),
     altitudeDeg: position.altitude,
     azimuthDeg: normaliseBearing(position.azimuth),
+    rising: later.altitude > position.altitude,
     sunrise,
     sunset,
     dawn: eventTime(times.dawn),
