@@ -59,6 +59,10 @@ export function PlanetCanvas() {
     };
     canvas.addEventListener("webglcontextlost", onLost);
 
+    // Stars are their own request and their own failure. A sky without them is
+    // worse; a scene that waited for them and lost would be nothing at all.
+    void scene.loadStars();
+
     scene.loadTextures().then((loaded) => {
       if (cancelled || !loaded) return;
 

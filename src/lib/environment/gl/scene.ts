@@ -1,4 +1,5 @@
 import { FRAGMENT_SHADER, VERTEX_SHADER } from "./shaders";
+import { decodeStars, localSiderealTime, STAR_FRAGMENT, STAR_VERTEX, type StarField } from "./stars";
 import type { EnvironmentState } from "../model";
 import type { Coordinates, MoonSnapshot, SolarSnapshot } from "../../solar/types";
 
@@ -68,6 +69,13 @@ export class PlanetScene {
   private textures: Textures | null = null;
   private quality: SceneQuality = "full";
   private disposed = false;
+
+  /** The star pass: its own program, buffers and uniforms. */
+  private starProgram: WebGLProgram | null = null;
+  private starUniforms: Record<string, WebGLUniformLocation | null> = {};
+  private starBuffers: WebGLBuffer[] = [];
+  private starVao: WebGLVertexArrayObject | null = null;
+  private starCount = 0;
 
   private constructor(
     private canvas: HTMLCanvasElement,
@@ -140,7 +148,9 @@ export class PlanetScene {
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
-    return new PlanetScene(canvas, gl, program);
+    const scene = new PlanetScene(canvas, gl, program);
+    scene.buildStarProgram();
+    return scene;
   }
 
   /**
@@ -271,6 +281,68 @@ export class PlanetScene {
     return texture;
   }
 
+  /** The second program. Failing to build it costs the stars, not the scene. */
+  private buildStarProgram(): void {
+    const gl = this.gl;
+    const program = link(gl, STAR_VERTEX, STAR_FRAGMENT);
+    if (!program) return;
+    this.starProgram = program;
+    for (const name of [
+      "uLst", "uLatitude", "uFov", "uPitch", "uYaw",
+      "uResolution", "uCameraHeight", "uVisibility", "uPixelRatio",
+    ]) {
+      this.starUniforms[name] = gl.getUniformLocation(program, name);
+    }
+  }
+
+  /**
+   * Load the catalogue and hand it to the GPU.
+   *
+   * Separate from the textures and separately survivable: a sky without stars
+   * is a worse sky, a scene that failed to start is no scene at all.
+   */
+  async loadStars(url = "/scene/stars.bin"): Promise<boolean> {
+    if (!this.starProgram) return false;
+    try {
+      const response = await fetch(url);
+      if (!response.ok) return false;
+      const stars = decodeStars(await response.arrayBuffer());
+      if (this.disposed) return false;
+      this.uploadStars(stars);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private uploadStars(stars: StarField): void {
+    const gl = this.gl;
+    const program = this.starProgram!;
+
+    this.starVao = gl.createVertexArray();
+    gl.bindVertexArray(this.starVao);
+
+    const attach = (name: string, data: Float32Array) => {
+      const buffer = gl.createBuffer()!;
+      this.starBuffers.push(buffer);
+      gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+      gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+      const location = gl.getAttribLocation(program, name);
+      if (location >= 0) {
+        gl.enableVertexAttribArray(location);
+        gl.vertexAttribPointer(location, 1, gl.FLOAT, false, 0, 0);
+      }
+    };
+
+    attach("aRa", stars.ra);
+    attach("aDec", stars.dec);
+    attach("aMag", stars.mag);
+    attach("aTemp", stars.temp);
+
+    gl.bindVertexArray(null);
+    this.starCount = stars.count;
+  }
+
   setQuality(quality: SceneQuality): void {
     this.quality = quality;
   }
@@ -308,6 +380,16 @@ export class PlanetScene {
     gl.viewport(0, 0, width, height);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
+
+    /*
+       Stars FIRST, planet over the top.
+       They are the furthest thing in the scene, and drawing them first means
+       the atmosphere — which has partial coverage near the limb — genuinely
+       dims the ones behind it, and the planet blots out the ones behind IT.
+       Drawn afterwards they would shine through the Earth.
+    */
+    this.renderStars(state, sun, where, width, height, facingDeg);
+
     gl.useProgram(this.program);
 
     const u = this.uniforms;
@@ -341,9 +423,59 @@ export class PlanetScene {
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
+  private renderStars(
+    state: EnvironmentState,
+    sun: SolarSnapshot,
+    where: Coordinates,
+    width: number,
+    height: number,
+    facingDeg: number
+  ): void {
+    if (!this.starProgram || this.starCount === 0) return;
+    const gl = this.gl;
+
+    gl.useProgram(this.starProgram);
+    gl.bindVertexArray(this.starVao);
+    /*
+       Additive, and `ONE` for the source rather than `SRC_ALPHA`.
+       Overlapping stars in a dense field should build up rather than replace
+       one another — that is what makes a crowded region read as a glow instead
+       of a heap of separate dots.
+
+       The source factor matters more than it looks. With `SRC_ALPHA` the colour
+       is multiplied by alpha at blend time, and the fragment shader has already
+       multiplied by intensity — so brightness came out SQUARED, and a sixth
+       magnitude star landed at about one part in sixty thousand. The whole
+       catalogue drew, correctly positioned and correctly occluded, and was
+       invisible. Pre-multiplied by intensity in the shader, added with `ONE`
+       here: scaled exactly once.
+    */
+    gl.blendFunc(gl.ONE, gl.ONE);
+
+    const u = this.starUniforms;
+    gl.uniform1f(u.uLst, localSiderealTime(new Date(sun.timestamp), where.longitude));
+    gl.uniform1f(u.uLatitude, (where.latitude * Math.PI) / 180);
+    gl.uniform1f(u.uFov, FOV_RAD);
+    gl.uniform1f(u.uPitch, PITCH_RAD);
+    gl.uniform1f(u.uYaw, (facingDeg * Math.PI) / 180);
+    gl.uniform2f(u.uResolution, width, height);
+    gl.uniform1f(u.uCameraHeight, CAMERA_HEIGHT_M);
+    gl.uniform1f(u.uVisibility, state.starVisibility);
+    gl.uniform1f(u.uPixelRatio, Math.min(2, width / Math.max(1, this.canvas.clientWidth)));
+
+    gl.drawArrays(gl.POINTS, 0, this.starCount);
+
+    gl.bindVertexArray(null);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  }
+
   dispose(): void {
     this.disposed = true;
     const gl = this.gl;
+    for (const buffer of this.starBuffers) gl.deleteBuffer(buffer);
+    this.starBuffers = [];
+    if (this.starVao) gl.deleteVertexArray(this.starVao);
+    if (this.starProgram) gl.deleteProgram(this.starProgram);
     if (this.textures) {
       for (const texture of Object.values(this.textures)) gl.deleteTexture(texture);
       this.textures = null;

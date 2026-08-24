@@ -1933,6 +1933,20 @@ textarea.field-input {
    atmosphere and return nothing, and it is what the scene falls back to
    instantly if the context is ever lost.
 */
+/*
+   The procedural field stays, dimmed, BEHIND the real one.
+
+   Nine thousand catalogue stars are every star the naked eye can see — and a
+   naked-eye sky is genuinely sparse, about three thousand at once. The
+   reference frames are far denser than that, and they are not wrong to be:
+   there are billions of stars below sixth magnitude, and from orbit, with no
+   atmosphere in the way, far more of them are there.
+
+   So the catalogue carries the bright stars and the real constellations, and
+   this carries the countless faint ones and the Milky Way behind them. Dimmed
+   hard, so the ones in the right places are the ones that read.
+*/
+:root[data-planet="live"] .constellations { opacity: 0.42; }
 :root[data-planet="live"] .sky-wash { opacity: 0.18; }
 :root[data-planet="live"] .sky-wash::after { opacity: 0; }
 
@@ -1954,6 +1968,7 @@ textarea.field-input {
 .sky-wash,
 .sky-wash::after,
 .earth,
-.horizon-glow {
+.horizon-glow,
+.constellations {
   transition: opacity 1.6s ease;
 }

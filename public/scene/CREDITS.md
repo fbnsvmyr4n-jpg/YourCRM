@@ -33,3 +33,23 @@ They are equirectangular: longitude across, latitude down. The WebGL scene
 samples them per-pixel and lights them from the real solar direction, which is
 what makes the terminator sweep across actual continents and the city lights
 come on where cities actually are.
+
+## stars.bin
+
+**Yale Bright Star Catalogue (BSC5)**, 9,096 stars — every star visible to the
+naked eye, down to about seventh magnitude. Compiled at Yale University
+Observatory and in the public domain.
+
+Six bytes each: right ascension and declination at sixteen bits, visual
+magnitude and colour temperature at eight. **53KB for the entire naked-eye
+sky** — less than one of the small texture files.
+
+Sorted brightest first, so a truncated read is still the best stars rather than
+an arbitrary slice. The first five decode as Sirius, Canopus, Arcturus, Alpha
+Centauri and Vega, which is how the encoding was checked.
+
+The shader converts each to the observer's own horizon using local sidereal
+time, so the constellations are the ones actually overhead: the Southern Cross
+from Cape Town, the Plough from London. They rise and set through the night
+because sidereal time advances — about four minutes a day faster than the
+sun's, which is why the sky in June differs from the sky in December.

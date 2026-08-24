@@ -188,6 +188,30 @@ void main() {
     vec3 night = texture(uNight, uv).rgb;
     float cloud = texture(uClouds, uv).r;
 
+    /*
+       Where the water is, read out of the imagery rather than shipped as a
+       fourth texture. Blue Marble's oceans are the only large areas where blue
+       runs well ahead of red; land is red-dominant almost everywhere, and ice
+       is neutral. One subtraction and a smoothstep beats another megabyte.
+    */
+    float water = smoothstep(0.03, 0.14, day.b - day.r) * (1.0 - cloud * 0.9);
+
+    /*
+       Cloud shadows.
+       Cloud sits about 10km above the surface, so it shades the ground OFFSET
+       from itself — toward the anti-solar side. Without this the clouds read as
+       paint on the sphere rather than as something floating above it, which is
+       one of the strongest tells that a rendered Earth is a texture on a ball.
+       The offset is in texture space, scaled by how oblique the sun is: at noon
+       a cloud shades the ground directly beneath it and the offset vanishes.
+    */
+    vec3 eastAt = normalize(cross(vec3(0.0, 0.0, 1.0), n));
+    vec3 northAt = cross(n, eastAt);
+    vec2 sunOnSurface = vec2(dot(uSunDir, eastAt), dot(uSunDir, northAt));
+    float obliquity = sqrt(max(0.0, 1.0 - sunCos * sunCos));
+    vec2 shadowUv = uv - sunOnSurface * obliquity * 0.004 * vec2(1.0, -1.0);
+    float shadowCloud = texture(uClouds, shadowUv).r;
+
     /* City lights belong to the dark side only, and they are emissive: they do
        not care how bright the sun is, only that it has gone. Cloud covers them,
        which is why the real Black Marble has holes in it.
@@ -208,10 +232,37 @@ void main() {
 
     // Lambert, with a little wrap so the limb does not go abruptly black.
     float diffuse = max(0.0, (sunCos + 0.08) / 1.08);
-    vec3 litSurface = day * diffuse * 1.7;
-    vec3 litCloud = vec3(1.0) * cloud * diffuse * 0.9;
 
-    surface = litSurface * (1.0 - cloud * 0.85) + litCloud + cities;
+    /*
+       The terminator is WARM, and that is not a stylistic choice.
+       Along the day-night line the surface is lit by a sun low in its own sky,
+       so the light reaching it has crossed a great deal of atmosphere and
+       arrived orange — the same reason sunset is orange from the ground, seen
+       from above as a band following the curve. A plain Lambert falloff renders
+       it grey and reads as a shadow rather than as evening.
+    */
+    float grazing = 1.0 - smoothstep(0.0, 0.42, sunCos);
+    vec3 sunlight = mix(vec3(1.0), vec3(1.32, 0.78, 0.46), grazing * lit);
+
+    vec3 litSurface = day * diffuse * 1.7 * sunlight;
+
+    /*
+       Ocean glint: the sun reflecting off water, and the single strongest cue
+       that this is a photograph of a planet rather than a shaded sphere. Every
+       image taken of Earth from orbit has it. Broad rather than mirror-sharp,
+       because the sea is never flat — the roughness is what turns a point into
+       the wide silver smear you actually see.
+    */
+    vec3 halfway = normalize(uSunDir - dir);
+    float specular = pow(max(0.0, dot(n, halfway)), 34.0);
+    vec3 glint = vec3(1.0, 0.97, 0.9) * specular * water * lit * 2.6;
+
+    // Cloud tops are bright and lit from the same sun; the shadow they cast
+    // falls on the ground, not on themselves.
+    vec3 litCloud = vec3(1.0) * cloud * diffuse * sunlight * 0.95;
+    float groundShade = 1.0 - shadowCloud * 0.42 * lit;
+
+    surface = litSurface * (1.0 - cloud * 0.85) * groundShade + litCloud + glint + cities;
   }
 
   /* March the atmosphere. The far end is the ground if we hit it, otherwise
