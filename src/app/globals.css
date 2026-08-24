@@ -1882,3 +1882,36 @@ textarea.field-input {
 
 /* Low power drops the ocean layer: the most fill for the least effect. */
 :root[data-low-power="true"] .earth-ocean { display: none; }
+
+/* ---------------- The WebGL planet ---------------- */
+
+/*
+   Sits over the CSS limb and fades in once WebGL2 is up and all three textures
+   have decoded. Until then — and forever, on a device that cannot do it — the
+   CSS scene underneath is what is on screen, which is why it was built to be a
+   complete picture rather than a placeholder.
+
+   The fade is slow on purpose. Textures arrive whenever the network delivers
+   them, so this is the one transition in the whole scene that is not driven by
+   the sun, and a quick one would read as a flash.
+*/
+.planet-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 1.6s ease;
+}
+
+.planet-canvas[data-live="true"] { opacity: 1; }
+
+/* The CSS limb steps back once the real one is drawing, rather than being
+   removed: it still carries the halo bleeding into the sky above the horizon,
+   which the shader's own atmosphere does not extend far enough to cover. */
+.planet-canvas[data-live="true"] ~ .horizon-glow { opacity: 0.35; }
+
+@media (prefers-reduced-motion: reduce) {
+  .planet-canvas { transition: none; }
+}

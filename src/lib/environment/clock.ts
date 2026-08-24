@@ -1,7 +1,7 @@
 import { approach } from "./curves";
 import { environmentFor, type EnvironmentState } from "./model";
 import { moonSnapshot, solarSnapshot } from "../solar/suncalc";
-import type { Coordinates, SolarSnapshot } from "../solar/types";
+import type { Coordinates, MoonSnapshot, SolarSnapshot } from "../solar/types";
 
 /**
  * One clock for the whole environment.
@@ -183,6 +183,16 @@ export class EnvironmentClock {
   private simulatedAt: number | null = null;
   private speed = 1;
 
+  /**
+   * Everything that wants to know when a frame was published.
+   *
+   * The clock had exactly one consumer — the CSS properties — until the WebGL
+   * planet arrived, and giving that its own animation loop would have broken
+   * §11's one-clock rule immediately: two loops means two ideas of what time it
+   * is, and a planet lit for a moment the sky has already left.
+   */
+  private subscribers = new Set<(state: EnvironmentState) => void>();
+
   /** Frame timings, and whether this machine has been judged too slow. */
   private intervals: number[] = [];
   private lowPower = false;
@@ -214,9 +224,19 @@ export class EnvironmentClock {
     return this.current ?? this.target();
   }
 
-  /** Where the sun actually is, for the simulator's readout. */
+  /** Where the sun actually is, for the simulator's readout and the renderer. */
   solar(): SolarSnapshot {
     return this.events.read(new Date(this.instant()), this.location);
+  }
+
+  /** Where the moon is. The renderer needs the geometry, not the light value. */
+  moon(): MoonSnapshot {
+    return moonSnapshot(new Date(this.instant()), this.location);
+  }
+
+  /** The coordinates in force, so the renderer knows which part of the map is below. */
+  where(): Coordinates {
+    return this.location;
   }
 
   start(): void {
@@ -256,6 +276,14 @@ export class EnvironmentClock {
 
   setReducedMotion(reduced: boolean): void {
     this.reducedMotion = reduced;
+  }
+
+  /** Listen for published frames. Returns the unsubscribe. */
+  onPublish(listener: (state: EnvironmentState) => void): () => void {
+    this.subscribers.add(listener);
+    return () => {
+      this.subscribers.delete(listener);
+    };
   }
 
   /** Whether the scene has been cut back for a machine that could not keep up. */
@@ -360,6 +388,7 @@ export class EnvironmentClock {
     if (!force && this.published && !worthPublishing(this.published, this.current)) return;
     this.published = this.current;
     this.publish(this.current);
+    for (const listener of this.subscribers) listener(this.current);
   }
 }
 

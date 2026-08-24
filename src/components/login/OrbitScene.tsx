@@ -5,6 +5,7 @@ import { EarthLimb } from "./EarthLimb";
 import { EnvironmentProvider } from "./EnvironmentProvider";
 import { EnvironmentDevTools } from "./EnvironmentDevTools";
 import { HorizonGlow, SolarBodies } from "./SolarBodies";
+import { PlanetCanvas } from "./PlanetCanvas";
 
 /**
  * The shared backdrop for every signed-out screen.
@@ -39,7 +40,14 @@ export function OrbitScene() {
         */}
         <SolarBodies />
         <ConstellationField variant="plain" />
+        {/*
+          The real planet, when the device can draw one. It fades in OVER the
+          CSS limb rather than replacing it, so a machine without WebGL, or one
+          that loses its context halfway through, is left looking at a complete
+          picture rather than a hole where the Earth was.
+        */}
         <EarthLimb />
+        <PlanetCanvas />
         <HorizonGlow />
       </div>
       <EnvironmentDevTools />
