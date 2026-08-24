@@ -6,11 +6,19 @@ deserves it and because a future reader should be able to find the originals.
 
 | file            | source                                     | original       |
 | --------------- | ------------------------------------------ | -------------- |
-| `earth-day-*`   | Blue Marble Next Generation, December 2004 | 5400 × 2700    |
+| `earth-day-*`   | Blue Marble Next Generation, December 2004 | 21600 × 10800  |
 | `earth-night-*` | Black Marble 2016 (VIIRS day-night band)   | 13500 × 6750   |
 | `earth-clouds-*`| Blue Marble combined cloud composite       | 8192 × 4096    |
 
-**Two sets, chosen by device.** The 4K set totals 2.8MB and the 2K set 920KB, on
+**Three tiers, and a progressive upgrade.** The surface is fetched again at
+8192 × 4096 *after* the scene is already drawing, and swapped in when it
+arrives — 2.8MB is far too much to wait for on a login page, and perfectly
+reasonable to arrive a few seconds later and quietly sharpen a picture that was
+already complete. Only the surface is upgraded: cloud is soft by nature and city
+lights are points, so neither repays the bytes. Skipped entirely on `saveData`
+or a 2G-class connection.
+
+**Two base sets, chosen by device.** The 4K set totals 2.8MB and the 2K set 920KB, on
 a page that has to load before anybody can do anything. A phone gains almost
 nothing from 4K — the frame is a third the width — and a metered connection
 loses real money for it, so `navigator.connection.saveData` is honoured as the

@@ -82,6 +82,10 @@ export function PlanetCanvas() {
       };
 
       unsubscribe = clock.onPublish(draw);
+      // A sharper surface arriving later must be drawn immediately rather than
+      // waiting for the next tick — on a still scene the next tick may be a
+      // while, and on a hidden tab it may never come.
+      scene.onUpgrade = draw;
       draw(); // Once immediately: the first frame must not wait for a tick.
       setLive(true);
       /**

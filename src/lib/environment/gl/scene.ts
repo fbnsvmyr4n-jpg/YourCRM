@@ -57,8 +57,25 @@ const QUALITY = {
   full: { steps: 16, lightSteps: 6, scale: 1 },
   // Fewer samples and a smaller buffer, upscaled. The atmosphere is smooth, so
   // it survives resolution loss far better than the surface does.
-  low: { steps: 8, lightSteps: 3, scale: 0.6 },
+  low: { steps: 8, lightSteps: 3, scale: 0.62 },
 } as const;
+
+/**
+ * How many device pixels to render per CSS pixel.
+ *
+ * A canvas sized in CSS pixels on a display with `devicePixelRatio: 2` is
+ * rendered at half the screen's resolution and scaled up by the browser —
+ * every pixel becoming four. That is not a subtle softening; it is the whole
+ * scene at 360p on a retina display, and it was the reason the Earth still
+ * looked like a low-resolution image after the texture and the camera height
+ * were both fixed.
+ *
+ * Capped at 2. Beyond that the fragment cost doubles again for a difference
+ * nobody has ever been able to point to, and this shader is not cheap: every
+ * pixel marches the atmosphere sixteen times, each of those sampling the light
+ * path six more.
+ */
+const MAX_PIXEL_RATIO = 2;
 
 type Textures = { day: WebGLTexture; night: WebGLTexture; clouds: WebGLTexture };
 
@@ -224,6 +241,24 @@ export class PlanetScene {
         night: this.upload(night, 1),
         clouds: this.upload(clouds, 2),
       };
+
+      /**
+       * Then, quietly, a much larger surface.
+       *
+       * At device resolution the frame is over two thousand pixels wide across
+       * roughly 78° of longitude, which wants something like ten thousand
+       * texels to be native. The 4K set is 2.5× short of that — visibly soft on
+       * the one layer carrying recognisable detail.
+       *
+       * So the 8K surface is fetched AFTER the scene is already drawing, and
+       * swapped in when it arrives. 2.8MB is far too much to wait for on a
+       * login page; it is perfectly reasonable to arrive a few seconds later
+       * and quietly sharpen a picture that was already complete. Only the
+       * surface is upgraded — cloud is soft by nature and city lights are
+       * points, so neither repays the bytes.
+       */
+      if (set === "4k") void this.upgradeSurface(base);
+
       return true;
     } catch {
       // Offline, blocked, or a decode failure. The CSS scene stands.
@@ -245,6 +280,48 @@ export class PlanetScene {
    * for one answer.
    */
   private anisotropy: { ext: EXT_texture_filter_anisotropic; max: number } | null = null;
+
+  /**
+   * Replace the day texture with the 8K one, if the connection allows.
+   *
+   * Failure is silent and total: the scene keeps the texture it already has,
+   * which is a complete picture. Nothing waits on this and nothing reports it.
+   */
+  private async upgradeSurface(base: string): Promise<void> {
+    const connection = (navigator as { connection?: { saveData?: boolean; effectiveType?: string } })
+      .connection;
+    if (connection?.saveData) return;
+    // A slow link would spend a long time on this and arrive after the user has
+    // signed in and gone.
+    if (connection?.effectiveType && /2g|slow/.test(connection.effectiveType)) return;
+
+    try {
+      const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const img = new Image();
+        const timer = setTimeout(() => reject(new Error("timed out")), 30_000);
+        img.onload = () => {
+          clearTimeout(timer);
+          resolve(img);
+        };
+        img.onerror = () => {
+          clearTimeout(timer);
+          reject(new Error("failed"));
+        };
+        img.src = `${base}/earth-day-8k.jpg`;
+      });
+
+      if (this.disposed || !this.textures) return;
+      const previous = this.textures.day;
+      this.textures = { ...this.textures, day: this.upload(image, 0) };
+      this.gl.deleteTexture(previous);
+      this.onUpgrade?.();
+    } catch {
+      // The 4K surface stands.
+    }
+  }
+
+  /** Called when a texture is swapped, so the scene can redraw immediately. */
+  onUpgrade: (() => void) | null = null;
 
   private upload(image: HTMLImageElement, unit: number): WebGLTexture {
     const gl = this.gl;
@@ -269,11 +346,14 @@ export class PlanetScene {
 
     const aniso = this.anisotropy;
     if (aniso?.ext) {
-      // Capped at 8: past that the returns are invisible and the cost is not.
+      /* Whatever the driver offers, up to 16. The incidence angle across the
+         visible part of this planet runs from about 40° to 90° — at the limb
+         the surface is edge-on — so the ratio between the two axes is large
+         and this is the one setting that addresses it directly. */
       gl.texParameterf(
         gl.TEXTURE_2D,
         aniso.ext.TEXTURE_MAX_ANISOTROPY_EXT,
-        Math.min(8, aniso.max)
+        Math.min(16, aniso.max)
       );
     }
 
@@ -370,8 +450,9 @@ export class PlanetScene {
     const gl = this.gl;
     const { steps, lightSteps, scale } = QUALITY[this.quality];
 
-    const width = Math.max(1, Math.round(this.canvas.clientWidth * scale));
-    const height = Math.max(1, Math.round(this.canvas.clientHeight * scale));
+    const dpr = Math.min(MAX_PIXEL_RATIO, typeof window === "undefined" ? 1 : window.devicePixelRatio || 1);
+    const width = Math.max(1, Math.round(this.canvas.clientWidth * scale * dpr));
+    const height = Math.max(1, Math.round(this.canvas.clientHeight * scale * dpr));
     if (this.canvas.width !== width || this.canvas.height !== height) {
       this.canvas.width = width;
       this.canvas.height = height;
