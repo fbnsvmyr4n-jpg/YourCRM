@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { EnvironmentClock, estimateLocationFromClock } from "@/lib/environment/clock";
-import { publishToElement } from "@/lib/environment/publish";
+import { clearFromElement, publishToElement } from "@/lib/environment/publish";
 import { resolveLocation } from "@/lib/solar/location";
 import type { Coordinates } from "@/lib/solar/types";
 
@@ -46,7 +46,27 @@ export function EnvironmentProvider({ children }: { children: React.ReactNode })
       // The device clock's estimate, available immediately. See
       // `estimateLocationFromClock` for why this beats waiting.
       location: estimateLocationFromClock(),
-      publish: (state) => publishToElement(host, state),
+      /*
+         Onto the ROOT, not onto the host.
+
+         The host div was the obvious target and it was wrong, and nothing
+         caught it for the entire life of this feature. `<OrbitScene />` is a
+         SIBLING of the sign-in form, not an ancestor of it — so every
+         `var(--env-card-text)`, `var(--env-scrim)` and the card's whole
+         readability wash resolved to its fallback, permanently. The palette
+         was computed correctly, published correctly, unit-tested correctly,
+         and then delivered to a subtree the form was not in.
+
+         The tests could not see it because they all measure the MODEL. There
+         is no arithmetic error here to find; the numbers were always right.
+         What was broken was who could read them.
+
+         `<html>` is rendered by the root layout with no `style` prop, so React
+         never touches the attribute — the same guarantee that made the host
+         div safe — and everything in the document inherits from it, which the
+         host could never offer.
+      */
+      publish: (state) => publishToElement(document.documentElement, state),
       reducedMotion: motion.matches,
       /**
        * The scene cuts itself back if this machine cannot keep up.
@@ -110,13 +130,21 @@ export function EnvironmentProvider({ children }: { children: React.ReactNode })
       motion.removeEventListener("change", onMotionChange);
       document.removeEventListener("visibilitychange", onVisible);
       engine.stop();
+      // See the publish target above: these live on `<html>` now, so they
+      // outlast this component unless it takes them away again.
+      clearFromElement(document.documentElement, engine.read());
     };
   }, []);
 
   return (
     <ClockContext.Provider value={clock}>
       {/*
-        The properties land here and inherit down.
+        The host takes part in no layout, and no longer carries the palette.
+
+        The properties go on `<html>` instead — see the publish call above for
+        why — but the reason this wrapper has a CLASS rather than a `style`
+        prop is unchanged and still worth stating, because the same trap
+        applies to the new target.
 
         `display: contents` comes from a CLASS, not from a `style` prop, and
         that is not a style preference — it is a correctness fix. React owns the

@@ -4,6 +4,7 @@ import {
   luminance,
   mix,
   over,
+  footerScrimAlpha,
   scenePalette,
   scrimAlpha,
   toCss,
@@ -133,6 +134,74 @@ describe("text stays readable through a whole day", () => {
     // It passes because the sky is nearly black — but it has to be checked,
     // because "obviously fine" is how the other end got missed.
     expect(sweepDay(TROMSO, [2026, 11, 21], "Tromsø polar night")).toEqual([]);
+  });
+});
+
+describe("the footer, which is over the planet rather than the sky", () => {
+  /**
+   * The case the original contrast work missed entirely.
+   *
+   * The form's last two rows hang below the card's readability wash and sit
+   * over the PLANET, which in daylight is the brightest thing in the frame by a
+   * wide margin. Every assertion in this file measured text against the SKY and
+   * passed, while those lines were over sunlit cloud and barely readable — a
+   * test measuring the right property of the wrong surface.
+   *
+   * `behindFooter` models the worst case rather than the average: lit cloud,
+   * near-white. Land and ocean are darker, so anything legible over cloud is
+   * legible over all of it.
+   */
+  const footerSweep = (where: Coordinates, date: [number, number, number], label: string) => {
+    const failures: string[] = [];
+    for (let minute = 0; minute < 1440; minute += 2) {
+      const when = new Date(Date.UTC(date[0], date[1], date[2], 0, minute));
+      const palette = paletteAt(when, where);
+      const quiet = contrastRatio(palette.cardMuted, palette.footerSurface);
+      if (quiet < AA_NORMAL) {
+        const at = `${String(Math.floor(minute / 60)).padStart(2, "0")}:${String(minute % 60).padStart(2, "0")}`;
+        failures.push(`${label} ${at}: footer text ${quiet.toFixed(2)}:1 over the planet`);
+      }
+    }
+    return failures;
+  };
+
+  it("stays readable over a sunlit planet all day", () => {
+    expect(footerSweep(CAPE_TOWN, [2026, 11, 21], "midsummer")).toEqual([]);
+  });
+
+  it("stays readable at the equator, where the planet is brightest", () => {
+    expect(footerSweep(EQUATOR, [2026, 2, 20], "equator")).toEqual([]);
+  });
+
+  it("stays readable through a polar day, which never lets up", () => {
+    expect(footerSweep(TROMSO, [2026, 5, 21], "midnight sun")).toEqual([]);
+  });
+
+  it("is measured against something genuinely bright", () => {
+    /**
+     * The counter-check, and the one that matters most here — because the
+     * original failure was precisely a sweep that passed against a surface
+     * that was never the hard case. If `behindFooter` is not near-white at
+     * noon, this whole block is measuring nothing again.
+     */
+    const noon = paletteAt(new Date(Date.UTC(2026, 11, 21, 10, 0)), CAPE_TOWN);
+    expect(luminance(noon.behindFooter), "the modelled planet is not bright").toBeGreaterThan(0.6);
+    expect(contrastRatio(noon.cardMuted, noon.behindFooter), "unwashed, this must FAIL")
+      .toBeLessThan(AA_NORMAL);
+  });
+
+  it("all but disappears at night, like the other wash", () => {
+    const when = new Date(Date.UTC(2026, 11, 21, 22, 0));
+    const night = environmentFor(solarSnapshot(when, CAPE_TOWN), moonSnapshot(when, CAPE_TOWN));
+    expect(footerScrimAlpha(night)).toBeLessThan(0.2);
+  });
+
+  it("is heavier than the card's, because the planet is brighter than the sky", () => {
+    const noon = environmentFor(
+      solarSnapshot(new Date(Date.UTC(2026, 11, 21, 10, 0)), CAPE_TOWN),
+      moonSnapshot(new Date(Date.UTC(2026, 11, 21, 10, 0)), CAPE_TOWN)
+    );
+    expect(footerScrimAlpha(noon)).toBeGreaterThan(scrimAlpha(noon));
   });
 });
 

@@ -1364,8 +1364,19 @@ textarea.field-input {
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
   gap: 16px;
-  color: #79839a;
+  /* Over the planet, like the footer below it, and fixed at a night-sky grey
+     until the same sweep caught it. See `.orbit-footer`. */
+  color: color-mix(in srgb, var(--env-card-muted, #79839a) 80%, transparent);
   font-size: 0.86rem;
+  /* Its own wash, painted as a background rather than a pseudo-element,
+     because both of this element's pseudos are already the two rules either
+     side of the label. Same gradient and same variable as the footer's. */
+  background: radial-gradient(
+    58% 340% at 50% 50%,
+    var(--env-footer-scrim, transparent) 0%,
+    color-mix(in srgb, var(--env-footer-scrim, transparent) 45%, transparent) 46%,
+    transparent 76%
+  );
 }
 .orbit-divider::before,
 .orbit-divider::after {
@@ -1971,4 +1982,56 @@ textarea.field-input {
 .horizon-glow,
 .constellations {
   transition: opacity 1.6s ease;
+}
+
+/* ---------------- The footer's own readability ---------------- */
+
+/*
+   The last two rows of the form — "New to YourCRM?" and "Secure. Private.
+   Always." — hang below the card's wash and sit over the PLANET, which in
+   daylight is the brightest thing in the frame by a wide margin.
+
+   The contrast work measured text against the sky and passed, while these two
+   lines were over sunlit cloud and barely readable. Two separate mistakes: they
+   were outside the wash, and they were hardcoded greys that never joined the
+   palette at all.
+
+   This wash is deliberately heavier than the card's and tracks daylight rather
+   than sky brightness, because what it has to overcome is the lit planet.
+   Sunlit cloud is near-white and the text is near-white; no tint saves that,
+   only putting something genuinely dark in between.
+*/
+.orbit-footer {
+  position: relative;
+}
+
+.orbit-footer::before {
+  content: "";
+  position: absolute;
+  /* Wider than tall, and generous on every side — the same rule as the card's
+     wash: an edge that can be found is a box. */
+  inset: -55% -40%;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(
+    62% 52% at 50% 50%,
+    var(--env-footer-scrim, transparent) 0%,
+    color-mix(in srgb, var(--env-footer-scrim, transparent) 52%, transparent) 48%,
+    transparent 78%
+  );
+}
+
+/*
+   And the greys join the palette.
+
+   `#7c8699` and `#5d6779` were fixed values chosen against a night sky. They
+   are legible there and hopeless over daylit cloud, and being fixed they could
+   not have adapted even if the wash had reached them.
+*/
+.orbit-quiet-text {
+  color: color-mix(in srgb, var(--env-card-muted, #7c8699) 82%, transparent);
+}
+
+.orbit-faint-text {
+  color: color-mix(in srgb, var(--env-card-muted, #5d6779) 68%, transparent);
 }

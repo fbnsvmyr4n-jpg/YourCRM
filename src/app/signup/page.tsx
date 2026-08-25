@@ -85,7 +85,8 @@ export default function SignUpPage() {
           </button>
         </form>
 
-        <p className="orbit-in mt-6 text-[0.88rem] text-[#7c8699]" style={{ ["--d" as string]: "0.8s" }}>
+        <div className="orbit-footer">
+        <p className="orbit-in mt-6 text-[0.88rem] orbit-quiet-text" style={{ ["--d" as string]: "0.8s" }}>
           Already have an account?{" "}
           <a href="/login" className="orbit-quiet font-medium underline-offset-4 hover:underline">
             Log in
@@ -93,11 +94,12 @@ export default function SignUpPage() {
         </p>
 
         <div
-          className="orbit-in mt-4 flex items-center justify-center gap-2 text-[0.8rem] text-[#5d6779]"
+          className="orbit-in mt-4 flex items-center justify-center gap-2 text-[0.8rem] orbit-faint-text"
           style={{ ["--d" as string]: "0.88s" }}
         >
           <ShieldCheck className="h-3.5 w-3.5" />
           Secure. Private. Always.
+        </div>
         </div>
       </div>
     </main>

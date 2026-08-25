@@ -109,6 +109,21 @@ export type ScenePalette = {
   /** What sits behind the sign-in card, which is what its text competes with. */
   behindCard: Rgb;
   cardSurface: Rgb;
+  /**
+   * What sits behind the footer lines, which is NOT the sky.
+   *
+   * The form's last two rows — "New to YourCRM?" and "Secure. Private.
+   * Always." — hang below the readability wash and over the PLANET, which in
+   * daylight is the brightest thing in the frame by a wide margin. The contrast
+   * work measured text against the sky and passed, while those two lines sat
+   * over sunlit cloud and were barely readable.
+   *
+   * Modelled as the worst case rather than the average: lit cloud, which is
+   * near-white. Land and ocean are darker, so anything legible over cloud is
+   * legible over all of it.
+   */
+  behindFooter: Rgb;
+  footerSurface: Rgb;
   cardText: Rgb;
   cardMuted: Rgb;
   cardBorder: Rgb;
@@ -127,6 +142,10 @@ export function scrimCss(state: EnvironmentState): string {
   return `rgb(${SCRIM.r} ${SCRIM.g} ${SCRIM.b} / ${scrimAlpha(state).toFixed(3)})`;
 }
 
+export function footerScrimCss(state: EnvironmentState): string {
+  return `rgb(${SCRIM.r} ${SCRIM.g} ${SCRIM.b} / ${footerScrimAlpha(state).toFixed(3)})`;
+}
+
 /**
  * How opaque the readability wash is.
  *
@@ -138,6 +157,26 @@ export function scrimCss(state: EnvironmentState): string {
  */
 export function scrimAlpha(state: EnvironmentState): number {
   return clamp01(0.1 + state.textScrim * 0.82);
+}
+
+/**
+ * How opaque the wash behind the footer lines is.
+ *
+ * Heavier than the card's, and driven by DAYLIGHT rather than by sky
+ * brightness, because what it has to overcome is the lit planet rather than
+ * the sky. At night it all but disappears, exactly like the other one — over a
+ * dark planet there is nothing to defend against.
+ *
+ * Square-rooted, and that is the part that was wrong on the first attempt.
+ * A linear ramp left a twenty-minute hole either side of sunrise and sunset
+ * where the text sat at 4.2:1 — because a planet does not brighten in step
+ * with `daylight`. The sun clears the horizon and the limb is *already* fully
+ * lit; what the next hour changes is how much of the disc is lit, not how
+ * bright the lit part is. The wash has to reach nearly full strength as soon
+ * as there is any sun at all, and the sweep below is what says whether it does.
+ */
+export function footerScrimAlpha(state: EnvironmentState): number {
+  return clamp01(0.12 + Math.sqrt(clamp01(state.daylight)) * 0.74);
 }
 
 /**
@@ -219,12 +258,31 @@ export function scenePalette(state: EnvironmentState): ScenePalette {
    */
   const cardSurface = over(SCRIM, scrimAlpha(state), behindCard);
 
+  /*
+     The footer's own backdrop and its own, heavier, wash.
+
+     Sunlit cloud is near-white and the text over it is near-white, so no amount
+     of tinting saves this — the only thing that works is putting something
+     genuinely dark in between. That is why the footer wash is substantially
+     stronger than the card's, and why it tracks DAYLIGHT rather than sky
+     brightness: what it has to overcome is the planet, lit by the sun directly,
+     not the sky behind it.
+
+     Modelled as the worst case rather than the average — lit cloud, near-white.
+     Land and ocean are darker, so anything legible over cloud is legible over
+     all of it.
+  */
+  const behindFooter = mix(rgb(6, 10, 20), rgb(228, 232, 238), clamp01(state.daylight));
+  const footerSurface = over(SCRIM, footerScrimAlpha(state), behindFooter);
+
   return {
     skyTop,
     skyMid,
     skyHorizon,
     behindCard,
     cardSurface,
+    behindFooter,
+    footerSurface,
     cardText: TEXT,
     cardMuted: MUTED,
     /**

@@ -113,3 +113,43 @@ not a rectangle.
   midday sky.
 - **The collapsed simulator chip froze at mount**, reporting a phase the scene
   had long left.
+
+## 31. The palette was never reaching the form
+
+Bradley reported the two lines at the foot of the sign-in form were unreadable.
+Two separate faults sat behind that, and the second was much larger than the
+complaint.
+
+**The contrast suite measured the wrong surface.** Every assertion compared text
+against `behindCard` — the sky. The footer lines hang below the card's
+readability wash and sit over the **planet**, which in daylight is the brightest
+thing in the frame. The suite was correct arithmetic applied to the wrong
+backdrop, so it passed while the text it was defending was barely legible.
+Fixed by modelling `behindFooter` as the worst case — lit cloud, near-white —
+and sweeping the footer against it. `footerScrimAlpha` is **square-rooted**: a
+linear ramp left a twenty-minute hole either side of sunrise and sunset at
+4.2:1, because a planet does not brighten in step with `daylight`. The limb is
+fully lit the moment the sun clears the horizon; what the next hour changes is
+how much of the disc is lit, not how bright the lit part is.
+
+**The palette was published to a subtree the form was not in.** `<OrbitScene />`
+is a **sibling** of `.orbit-form`, and the properties were written onto a div
+inside the scene. Custom properties inherit downwards; the form was never
+downwards of it. So `--env-card-text`, `--env-card-muted`, `--env-scrim` and the
+card's entire readability wash silently resolved to their fallbacks — a fixed
+night palette, in broad daylight, for the whole life of the feature.
+
+There was no arithmetic error to find. The numbers were always right; what was
+wrong was **who could read them** — and no test that measures the model can see
+that. It was found by reading the computed styles out of the running page, which
+is the only place the two halves meet.
+
+Published onto `document.documentElement` now, which is an ancestor of both, and
+removed again on unmount so a sunset does not outlive the login page and tint
+the CRM behind it. `tests/palette-wiring.test.ts` pins the publish target and
+asserts every `--env-` name the stylesheet reads has a publisher — a `var()`
+with a fallback never errors, so an orphaned name is not a typo to be found
+later, it is a value that looks plausible and is wrong forever.
+
+The divider above the footer had the same fixed grey and the same backdrop, and
+is now on the same variable and the same wash.

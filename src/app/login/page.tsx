@@ -85,7 +85,7 @@ export default function LoginPage() {
               decides whether the session cookie outlives the browser, so
               removing the control would silently change how long someone stays
               signed in. Quiet enough to sit inside the composition. */}
-          <label className="orbit-in mt-4 flex cursor-pointer select-none items-center justify-center gap-2.5 text-[0.82rem] text-[#7c8699]" style={{ ["--d" as string]: "0.68s" }}>
+          <label className="orbit-in mt-4 flex cursor-pointer select-none items-center justify-center gap-2.5 text-[0.82rem] orbit-quiet-text" style={{ ["--d" as string]: "0.68s" }}>
             <input type="checkbox" name="remember" value="1" defaultChecked className="login-chk" />
             Keep me signed in
           </label>
@@ -146,7 +146,8 @@ export default function LoginPage() {
           </p>
         )}
 
-        <p className="orbit-in mt-6 text-[0.88rem] text-[#7c8699]" style={{ ["--d" as string]: "0.94s" }}>
+        <div className="orbit-footer">
+        <p className="orbit-in mt-6 text-[0.88rem] orbit-quiet-text" style={{ ["--d" as string]: "0.94s" }}>
           New to YourCRM?{" "}
           <a href="/signup" className="orbit-quiet font-medium underline-offset-4 hover:underline">
             Create an account
@@ -154,11 +155,12 @@ export default function LoginPage() {
         </p>
 
         <div
-          className="orbit-in mt-4 flex items-center justify-center gap-2 text-[0.8rem] text-[#5d6779]"
+          className="orbit-in mt-4 flex items-center justify-center gap-2 text-[0.8rem] orbit-faint-text"
           style={{ ["--d" as string]: "1.02s" }}
         >
           <ShieldCheck className="h-3.5 w-3.5" />
           Secure. Private. Always.
+        </div>
         </div>
       </div>
     </main>

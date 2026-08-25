@@ -1,4 +1,4 @@
-import { scenePalette, scrimCss, toCss } from "./palette";
+import { footerScrimCss, scenePalette, scrimCss, toCss } from "./palette";
 import type { EnvironmentState } from "./model";
 
 /**
@@ -87,6 +87,30 @@ export function publishToElement(element: HTMLElement, state: EnvironmentState):
   // The scrim goes over the live gradient rather than replacing it, so it is
   // published with its alpha intact and the browser composites it itself.
   element.style.setProperty("--env-scrim", scrimCss(state));
+  element.style.setProperty("--env-footer-scrim", footerScrimCss(state));
 
   element.dataset.phase = state.phase;
+}
+
+/**
+ * Take the environment back off an element.
+ *
+ * Published onto `document.documentElement`, these properties outlive the
+ * login page unless something removes them — and a stale sunset sitting on
+ * `<html>` would tint the CRM behind it, with nothing left running to correct
+ * it. Cheap to do, and the alternative is a bug that only appears after a
+ * successful sign-in, which is the worst possible place to find one.
+ */
+export function clearFromElement(element: HTMLElement, state: EnvironmentState): void {
+  for (const key of ENV_PROPERTIES) element.style.removeProperty(propertyName(key));
+  /* The palette's keys are not enumerated anywhere as a list, so they are read
+     back off a palette rather than duplicated here. A second hand-written list
+     would be one more thing to forget to update — and a colour left behind is
+     exactly the kind of leftover this function exists to prevent. */
+  for (const key of Object.keys(scenePalette(state))) {
+    element.style.removeProperty(propertyName(key));
+  }
+  element.style.removeProperty("--env-scrim");
+  element.style.removeProperty("--env-footer-scrim");
+  delete element.dataset.phase;
 }

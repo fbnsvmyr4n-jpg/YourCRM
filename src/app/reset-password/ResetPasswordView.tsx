@@ -115,7 +115,7 @@ export function ResetPasswordView({
         )}
 
         <div
-          className="orbit-in mt-8 flex items-center justify-center gap-2 text-[0.8rem] text-[#5d6779]"
+          className="orbit-footer orbit-in mt-8 flex items-center justify-center gap-2 text-[0.8rem] orbit-faint-text"
           style={{ ["--d" as string]: "0.8s" }}
         >
           <ShieldCheck className="h-3.5 w-3.5" />
