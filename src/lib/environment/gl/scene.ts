@@ -78,6 +78,39 @@ const QUALITY = {
  */
 const MAX_PIXEL_RATIO = 2;
 
+/**
+ * The scene's blend state, in one place because it is restored from two.
+ *
+ * `blendFunc(SRC_ALPHA, ONE_MINUS_SRC_ALPHA)` applies those factors to the
+ * ALPHA channel as well as to colour. Over a cleared buffer, where destination
+ * alpha is zero, the stored alpha becomes
+ *
+ *     A = A_src * A_src + 0 * (1 - A_src) = A_src²
+ *
+ * — every alpha this shader computes, silently squared. A band asked to be 18%
+ * opaque was written at 3%, and because the error grows as things get fainter
+ * it hit exactly the soft edges that matter: the aureole around the sun, the
+ * outer atmosphere, the airglow arc.
+ *
+ * Measured rather than reasoned: replacing the sun's halo term with a constant
+ * 0.5 and reading the framebuffer back gave 64/255 = 0.251, which is 0.5².
+ *
+ * Colour blends normally. Alpha accumulates with ONE, which is what "how much
+ * of this pixel is covered" actually means.
+ *
+ * (The same squaring, from the other direction, once made the entire star field
+ * invisible — there the fragment multiplied by intensity and the blend
+ * multiplied again.)
+ */
+function sceneBlend(gl: WebGL2RenderingContext): void {
+  gl.blendFuncSeparate(
+    gl.SRC_ALPHA,
+    gl.ONE_MINUS_SRC_ALPHA,
+    gl.ONE,
+    gl.ONE_MINUS_SRC_ALPHA
+  );
+}
+
 type Textures = { day: WebGLTexture; night: WebGLTexture; clouds: WebGLTexture };
 
 export class PlanetScene {
@@ -166,7 +199,33 @@ export class PlanetScene {
     gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
 
     gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    /*
+       blendFuncSeparate, and the separation is the whole point.
+
+       `blendFunc(SRC_ALPHA, ONE_MINUS_SRC_ALPHA)` applies those factors to the
+       ALPHA channel as well as to colour. Over a cleared buffer, where the
+       destination alpha is zero, that makes the stored alpha
+
+           A = A_src * A_src + 0 * (1 - A_src) = A_src²
+
+       — every alpha this shader computes, silently squared. A band the shader
+       asked to be 18% opaque was written at 3%, and the error grows as things
+       get fainter, so it hit precisely the soft edges that matter: the aureole
+       around the sun, the outer atmosphere, the airglow arc.
+
+       It was found by reading the framebuffer back and fitting the sun's halo
+       against the formula that produced it. The measured profile matched the
+       square of the prediction across four decades of offset, which is not a
+       thing that happens by chance.
+
+       (The same squaring bug, in a different guise, once made the entire star
+       field invisible — there the fragment multiplied by intensity AND the
+       blend multiplied again. Twice now, from two directions.)
+
+       Colour still blends normally. Alpha accumulates with ONE, which is what
+       "how much of this pixel is covered" actually means.
+    */
+    sceneBlend(gl);
 
     const scene = new PlanetScene(canvas, gl, program);
     scene.buildStarProgram();
@@ -739,7 +798,13 @@ export class PlanetScene {
     gl.drawArrays(gl.POINTS, 0, this.starCount);
 
     gl.bindVertexArray(null);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    /* Restored through the SAME function that set it up, which is the actual
+       fix here. This line used to read `blendFunc(SRC_ALPHA, ONE_MINUS_SRC_ALPHA)`
+       — a hand-written restore that silently disagreed with the setup and, since
+       the star pass runs every frame, meant the planet had never once drawn with
+       the intended blend. A restore that repeats the state instead of naming it
+       is a copy waiting to drift. */
+    sceneBlend(gl);
   }
 
   dispose(): void {

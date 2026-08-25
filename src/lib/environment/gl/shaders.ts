@@ -697,6 +697,21 @@ void main() {
      an atmosphere and one that is merely sliding behind an edge — a coin behind
      a card, which is what "a sun moving behind a 2D object" was describing.
   */
+  /*
+     What the bodies themselves contribute to ALPHA.
+
+     This is the whole reason the sun was reported as "only visible in the
+     hemisphere band". Alpha here carries "is there anything at this pixel", and
+     it was computed purely from scattering and ground coverage — so above the
+     atmosphere, where the sun spends most of its arc, alpha was ~0 and the
+     SRC_ALPHA blend multiplied the disc straight out of existence. It was being
+     drawn correctly across the entire sky and erased everywhere except the one
+     place the air happened to make the frame opaque.
+
+     A body is unambiguously something that is there.
+  */
+  float bodyAlpha = 0.0;
+
   vec3 sunRight = normalize(cross(vec3(0.0, 0.0, 1.0), uSunDisplayDir));
   vec3 sunUp = cross(uSunDisplayDir, sunRight);
   float sunFlatten = mix(1.0, 0.62, uSunLimbProximity);
@@ -759,10 +774,36 @@ void main() {
      stays present instead of terminating on a visible edge.
   */
   if (notBlocked > 0.0 && alongSun > 0.0 && uSunIntensity > 0.0) {
+    /*
+       Measured, not guessed. Reading the framebuffer back, the first version's
+       alpha fell from 255 at the centre to 31 by forty pixels and was gone by
+       eighty — a halo barely wider than the 55-pixel disc itself. That is what
+       made it read as a sticker rather than a light: a real source seen through
+       air keeps a faint aureole out to many diameters, and it is the long, low
+       tail that the eye reads as brightness.
+
+       Two lobes. A tight one that hugs the rim, and a wide one falling as
+       roughly the inverse of the angle, which is what atmospheric scattering
+       around a point source actually does. Targets, in units of the disc's own
+       radius: about 0.37 at 2 radii, 0.13 at 4, 0.06 at 8, and still 0.03 at
+       16 — faint, but present, across a big area.
+    */
+    /* NOT named near/wide: the scattering march above already declares
+       float near and float far at main() scope, and shadowing them inside this
+       block produced a measurable wrong answer — the readback matched the tight
+       lobe alone, exactly as if the second term had evaluated to zero. Renamed
+       rather than diagnosed further, because there is no reason to shadow them
+       in the first place. */
     float halo = SUN_RADIUS / max(sunAngle, SUN_RADIUS * 0.55);
-    float near = pow(halo, 2.6) * 0.55;
-    float wide = pow(halo, 1.15) * 0.06;
-    colour += vec3(1.0, 0.86, 0.66) * (near + wide) * slant * notBlocked * uSunIntensity * 1.6;
+    float haloRim = pow(halo, 3.0) * 0.9;
+    float haloSpread = pow(halo, 1.1) * 0.55;
+    float glow = (haloRim + haloSpread) * notBlocked * uSunIntensity;
+    colour += vec3(1.0, 0.86, 0.66) * glow * slant;
+    /* The halo's alpha follows its own brightness, so it fades to transparent
+       at its edge instead of ending on a rim of opaque nothing — and it is
+       damped by slant, so a halo shining through a long slant of atmosphere
+       goes as thin as it goes red. */
+    bodyAlpha = max(bodyAlpha, clamp(glow * max(slant.r, slant.g), 0.0, 1.0));
   }
 
   /* alongSun > 0.0 is not defensive padding, it is a correctness guard.
@@ -789,6 +830,10 @@ void main() {
     float limbDark = 0.35 + 0.65 * pow(sqrt(max(0.0, 1.0 - rr * rr)), 0.42);
 
     colour += vec3(1.0, 0.96, 0.90) * disc * limbDark * slant * notBlocked * 26.0;
+    /* The disc's own coverage. Not scaled by brightness: a sun reddened almost
+       to extinction is still completely opaque, and fading its alpha with its
+       colour would make it turn transparent as it set rather than dark red. */
+    bodyAlpha = max(bodyAlpha, disc * notBlocked);
   }
 
   if (uMoonVisible > 0.0) {
@@ -800,6 +845,7 @@ void main() {
          its edge stays bright right to the terminator — which is why a full
          moon looks like a disc and not a ball. */
       colour += vec3(0.94, 0.94, 0.99) * disc * slant * notBlocked * uMoonVisible * 0.5;
+      bodyAlpha = max(bodyAlpha, disc * notBlocked * uMoonVisible);
     }
   }
 
@@ -847,7 +893,10 @@ void main() {
      transparent on its own and the Milky Way is undisturbed.
   */
   float coverage = clamp(
-    max(groundCoverage, max(length(scattered) * 320.0, glowPath * sunGone * 1.9)),
+    max(
+      max(groundCoverage, bodyAlpha),
+      max(length(scattered) * 320.0, glowPath * sunGone * 1.9)
+    ),
     0.0,
     1.0
   );

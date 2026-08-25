@@ -225,3 +225,49 @@ describe("the shader sources survive being written inside template literals", ()
   });
 });
 
+describe("the blend state", () => {
+  /**
+   * `blendFunc(SRC_ALPHA, ONE_MINUS_SRC_ALPHA)` applies those factors to the
+   * ALPHA channel too. Over a cleared buffer the stored alpha becomes A_src² —
+   * every alpha the shader computes, silently squared. A band asked to be 18%
+   * opaque was written at 3%, and since the error grows as things get fainter it
+   * struck exactly the soft edges that matter: the sun's aureole, the outer
+   * atmosphere, the airglow arc.
+   *
+   * It survived because the state was SET correctly in one place and RESTORED
+   * by hand in another. The star pass ended with its own literal
+   * `blendFunc(SRC_ALPHA, ONE_MINUS_SRC_ALPHA)`, and since that pass runs every
+   * frame the planet had never once drawn with the intended blend. A restore
+   * that repeats state instead of naming it is a copy waiting to drift.
+   *
+   * Measured, not reasoned: replacing the halo term with a constant 0.5 and
+   * reading the framebuffer back gave 64/255 = 0.251, which is 0.5².
+   */
+  const scene = readFileSync(
+    new URL("../src/lib/environment/gl/scene.ts", import.meta.url),
+    "utf8"
+  );
+
+  it("separates the alpha factors from the colour factors", () => {
+    expect(scene).toMatch(/blendFuncSeparate\(/);
+  });
+
+  it("never sets the scene blend with a bare blendFunc", () => {
+    /* `blendFunc(ONE, ONE)` is legitimate — that is the star pass, which wants
+       additive light. What must not exist is a second hand-written copy of the
+       SCENE blend, because that is the one that drifted. */
+    const bare = [...scene.matchAll(/gl\.blendFunc\(([^)]*)\)/g)].map((m) => m[1].trim());
+    for (const args of bare) {
+      expect(args, "the scene blend must go through sceneBlend()").not.toMatch(
+        /SRC_ALPHA/
+      );
+    }
+  });
+
+  it("restores through the same function that sets it up", () => {
+    // Two call sites, one definition: setup, and the star pass's restore.
+    const calls = scene.match(/sceneBlend\(gl\);/g) ?? [];
+    expect(calls.length).toBeGreaterThanOrEqual(2);
+  });
+});
+

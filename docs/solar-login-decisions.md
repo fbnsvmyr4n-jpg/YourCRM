@@ -395,3 +395,55 @@ bent more than its upper, so the disc squashes — to 0.62 of its height at
 contact. It is why every photograph of a sunrise from the ISS shows an orange
 ellipse rather than a circle, and it is what "a sun moving behind a 2D object"
 was describing the absence of.
+
+## 36. Two bugs that made the sun a sticker on the limb
+
+Reported as "the sun is only visible in the hemisphere band". That is an exact
+description of the first bug, and chasing it uncovered a second and larger one.
+
+**Alpha carried no body.** The last line of the fragment shader computes
+`coverage` — the alpha channel, meaning "is there anything at this pixel" — from
+scattering and ground coverage only. The sun disc added to `colour` and
+contributed **nothing to coverage**. Above the atmosphere, where the sun spends
+most of its arc, `scattered` is ~0, so alpha was ~0 and the `SRC_ALPHA` blend
+multiplied the disc straight out of existence. It was being drawn correctly
+across the entire sky and erased everywhere except the one place the air made
+the frame opaque — the band around the limb. Fixed by giving the bodies their
+own `bodyAlpha` and folding it into the coverage max.
+
+**And every alpha in the scene was being squared.** `blendFunc(SRC_ALPHA,
+ONE_MINUS_SRC_ALPHA)` applies those factors to the alpha channel as well as to
+colour, so over a cleared buffer the stored alpha is
+
+    A = A_src * A_src + 0 * (1 - A_src) = A_src²
+
+A band asked to be 18% opaque was written at 3%, and because the error grows as
+things get fainter it struck precisely the soft edges that matter: the sun's
+aureole, the outer atmosphere, the airglow arc. The same squaring, from the
+other direction, once made the entire star field invisible.
+
+It survived because the state was **set** in one place and **restored by hand**
+in another: the star pass ended with its own literal
+`blendFunc(SRC_ALPHA, ONE_MINUS_SRC_ALPHA)`, and since that pass runs every
+frame, the planet had never once drawn with the intended blend. Setting
+`blendFuncSeparate` in `create()` therefore changed nothing at all, which is
+what made it confusing. One `sceneBlend()` function now, called from both.
+
+**The method that found it.** None of this was reasoned out. The automation
+browser has no `preserveDrawingBuffer`, which had made pixel evidence impossible
+all through this project — but dispatching `visibilitychange` forces the clock
+to snap and publish, the canvas redraws **synchronously** inside that dispatch,
+and `readPixels` in the same task reads the frame before it is presented. With
+that, the sun's halo could be fitted against the formula that produced it: the
+measured profile matched the SQUARE of the prediction across four decades of
+offset, which does not happen by chance. Replacing the halo term with a constant
+0.5 and reading back 64/255 = 0.251 settled it.
+
+Afterwards the halo matches its formula across the whole range — 74 against 83
+at two disc radii, then 42/45, 24/25, 14/15, 9/9 out to twelve. Before the fixes
+it died by three radii, which is why it read as a flat disc rather than a light.
+
+**A hypothesis I got wrong on the way.** I first blamed variable shadowing: the
+aureole declared `float near` inside a block where the scattering march had
+already declared `near` and `far` at function scope. Plausible, and wrong —
+renaming changed nothing. Worth doing anyway, but it was not the cause.
