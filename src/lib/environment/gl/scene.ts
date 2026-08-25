@@ -258,7 +258,7 @@ export class PlanetScene {
        * surface is upgraded — cloud is soft by nature and city lights are
        * points, so neither repays the bytes.
        */
-      if (set === "4k") void this.upgradeSurface(base);
+      if (set === "4k") void this.upgrade(base);
 
       return true;
     } catch {
@@ -283,12 +283,39 @@ export class PlanetScene {
   private anisotropy: { ext: EXT_texture_filter_anisotropic; max: number } | null = null;
 
   /**
-   * Replace the day texture with the 8K one, if the connection allows.
+   * Sharper textures, in stages, once the scene is already drawing.
    *
-   * Failure is silent and total: the scene keeps the texture it already has,
+   * ## Why there is a 16K tier at all
+   *
+   * Measured rather than assumed. Tracing the camera's own rays at 5,500km and
+   * a 58° field: the planet occupies only the bottom fifth of the frame, and at
+   * the BOTTOM EDGE — the nearest and largest part of it — an 8K surface
+   * renders at **1.4 screen pixels per texel** on a 4K panel. That is
+   * magnification. The shader was stretching each texel across more than one
+   * pixel and there was no more detail in the file to show, which is exactly
+   * what "looks like an old phone at 360p" is. 16K puts the same region at
+   * roughly 2.8 texels per pixel — oversampled, which is where sharp lives.
+   *
+   * Every tier is a genuine downsample of a 21600-wide original, so this is
+   * real detail arriving, not interpolation.
+   *
+   * ## And why the night texture upgrades too
+   *
+   * It was 4K while the day went to 8K, so the night side rendered at **half**
+   * the day side's detail — 2.8 screen pixels per texel — and every coastal
+   * city was smeared three pixels out into the water. That smear is what read
+   * as "lights in the sea": the imagery has no light in the open ocean at all.
+   *
+   * ## Order and cost
+   *
+   * Night first at 4MB, then the surface at 9.4MB, sequentially rather than at
+   * once — two large fetches racing each other finish later than either would
+   * alone, and the first one to land is a visible improvement on its own.
+   *
+   * Failure at any point is silent and total: the scene keeps what it has,
    * which is a complete picture. Nothing waits on this and nothing reports it.
    */
-  private async upgradeSurface(base: string): Promise<void> {
+  private async upgrade(base: string): Promise<void> {
     const connection = (navigator as { connection?: { saveData?: boolean; effectiveType?: string } })
       .connection;
     if (connection?.saveData) return;
@@ -296,10 +323,10 @@ export class PlanetScene {
     // signed in and gone.
     if (connection?.effectiveType && /2g|slow/.test(connection.effectiveType)) return;
 
-    try {
-      const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const fetchImage = (file: string, timeoutMs: number) =>
+      new Promise<HTMLImageElement>((resolve, reject) => {
         const img = new Image();
-        const timer = setTimeout(() => reject(new Error("timed out")), 30_000);
+        const timer = setTimeout(() => reject(new Error("timed out")), timeoutMs);
         img.onload = () => {
           clearTimeout(timer);
           resolve(img);
@@ -308,16 +335,51 @@ export class PlanetScene {
           clearTimeout(timer);
           reject(new Error("failed"));
         };
-        img.src = `${base}/earth-day-8k.jpg`;
+        img.src = `${base}/${file}`;
       });
 
+    const swap = (key: "day" | "night", image: HTMLImageElement, unit: number) => {
       if (this.disposed || !this.textures) return;
-      const previous = this.textures.day;
-      this.textures = { ...this.textures, day: this.upload(image, 0) };
+      const previous = this.textures[key];
+      this.textures = { ...this.textures, [key]: this.upload(image, unit) };
       this.gl.deleteTexture(previous);
       this.onUpgrade?.();
+    };
+
+    try {
+      swap("night", await fetchImage("earth-night-8k.jpg", 30_000), 1);
     } catch {
-      // The 4K surface stands.
+      // The 4K night stands.
+    }
+
+    /*
+       The top surface tier is desktop-only, and gated on more than the
+       connection: 9.4MB is a real cost, and a 1280-wide window renders the
+       foreground at 2.5 texels per pixel against the 8K texture already. It
+       buys nothing there. `deviceMemory` is advisory and absent on Safari,
+       so it only ever excludes — never a requirement.
+    */
+    /*
+       The GPU has to be able to hold it, and many cannot.
+
+       16384 is the largest size WebGL2 guarantees nothing about: this machine
+       reports exactly 16384, which is the common desktop ceiling, while plenty
+       of integrated and mobile GPUs report 8192 or 4096. Uploading past the
+       limit fails with INVALID_VALUE and leaves a black surface where a
+       perfectly good 8K one was — after spending 9.4MB to get there. Asking
+       first costs one parameter read.
+    */
+    if (this.gl.getParameter(this.gl.MAX_TEXTURE_SIZE) < 16384) return;
+
+    const memory = (navigator as { deviceMemory?: number }).deviceMemory;
+    if (window.innerWidth < 1400) return;
+    if (typeof memory === "number" && memory < 8) return;
+    if (connection?.effectiveType && /3g/.test(connection.effectiveType)) return;
+
+    try {
+      swap("day", await fetchImage("earth-day-16k.jpg", 60_000), 0);
+    } catch {
+      // The 8K surface stands.
     }
   }
 

@@ -246,9 +246,24 @@ void main() {
        Where the water is, read out of the imagery rather than shipped as a
        fourth texture. Blue Marble's oceans are the only large areas where blue
        runs well ahead of red; land is red-dominant almost everywhere, and ice
-       is neutral. One subtraction and a smoothstep beats another megabyte.
+       is neutral.
+
+       RELATIVE dominance, not a difference — and that correction matters most
+       exactly where the ocean is deepest. Blue Marble's abyssal plains are
+       nearly black: the mid-Atlantic reads (2, 7, 23), where blue is three
+       times red and the difference is still only 0.08. Under the old
+       b - r > 0.03..0.14 test the deep ocean read as LAND, and got no glint
+       from a sun sitting right on it. Weighted by latitude that test called
+       46.1% of Earth land against a true 29.2%.
+
+       Dividing by blue removes the brightness dependence, and what is left is
+       not a tuned constant but a gap: the land fraction is 29.2% at a cut of
+       0.12 and 30.3% at 0.36, because almost nothing on Earth scores in
+       between. Ice lands at 0.02, the Sahara at -0.62, the Amazon at -1.50,
+       deep ocean at 0.70.
     */
-    float water = smoothstep(0.03, 0.14, day.b - day.r) * (1.0 - cloud * 0.9);
+    float blueDominance = (day.b - max(day.r, day.g)) / max(day.b, 0.02);
+    float water = smoothstep(0.10, 0.34, blueDominance) * (1.0 - cloud * 0.9);
 
     /*
        Cloud shadows.
@@ -289,7 +304,33 @@ void main() {
        is what Black Marble records and what makes a night-side city look like a
        city rather than a hole in the occlusion. The tint is applied AFTER the
        threshold so it colours the lights and not the floor they sit on. */
-    float lightMask = max(0.0, night.r - 0.36) * 5.0;
+    /*
+       And attenuated OFFSHORE, using a land-proximity field baked into the
+       night texture's green channel at build time.
+
+       Not a guess about what looks right. Sweeping the imagery against a
+       distance transform: 80% of all light over water lies within one texel of
+       a coast, and light more than 400km out is **exactly zero**. There are no
+       cities in the open ocean. What is genuinely out there — gas flares in the
+       Persian Gulf and the Niger Delta, fishing fleets off Argentina — is real,
+       but a lone amber point in a black ocean reads as a defect on a login
+       screen whether or not it is accurate.
+
+       The alternative was a binary land test, and it is a trap: the same sweep
+       named the BRIGHTEST "over water" pixels on Earth as Singapore, Hong Kong,
+       Rio, Helsinki and Chennai. They are coastal cities on bays, and deleting
+       light over water deletes them. So the mask counts anything within ~60km
+       of land as land, ramps out over the next 260km, and never reaches zero.
+
+       The threshold moved 0.36 -> 0.24 with the texture. This source's own
+       histogram puts a hard background plateau at 0.208 and the 99.5th
+       percentile at 0.278: 0.24 clears the floor while keeping roughly 60%
+       more genuine towns than 0.36 did.
+    */
+    float landProximity = night.g;
+    float offshore = mix(0.22, 1.0, landProximity);
+
+    float lightMask = max(0.0, night.r - 0.24) * 5.0 * offshore;
     vec3 cities = lightMask * vec3(1.0, 0.72, 0.38) * (1.0 - lit) * (1.0 - cloud * 0.75);
 
     /* Lambert with a generous wrap, plus a little ambient.

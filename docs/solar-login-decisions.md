@@ -153,3 +153,57 @@ later, it is a value that looks plausible and is wrong forever.
 
 The divider above the footer had the same fixed grey and the same backdrop, and
 is now on the same variable and the same wash.
+
+## 32. Clarity, and where the lights in the sea actually came from
+
+Two complaints, one root cause, and one of my own hypotheses killed by
+measurement along the way.
+
+**Both were magnification.** Tracing the camera's own rays at 5,500km and a 58°
+field: the planet occupies only the bottom fifth of the frame, and at the bottom
+edge — its nearest and largest part — an 8K surface renders at **1.4 screen
+pixels per texel** on a 4K panel. The shader was stretching each texel across
+more than a pixel; there was no more detail in the file to show. The night
+texture was worse: 4K against the day's 8K, so **2.8 screen pixels per texel**,
+every coastal city smeared three pixels out into the water.
+
+**The sea lights are not in the data.** Measuring the night imagery against a
+land mask and a distance transform: 80% of all light over water lies within one
+texel of a coast, and light more than 400km offshore is exactly zero. Counting
+*perceptible* lit texels after the shader's threshold and gamma, open water
+scores **zero both before and after**. The offshore glow was the smear, not the
+source — so the fix for it is resolution, and the land-proximity mask described
+below is insurance rather than the cure. Worth saying plainly: the mask is not
+what fixed the complaint.
+
+**A hypothesis that was wrong.** I expected JPEG ringing around bright coastal
+cities to be spilling energy into adjacent water — a plausible mechanism with a
+clean story. Measured against a lossless reference it invents light in **36
+pixels at quality 82**, which is nothing. Killed in one measurement rather than
+becoming an explanation.
+
+**A defect found on the way.** The water mask used `blue - red > k`, which fails
+where the ocean is deepest. Blue Marble's abyssal plains are nearly black: the
+mid-Atlantic reads (2, 7, 23), blue three times red, difference still only 0.08.
+Weighted by latitude that test called **46.1% of Earth land against a true
+29.2%** — the deep ocean was classified as land, which is why the mid-Atlantic
+sat 430km from "land", and why the deepest ocean got no sun glint. Relative
+dominance, `(b - max(r,g)) / b`, removes the brightness dependence and produces
+not a tuned constant but a gap: 29.2% land at a cut of 0.12, 30.3% at 0.36,
+because almost nothing scores in between. Both the shader and the build script
+use 0.22.
+
+**What shipped.** A 16K day tier and an 8K night tier, both genuine downsamples
+of the NASA originals, arriving after the scene is already drawing — night
+first at 4MB, then the surface at 9.4MB, sequentially. The 16K tier is gated on
+window width, `deviceMemory`, connection, and `MAX_TEXTURE_SIZE`, since 16384 is
+the common desktop ceiling and an over-limit upload would spend 9.4MB to produce
+a black planet. The night texture's unused green channel now carries a
+land-proximity field so offshore light can be attenuated rather than deleted —
+deleting it would have taken Singapore, Hong Kong, Rio, Helsinki and Chennai,
+which the sweep named as the brightest "over water" pixels on Earth.
+
+The threshold moved 0.36 → 0.24, re-derived from the new image's own histogram
+(background plateau at 0.208, 99.5th percentile 0.278). Net effect on land:
+**1.8× more perceptible lit texels** — cities that read as cities rather than
+as amber blobs.
