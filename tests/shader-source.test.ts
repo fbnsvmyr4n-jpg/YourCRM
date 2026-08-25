@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { FRAGMENT_SHADER, VERTEX_SHADER } from "../src/lib/environment/gl/shaders";
 import { STAR_FRAGMENT, STAR_VERTEX } from "../src/lib/environment/gl/stars";
@@ -98,3 +99,61 @@ describe("the sun and moon are drawn by the shader, not by CSS", () => {
     expect(FRAGMENT_SHADER).toMatch(/if \(uMoonVisible > 0\.0\)/);
   });
 });
+
+describe("the atmosphere is a limb, not a ribbon", () => {
+  /**
+   * Reported as "a blue strip that curves above the earth… it looks fictional",
+   * which turned out to be an exact diagnosis. Measured, the band was 384
+   * device pixels thick against a real 23 — but the damning number was that its
+   * brightest point sat 331km ABOVE the surface. A real atmosphere is brightest
+   * where it is densest, at the ground; a peak three hundred kilometres up
+   * detaches the glow from the planet, and that is what makes it read as a
+   * ribbon laid over the picture.
+   *
+   * The shell says where air can be; the SCALE HEIGHT says where it actually
+   * is, and the second is what decides the band's shape. These pin both, and
+   * the two constants derived from the scale height.
+   */
+  it("keeps the scale height low enough that the band hugs the surface", () => {
+    const h = FRAGMENT_SHADER.match(/H_RAYLEIGH\s*=\s*([\d.]+)/);
+    expect(h).toBeTruthy();
+    // 128000 put the peak 331km up. Anything near it brings the ribbon back.
+    expect(Number(h![1])).toBeLessThan(60000);
+  });
+
+  it("derives the extinction constants from that scale height", () => {
+    /* Both are sqrt(scale height) relationships, not dials. If H_RAYLEIGH moves
+       and these do not, the surface haze and the sunset's reddening silently
+       stop matching the air they are supposed to describe. */
+    const h = Number(FRAGMENT_SHADER.match(/H_RAYLEIGH\s*=\s*([\d.]+)/)![1]);
+    const sun = Number(FRAGMENT_SHADER.match(/SUN_EXTINCTION_SCALE\s*=\s*([\d.]+)/)![1]);
+    expect(sun).toBeCloseTo(Math.sqrt(8500 / h), 2);
+  });
+
+  it("models airglow as a layer rather than as the whole air column", () => {
+    /**
+     * The night limb is the one part of this that was called good, and it was
+     * being produced by the wrong model: emission proportional to the Rayleigh
+     * column is brightest at the GROUND, not at 90km where airglow actually
+     * lives. It only looked like an arc because the old term saturated its own
+     * clamp across the whole fat shell. Thinning the shell removed the padding
+     * and the arc nearly vanished, which is how the wrong model showed itself.
+     */
+    expect(FRAGMENT_SHADER).toMatch(/GLOW_ALTITUDE/);
+    expect(FRAGMENT_SHADER).toMatch(/glowDensity \* [\d.e-]+/);
+    expect(FRAGMENT_SHADER, "airglow must not be driven by the Rayleigh column")
+      .not.toMatch(/glowPath\s*=\s*clamp\(depthAlongView/);
+  });
+
+  it("lets one renderer own the sky", () => {
+    // `.sky-wash` is a second, cruder CSS theory of the same air. Invisible
+    // under a 384px ribbon; the brightest blue on screen once the ribbon became
+    // a real arc.
+    const css = readFileSync(new URL("../src/app/globals.css", import.meta.url), "utf8");
+    /* `0\b` was the first attempt and it matches "0.18" — the word boundary
+       falls between the 0 and the dot — so the check passed against exactly the
+       value it existed to forbid. Anchored on the terminator instead. */
+    expect(css).toMatch(/\[data-planet="live"\]\s*\.sky-wash[\s\S]{0,140}opacity:\s*0\s*[;}]/);
+  });
+});
+

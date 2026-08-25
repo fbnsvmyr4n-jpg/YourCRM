@@ -277,3 +277,63 @@ under an `AbortController` with a 25-second budget and is genuinely cancelled if
 it overruns — unlike a timeout wrapped around `Image.src`, which abandons the
 request while it goes on consuming a slow connection in the background.
 `saveData` is still absolute, because that is a person saying no.
+
+## 34. The atmosphere was a ribbon, and the airglow was the wrong physics
+
+"A blue strip that curves above the earth… it looks fictional." That turned out
+to be an exact diagnosis, and measuring it found three separate faults.
+
+**The band was 17x too thick, and its peak was in the wrong place.** From
+5,500km the planet's limb subtends 32.46°. A real atmosphere adds 0.57° — 23
+device pixels. This shader's 1600km shell added 9.72°, or **384 pixels**. But
+thickness was the lesser problem. Computing the limb's radiance profile with the
+128km scale height, the band's **brightest point sat 331km above the surface**.
+A real atmosphere is brightest where it is densest, which is at the ground.
+Putting the peak three hundred kilometres up detaches the glow from the planet,
+and that is exactly what makes it read as a ribbon laid over the picture rather
+than as air belonging to it.
+
+The shell says where air *can* be; the scale height says where it actually is,
+and the second decides the band's shape. Both came down — 500km and 36km,
+roughly five times Earth rather than seventeen. The profile now peaks 16 pixels
+above the surface and is gone by 80. At golden hour it runs deep orange at the
+limb (0.258, 0.035, 0.002), through warm white (0.483, 0.516, 0.389), into blue
+(0.216, 0.302, 0.409) — the progression every photograph from orbit shows, and
+the one the old settings smeared across 300 pixels until it was flat. At midday
+the base now comes out near-white (saturation 0.06) and grades to cyan, instead
+of a near-uniform 0.55 from pixel 1 to pixel 100.
+
+Two constants are derived from the scale height and had to move with it: a
+grazing path's optical depth goes as its square root, so the transmittance
+correction went 0.22 → 0.415 and the solar extinction scale 0.26 → 0.486. A test
+now pins the second to `sqrt(8500 / H_RAYLEIGH)` so they cannot drift apart.
+
+**The CSS sky wash was a second, cruder sky.** `.sky-wash` is a full-screen
+gradient held at 0.18 — invisible while the shader's own atmosphere was a
+384-pixel ribbon, because the ribbon drowned it. Thinning that band to a real arc
+left the CSS wash as the brightest blue on screen: a broad diffuse haze filling
+the upper frame, attached to nothing. Suppressing it in the browser and
+comparing was unambiguous. Same trap as `.horizon-glow` and the dark ring at the
+limb, same answer — two renderers with different ideas about the sky cannot both
+be right, and once one is computing the answer the other is noise. The ambient
+`.sun-glow` and `.moon-glow` went with it, for the same reason: the shader now
+produces its own aureole from the same integral, correctly placed.
+
+**And the airglow was modelled as a column when it is a layer.** It was driven
+by the total Rayleigh path, which is brightest at the ground — but airglow is
+emission from oxygen and hydroxyl in a band around 90km up, and everything below
+contributes nothing. The error stayed hidden because the old term *saturated its
+own clamp* from the surface out to 200km, producing a flat-topped band that
+happened to look like an arc. Thinning the shell removed the padding and the
+night limb nearly vanished — which is how the wrong model finally showed itself,
+and it was a regression on the one part of this that had been called good.
+
+It is a Gaussian shell now, accumulated in the march that was already walking
+the ray. The important consequence is structural: the night limb no longer
+shares parameters with the daytime band. They are different physics — emission
+against scattering — and can now be got right independently.
+
+**A test of my own that could not fail.** The guard pinning `.sky-wash` to zero
+used `opacity:\s*0\b`, which matches `0.18` — the word boundary falls between
+the `0` and the dot. It passed against precisely the value it existed to forbid,
+and only a mutation caught it. Anchored on the terminator instead.

@@ -1957,8 +1957,21 @@ textarea.field-input {
    this carries the countless faint ones and the Milky Way behind them. Dimmed
    hard, so the ones in the right places are the ones that read.
 */
+/* One model per phenomenon, and the sky is the shader's.
+
+   `.sky-wash` is a full-screen CSS gradient — a second, much cruder theory of
+   the same air the fragment shader now integrates properly. Held at 0.18 it was
+   invisible while the shader's own atmosphere was a 384-pixel ribbon, because
+   the ribbon drowned it. Thinning that band to a real arc left the CSS wash as
+   the brightest blue on screen: a broad diffuse haze filling the upper frame,
+   attached to nothing, which is a large part of what "it looks fictional" was
+   pointing at.
+
+   The same trap as `.horizon-glow` and the dark ring at the limb, and the same
+   answer: two renderers with different ideas about the sky cannot both be
+   right, and once one of them is computing the answer the other is noise. */
 :root[data-planet="live"] .constellations { opacity: 0.42; }
-:root[data-planet="live"] .sky-wash { opacity: 0.18; }
+:root[data-planet="live"] .sky-wash,
 :root[data-planet="live"] .sky-wash::after { opacity: 0; }
 
 /* The CSS limb and its halo are entirely superseded by a real one.
@@ -1994,7 +2007,18 @@ textarea.field-input {
 */
 :root[data-planet="live"] .sun-body,
 :root[data-planet="live"] .moon-body { opacity: 0; }
-:root[data-planet="live"] .sun-glow { scale: calc(0.22 + var(--env-warmth, 0) * 0.5); }
+
+/* And the ambient washes go with them.
+
+   These were kept on the argument that a broad glow is light spread across the
+   sky rather than a body in it, and that the shader's narrow forward-scattering
+   lobe does not replace it. That was true of the OLD atmosphere. With a real
+   arc the shader produces its own aureole from the same integral, correctly
+   placed and correctly coloured, and the CSS glow sits on top of it as a large
+   orange blob with no relationship to where the air actually is — which is the
+   other half of what got circled. */
+:root[data-planet="live"] .sun-glow,
+:root[data-planet="live"] .moon-glow { opacity: 0; }
 
 .sky-wash,
 .sky-wash::after,

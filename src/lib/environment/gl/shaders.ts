@@ -69,24 +69,34 @@ const float PI = 3.141592653589793;
    sky at a hard edge, which is the one join in this composition nobody can be
    allowed to see.
 
-   Every space visualisation exaggerates this and so does this one — to 1600km,
-   which sounds absurd until you do the angles. From 5,500km the planet's
-   angular radius is 32.4°; a real atmosphere reaches 33.0°, a band of 0.6°, or
-   about nine pixels in a 58° frame. Rendering it honestly produced a hard edge
-   and nothing else, which I could only prove by hiding the CSS scene and
-   finding the shader's sky completely black. At 900km the band was 5.4°, which
-   read at night but left daylight a thin blue line under a black sky. At 1600km
-   it is closer to 9°, and the day side finally has the depth of blue the
-   reference frames show — which was the remaining complaint about daytime.
+   Every space visualisation exaggerates this and so does this one — but the
+   first attempt exaggerated it SEVENTEEN-FOLD, to a 1600km shell with a 128km
+   scale height, and the result was reported as "a blue strip that curves above
+   the earth… it looks fictional". That description turned out to be an exact
+   diagnosis.
 
-   The scale heights below are stretched by the same factor so the density
-   profile still fills the shell rather than hugging the ground inside a
-   suddenly enormous void. Scaling the shell alone thins the band out instead of
-   thickening it, which is the trap here: the shell says where air can be, the
-   scale height says where it actually is.
+   Measuring the limb's radiance profile: with a 128km scale height the band was
+   384 device pixels thick against a real 23, and worse, its BRIGHTEST POINT sat
+   331km above the surface. A real atmosphere is brightest where it is densest,
+   which is at the ground. Putting the peak three hundred kilometres up detaches
+   the glow from the planet, and that is precisely what makes it read as a
+   ribbon laid over the image rather than as air.
+
+   The shell says where air CAN be; the scale height says where it actually is,
+   and the second one is what shape the band comes out. So both came down —
+   500km and 36km, roughly five times Earth rather than seventeen. The profile
+   now peaks 16 pixels above the surface and is gone by 80: at golden hour it
+   runs deep orange at the limb, through warm white, into blue, which is the
+   progression every photograph from orbit shows and which the old settings
+   smeared across three hundred pixels until it was a flat band.
+
+   Two constants downstream are derived from this and must move with it: a
+   grazing path's optical depth goes as sqrt(scale height), so the transmittance
+   correction and the solar extinction scale are both recomputed against 36km
+   rather than 128km. They are marked where they appear.
 */
 const float R_PLANET = 6371000.0;
-const float R_ATMOS  = 7971000.0;
+const float R_ATMOS  = 6871000.0;
 
 /* Rayleigh scattering per metre at sea level, per channel. Blue scatters an
    order of magnitude more than red — this triple IS why the sky is blue and
@@ -102,10 +112,34 @@ const vec3  BETA_RAYLEIGH = vec3(5.8e-6, 13.5e-6, 33.1e-6);
 const float BETA_MIE      = 8e-6;
 
 /* How fast each falls off with altitude, stretched to match the shell above. */
-const float H_RAYLEIGH = 128000.0;
+const float H_RAYLEIGH = 36000.0;
 /* And kept LOW relative to Rayleigh, so the grey stays near the ground where
    it belongs rather than spreading through the whole band. */
-const float H_MIE      = 9000.0;
+const float H_MIE      = 4000.0;
+
+/*
+   Airglow lives in a SHELL, and modelling it as anything else was wrong.
+
+   It was previously driven by the Rayleigh column — how much air the ray
+   crossed in total. That is not what airglow is. It is emission from oxygen and
+   hydroxyl in a thin band around 90km up, and everything below that contributes
+   nothing at all. Tying it to the column meant it was brightest where the air
+   was thickest, which is the ground, so it hugged the surface instead of
+   arching above it.
+
+   The error stayed hidden while the atmosphere shell was seventeen times too
+   thick: the column term saturated its own clamp from the surface out to 200km,
+   producing a flat-topped band that happened to look like an arc. Thinning the
+   shell to something honest removed the padding and the night limb nearly
+   vanished — which is how the wrong model finally showed itself.
+
+   Now it is a Gaussian layer, and the important consequence is that the night
+   limb no longer shares parameters with the daytime band. They are different
+   physics — emission against scattering — and they can now be got right
+   independently, which is exactly what was being asked for.
+*/
+const float GLOW_ALTITUDE = 120000.0;
+const float GLOW_WIDTH    = 90000.0;
 
 /* Mie asymmetry: aerosols scatter strongly forward, which is what puts the
    bright halo immediately around the sun rather than spreading it evenly. */
@@ -462,15 +496,13 @@ void main() {
 
   vec3 scattered = vec3(0.0);
   vec3 transmittance = vec3(1.0);
-  /* Kept outside the block below so the airglow term can use it: how much air
-     this ray crossed is exactly what decides how much glow it picks up. */
-  float depthAlongViewLength = 0.0;
   /* The FULL view-path depth, Rayleigh and Mie. The airglow only needs the
      Rayleigh part; the sun disc below needs both, because what reddens a
      setting sun is precisely how much air its light crossed to reach the eye —
      the same air this loop is already measuring. Computing it twice would be
      two answers to one question. */
   vec2 viewDepth = vec2(0.0);
+  float glowDensity = 0.0;
 
   if (far > near) {
     float step = (far - near) / float(uSteps);
@@ -487,6 +519,12 @@ void main() {
 
       vec2 density = vec2(exp(-h / H_RAYLEIGH), exp(-h / H_MIE)) * step;
       depthAlongView += density;
+
+      /* Airglow is a LAYER, not a column — see below. Accumulated here because
+         the march is already walking this ray and a second loop would be the
+         same arithmetic twice. */
+      float glowOffset = (h - GLOW_ALTITUDE) / GLOW_WIDTH;
+      glowDensity += exp(-glowOffset * glowOffset) * step;
 
       vec2 depthToSun = opticalDepthToSun(p, uSunDir);
       if (depthToSun.x < 0.0) continue; // in the planet's shadow
@@ -512,10 +550,14 @@ void main() {
        Physically inconsistent, and deliberately. The alternative is choosing
        between a planet you can see and an atmosphere you can.
     */
+    /* 0.415, derived rather than dialled: it is 0.22 scaled by
+       sqrt(128000 / 36000), preserving the same EFFECTIVE optical depth through
+       a shell whose scale height dropped by 3.6x. Leaving it at 0.22 would have
+       made the surface too clear and quietly undone the aerial perspective that
+       gives the disc its depth. */
     transmittance = exp(
-      -(BETA_RAYLEIGH * depthAlongView.x + BETA_MIE * 1.1 * depthAlongView.y) * 0.22
+      -(BETA_RAYLEIGH * depthAlongView.x + BETA_MIE * 1.1 * depthAlongView.y) * 0.415
     );
-    depthAlongViewLength = depthAlongView.x;
     viewDepth = depthAlongView;
   }
 
@@ -574,7 +616,12 @@ void main() {
      comes up, when it is utterly swamped. The colour is the real one: the
      557.7nm oxygen line is green, with the hydroxyl bands adding a little red.
   */
-  float glowPath = clamp(depthAlongViewLength * 3.0e-6, 0.0, 1.0);
+  /* Path length through the emitting layer, normalised. Seen edge-on that path
+     is hundreds of kilometres of glowing air; looking straight down it is a few
+     tens, which is why this is a limb phenomenon and not a wash over the whole
+     disc. The old term needed a glowEdge fudge to achieve that; the geometry
+     produces it here on its own. */
+  float glowPath = clamp(glowDensity * 2.4e-6, 0.0, 1.0);
   float sunGone = 1.0 - smoothstep(-0.30, 0.02, uSunDir.z);
   /* A LIMB phenomenon. Looking down through the atmosphere you see almost none
      of it; looking along it, edge-on, the path is hundreds of kilometres of
@@ -582,7 +629,7 @@ void main() {
      that miss the ground — the first version used the path length alone and lit
      the entire disc a uniform green. */
   float glowEdge = mix(1.0, 0.05, groundCoverage);
-  colour += vec3(0.16, 0.40, 0.34) * glowPath * sunGone * glowEdge * 0.16;
+  colour += vec3(0.16, 0.40, 0.34) * glowPath * sunGone * glowEdge * 0.42;
 
   /* Moonlight: a cool wash on the lit hemisphere of the night side, far below
      the sun's contribution and gated on the moon being up and full enough. */
@@ -635,11 +682,12 @@ void main() {
      makes the sky blue makes the sun orange.
 
      Scaled by 0.26 because the shell is exaggerated. A grazing path's optical
-     depth goes as sqrt(scale height), and this atmosphere uses 128km against
-     the real 8.5km: sqrt(8500 / 128000) = 0.258. So the factor is not a taste
-     control, it is the conversion back to Earth's own extinction.
+     depth goes as sqrt(scale height), and this atmosphere uses 36km against the
+     real 8.5km: sqrt(8500 / 36000) = 0.486. So the factor is not a taste
+     control, it is the conversion back to Earth's own extinction — and it moves
+     whenever H_RAYLEIGH does.
   */
-  const float SUN_EXTINCTION_SCALE = 0.26;
+  const float SUN_EXTINCTION_SCALE = 0.486;
   vec3 slant = exp(
     -(BETA_RAYLEIGH * viewDepth.x + BETA_MIE * 1.1 * viewDepth.y) * SUN_EXTINCTION_SCALE
   );
