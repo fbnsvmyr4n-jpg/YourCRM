@@ -43,6 +43,7 @@ uniform vec2  uResolution;
 uniform vec3  uSunDir;        // unit, observer's local frame (east, north, up)
 uniform vec3  uMoonDir;
 uniform float uMoonLight;     // 0..1, already gated on phase and altitude
+uniform float uMoonVisible;   // 0..1, simply whether the moon is above the horizon
 uniform float uCameraHeight;  // metres above the surface
 uniform float uFov;           // vertical field of view, radians
 uniform float uPitch;         // camera tilt below horizontal, radians
@@ -263,7 +264,12 @@ void main() {
        deep ocean at 0.70.
     */
     float blueDominance = (day.b - max(day.r, day.g)) / max(day.b, 0.02);
-    float water = smoothstep(0.10, 0.34, blueDominance) * (1.0 - cloud * 0.9);
+    /* Cloud-free, because two different questions are being asked of this.
+       Glint needs to know whether the sun is hitting water the eye can see, so
+       cloud has to hide it. The city-light test needs to know whether this
+       point IS ocean, which cloud does not change. */
+    float ocean = smoothstep(0.10, 0.34, blueDominance);
+    float water = ocean * (1.0 - cloud * 0.9);
 
     /*
        Cloud shadows.
@@ -319,8 +325,16 @@ void main() {
        The alternative was a binary land test, and it is a trap: the same sweep
        named the BRIGHTEST "over water" pixels on Earth as Singapore, Hong Kong,
        Rio, Helsinki and Chennai. They are coastal cities on bays, and deleting
-       light over water deletes them. So the mask counts anything within ~60km
-       of land as land, ramps out over the next 260km, and never reaches zero.
+       light over water deletes them.
+
+       Measured, the split is clean enough that the mask barely has to be
+       careful: the brightest texel of every one of those cities is ZERO texels
+       from land, while Angola's oil flares are 22 texels out and the Persian
+       Gulf platforms 25. The first dilation was 60km and left the Angolan
+       flares at 91% — the amber patch in the ocean that got reported. It is
+       ~15km now, and the floor here dropped with it: what still survives is
+       genuinely a hundred kilometres out and should read as a hint, not a
+       city.
 
        The threshold moved 0.36 -> 0.24 with the texture. This source's own
        histogram puts a hard background plateau at 0.208 and the 99.5th
@@ -328,9 +342,31 @@ void main() {
        more genuine towns than 0.36 did.
     */
     float landProximity = night.g;
-    float offshore = mix(0.22, 1.0, landProximity);
+    float offshore = mix(0.10, 1.0, landProximity);
 
-    float lightMask = max(0.0, night.r - 0.24) * 5.0 * offshore;
+    /*
+       And a second, independent test — because the mask alone CANNOT stop the
+       bleed at a coastline, by construction.
+
+       night.g is sampled with the same bilinear filter as night.r. Where a
+       city's light spreads a texel or two into its bay, the mask spreads with
+       it and arrives still reading "land". The mask is the right tool for a
+       flare a hundred kilometres out and useless against the thing actually
+       being seen, which is a coastal city smeared across the water beside it.
+
+       So the ocean test comes from the DAY texture instead. Its coastline is
+       crisp and, more to the point, entirely independent of where the lights
+       are — nothing has bled into it. A light that lands on a pixel the
+       surface says is open ocean is not a city.
+
+       0.85, measured. Sweeping it: Singapore, Hong Kong, Rio, Venice,
+       Helsinki, Alexandria and Luanda hold full brightness at every value up
+       to 1.0, because each has land under it within a texel or two. The
+       Cabinda flares fall from 0.49 to 0.07 and the Persian Gulf platforms
+       from 0.31 to 0.05. Short of 1.0 so that genuine offshore activity
+       remains a hint rather than being censored.
+    */
+    float lightMask = max(0.0, night.r - 0.24) * 5.0 * offshore * (1.0 - ocean * 0.85);
     vec3 cities = lightMask * vec3(1.0, 0.72, 0.38) * (1.0 - lit) * (1.0 - cloud * 0.75);
 
     /* Lambert with a generous wrap, plus a little ambient.
@@ -429,6 +465,12 @@ void main() {
   /* Kept outside the block below so the airglow term can use it: how much air
      this ray crossed is exactly what decides how much glow it picks up. */
   float depthAlongViewLength = 0.0;
+  /* The FULL view-path depth, Rayleigh and Mie. The airglow only needs the
+     Rayleigh part; the sun disc below needs both, because what reddens a
+     setting sun is precisely how much air its light crossed to reach the eye —
+     the same air this loop is already measuring. Computing it twice would be
+     two answers to one question. */
+  vec2 viewDepth = vec2(0.0);
 
   if (far > near) {
     float step = (far - near) / float(uSteps);
@@ -474,6 +516,7 @@ void main() {
       -(BETA_RAYLEIGH * depthAlongView.x + BETA_MIE * 1.1 * depthAlongView.y) * 0.22
     );
     depthAlongViewLength = depthAlongView.x;
+    viewDepth = depthAlongView;
   }
 
   /* Sunlight's intensity: the one free constant, and it sets how luminous the
@@ -547,6 +590,95 @@ void main() {
     vec3 p = normalize(origin + dir * ground.x);
     float moonCos = max(0.0, dot(p, uMoonDir));
     colour += vec3(0.42, 0.5, 0.72) * moonCos * uMoonLight * 0.05;
+  }
+
+  /*
+     ===================  The sun, and the moon  ===================
+
+     Both were CSS elements until now: a div with a radial gradient, positioned
+     by a custom property, drawn earlier in the stacking order so the planet
+     would cover it. That is why the moment it went behind the limb looked
+     cheap, and no amount of gradient tuning could have fixed it. A sprite
+     occluded by paint order can only ever be clipped. It cannot be dimmed by
+     the air in front of it, cannot redden, cannot bloom through an atmosphere
+     it knows nothing about, and meets the limb on a hard edge that belongs to
+     a different renderer with a different idea of where the horizon is.
+
+     Here it is the same ray, the same sphere and the same integral as
+     everything else in the frame, so all four come out for free.
+  */
+
+  /* Angular distance from this pixel's ray to each body. */
+  float sunAngle = acos(clamp(dot(dir, uSunDir), -1.0, 1.0));
+
+  /*
+     EXAGGERATED, and by a measured amount rather than a chosen one.
+
+     The real sun is 0.266° of arc. In this camera that is a disc about 21
+     device pixels across — correct, and much smaller than the composition has
+     ever had. The CSS sun it replaces was 3.4vmax, which works out at almost
+     exactly 1.0° of apparent radius, so 3.5x is what the frame is already
+     built around. Keeping the size and changing only the physics means this
+     reads as the same picture rendered properly, not as a different one.
+  */
+  const float SUN_RADIUS = 0.00465 * 3.5;
+  const float MOON_RADIUS = 0.00452 * 3.5;
+
+  /*
+     Extinction, and this is the entire point of moving it in here.
+
+     A low sun is red because its light crosses a vast slant of atmosphere and
+     Rayleigh scattering removes blue roughly sixteen times faster than red.
+     viewDepth is that path, already integrated above. Multiplying the disc by
+     exp(-tau) therefore reddens and dims it exactly as it approaches the limb,
+     with no ramp, no keyframe and no colour curve — the same arithmetic that
+     makes the sky blue makes the sun orange.
+
+     Scaled by 0.26 because the shell is exaggerated. A grazing path's optical
+     depth goes as sqrt(scale height), and this atmosphere uses 128km against
+     the real 8.5km: sqrt(8500 / 128000) = 0.258. So the factor is not a taste
+     control, it is the conversion back to Earth's own extinction.
+  */
+  const float SUN_EXTINCTION_SCALE = 0.26;
+  vec3 slant = exp(
+    -(BETA_RAYLEIGH * viewDepth.x + BETA_MIE * 1.1 * viewDepth.y) * SUN_EXTINCTION_SCALE
+  );
+
+  /* Behind the planet is behind the planet. The same coverage term that
+     antialiases the silhouette hides the sun, so the disc is occluded on
+     exactly the edge the surface uses, to the same fraction of a pixel — which
+     is the thing a separate CSS layer could never agree about. */
+  float notBlocked = 1.0 - groundCoverage;
+
+  if (sunAngle < SUN_RADIUS * 1.02 && notBlocked > 0.0) {
+    /* Analytic edge, one pixel wide, from the screen-space derivative. A disc
+       this small is nearly all edge, so a hard cut here reads as a polygon. */
+    float aa = max(fwidth(sunAngle), 1.0e-6);
+    float disc = 1.0 - smoothstep(SUN_RADIUS - aa, SUN_RADIUS + aa, sunAngle);
+
+    /*
+       Limb darkening — the sun's edge really is dimmer than its centre, by
+       about a third in visible light, because looking at the edge you see
+       shallower and cooler layers of the photosphere. It is the difference
+       between a disc that reads as a sphere of gas and one that reads as a
+       flat sticker, and it costs a square root.
+    */
+    float rr = clamp(sunAngle / SUN_RADIUS, 0.0, 1.0);
+    float limbDark = 0.35 + 0.65 * pow(sqrt(max(0.0, 1.0 - rr * rr)), 0.42);
+
+    colour += vec3(1.0, 0.96, 0.90) * disc * limbDark * slant * notBlocked * 26.0;
+  }
+
+  if (uMoonVisible > 0.0) {
+    float moonAngle = acos(clamp(dot(dir, uMoonDir), -1.0, 1.0));
+    if (moonAngle < MOON_RADIUS * 1.02 && notBlocked > 0.0) {
+      float aa = max(fwidth(moonAngle), 1.0e-6);
+      float disc = 1.0 - smoothstep(MOON_RADIUS - aa, MOON_RADIUS + aa, moonAngle);
+      /* Lambertian rather than limb-darkened: the moon is dust, not gas, and
+         its edge stays bright right to the terminator — which is why a full
+         moon looks like a disc and not a ball. */
+      colour += vec3(0.94, 0.94, 0.99) * disc * slant * notBlocked * uMoonVisible * 0.5;
+    }
   }
 
   colour *= uExposure;

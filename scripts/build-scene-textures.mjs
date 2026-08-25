@@ -126,9 +126,30 @@ async function landProximity(width, height) {
     queue = next;
   }
 
+  /*
+     The dilation, and it is much tighter than it first looks like it should be.
+
+     60km was the first guess and it was far too generous: it left the oil
+     flares off Angola and Cabinda — 108km out, and as bright as a city — at
+     91% brightness, which is exactly the lone amber patch in the ocean that
+     got reported.
+
+     Measuring instead of guessing gives a startlingly clean split. The
+     brightest texel of every coastal city that has to survive this — Singapore,
+     Hong Kong, Rio, Helsinki, Chennai, Venice, Dubai — is **0 texels from
+     land**. They sit ON land at this resolution; it is only the bilinear
+     footprint around them that ever touched water. Meanwhile Angola's flares
+     are 22 texels out and the Persian Gulf platforms 25. There is nothing in
+     between to get wrong.
+
+     Floored in TEXELS as well as kilometres, because the same field is built
+     for the 2K tier where one texel is already 19.6km and a fixed 15km would
+     be a sub-texel distance — meaningless, and it would start dimming a
+     harbour that merely landed on the wrong side of a pixel.
+  */
   const kmPerTexel = 40075 / width;
-  const NEAR_KM = 60; // a coastal city, its harbour, and its bay
-  const FAR_KM = 320; // open water, where nothing is a city
+  const NEAR_KM = Math.max(15, kmPerTexel * 2.5);
+  const FAR_KM = NEAR_KM + 105;
   const out = Buffer.alloc(n);
   for (let p = 0; p < n; p++) {
     const km = dist[p] * kmPerTexel;

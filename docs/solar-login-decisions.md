@@ -207,3 +207,73 @@ The threshold moved 0.36 → 0.24, re-derived from the new image's own histogram
 (background plateau at 0.208, 99.5th percentile 0.278). Net effect on land:
 **1.8× more perceptible lit texels** — cities that read as cities rather than
 as amber blobs.
+
+## 33. The sun was a sprite, and the 16K never arrived
+
+Three reports, three genuinely separate causes.
+
+**The lights in the ocean were off Angola.** Mapping the reported frame's pixels
+back through the camera to coordinates: the lit water sat at 5–8°S, 11–13°E —
+the Cabinda and Congo-mouth oil flares, 108km offshore, and Luanda beside them.
+The first land-proximity mask dilated by 60km, which left those flares at 91%
+brightness. Measuring instead of guessing gave a startlingly clean split: the
+brightest texel of every coastal city that must survive — Singapore, Hong Kong,
+Rio, Helsinki, Chennai, Venice, Dubai — is **0 texels from land**, while the
+flares are 22 and the Gulf platforms 25. Nothing lies in between.
+
+But tightening the dilation was not enough, and the reason is structural: **the
+mask cannot stop bleed at a coastline, by construction.** `night.g` is sampled
+with the same bilinear filter as `night.r`, so light spreading a texel into its
+own bay carries the mask with it and arrives still reading "land". The mask is
+the right tool for a flare a hundred kilometres out and useless against the
+thing actually being seen. The second test comes from the DAY texture instead,
+whose coastline is crisp and, crucially, independent of where the lights are.
+Sweeping it: every city holds full brightness at every suppression up to 1.0,
+while the Cabinda flares fall 0.49 → 0.07. Re-rendering the exact reported
+frame, the brightest light over water drops **2.26 → 0.26**.
+
+**The sun was a CSS div.** A radial gradient positioned by a custom property and
+drawn earlier in the stacking order so the planet would paint over it. That is
+why the moment it passed the limb looked cheap, and why no amount of gradient
+tuning could have fixed it — a sprite occluded by paint order can only be
+clipped. It cannot be dimmed by the air in front of it, cannot redden, cannot
+bloom through an atmosphere it knows nothing about, and meets the limb on an
+edge belonging to a different renderer with a different idea of where the
+horizon is.
+
+Moved into the shader, all of it falls out of arithmetic already running. The
+same coverage term that antialiases the silhouette occludes the disc to the same
+fraction of a pixel. The same optical depth that makes the sky blue reddens the
+sun — scaled by 0.26, which is not a taste control but `sqrt(8500 / 128000)`,
+the conversion from this exaggerated 128km scale height back to Earth's real
+8.5km. Computing the result across the band the sun actually crosses (the limb
+sits 57.5° below horizontal from 5,500km, the atmosphere edge at 47.8°):
+
+| local altitude | transmitted R, G, B | reads as |
+| --- | --- | --- |
+| −53° | 0.991, 0.980, 0.952 | white |
+| −55° | 0.890, 0.763, 0.516 | warm white |
+| −56° | 0.647, 0.363, 0.083 | orange |
+| −57° | 0.191, 0.021, 0.000 | deep red |
+| −58° | — | occluded |
+
+Three degrees of travel, about 120 device pixels, with no keyframe anywhere.
+Size is deliberately exaggerated 3.5× — the real sun is 0.266° and would be a
+21-pixel dot — chosen because the CSS sun it replaces was 3.4vmax, almost
+exactly 1.0° of apparent radius. The composition is unchanged; only the physics
+is new. Limb darkening added, because a disc without it reads as a sticker.
+
+**And the 16K tier was never reaching anyone.** Two gates were wrong. It
+required `innerWidth >= 1400`, which excluded a 1035px window beside an editor —
+a window whose drawing buffer is 2070 × 2290, over four megapixels, and exactly
+the case that needs the texture. CSS pixels say how big a window looks; device
+pixels say how many samples the shader must fill, which is the only thing
+texture resolution answers to.
+
+The second was `connection.effectiveType`, which reported **"3g" for localhost**
+with no network involved at all. A coarse estimate was vetoing a download the
+machine would have finished instantly. Replaced by measurement: the fetch runs
+under an `AbortController` with a 25-second budget and is genuinely cancelled if
+it overruns — unlike a timeout wrapped around `Image.src`, which abandons the
+request while it goes on consuming a slow connection in the background.
+`saveData` is still absolute, because that is a person saying no.

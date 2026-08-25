@@ -1971,9 +1971,29 @@ textarea.field-input {
 :root[data-planet="live"] .earth { opacity: 0; }
 :root[data-planet="live"] .horizon-glow { opacity: 0; }
 
-/* The sun and moon are drawn by neither — the shader has no disc for them —
-   so those layers stay, and only their scale is trimmed now that the real
-   atmosphere is carrying the glow near the horizon. */
+/* The discs are the SHADER's now.
+
+   They were CSS sprites — a div with a radial gradient, drawn earlier in the
+   stacking order so the planet would paint over them. That is exactly why the
+   moment the sun went behind the limb looked cheap, and why no amount of
+   gradient tuning could have fixed it: a sprite occluded by paint order can
+   only ever be clipped. It cannot be dimmed by the air in front of it, cannot
+   redden as it sinks, cannot bloom through an atmosphere it knows nothing
+   about, and meets the limb on an edge belonging to a different renderer with
+   a different idea of where the horizon is.
+
+   In the shader all four fall out of arithmetic that was already running: the
+   same silhouette coverage that antialiases the planet occludes the disc to
+   the same fraction of a pixel, and the same optical depth that makes the sky
+   blue reddens the sun.
+
+   So the bodies go, and only the ambient WASH stays — that one is light spread
+   across the sky rather than a body in it, and the shader's aureole is a
+   narrow forward-scattering lobe that does not replace it. Trimmed, because
+   the real limb is now doing most of that work.
+*/
+:root[data-planet="live"] .sun-body,
+:root[data-planet="live"] .moon-body { opacity: 0; }
 :root[data-planet="live"] .sun-glow { scale: calc(0.22 + var(--env-warmth, 0) * 0.5); }
 
 .sky-wash,

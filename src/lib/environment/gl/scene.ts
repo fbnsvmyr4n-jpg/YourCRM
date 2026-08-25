@@ -119,7 +119,7 @@ export class PlanetScene {
      */
     const missing: string[] = [];
     for (const name of [
-      "uResolution", "uSunDir", "uMoonDir", "uMoonLight", "uCameraHeight",
+      "uResolution", "uSunDir", "uMoonDir", "uMoonLight", "uMoonVisible", "uCameraHeight",
       "uFov", "uPitch", "uYaw", "uEnuToEcef", "uExposure", "uSteps",
       "uLightSteps", "uCloudPhase", "uDay", "uNight", "uClouds",
     ]) {
@@ -338,7 +338,7 @@ export class PlanetScene {
         img.src = `${base}/${file}`;
       });
 
-    const swap = (key: "day" | "night", image: HTMLImageElement, unit: number) => {
+    const swap = (key: "day" | "night", image: TexImageSource, unit: number) => {
       if (this.disposed || !this.textures) return;
       const previous = this.textures[key];
       this.textures = { ...this.textures, [key]: this.upload(image, unit) };
@@ -371,22 +371,78 @@ export class PlanetScene {
     */
     if (this.gl.getParameter(this.gl.MAX_TEXTURE_SIZE) < 16384) return;
 
+    /*
+       DEVICE pixels, not CSS pixels — and this was a real miss.
+
+       The first version gated on `innerWidth < 1400`, which excluded a 1035px
+       window sitting beside an editor. That window has a drawing buffer of
+       2070 x 2290: over four megapixels, rendering the foreground of the frame
+       at well under one texel per pixel against the 8K surface. It is exactly
+       the case that needs the larger texture, and the check turned it away.
+
+       CSS pixels say how big the window looks. Device pixels say how many
+       samples the shader has to fill, which is the only thing texture
+       resolution answers to.
+    */
     const memory = (navigator as { deviceMemory?: number }).deviceMemory;
-    if (window.innerWidth < 1400) return;
+    const devicePixels =
+      window.innerWidth * Math.min(MAX_PIXEL_RATIO, window.devicePixelRatio || 1);
+    if (devicePixels < 1800) return;
     if (typeof memory === "number" && memory < 8) return;
-    if (connection?.effectiveType && /3g/.test(connection.effectiveType)) return;
 
     try {
-      swap("day", await fetchImage("earth-day-16k.jpg", 60_000), 0);
+      const image = await this.fetchWithBudget(`${base}/earth-day-16k.jpg`, 25_000);
+      if (image) swap("day", image, 0);
     } catch {
       // The 8K surface stands.
+    }
+  }
+
+  /**
+   * Fetch a large texture, and genuinely give up if it takes too long.
+   *
+   * ## Measuring beats predicting
+   *
+   * The gate here used to be `connection.effectiveType`, and it was quietly
+   * wrong. That value is a coarse, quantised ESTIMATE: it reported "3g" for a
+   * localhost connection with no network involved at all, and vetoed the
+   * upgrade on a machine that would have finished the download instantly.
+   * Refusing to try, based on a guess about a connection, is strictly worse
+   * than trying and stopping.
+   *
+   * So the request carries an `AbortController` and a budget. If 9.4MB has not
+   * arrived in twenty-five seconds it is genuinely CANCELLED — not merely
+   * ignored, which is all a timeout wrapped around `Image.src` can do. That
+   * distinction is the point: an abandoned image request goes on consuming a
+   * slow connection in the background, competing with the sign-in the person is
+   * actually trying to complete.
+   *
+   * `saveData` is still honoured earlier and unconditionally, because that is a
+   * person saying no, which no measurement overrides.
+   */
+  private async fetchWithBudget(url: string, budgetMs: number): Promise<ImageBitmap | null> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), budgetMs);
+    try {
+      const response = await fetch(url, { signal: controller.signal });
+      if (!response.ok) return null;
+      const blob = await response.blob();
+      if (this.disposed) return null;
+      /* Decoded off the main thread, which matters at this size: a
+         16384 x 8192 JPEG decoded synchronously is a visible stall on the very
+         thread the password is being typed into. */
+      return await createImageBitmap(blob);
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timer);
     }
   }
 
   /** Called when a texture is swapped, so the scene can redraw immediately. */
   onUpgrade: (() => void) | null = null;
 
-  private upload(image: HTMLImageElement, unit: number): WebGLTexture {
+  private upload(image: TexImageSource, unit: number): WebGLTexture {
     const gl = this.gl;
 
     if (this.anisotropy === null) {
@@ -546,6 +602,10 @@ export class PlanetScene {
     gl.uniform3fv(u.uSunDir, localDirection(sun.altitudeDeg, sun.azimuthDeg));
     gl.uniform3fv(u.uMoonDir, localDirection(moon.altitudeDeg, moon.azimuthDeg));
     gl.uniform1f(u.uMoonLight, state.moonlight * 6);
+    /* Whether the moon is UP, which is a different question from how much light
+       it casts. A thin crescent lights nothing and is still plainly visible, so
+       the disc is gated on this and the ground wash on `uMoonLight`. */
+    gl.uniform1f(u.uMoonVisible, state.moonVisible);
     gl.uniform1f(u.uCameraHeight, CAMERA_HEIGHT_M);
     gl.uniform1f(u.uFov, FOV_RAD);
     gl.uniform1f(u.uPitch, PITCH_RAD);
