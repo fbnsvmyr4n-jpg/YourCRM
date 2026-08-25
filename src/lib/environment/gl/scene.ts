@@ -684,9 +684,14 @@ export class PlanetScene {
        so compressing azimuth cannot change when a body crosses it, and both
        occlusion and reddening are computed from each pixel's own ray.
     */
-    const horizontalFovDeg = (FOV_RAD * 180) / Math.PI * (width / height);
-    const sunAim = aimBody(sun.altitudeDeg, sun.azimuthDeg, facingDeg, horizontalFovDeg);
-    const moonAim = aimBody(moon.altitudeDeg, moon.azimuthDeg, facingDeg, horizontalFovDeg);
+    const aimCamera = {
+      fovRad: FOV_RAD,
+      pitchRad: PITCH_RAD,
+      facingDeg,
+      aspect: width / height,
+    };
+    const sunAim = aimBody(sun.altitudeDeg, sun.azimuthDeg, aimCamera);
+    const moonAim = aimBody(moon.altitudeDeg, moon.azimuthDeg, aimCamera);
     gl.uniform3fv(u.uSunDisplayDir, new Float32Array(sunAim.direction));
     gl.uniform3fv(u.uMoonDisplayDir, new Float32Array(moonAim.direction));
     gl.uniform1f(u.uSunLimbProximity, sunAim.limbProximity);

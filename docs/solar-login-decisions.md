@@ -447,3 +447,61 @@ it died by three radii, which is why it read as a flat disc rather than a light.
 aureole declared `float near` inside a block where the scattering march had
 already declared `near` and `far` at function scope. Plausible, and wrong —
 renaming changed nothing. Worth doing anyway, but it was not the cause.
+
+## 37. The arc, solved in the space the requirement lives in
+
+The sun's path was sketched over a screenshot: up one edge of the frame, across
+the top, down the other. Reading points off it against the viewport gives a
+half-width of about 0.44 and an apex around y = 0.20.
+
+Two attempts at this failed, both for the same reason, and the second failure is
+the interesting one.
+
+**Scaling azimuth by a constant cannot work.** The first version reused the CSS
+scene's 220° field and produced an arc spanning x 0.27 to 0.73 — the middle half
+of the screen, which is exactly where the sign-in card is. Solving for the
+constant that puts the limb crossings at x 0.05 and 0.95 gave 106, and that
+framed the equinox correctly. Then midsummer: **ten hours off the side of the
+screen.** A body's screen x depends on its ALTITUDE as well as its bearing, and
+at Cape Town azimuth swings ±115° in December against the equinox's ±89°. Every
+constant that framed one season lost another. Bounding an angle does not bound a
+position.
+
+**So the aim is specified in screen space and the azimuth is solved for it.**
+Pick the x the arc should pass through — a `tanh` that cannot exceed
+ARC_HALF_WIDTH by construction — then bisect on azimuth until the projection
+lands there. Screen x is monotonic in bearing across the half-turn either side
+of the camera, so it converges in a few steps, and it runs once per body per
+frame rather than per pixel. The result is bounded in every season at every
+latitude with no constant left to be wrong.
+
+Altitude gets the same treatment for the same reason. A linear map cannot both
+put the equinox apex on the reference (34.8° of rise) and keep midsummer's 79.5°
+sun inside the frame (28.3° allowed). An exponential approach reaches the frame
+top only in the limit, so nothing can overshoot, while still rising fast enough
+near the horizon to hit the reference apex.
+
+Measured across the year, with zero minutes off-frame in every season:
+
+| | x range | apex | sun up |
+| --- | --- | --- | --- |
+| sketch | 0.09 – 0.97 | 0.20 | |
+| equinox | 0.107 – 0.893 | 0.201 | 12.0h |
+| midsummer | 0.079 – 0.921 | 0.114 | 14.3h |
+| midwinter | 0.167 – 0.831 | 0.350 | 9.8h |
+
+Confirmed in the browser by reading `uSunDisplayDir` back out of the live GL
+context, projecting it, and sampling that exact pixel: a full-brightness opaque
+disc at Sunrise (0.892, 0.908), Morning (0.885, 0.761), Day (0.455, 0.202) and
+Golden hour (0.108, 0.913), and correctly occluded at Sunset.
+
+Two properties still survive the artistic placement, and they remain the reason
+it is defensible: the planet's edge is at the same altitude in every direction,
+so nothing horizontal changes when a body crosses it; and occlusion and
+reddening are computed from each pixel's own ray, not from the aim.
+
+**A test of mine that measured nothing.** Fitting the spread by "distance to the
+nearest point on the sketched line" returned the same 0.21 error for every
+candidate from 106 to 150 — it was measuring the gaps between my sampled
+reference points, not the fit. Replaced by the features that actually matter:
+half-width, apex, and minutes spent off the edge of the frame.

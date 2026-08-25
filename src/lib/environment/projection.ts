@@ -251,6 +251,28 @@ export const LIMB_ALTITUDE_DEG = -57.5;
 /** Local altitude of the top of the shader's frame: pitch + half the FOV. */
 const FRAME_TOP_DEG = -12;
 
+/**
+ * How far either side of centre the arc is allowed to reach.
+ *
+ * Read off the reference sketch, which runs x 0.09 to 0.97 — a half-width of
+ * 0.44 about a centre at 0.53. Ours is symmetric about 0.5, so 0.44 it is.
+ */
+const ARC_HALF_WIDTH = 0.44;
+
+/**
+ * How quickly the arc reaches that half-width as the sun swings away from the
+ * camera's bearing. Larger keeps the sun nearer the middle for longer.
+ */
+const ARC_AZIMUTH_SOFT_DEG = 62;
+
+/**
+ * How quickly altitude lifts the body off the limb.
+ *
+ * Solves `1 − e^(−56/s) = 34.8 / span`, which puts the equinox apex on the
+ * reference's y ≈ 0.20. See the note in `aimBody`.
+ */
+const ALT_SCALE_DEG = 38.7;
+
 export type BodyAim = {
   /** Unit vector in the observer's local frame: x east, y north, z up. */
   direction: [number, number, number];
@@ -261,40 +283,153 @@ export type BodyAim = {
    * visibly squashed — its light is passing tangentially through the atmosphere
    * and being bent — and it is the single most recognisable feature of the
    * moment. Without it a disc slides behind the edge looking like a coin behind
-   * a card, which is what "a sun moving behind a 2D object" describes.
+   * a card.
    */
   limbProximity: number;
 };
 
+export type AimCamera = {
+  /** Vertical field of view, radians. */
+  fovRad: number;
+  /** Downward tilt, radians (negative). */
+  pitchRad: number;
+  /** Compass bearing the camera faces, degrees. */
+  facingDeg: number;
+  /** Drawing buffer width / height. */
+  aspect: number;
+};
+
+/**
+ * Project a local direction to normalised screen coordinates.
+ *
+ * The exact inverse of the ray the fragment shader builds, so "where will this
+ * appear" is answered by the same arithmetic that decides where it is drawn.
+ */
+function screenOf(direction: [number, number, number], camera: AimCamera) {
+  const cy = Math.cos((camera.facingDeg * Math.PI) / 180);
+  const sy = Math.sin((camera.facingDeg * Math.PI) / 180);
+  const lx = direction[0] * cy - direction[1] * sy;
+  const ly = direction[0] * sy + direction[1] * cy;
+  const lz = direction[2];
+
+  const cp = Math.cos(camera.pitchRad);
+  const sp = Math.sin(camera.pitchRad);
+  const rx = lx;
+  const ry = ly * cp + lz * sp;
+  const rz = -ly * sp + lz * cp;
+  if (ry <= 0) return null;
+
+  const t = Math.tan(camera.fovRad / 2);
+  return {
+    x: ((rx / ry / t / camera.aspect) + 1) / 2,
+    y: 1 - ((rz / ry / t) + 1) / 2,
+  };
+}
+
+function directionAt(altitudeDeg: number, azimuthDeg: number): [number, number, number] {
+  const a = (altitudeDeg * Math.PI) / 180;
+  const z = (azimuthDeg * Math.PI) / 180;
+  const c = Math.cos(a);
+  return [c * Math.sin(z), c * Math.cos(z), Math.sin(a)];
+}
+
+/**
+ * Where the sun and moon must be POINTED for the shader to draw them in frame.
+ *
+ * ## The bug this exists to fix
+ *
+ * Moving the discs out of CSS and into the fragment shader gave them the
+ * shader's real camera — 58° vertical, about 52° horizontal. That is physically
+ * correct and it means **the sun is on screen 0.0% of the day**: measured over a
+ * full day at Cape Town it is within the frame's bearing 13.9% of the time and
+ * within its altitude 1.4%, and never both at once. The CSS scene had been
+ * hiding that behind a deliberately wide 220°×70° projection folding the whole
+ * sky into the frame.
+ *
+ * So the discs get an artistic direction and the light keeps the physical one.
+ * `uSunDir` still lights the planet from the true solar vector; only where the
+ * disc is DRAWN comes from here. Two properties survive the remap, and they are
+ * the two that carry the moment:
+ *
+ * 1. **The limb sits at the same altitude in every direction.** The planet is a
+ *    sphere seen from directly above the observer, so its edge is at −57.5° of
+ *    local altitude whichever way the camera faces. Moving a body in AZIMUTH
+ *    therefore cannot change when it crosses the limb.
+ * 2. **Occlusion and reddening are computed from the pixel, not from here.**
+ *
+ * ## Why the azimuth is SOLVED rather than scaled
+ *
+ * The first two attempts scaled azimuth by a constant, and neither could be
+ * made to hold. A body's screen x depends on its altitude as well as its
+ * bearing, so bounding the angle does not bound the position: at Cape Town's
+ * midsummer, where azimuth swings ±115° instead of the equinox's ±89°, every
+ * constant that framed the equinox correctly threw the sun off the side of the
+ * screen for up to ten hours.
+ *
+ * The requirement lives in screen space, so the aim is specified there: pick
+ * the x the arc should pass through — a `tanh` that cannot exceed
+ * ARC_HALF_WIDTH — and then solve for the azimuth that projects to it. Screen x
+ * is monotonic in azimuth, so a bisection converges in a few steps, and it runs
+ * once per body per frame rather than per pixel.
+ *
+ * The result is bounded by construction, in every season and at every latitude,
+ * with no constant left to be wrong.
+ */
 export function aimBody(
   altitudeDeg: number,
   azimuthDeg: number,
-  facingDeg: number,
-  horizontalFovDeg: number
+  camera: AimCamera
 ): BodyAim {
   if (!Number.isFinite(altitudeDeg) || !Number.isFinite(azimuthDeg)) {
     return { direction: [0, 1, 0], limbProximity: 0 };
   }
 
-  /* Azimuth, compressed by exactly the ratio the CSS projection used, so the
-     body appears where the composition has always put it and the cross-fade
-     from the CSS scene to the shader does not slide it sideways. */
-  const delta = bearingDelta(azimuthDeg, facingDeg);
-  const displayAz = facingDeg + delta * (horizontalFovDeg / HORIZONTAL_FOV_DEG);
+  /*
+     Altitude, approaching the top of the frame rather than marching past it.
 
-  /* Altitude, mapped so 0° is the limb and VERTICAL_FOV_DEG is the top of the
-     frame. Below the limb it keeps going at the same rate, because a body that
-     has just set must be just BEHIND the edge — near enough for its glow to
-     still reach round it — rather than snapped to some floor. */
+     A straight `altitude / 70 × span` is the obvious map and cannot satisfy
+     both requirements at once. Placing the apex where the reference puts it
+     (y ≈ 0.20 at the equinox's 56°) needs 34.8° of rise; keeping the sun inside
+     the frame at Cape Town's midsummer 79.5° allows at most 28.3°. Any linear
+     map either sits the arc too low or throws the sun off the top for an hour
+     around midsummer noon.
+
+     An exponential approach satisfies both: it reaches FRAME_TOP_DEG only in
+     the limit, so no altitude can overshoot the frame, while still rising fast
+     enough near the horizon to put the equinox apex on the reference line.
+
+     Below the horizon it continues linearly at the curve's own slope at zero,
+     so value and gradient are both continuous — a body that has just set is
+     just BEHIND the edge, and does not visibly change pace as it crosses.
+  */
   const span = FRAME_TOP_DEG - LIMB_ALTITUDE_DEG;
-  const displayAlt = LIMB_ALTITUDE_DEG + (altitudeDeg / VERTICAL_FOV_DEG) * span;
+  const rise =
+    altitudeDeg >= 0
+      ? span * (1 - Math.exp(-altitudeDeg / ALT_SCALE_DEG))
+      : (span / ALT_SCALE_DEG) * altitudeDeg;
+  const displayAlt = LIMB_ALTITUDE_DEG + rise;
 
-  const alt = (displayAlt * Math.PI) / 180;
-  const az = (displayAz * Math.PI) / 180;
-  const cos = Math.cos(alt);
+  const delta = bearingDelta(azimuthDeg, camera.facingDeg);
+  const targetX = 0.5 + ARC_HALF_WIDTH * Math.tanh(delta / ARC_AZIMUTH_SOFT_DEG);
+
+  /* Bisection on azimuth. Screen x rises monotonically with bearing across the
+     half-turn either side of the camera, so this is well behaved; 40 steps take
+     it far below one pixel. A direction whose ray falls behind the camera
+     projects to null, which is treated as "further out than any valid answer"
+     so the search walks back toward the centre instead of stalling. */
+  let low = camera.facingDeg - 89;
+  let high = camera.facingDeg + 89;
+  let azimuth = camera.facingDeg + delta;
+  for (let i = 0; i < 40; i++) {
+    azimuth = (low + high) / 2;
+    const point = screenOf(directionAt(displayAlt, azimuth), camera);
+    const x = point ? point.x : delta > 0 ? Infinity : -Infinity;
+    if (x < targetX) low = azimuth;
+    else high = azimuth;
+  }
 
   return {
-    direction: [cos * Math.sin(az), cos * Math.cos(az), Math.sin(alt)],
+    direction: directionAt(displayAlt, azimuth),
     /* Ramped over 6° of real altitude either side of the horizon — the span
        over which a real sunset's colour and shape actually change. */
     limbProximity: clamp01(1 - Math.abs(altitudeDeg) / 6),
