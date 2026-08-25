@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  aimBody,
   bearingDelta,
   facingBearing,
+  LIMB_ALTITUDE_DEG,
   HORIZONTAL_FOV_DEG,
   limbY,
   project,
@@ -312,5 +314,52 @@ describe("the frame is wide enough to be worth watching", () => {
     const atAntipode = project(10, 180, 0);
     expect(atAntipode.x < 0 || atAntipode.x > 1, "the wrap point is inside the frame").toBe(true);
     expect(HORIZONTAL_FOV_DEG).toBeLessThan(360);
+  });
+});
+
+describe("aiming the sun and moon at the frame", () => {
+  /**
+   * The regression this exists for: moving the discs into the shader gave them
+   * the shader's real 58°x52° camera, and against that the sun is on screen
+   * **0.0% of the day**. Measured over a full day at Cape Town, it is within
+   * the frame's bearing 13.9% of the time and within its altitude 1.4%, and
+   * never both at once. The CSS scene had hidden that behind a 220° projection
+   * folding the whole sky into the frame, so the disc simply disappeared.
+   */
+  const HORIZONTAL_FOV = 73.7; // a 2194x1726 drawing buffer
+
+  it("puts a body at the horizon exactly on the limb", () => {
+    /* The composition's premise: sunset happens at the planet's edge. If this
+       drifts, the sun sinks into the surface or floats above it — the two
+       failures §12 says are not subtle. */
+    const aim = aimBody(0, 0, 0, HORIZONTAL_FOV);
+    const altitude = (Math.asin(aim.direction[2]) * 180) / Math.PI;
+    expect(altitude).toBeCloseTo(LIMB_ALTITUDE_DEG, 4);
+  });
+
+  it("keeps a body that has set behind the limb, not pinned to it", () => {
+    // A sun just below the edge must be just BEHIND it — near enough for its
+    // glow to still reach around — rather than clamped to the horizon.
+    const set = (Math.asin(aimBody(-3, 0, 0, HORIZONTAL_FOV).direction[2]) * 180) / Math.PI;
+    expect(set).toBeLessThan(LIMB_ALTITUDE_DEG);
+  });
+
+  it("brings the sun into frame at the times it must be seen", () => {
+    /* The actual regression, asserted directly: at Cape Town's golden hour the
+       sun sits at azimuth 271.7° against a camera facing 0°, which is 88° away
+       — far outside a 52° frame until the azimuth is compressed. */
+    const aim = aimBody(2.67, 271.7, 0, HORIZONTAL_FOV);
+    const azimuth = (Math.atan2(aim.direction[0], aim.direction[1]) * 180) / Math.PI;
+    expect(Math.abs(azimuth)).toBeLessThan(HORIZONTAL_FOV / 2);
+  });
+
+  it("does not flatten a body that is nowhere near the limb", () => {
+    expect(aimBody(40, 0, 0, HORIZONTAL_FOV).limbProximity).toBe(0);
+    expect(aimBody(0, 0, 0, HORIZONTAL_FOV).limbProximity).toBe(1);
+  });
+
+  it("survives a body whose position could not be computed", () => {
+    const aim = aimBody(Number.NaN, 120, 0, HORIZONTAL_FOV);
+    expect(aim.direction.every(Number.isFinite)).toBe(true);
   });
 });

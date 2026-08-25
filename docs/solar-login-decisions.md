@@ -337,3 +337,61 @@ against scattering — and can now be got right independently.
 used `opacity:\s*0\b`, which matches `0.18` — the word boundary falls between
 the `0` and the dot. It passed against precisely the value it existed to forbid,
 and only a mutation caught it. Anchored on the terminator instead.
+
+## 35. The sun was on screen 0.0% of the day
+
+Moving the discs into the shader in §33 gave them the shader's real camera — 58°
+vertical, about 52° horizontal — which is physically correct and made the sun
+invisible. Measured over a full day at Cape Town: within the frame's **bearing**
+13.9% of the time, within its **altitude** 1.4%, and **never both at once**. The
+CSS scene had been hiding that behind a deliberately wide 220° × 70° projection
+that folds the whole sky into the frame. Reported simply as "add the sun back
+in", which was exactly right.
+
+So the discs are aimed by `aimBody` and the light keeps the physical vector.
+`uSunDir` still lights the planet from the true solar direction; only where the
+disc is *drawn* is artistic. Two properties survive the remap, and they are the
+two that carry the moment:
+
+1. **The limb sits at the same altitude in every direction** — the planet is a
+   sphere seen from above the observer, so its edge is at −57.5° whichever way
+   the camera faces. Compressing azimuth cannot change when a body crosses it.
+2. **Occlusion and reddening come from the pixel, not from the aim.** Whether a
+   fragment is in front of the planet, and how much air its ray crossed, are
+   properties of that ray.
+
+Altitude maps so real 0° lands exactly on the limb, which is the composition's
+premise and what the CSS scene did with `rise = altitude / 70 * horizon`.
+
+**Three further faults found while verifying it.**
+
+*The aureole was gated on `sunVisible`*, which is a ramp across the disc's own
+0.27° half-width — so the glow vanished within a frame of the sun touching the
+limb. That is backwards: a sun just below the edge throws an enormous halo
+around it, and that glow **is** the orbital sunset. Cutting it at the moment of
+contact is exactly what makes the crossing read as an object being switched off.
+Driven by `sunIntensity` now, which ramps from 12° below the horizon to 6° above,
+so the halo swells, reddens and fades over minutes.
+
+*A sun behind the camera painted a second sun.* The refraction flattening
+divides the offset by `max(alongSun, 0.05)`; for a ray pointing directly away
+from the sun both offset components are zero, so the angle evaluates to zero,
+passes the radius test, and draws an anti-sun at the antipode — whenever the sun
+is behind the viewer, which on this camera is most of the day. Now gated on
+`alongSun > 0.0`, and pinned by a test, because the mutation showed nothing
+covered it.
+
+*And I had the camera bearing wrong in my own analysis.* I hand-computed the
+facing as 180° from raw SunCalc and concluded the sun was rendering on the wrong
+side. Reading `uYaw` back out of the live GL context gave 0. The renderer was
+right and the check was wrong — which is the same failure mode as every other
+one in this document, and the reason for reading uniforms back rather than
+reasoning about them.
+
+**Refraction flattening** was added at the same time, and it is the detail that
+separates a sun seen *through* an atmosphere from one sliding behind an edge.
+Light from a body at the limb crosses the air tangentially and its lower edge is
+bent more than its upper, so the disc squashes — to 0.62 of its height at
+contact. It is why every photograph of a sunrise from the ISS shows an orange
+ellipse rather than a circle, and it is what "a sun moving behind a 2D object"
+was describing the absence of.

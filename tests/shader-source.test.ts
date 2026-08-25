@@ -93,6 +93,26 @@ describe("the sun and moon are drawn by the shader, not by CSS", () => {
     expect(sun).toBeLessThan(tone);
   });
 
+  it("refuses to paint a sun behind the camera", () => {
+    /**
+     * A real bug, found while adding the refraction flattening.
+     *
+     * The flattened offset is divided by `max(alongSun, 0.05)` so the disc can
+     * be squashed along one axis. For a ray pointing directly AWAY from the
+     * sun, both components of that offset are zero — so the angle evaluates to
+     * zero, passes the radius test, and paints a second sun at the antipode of
+     * the real one. It appears whenever the sun is behind the viewer, which on
+     * this camera is most of the day.
+     *
+     * The whole disc block must therefore be gated on facing the sun at all.
+     */
+    const block = FRAGMENT_SHADER.match(
+      /if \(sunAngle < SUN_RADIUS[^)]*\)[^{]*\{/
+    );
+    expect(block, "the sun disc block should exist").toBeTruthy();
+    expect(block![0]).toContain("alongSun > 0.0");
+  });
+
   it("gates the moon disc on it being up, not on how much light it casts", () => {
     // A thin crescent lights nothing and is plainly visible. Keying the disc to
     // `uMoonLight` would make the moon vanish for most of the month.
@@ -154,6 +174,54 @@ describe("the atmosphere is a limb, not a ribbon", () => {
        falls between the 0 and the dot — so the check passed against exactly the
        value it existed to forbid. Anchored on the terminator instead. */
     expect(css).toMatch(/\[data-planet="live"\]\s*\.sky-wash[\s\S]{0,140}opacity:\s*0\s*[;}]/);
+  });
+});
+
+describe("the shader sources survive being written inside template literals", () => {
+  /**
+   * A backtick in a GLSL comment ENDS the JavaScript template literal holding
+   * the shader. I have now done this four times while documenting this file,
+   * because writing `identifier` in prose is a reflex.
+   *
+   * In practice the compiler does catch it — the text after the stray backtick
+   * almost never parses as JavaScript. What it does NOT do is say why: the
+   * error lands wherever the parser finally gave up, often hundreds of lines
+   * from the comment that caused it, reported as a missing semicolon in a file
+   * that has no statements in it at all. That is a genuinely confusing minute
+   * every time.
+   *
+   * This trades that for a message naming the actual rule. It is a signposting
+   * guard rather than a safety net, and worth having for a mistake with a 100%
+   * recurrence rate.
+   */
+  const source = readFileSync(
+    new URL("../src/lib/environment/gl/shaders.ts", import.meta.url),
+    "utf8"
+  );
+  const stars = readFileSync(
+    new URL("../src/lib/environment/gl/stars.ts", import.meta.url),
+    "utf8"
+  );
+
+  const insideLiterals = (file: string) =>
+    [...file.matchAll(/\/\* glsl \*\/ `([\s\S]*?)`;/g)].map((m) => m[1]);
+
+  it("contains no backticks inside the GLSL", () => {
+    for (const [name, file] of [["shaders.ts", source], ["stars.ts", stars]] as const) {
+      const bodies = insideLiterals(file);
+      expect(bodies.length, `${name} should hold at least one GLSL literal`).toBeGreaterThan(0);
+      for (const body of bodies) {
+        expect(body, `${name}: a backtick here would truncate the shader`).not.toContain("`");
+      }
+    }
+  });
+
+  it("still holds a whole shader after the literal is parsed", () => {
+    // The even-numbered case leaves a shader that is short but syntactically
+    // fine. Length is the crude, reliable tell.
+    expect(FRAGMENT_SHADER.length).toBeGreaterThan(8000);
+    expect(FRAGMENT_SHADER.trimEnd().endsWith("}")).toBe(true);
+    expect(STAR_VERTEX.trimEnd().endsWith("}")).toBe(true);
   });
 });
 

@@ -208,3 +208,95 @@ export function projectBodies(sun: SolarSnapshot, moon: MoonSnapshot) {
     moon: project(moon.altitudeDeg, moon.azimuthDeg, facing),
   };
 }
+
+/**
+ * Where the sun and moon must be POINTED for the shader to draw them in frame.
+ *
+ * ## The bug this exists to fix
+ *
+ * Moving the discs out of CSS and into the fragment shader gave them the
+ * shader's real camera — 58° vertical and about 52° horizontal. That is
+ * physically correct and it means **the sun is on screen 0.0% of the day**.
+ * Measured over a full day at Cape Town: the sun is within the frame's bearing
+ * 13.9% of the time and within its altitude 1.4%, and never both at once. The
+ * CSS scene had been hiding this behind a deliberately wide 220°×70° projection
+ * that folds the whole sky into the frame.
+ *
+ * So the discs get an artistic direction and the light keeps the physical one.
+ * `uSunDir` still lights the planet from the true solar vector; only where the
+ * disc is DRAWN comes from here.
+ *
+ * ## Why this stays honest
+ *
+ * Two properties survive the remap, and they are the two that carry the moment:
+ *
+ * 1. **The limb sits at the same angle in every direction.** The planet is a
+ *    sphere seen from directly above the observer, so its edge is at −57.5° of
+ *    local altitude whichever way the camera faces. Compressing AZIMUTH
+ *    therefore cannot change when a body crosses it.
+ *
+ * 2. **Occlusion and reddening are computed from the pixel, not from here.**
+ *    Whether a fragment is in front of the planet, and how much air its ray
+ *    crossed, are properties of that ray. The disc is placed artistically and
+ *    then rendered by the same physics as everything around it.
+ *
+ * Altitude is mapped so that **real altitude 0° lands exactly on the limb** —
+ * the composition's whole premise is that sunset happens at the planet's edge,
+ * which is what the CSS scene did with `rise = altitude / 70 * horizon`.
+ */
+
+/** Local altitude of the planet's edge, seen from the scene's camera height. */
+export const LIMB_ALTITUDE_DEG = -57.5;
+
+/** Local altitude of the top of the shader's frame: pitch + half the FOV. */
+const FRAME_TOP_DEG = -12;
+
+export type BodyAim = {
+  /** Unit vector in the observer's local frame: x east, y north, z up. */
+  direction: [number, number, number];
+  /**
+   * How close the body is to the limb, 0 (clear of it) to 1 (touching).
+   *
+   * Drives the refraction flattening. A real sun seen at the limb from orbit is
+   * visibly squashed — its light is passing tangentially through the atmosphere
+   * and being bent — and it is the single most recognisable feature of the
+   * moment. Without it a disc slides behind the edge looking like a coin behind
+   * a card, which is what "a sun moving behind a 2D object" describes.
+   */
+  limbProximity: number;
+};
+
+export function aimBody(
+  altitudeDeg: number,
+  azimuthDeg: number,
+  facingDeg: number,
+  horizontalFovDeg: number
+): BodyAim {
+  if (!Number.isFinite(altitudeDeg) || !Number.isFinite(azimuthDeg)) {
+    return { direction: [0, 1, 0], limbProximity: 0 };
+  }
+
+  /* Azimuth, compressed by exactly the ratio the CSS projection used, so the
+     body appears where the composition has always put it and the cross-fade
+     from the CSS scene to the shader does not slide it sideways. */
+  const delta = bearingDelta(azimuthDeg, facingDeg);
+  const displayAz = facingDeg + delta * (horizontalFovDeg / HORIZONTAL_FOV_DEG);
+
+  /* Altitude, mapped so 0° is the limb and VERTICAL_FOV_DEG is the top of the
+     frame. Below the limb it keeps going at the same rate, because a body that
+     has just set must be just BEHIND the edge — near enough for its glow to
+     still reach round it — rather than snapped to some floor. */
+  const span = FRAME_TOP_DEG - LIMB_ALTITUDE_DEG;
+  const displayAlt = LIMB_ALTITUDE_DEG + (altitudeDeg / VERTICAL_FOV_DEG) * span;
+
+  const alt = (displayAlt * Math.PI) / 180;
+  const az = (displayAz * Math.PI) / 180;
+  const cos = Math.cos(alt);
+
+  return {
+    direction: [cos * Math.sin(az), cos * Math.cos(az), Math.sin(alt)],
+    /* Ramped over 6° of real altitude either side of the horizon — the span
+       over which a real sunset's colour and shape actually change. */
+    limbProximity: clamp01(1 - Math.abs(altitudeDeg) / 6),
+  };
+}

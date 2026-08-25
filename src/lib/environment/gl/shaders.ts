@@ -44,6 +44,35 @@ uniform vec3  uSunDir;        // unit, observer's local frame (east, north, up)
 uniform vec3  uMoonDir;
 uniform float uMoonLight;     // 0..1, already gated on phase and altitude
 uniform float uMoonVisible;   // 0..1, simply whether the moon is above the horizon
+
+/* Where the DISCS are drawn, which is not where the light comes from.
+
+   The shader's real camera is 58° by about 52°, and against it the sun is on
+   screen 0.0% of the day — the CSS scene had been hiding that behind a 220°
+   projection that folds the whole sky into the frame. So the discs are aimed by
+   aimBody() in projection.ts and the lighting keeps uSunDir. What survives
+   the remap is everything that matters: the limb sits at the same altitude in
+   every direction, so the moment of crossing is unchanged, and occlusion and
+   reddening are computed from each pixel's own ray rather than from here. */
+uniform vec3  uSunDisplayDir;
+uniform vec3  uMoonDisplayDir;
+uniform float uSunLimbProximity;  // 0 clear of the limb, 1 touching it
+/*
+   How strongly the sun lights the sky, 0..1 — NOT whether its disc is up.
+
+   The first version gated the aureole on visibility, which is a ramp across the
+   disc's own 0.27 deg half-width: the glow therefore vanished within a single
+   frame of the sun touching the limb. That is backwards. A sun just below the
+   edge still throws an enormous halo around it — light scattering round the
+   planet through a long slant of atmosphere — and that glow IS the orbital
+   sunset. Cutting it at the moment of contact is precisely what makes the
+   crossing look like an object being switched off.
+
+   This ramps from about 12 deg below the horizon to 6 deg above, so the halo
+   swells, reddens and fades over minutes. The disc needs no such gate: the
+   planet's own coverage term occludes it.
+*/
+uniform float uSunIntensity;
 uniform float uCameraHeight;  // metres above the surface
 uniform float uFov;           // vertical field of view, radians
 uniform float uPitch;         // camera tilt below horizontal, radians
@@ -655,8 +684,25 @@ void main() {
      everything else in the frame, so all four come out for free.
   */
 
-  /* Angular distance from this pixel's ray to each body. */
-  float sunAngle = acos(clamp(dot(dir, uSunDir), -1.0, 1.0));
+  /*
+     Angular offset from this pixel's ray to the sun, measured in a basis
+     aligned with the frame rather than as a single angle — because the disc is
+     not round at the limb.
+
+     REFRACTION FLATTENING. Light from a sun at the limb crosses the atmosphere
+     tangentially, and the lower edge is bent more than the upper because it
+     passes through denser air. The disc squashes visibly: this is why every
+     photograph of a sunrise from the ISS shows an orange ellipse rather than a
+     circle. It is also the difference between a body that is being seen THROUGH
+     an atmosphere and one that is merely sliding behind an edge — a coin behind
+     a card, which is what "a sun moving behind a 2D object" was describing.
+  */
+  vec3 sunRight = normalize(cross(vec3(0.0, 0.0, 1.0), uSunDisplayDir));
+  vec3 sunUp = cross(uSunDisplayDir, sunRight);
+  float sunFlatten = mix(1.0, 0.62, uSunLimbProximity);
+  vec2 sunOffset = vec2(dot(dir, sunRight), dot(dir, sunUp) / sunFlatten);
+  float alongSun = dot(dir, uSunDisplayDir);
+  float sunAngle = length(sunOffset) / max(alongSun, 0.05);
 
   /*
      EXAGGERATED, and by a measured amount rather than a chosen one.
@@ -698,7 +744,35 @@ void main() {
      is the thing a separate CSS layer could never agree about. */
   float notBlocked = 1.0 - groundCoverage;
 
-  if (sunAngle < SUN_RADIUS * 1.02 && notBlocked > 0.0) {
+  /*
+     The AUREOLE, and it is what stops the disc reading as a sticker.
+
+     A bright source seen through air is never a bare disc: the atmosphere
+     scatters a halo around it that falls off steeply, and a camera adds its own
+     bloom on top. Drawn as part of the same term so it is occluded by the same
+     coverage and reddened by the same optical depth — which means that as the
+     sun goes behind the limb its glow shrinks, reddens and is eaten by the
+     curve along with it, instead of a disc vanishing and a glow staying put.
+
+     Two lobes: a tight one for the near halo and a wide, faint one for the
+     spread. Both fall off as powers rather than exponentials so the far tail
+     stays present instead of terminating on a visible edge.
+  */
+  if (notBlocked > 0.0 && alongSun > 0.0 && uSunIntensity > 0.0) {
+    float halo = SUN_RADIUS / max(sunAngle, SUN_RADIUS * 0.55);
+    float near = pow(halo, 2.6) * 0.55;
+    float wide = pow(halo, 1.15) * 0.06;
+    colour += vec3(1.0, 0.86, 0.66) * (near + wide) * slant * notBlocked * uSunIntensity * 1.6;
+  }
+
+  /* alongSun > 0.0 is not defensive padding, it is a correctness guard.
+
+     sunAngle divides the offset by max(alongSun, 0.05), and for a ray pointing
+     directly AWAY from the sun both components of that offset are zero — so the
+     angle comes out as zero and the disc would be painted behind the camera.
+     An anti-sun, exactly opposite the real one, appearing whenever the sun is
+     behind the viewer. */
+  if (sunAngle < SUN_RADIUS * 1.02 && notBlocked > 0.0 && alongSun > 0.0) {
     /* Analytic edge, one pixel wide, from the screen-space derivative. A disc
        this small is nearly all edge, so a hard cut here reads as a polygon. */
     float aa = max(fwidth(sunAngle), 1.0e-6);
@@ -718,7 +792,7 @@ void main() {
   }
 
   if (uMoonVisible > 0.0) {
-    float moonAngle = acos(clamp(dot(dir, uMoonDir), -1.0, 1.0));
+    float moonAngle = acos(clamp(dot(dir, uMoonDisplayDir), -1.0, 1.0));
     if (moonAngle < MOON_RADIUS * 1.02 && notBlocked > 0.0) {
       float aa = max(fwidth(moonAngle), 1.0e-6);
       float disc = 1.0 - smoothstep(MOON_RADIUS - aa, MOON_RADIUS + aa, moonAngle);

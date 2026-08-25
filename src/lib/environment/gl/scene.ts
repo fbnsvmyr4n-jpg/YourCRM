@@ -1,6 +1,7 @@
 import { FRAGMENT_SHADER, VERTEX_SHADER } from "./shaders";
 import { decodeStars, localSiderealTime, STAR_FRAGMENT, STAR_VERTEX, type StarField } from "./stars";
 import type { EnvironmentState } from "../model";
+import { aimBody } from "../projection";
 import type { Coordinates, MoonSnapshot, SolarSnapshot } from "../../solar/types";
 
 /**
@@ -120,6 +121,7 @@ export class PlanetScene {
     const missing: string[] = [];
     for (const name of [
       "uResolution", "uSunDir", "uMoonDir", "uMoonLight", "uMoonVisible", "uCameraHeight",
+      "uSunDisplayDir", "uMoonDisplayDir", "uSunLimbProximity", "uSunIntensity",
       "uFov", "uPitch", "uYaw", "uEnuToEcef", "uExposure", "uSteps",
       "uLightSteps", "uCloudPhase", "uDay", "uNight", "uClouds",
     ]) {
@@ -606,6 +608,33 @@ export class PlanetScene {
        it casts. A thin crescent lights nothing and is still plainly visible, so
        the disc is gated on this and the ground wash on `uMoonLight`. */
     gl.uniform1f(u.uMoonVisible, state.moonVisible);
+
+    /*
+       Where the discs are DRAWN, which is not where the light comes from.
+
+       Against the shader's real 58°x52° camera the sun is on screen 0.0% of the
+       day — measured over a full day at Cape Town it is within the frame's
+       bearing 13.9% of the time and within its altitude 1.4%, never both. The
+       CSS scene had been hiding that behind a 220° projection folding the whole
+       sky into the frame, so moving the disc into the shader made it disappear
+       entirely.
+
+       `uSunDir` above still lights the planet from the true solar vector. Only
+       the placement is artistic, and the two properties that carry the moment
+       both survive it: the limb sits at the same altitude in every direction,
+       so compressing azimuth cannot change when a body crosses it, and both
+       occlusion and reddening are computed from each pixel's own ray.
+    */
+    const horizontalFovDeg = (FOV_RAD * 180) / Math.PI * (width / height);
+    const sunAim = aimBody(sun.altitudeDeg, sun.azimuthDeg, facingDeg, horizontalFovDeg);
+    const moonAim = aimBody(moon.altitudeDeg, moon.azimuthDeg, facingDeg, horizontalFovDeg);
+    gl.uniform3fv(u.uSunDisplayDir, new Float32Array(sunAim.direction));
+    gl.uniform3fv(u.uMoonDisplayDir, new Float32Array(moonAim.direction));
+    gl.uniform1f(u.uSunLimbProximity, sunAim.limbProximity);
+    /* `sunIntensity`, not `sunVisible`: the halo has to outlive the disc. See
+       the uniform's own note in the shader. */
+    gl.uniform1f(u.uSunIntensity, state.sunIntensity);
+
     gl.uniform1f(u.uCameraHeight, CAMERA_HEIGHT_M);
     gl.uniform1f(u.uFov, FOV_RAD);
     gl.uniform1f(u.uPitch, PITCH_RAD);
