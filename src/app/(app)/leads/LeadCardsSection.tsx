@@ -39,6 +39,19 @@ export function LeadCardsSection({ leads }: { leads: LeadCard[] }) {
   const [busy, setBusy] = useState(false);
   const [filter, setFilter] = useState<"All" | LeadStatus>("All");
   const [sort, setSort] = useState<LeadSort>("newest");
+  /*
+     The list itself collapses on a phone.
+
+     Even with every card compressed to a row, fifteen leads is 1,450px, so
+     Lead's Feed sat at y=1742 and Lead Sources at y=2208 — 2.2 and 2.7 screens
+     down. Anyone wanting the analytics had to scroll the entire list every
+     time, and the list is the one thing on this page they had already seen.
+
+     Open by default, because the leads ARE the page. This only ever closes on
+     a phone: the list carries an unconditional `sm:block`, so from `sm` up the
+     state cannot hide anything and desktop is untouched whatever it holds.
+  */
+  const [listOpen, setListOpen] = useState(true);
 
   const counts = {
     All: leads.length,
@@ -254,6 +267,26 @@ export function LeadCardsSection({ leads }: { leads: LeadCard[] }) {
           <span className="ml-2 text-sm font-normal text-faint">{visible.length}</span>
         </h2>
         <div className="flex items-center gap-2">
+          {/* Phone only, and only when there is a list to collapse. */}
+          {visible.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setListOpen((v) => !v)}
+              aria-expanded={listOpen}
+              aria-controls="leads-list"
+              aria-label={listOpen ? "Collapse the lead list" : "Expand the lead list"}
+              title={listOpen ? "Collapse the lead list" : "Expand the lead list"}
+              className="btn-soft focus-ring grid h-9 w-9 shrink-0 place-items-center rounded-xl sm:hidden"
+            >
+              {/* A plain chevron, not a collapse glyph. `ChevronsDownUp` is the
+                  semantically exact icon and it renders as an X at 16px, which
+                  on a row that also holds "Add Lead" reads as close or delete.
+                  Up means fold away, down means bring back. */}
+              <ChevronDown
+                className={clsx("h-4 w-4 transition-transform", listOpen && "rotate-180")}
+              />
+            </button>
+          )}
           <SortMenu options={LEAD_SORTS} value={sort} onChange={setSort} defaultId="newest" />
           <button
             onClick={() => setModal("new")}
@@ -263,6 +296,17 @@ export function LeadCardsSection({ leads }: { leads: LeadCard[] }) {
           </button>
         </div>
       </div>
+
+      {!listOpen && visible.length > 0 && (
+        <button
+          type="button"
+          onClick={() => setListOpen(true)}
+          className="card focus-ring mb-1 flex w-full items-center justify-center gap-2 py-3 text-sm text-muted sm:hidden"
+        >
+          <ChevronDown className="h-4 w-4" />
+          {visible.length} {visible.length === 1 ? "lead" : "leads"} hidden — tap to show
+        </button>
+      )}
 
       {leads.length === 0 ? (
         <div className="card grid place-items-center p-10 text-center">
@@ -279,7 +323,16 @@ export function LeadCardsSection({ leads }: { leads: LeadCard[] }) {
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 @min-[560px]:grid-cols-2 @min-[900px]:grid-cols-3">
+        <div
+          id="leads-list"
+          /* `sm:grid` is unconditional: from `sm` up this is always laid out,
+             whatever `listOpen` says, so a desktop reader never depends on
+             client state to see a list that was always visible there. */
+          className={clsx(
+            "grid-cols-1 gap-4 sm:grid @min-[560px]:grid-cols-2 @min-[900px]:grid-cols-3",
+            listOpen ? "grid" : "hidden"
+          )}
+        >
           {visible.map((lead) => (
             <LeadCardItem
               key={lead.id}

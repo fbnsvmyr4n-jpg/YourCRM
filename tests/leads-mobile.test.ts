@@ -162,6 +162,43 @@ describe("the leads page on a phone", () => {
     expect(topbar).toMatch(/h-8 w-8 place-items-center rounded-full[^"]*sm:h-9 sm:w-9/);
   });
 
+  it("collapses the whole list so the analytics are reachable", () => {
+    /**
+     * Compressing each card was not enough on its own. Fifteen leads is still
+     * about 1,450px, so Lead's Feed sat at y=1742 and Lead Sources at y=2208 —
+     * 2.2 and 2.7 screens down. Reaching either meant scrolling past the whole
+     * list every time, and the list is the thing the reader had already seen.
+     *
+     * Collapsed: feed at y=398, sources at y=864, page 2,457px -> 1,113px.
+     * Both are on the first screen.
+     */
+    expect(cards).toMatch(/const \[listOpen, setListOpen\] = useState\(true\)/);
+    expect(cards).toMatch(/aria-controls="leads-list"/);
+    expect(cards).toMatch(/aria-expanded=\{listOpen\}/);
+
+    /* Open by default. The leads ARE the page; the collapse is an escape
+       hatch, not the resting state. */
+    expect(cards).not.toMatch(/useState\(false\)[^\n]*listOpen/);
+  });
+
+  it("cannot hide the list on a desktop, whatever the state holds", () => {
+    /* `sm:grid` is unconditional, so from `sm` up the layout does not consult
+       `listOpen` at all — verified in the browser by forcing the state closed
+       at 1280px and finding the list still `display: grid`. The control itself
+       is `sm:hidden`, so a desktop reader never sees it either. */
+    expect(cards).toMatch(/"grid-cols-1 gap-4 sm:grid @min-\[560px\]:grid-cols-2 @min-\[900px\]:grid-cols-3",\s*\n\s*listOpen \? "grid" : "hidden"/);
+    expect(cards).toMatch(/rounded-xl sm:hidden"\n\s*>/);
+  });
+
+  it("says what it hid, and offers its own way back", () => {
+    /* A collapsed list must not read as an empty one. The strip reports the
+       count and is itself the control that restores them, so the reader is
+       never left hunting for the button they pressed. */
+    expect(cards).toMatch(/leads"\} hidden — tap to show/);
+    expect(cards).toMatch(/\{!listOpen && visible\.length > 0 && \(/);
+    expect(cards).toMatch(/onClick=\{\(\) => setListOpen\(true\)\}/);
+  });
+
   it("both filter controls drive the same state", () => {
     /* Two renderings of one filter. If they ever diverged, the strip would
        report a selection the list did not honour. */
