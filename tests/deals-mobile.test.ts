@@ -92,8 +92,11 @@ describe("the deals board on a phone", () => {
      * count; among the money only Open Pipeline is about what can still
      * happen, Closed Won is the scoreboard, and In Delivery is a sub-state of
      * it. So Open Pipeline takes the full row, the two "won" figures pair
-     * beneath it — larger first — and the count lays out as a slim strip where
-     * a number that is not money stops competing with ones that are.
+     * beneath it, and the count lays out as a slim strip where a number that
+     * is not money stops competing with ones that are.
+     *
+     * The pair reads in the order the money moves: In Delivery is won but not
+     * yet delivered, Closed Won is the banked total it lands in.
      *
      * Measured at 375px: hero 335x88, pair 162x132 each, strip 335x88.
      *
@@ -107,7 +110,7 @@ describe("the deals board on a phone", () => {
     /* Order is the deliverable here, so it is asserted as a sequence rather
        than as four independent labels. */
     const labels = [...board.matchAll(/^\s*label="([^"]+)"/gm)].map((m) => m[1]);
-    expect(labels).toEqual(["Open Pipeline", "Closed Won", "In Delivery", "Total Deals"]);
+    expect(labels).toEqual(["Open Pipeline", "In Delivery", "Closed Won", "Total Deals"]);
   });
 
   it("keeps the wide tiles short so they read as a different rank", () => {

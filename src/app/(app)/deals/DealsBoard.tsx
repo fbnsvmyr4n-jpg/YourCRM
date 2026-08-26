@@ -308,9 +308,14 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
           three.
 
           So the grid gives Open Pipeline the full width, pairs the two "won"
-          figures beneath it — bigger one first — and lays the count out as a
-          slim strip at the bottom, where a number that is not money stops
-          competing with the ones that are.
+          figures beneath it, and lays the count out as a slim strip at the
+          bottom, where a number that is not money stops competing with the
+          ones that are.
+
+          The pair reads left to right in the order the money actually moves:
+          In Delivery is won but not yet delivered, Closed Won is the banked
+          total it ends up in. Ordering them by size instead was the first
+          attempt and it put the destination before the step that reaches it.
 
           Three across was the other candidate and it fails on measurement, not
           taste: at 375px it leaves each card about 86px of text column and
@@ -332,20 +337,20 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
           soft="var(--amber-soft)"
         />
         <SummaryTile
-          icon={<Coins className="h-5 w-5" />}
-          label="Closed Won"
-          sub="Won, all time"
-          value={fullMoney(summary.won)}
-          tone="var(--green)"
-          soft="var(--green-soft)"
-        />
-        <SummaryTile
           icon={<HandCoins className="h-5 w-5" />}
           label="In Delivery"
           sub="Won, being delivered"
           value={fullMoney(summary.inDelivery)}
           tone={PARTIAL}
           soft="rgba(249,115,22,0.12)"
+        />
+        <SummaryTile
+          icon={<Coins className="h-5 w-5" />}
+          label="Closed Won"
+          sub="Won, all time"
+          value={fullMoney(summary.won)}
+          tone="var(--green)"
+          soft="var(--green-soft)"
         />
         <SummaryTile
           className="col-span-2 @min-[880px]:col-span-1"
