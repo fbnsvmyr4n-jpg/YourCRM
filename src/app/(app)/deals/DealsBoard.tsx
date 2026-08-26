@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Coins, Flame, GripVertical, HandCoins, Plus, Trash2, Wallet, X } from "lucide-react";
+import { ChevronDown, Coins, Flame, GripVertical, HandCoins, Plus, Trash2, Wallet, X } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Overlay } from "@/components/ui/Overlay";
 import { BOARD_STAGES as STAGES, carriesMoney } from "@/data/pipeline";
@@ -51,6 +51,21 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
   const [items, setItems] = useState<Deal[]>(deals);
   const [dragId, setDragId] = useState<string | null>(null);
   const [overStage, setOverStage] = useState<StageId | null>(null);
+  /*
+     Stages the reader has folded away, on a phone.
+
+     The board is a vertical stack below `sm`, so at 375px it ran to 3,428px —
+     4.2 screens for fifteen deals, with Discovery alone 1,388px and Closed Won
+     968px. Reaching Delivery meant scrolling past every won deal of the year.
+
+     A set of what is CLOSED rather than a map of what is open: a stage nobody
+     has touched is open, which keeps the default correct without seeding state
+     for stages that may not exist on another account's board.
+
+     Desktop never reads this. Each stage body carries an unconditional
+     `sm:flex`, so from `sm` up the columns are laid out whatever this holds.
+  */
+  const [folded, setFolded] = useState<Set<StageId>>(new Set());
   const [addOpen, setAddOpen] = useState<StageId | true | null>(null);
   const [active, setActive] = useState<Deal | null>(null);
   const [busy, setBusy] = useState(false);
@@ -165,6 +180,15 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
    * a drag-and-drop board is worse — but the removal is now undone if the
    * server says the deal is still there.
    */
+  function toggleFold(id: StageId) {
+    setFolded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
   async function handleDelete(id: string) {
     const deal = items.find((d) => d.id === id);
     if (!deal) return;
@@ -333,6 +357,7 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
           const stageDeals = items.filter((d) => d.stage === stage.id);
           const total = stageDeals.reduce((s, d) => s + d.value, 0);
           const isOver = overStage === stage.id;
+          const isFolded = folded.has(stage.id);
           const showsMoney = carriesMoney(stage.id);
 
           return (
@@ -351,18 +376,43 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
                 isOver ? "border-[var(--border-strong)] bg-[var(--raise)]" : "border-[var(--border)]"
               )}
             >
-              <div className="border-b border-[var(--border)] px-4 py-3">
+              {/* The divider separates the header from a body. Folded, there is
+                  no body, and the rule was left hanging under the last line of
+                  text like a mis-drawn card. */}
+              <div
+                className={clsx(
+                  "px-4 py-3",
+                  isFolded ? "border-b-0 sm:border-b" : "border-b",
+                  "border-[var(--border)]"
+                )}
+              >
                 <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="h-2.5 w-2.5 rounded-full" style={{ background: stage.color }} />
-                    <span className="text-sm font-semibold">{stage.label}</span>
+                  {/* The header is the fold control, and only on a phone.
+                      `sm:pointer-events-none` leaves the desktop column header
+                      exactly the inert label it has always been rather than a
+                      button that appears to do nothing. */}
+                  <button
+                    type="button"
+                    onClick={() => toggleFold(stage.id)}
+                    aria-expanded={!isFolded}
+                    aria-controls={`stage-${stage.id}`}
+                    className="focus-ring -m-1 flex min-w-0 items-center gap-2 rounded-lg p-1 text-left sm:pointer-events-none"
+                  >
+                    <ChevronDown
+                      className={clsx(
+                        "h-4 w-4 shrink-0 text-faint transition-transform sm:hidden",
+                        !isFolded && "rotate-180"
+                      )}
+                    />
+                    <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: stage.color }} />
+                    <span className="truncate text-sm font-semibold">{stage.label}</span>
                     <span
-                      className="rounded-full px-1.5 py-0.5 text-[11px] font-semibold text-muted"
+                      className="shrink-0 rounded-full px-1.5 py-0.5 text-[11px] font-semibold text-muted"
                       style={{ background: "var(--raise)" }}
                     >
                       {stageDeals.length}
                     </span>
-                  </div>
+                  </button>
                   {/* No total on the stages that carry no money — a sum of
                       zeroes still reads as "this column is worth nothing". */}
                   {showsMoney && (
@@ -374,7 +424,16 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
                 <p className="mt-1 text-[11px] text-faint">{stage.exit}</p>
               </div>
 
-              <div className="flex flex-1 flex-col gap-2.5 overflow-y-auto p-3">
+              {/* `sm:flex` is unconditional: from `sm` up the body is laid out
+                  whatever the fold state says, so a desktop reader never depends
+                  on client state to see a column that was always open there. */}
+              <div
+                id={`stage-${stage.id}`}
+                className={clsx(
+                  "flex-1 flex-col gap-2.5 overflow-y-auto p-3 sm:flex",
+                  isFolded ? "hidden" : "flex"
+                )}
+              >
                 {stageDeals.map((deal) => (
                   <DealCard
                     key={deal.id}
@@ -448,11 +507,27 @@ function SummaryTile({
   soft: string;
 }) {
   return (
-    <div className="card flex items-center gap-3 p-4">
-      <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl" style={{ background: soft, color: tone }}>
+    /*
+       Stacked on a phone, side by side from `sm`.
+
+       As a row at 375px the card is 155px wide; the padding takes 32 and the
+       icon and its gap take another 56, leaving 67px of text column for a
+       figure that needs 94. Every money value on this page rendered as
+       "$286,..." — and a truncated currency figure is not a smaller version of
+       the number, it is a different number. "Won, being delivered" and "Across
+       all stages" were cut the same way.
+
+       Stacking gives the value the full width of the card, which is the entire
+       reason the card exists. From `sm` the row returns untouched.
+    */
+    <div className="card flex flex-col items-start gap-2 p-4 sm:flex-row sm:items-center sm:gap-3">
+      <span
+        className="grid h-9 w-9 shrink-0 place-items-center rounded-xl sm:h-11 sm:w-11"
+        style={{ background: soft, color: tone }}
+      >
         {icon}
       </span>
-      <div className="min-w-0 leading-tight">
+      <div className="w-full min-w-0 leading-tight">
         <p className="truncate text-xl font-bold tabular-nums">{value}</p>
         <p className="truncate text-[11px] font-medium">{label}</p>
         <p className="truncate text-[10px] text-faint">{sub}</p>
@@ -504,10 +579,21 @@ function DealCard({
             e.stopPropagation();
             onDelete();
           }}
-          // Revealed on hover *or* focus. It was hover-only, so a keyboard
-          // user tabbed onto an invisible control with nothing to show where
-          // they were.
-          className="focus-ring shrink-0 rounded text-faint opacity-0 transition-opacity hover:text-[var(--red)] focus-visible:opacity-100 group-hover:opacity-100"
+          /*
+             Revealed on hover, on focus, and unconditionally where there is no
+             hover to reveal it with.
+
+             `opacity-0 group-hover:opacity-100` makes a control that a phone
+             can never show: touch has no hover state, so this button was
+             invisible AND unreachable on every mobile device — deleting a deal
+             simply could not be done there. `max-sm:opacity-100` restores it
+             below `sm` and changes nothing above it.
+
+             Safe to surface: the action confirms first and is recoverable from
+             Settings → Recently deleted, so a mis-tap costs a dialog rather
+             than a record.
+          */
+          className="focus-ring shrink-0 rounded text-faint opacity-0 transition-opacity hover:text-[var(--red)] focus-visible:opacity-100 group-hover:opacity-100 max-sm:opacity-100"
           aria-label="Delete deal"
         >
           <Trash2 className="h-3.5 w-3.5" />
@@ -816,7 +902,10 @@ function PainPoints({
                   type="submit"
                   disabled={busy}
                   aria-label={`Remove "${point}"`}
-                  className="shrink-0 text-faint opacity-0 transition-opacity hover:text-[var(--red)] focus:opacity-100 group-hover:opacity-100 disabled:opacity-40"
+                  /* Same hover-only trap as the card's delete button: on a
+                     phone there is no hover, so a pain point could be added
+                     and never removed. */
+                  className="shrink-0 text-faint opacity-0 transition-opacity hover:text-[var(--red)] focus:opacity-100 group-hover:opacity-100 disabled:opacity-40 max-sm:opacity-100"
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>
