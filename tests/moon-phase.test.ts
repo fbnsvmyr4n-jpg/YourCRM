@@ -89,3 +89,43 @@ describe("the shader draws a sphere, not a lit disc", () => {
     expect(FRAGMENT_SHADER).toMatch(/earthshine/);
   });
 });
+
+describe("the moon's surface", () => {
+  /**
+   * A lit sphere with no surface is still a basic circle. These check the two
+   * things that make it a moon: real imagery, and the right way up.
+   */
+  it("samples a real albedo map rather than a flat tint", () => {
+    expect(FRAGMENT_SHADER).toMatch(/texture\(uMoon, vec2\(lunarLon/);
+    expect(FRAGMENT_SHADER).toMatch(/vec3 albedo/);
+  });
+
+  it("rotates the face by the parallactic angle", () => {
+    /* −33° from London, −143° from Cape Town on the same night. Skip this and
+       the maria are drawn in one fixed orientation, which is wrong everywhere
+       except one latitude. */
+    expect(FRAGMENT_SHADER).toMatch(/uMoonNorthAngle/);
+    expect(FRAGMENT_SHADER).toMatch(/vec2 face = vec2\(unit\.x \* ca - unit\.y \* sa/);
+  });
+
+  it("supplies that angle, finite even where it is undefined", () => {
+    /* The parallactic angle has no value at the zenith. A NaN reaching a
+       uniform makes the rotation matrix NaN and the moon disappears — silently,
+       and only for observers directly beneath it. */
+    const m = moonSnapshot(new Date(Date.UTC(2026, 2, 3, 21)), CAPE_TOWN);
+    expect(Number.isFinite(m.parallacticAngleDeg)).toBe(true);
+    expect(Math.abs(m.parallacticAngleDeg)).toBeLessThanOrEqual(180);
+  });
+
+  it("gives different hemispheres different orientations", () => {
+    const when = new Date(Date.UTC(2026, 2, 3, 21));
+    const south = moonSnapshot(when, CAPE_TOWN).parallacticAngleDeg;
+    const north = moonSnapshot(when, {
+      latitude: 51.5,
+      longitude: -0.1,
+      source: "default",
+    }).parallacticAngleDeg;
+    expect(Math.abs(south - north)).toBeGreaterThan(45);
+  });
+});
+

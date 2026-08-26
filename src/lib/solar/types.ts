@@ -119,4 +119,13 @@ export type MoonSnapshot = {
   azimuthDeg: number;
   /** 0 = new, 1 = full. The moon's contribution scales with this. */
   illuminatedFraction: number;
+  /**
+   * How far the moon's north pole is rotated from the observer's zenith.
+   *
+   * The reason the moon looks "upside down" from Cape Town compared to London:
+   * on the same night this is −142.7° there and −33.1° here. Without it the
+   * maria are drawn in a fixed orientation and the face is simply wrong for
+   * most of the world.
+   */
+  parallacticAngleDeg: number;
 };

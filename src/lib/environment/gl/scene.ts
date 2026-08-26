@@ -111,7 +111,7 @@ function sceneBlend(gl: WebGL2RenderingContext): void {
   );
 }
 
-type Textures = { day: WebGLTexture; night: WebGLTexture; clouds: WebGLTexture };
+type Textures = { day: WebGLTexture; night: WebGLTexture; clouds: WebGLTexture; moon: WebGLTexture };
 
 export class PlanetScene {
   private gl: WebGL2RenderingContext;
@@ -158,6 +158,7 @@ export class PlanetScene {
       "uMoonIllumination",
       "uFov", "uPitch", "uYaw", "uEnuToEcef", "uExposure", "uSteps",
       "uLightSteps", "uCloudPhase", "uDay", "uNight", "uClouds",
+      "uMoon", "uMoonNorthAngle",
     ]) {
       const location = gl.getUniformLocation(program, name);
       if (location === null) missing.push(name);
@@ -293,16 +294,20 @@ export class PlanetScene {
       });
 
     try {
-      const [day, night, clouds] = await Promise.all([
+      const [day, night, clouds, moon] = await Promise.all([
         load(`earth-day-${set}.jpg`),
         load(`earth-night-${set}.jpg`),
         load(`earth-clouds-${set}.jpg`),
+        /* One size only: the moon is about fifty pixels across, so a 1K map is
+           already far finer than the disc can show, and it is 86kB. */
+        load("moon-1k.jpg"),
       ]);
       if (this.disposed) return false;
       this.textures = {
         day: this.upload(day, 0),
         night: this.upload(night, 1),
         clouds: this.upload(clouds, 2),
+        moon: this.upload(moon, 3),
       };
 
       /**
@@ -671,6 +676,9 @@ export class PlanetScene {
     /* The real illuminated fraction, so the phase on screen is the phase
        outside. A crescent night draws a crescent. */
     gl.uniform1f(u.uMoonIllumination, moon.illuminatedFraction);
+    /* Radians. The moon's north pole against the observer's zenith — the reason
+       the same moon looks upside down from the other hemisphere. */
+    gl.uniform1f(u.uMoonNorthAngle, (moon.parallacticAngleDeg * Math.PI) / 180);
 
     /*
        Where the discs are DRAWN, which is not where the light comes from.
@@ -760,6 +768,7 @@ export class PlanetScene {
     gl.uniform1i(u.uDay, 0);
     gl.uniform1i(u.uNight, 1);
     gl.uniform1i(u.uClouds, 2);
+    gl.uniform1i(u.uMoon, 3);
 
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }

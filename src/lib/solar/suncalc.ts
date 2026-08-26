@@ -143,6 +143,11 @@ export function moonSnapshot(at: Date, where: Coordinates): MoonSnapshot {
     altitudeDeg: position.altitude,
     azimuthDeg: normaliseBearing(position.azimuth),
     illuminatedFraction: illumination.fraction,
+    /* Degrees, like everything else this library returns — see the table above.
+       Finite even at the zenith, where the angle is formally undefined. */
+    parallacticAngleDeg: Number.isFinite(position.parallacticAngle)
+      ? position.parallacticAngle
+      : 0,
   };
 }
 

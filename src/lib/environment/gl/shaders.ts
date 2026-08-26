@@ -46,6 +46,10 @@ uniform float uMoonLight;     // 0..1, already gated on phase and altitude
 uniform float uMoonVisible;   // 0..1, simply whether the moon is above the horizon
 /** 0 = new, 1 = full. The real illuminated fraction, for the real phase. */
 uniform float uMoonIllumination;
+/** NASA LRO albedo of the near side, equirectangular, 0 deg at the disc centre. */
+uniform sampler2D uMoon;
+/** Rotation of the moon's north pole away from the observer's zenith. */
+uniform float uMoonNorthAngle;
 
 /* Where the DISCS are drawn, which is not where the light comes from.
 
@@ -977,6 +981,47 @@ void main() {
          a body this small reads as a cut mask. */
       float lit = smoothstep(-0.05, 0.05, lambert);
 
+      /*
+         The actual lunar surface.
+
+         The disc point already gives a surface normal — (unit.x, unit.y, w),
+         with w toward the observer — so it maps straight onto the moon's own
+         coordinates. The moon is tidally locked, so the near side is always the
+         near side and a fixed equirectangular map is right; libration is ±8°,
+         which at fifty-odd pixels is under half a pixel of wobble.
+
+         ROTATED by the parallactic angle first, which is the difference between
+         a moon and *the* moon. It is the angle between the observer's zenith
+         and the moon's north pole: −33° from London and −143° from Cape Town on
+         the same night, which is why the moon looks upside down when you fly
+         between them. Without it the maria sit in one fixed orientation and the
+         face is simply wrong for most of the world.
+      */
+      float ca = cos(uMoonNorthAngle);
+      float sa = sin(uMoonNorthAngle);
+      vec2 face = vec2(unit.x * ca - unit.y * sa, unit.x * sa + unit.y * ca);
+      float lunarLat = asin(clamp(face.y, -1.0, 1.0));
+      float lunarLon = atan(face.x, max(w, 1.0e-4));
+      vec3 albedo = texture(uMoon, vec2(lunarLon / (2.0 * PI) + 0.5, 0.5 - lunarLat / PI)).rgb;
+
+      /*
+         Contrast restored before the tone curve takes it away.
+
+         The map holds a genuine 2:1 ratio between maria and highlands — 65
+         against 165 in its own values — and measured on screen the rendered
+         disc came out 149 to 181, a ratio of 1.2:1. The same compression that
+         flattens the sun flattens this: at a peak near 1.0 in linear light the
+         curve has already lost most of its slope, so a real difference in
+         albedo arrives as a faint smudge.
+
+         Two changes, both aimed at that. The albedo gets a gamma so the seas
+         separate further from the highlands, and the whole moon is rendered
+         LOWER on the curve, where it still has slope, rather than being made
+         brighter. A moon that is slightly dimmer and clearly has a face beats a
+         brighter one that is a disc.
+      */
+      albedo = pow(albedo, vec3(1.4));
+
       /* Slight darkening toward the limb, so it reads as a sphere. */
       float sphere = 0.72 + 0.28 * w;
 
@@ -989,12 +1034,31 @@ void main() {
       float earthshine = 0.05 * (1.0 - uMoonIllumination);
 
       float surface = lit * sphere + (1.0 - lit) * earthshine;
-      vec3 moonColour = mix(vec3(0.46, 0.52, 0.72), vec3(0.96, 0.94, 0.89), lit);
 
-      colour += moonColour * disc * surface * slant * notBlocked * uMoonVisible * 0.55;
+      /* The albedo carries the maria; the tint only decides what colour the
+         light falling on them is. Earthshine is the blue-grey of sunlight that
+         has bounced off the Earth, direct sun is very slightly warm. */
+      vec3 lightColour = mix(vec3(0.52, 0.60, 0.86), vec3(1.0, 0.98, 0.94), lit);
+
+      /* 1.55, up from 0.55, because the albedo now multiplies in at a mean of
+         about 0.59 and would otherwise darken the moon by nearly half. */
+      colour += albedo * lightColour * disc * surface * slant * notBlocked * uMoonVisible * 1.3;
       /* Coverage is the whole disc, lit or not: the unlit half of a crescent
          still occludes the stars behind it. */
       bodyAlpha = max(bodyAlpha, disc * notBlocked * uMoonVisible);
+    } else if (moonAngle < MOON_RADIUS * 7.0 && notBlocked > 0.0 && alongMoon > 0.0) {
+      /*
+         A small halo just outside the disc.
+
+         Far fainter than the sun's and scaled by the phase, because a crescent
+         throws almost no light. Without it the moon has a cut edge against the
+         sky — it sits ON the frame rather than in it — and that hard boundary
+         is most of what reads as "a basic circle".
+      */
+      float ring = MOON_RADIUS / max(moonAngle, MOON_RADIUS);
+      float glow = pow(ring, 2.4) * 0.10 * uMoonIllumination;
+      colour += vec3(0.80, 0.85, 1.0) * glow * slant * notBlocked * uMoonVisible;
+      bodyAlpha = max(bodyAlpha, clamp(glow, 0.0, 1.0));
     }
   }
 

@@ -304,7 +304,7 @@ describe("the model says true things about light", () => {
     const warmthAt = (altitude: number, rising: boolean) =>
       environmentFor(
         { ...solarSnapshot(new Date(), CAPE_TOWN), altitudeDeg: altitude, rising },
-        { altitudeDeg: -30, azimuthDeg: 0, illuminatedFraction: 0 }
+        { altitudeDeg: -30, azimuthDeg: 0, illuminatedFraction: 0 , parallacticAngleDeg: 0 }
       ).warmth;
 
     expect(warmthAt(-2, false)).toBeGreaterThan(warmthAt(45, false));
@@ -315,7 +315,7 @@ describe("the model says true things about light", () => {
     const lightsAt = (altitude: number) =>
       environmentFor(
         { ...solarSnapshot(new Date(), CAPE_TOWN), altitudeDeg: altitude, rising: false },
-        { altitudeDeg: -30, azimuthDeg: 0, illuminatedFraction: 0 }
+        { altitudeDeg: -30, azimuthDeg: 0, illuminatedFraction: 0 , parallacticAngleDeg: 0 }
       ).cityLights;
 
     expect(lightsAt(30)).toBe(0);
@@ -325,9 +325,9 @@ describe("the model says true things about light", () => {
 
   it("gives a full moon a night and a new moon none", () => {
     const night = { ...solarSnapshot(new Date(), CAPE_TOWN), altitudeDeg: -40, rising: false };
-    const full = environmentFor(night, { altitudeDeg: 50, azimuthDeg: 0, illuminatedFraction: 1 });
-    const newMoon = environmentFor(night, { altitudeDeg: 50, azimuthDeg: 0, illuminatedFraction: 0 });
-    const below = environmentFor(night, { altitudeDeg: -40, azimuthDeg: 0, illuminatedFraction: 1 });
+    const full = environmentFor(night, { altitudeDeg: 50, azimuthDeg: 0, illuminatedFraction: 1 , parallacticAngleDeg: 0 });
+    const newMoon = environmentFor(night, { altitudeDeg: 50, azimuthDeg: 0, illuminatedFraction: 0 , parallacticAngleDeg: 0 });
+    const below = environmentFor(night, { altitudeDeg: -40, azimuthDeg: 0, illuminatedFraction: 1 , parallacticAngleDeg: 0 });
 
     expect(full.moonlight).toBeGreaterThan(0);
     expect(newMoon.moonlight).toBe(0);
@@ -337,7 +337,7 @@ describe("the model says true things about light", () => {
   it("does not let the moon light the day", () => {
     // A full moon at midday is a real thing that contributes nothing visible.
     const day = { ...solarSnapshot(new Date(), CAPE_TOWN), altitudeDeg: 45, rising: false };
-    const state = environmentFor(day, { altitudeDeg: 40, azimuthDeg: 0, illuminatedFraction: 1 });
+    const state = environmentFor(day, { altitudeDeg: 40, azimuthDeg: 0, illuminatedFraction: 1 , parallacticAngleDeg: 0 });
     expect(state.moonlight).toBe(0);
   });
 
@@ -345,7 +345,7 @@ describe("the model says true things about light", () => {
     const reflectionAt = (altitude: number) =>
       environmentFor(
         { ...solarSnapshot(new Date(), CAPE_TOWN), altitudeDeg: altitude, rising: false },
-        { altitudeDeg: -30, azimuthDeg: 0, illuminatedFraction: 0 }
+        { altitudeDeg: -30, azimuthDeg: 0, illuminatedFraction: 0 , parallacticAngleDeg: 0 }
       ).reflection;
 
     expect(reflectionAt(1)).toBeGreaterThan(reflectionAt(45));

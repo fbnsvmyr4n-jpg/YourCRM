@@ -9,6 +9,7 @@ deserves it and because a future reader should be able to find the originals.
 | `earth-day-*`   | Blue Marble Next Generation, December 2004 | 21600 × 10800  |
 | `earth-night-*` | Black Marble 2016 (VIIRS day-night band)   | 13500 × 6750   |
 | `earth-clouds-*`| Blue Marble combined cloud composite       | 8192 × 4096    |
+| `moon-1k.jpg`   | LRO/LROC colour albedo of the near side    | 2048 × 1024    |
 
 Regenerate with `scripts/build-scene-textures.mjs`, which takes the two
 originals and emits every tier. The night texture is **not** a plain copy of
@@ -119,3 +120,33 @@ time, so the constellations are the ones actually overhead: the Southern Cross
 from Cape Town, the Plough from London. They rise and set through the night
 because sidereal time advances — about four minutes a day faster than the
 sun's, which is why the sky in June differs from the sky in December.
+
+## moon-1k.jpg
+
+**NASA LRO/LROC colour albedo**, from the CGI Moon Kit — public domain, like
+everything else here. Downsampled from 2048 × 1024 to 1024 × 512 and shipped at
+**86kB**, which is already far finer than the disc can show: the moon renders at
+about fifty pixels across, so one texel of a 1K map is smaller than a rendered
+pixel.
+
+Checked against known features rather than by eye. Maria come out dark and
+highlands bright, which is the whole point of shipping it:
+
+| feature | value |
+| --- | --- |
+| Mare Tranquillitatis | 65 |
+| Oceanus Procellarum | 69 |
+| Mare Serenitatis | 84 |
+| Mare Crisium | 88 |
+| southern highlands | 161 |
+| far side highlands | 177 |
+| Tycho, with its fresh rays | 220 |
+
+**It is rotated by the parallactic angle before it is sampled.** That is the
+angle between the observer's zenith and the moon's north pole, and it is the
+reason the moon looks upside down when you fly between hemispheres: on the same
+night it is −33° from London and −143° from Cape Town. Without it the maria sit
+in one fixed orientation and the face is wrong for most of the world.
+
+Libration is ignored. The moon is tidally locked so the near side is always the
+near side, and the ±8° wobble is under half a pixel at this size.

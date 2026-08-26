@@ -616,3 +616,42 @@ window went from about 160 minutes to about 20:
 | 16:55 | **0.92** |
 | 17:05 | 0.25 |
 | 17:15 | 0.00 |
+
+## 41. The moon gets a surface
+
+It was a tinted circle with a correct phase — the shape of the terminator was
+right and there was nothing inside it.
+
+**It samples NASA's LRO/LROC albedo map now.** 86kB for a 1024 × 512 near side,
+which is already finer than the disc can resolve: the moon renders about fifty
+pixels across, so one texel is smaller than a rendered pixel. Validated against
+known features rather than by eye — Mare Tranquillitatis 65, Oceanus Procellarum
+69, southern highlands 161, far side 177, and Tycho brightest at 220 with its
+fresh rays.
+
+The disc point already gives a surface normal, so it maps straight onto lunar
+coordinates. The moon is tidally locked, so a fixed equirectangular map is
+correct and libration's ±8° is under half a pixel here.
+
+**Rotated by the parallactic angle**, which is the difference between drawing a
+moon and drawing *the* moon. It is the angle between the observer's zenith and
+the moon's north pole: on the same night, −33° from London and −143° from Cape
+Town. That is why the moon looks upside down when you fly between hemispheres,
+and without it the maria sit in one fixed orientation that is wrong everywhere
+but one latitude. SunCalc returns it already; it was simply being discarded.
+Guarded against NaN, which the angle formally is at the zenith — a NaN there
+would make the rotation NaN and the moon vanish, silently, only for observers
+directly beneath it.
+
+**And the same tone-curve trap as the sun.** The map holds a real 2:1 ratio
+between maria and highlands, and the first render came out 149 to 181 — 1.2:1, a
+faint smudge. At a peak near 1.0 in linear light the curve has already lost most
+of its slope. Fixed by boosting the albedo's own contrast and rendering the moon
+LOWER on the curve rather than brighter: 117 to 169 now, a ratio of 1.44 with
+the standard deviation across the disc up from 12 to 17. A slightly dimmer moon
+that clearly has a face beats a brighter one that is a disc.
+
+A faint halo was added outside the disc as well, scaled by the phase because a
+crescent throws almost no light. Without it the moon met the sky on a cut edge —
+it sat *on* the frame rather than in it, which was most of what read as "a basic
+circle".

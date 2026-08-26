@@ -290,7 +290,7 @@ describe("the moon shares the camera", () => {
     const when = new Date(Date.UTC(2026, 7, 24, 12));
     const { moon } = projectBodies(
       solarSnapshot(when, CAPE_TOWN),
-      { altitudeDeg: -30, azimuthDeg: 100, illuminatedFraction: 1 }
+      { altitudeDeg: -30, azimuthDeg: 100, illuminatedFraction: 1, parallacticAngleDeg: 0 }
     );
     expect(moon.visible).toBe(0);
   });
