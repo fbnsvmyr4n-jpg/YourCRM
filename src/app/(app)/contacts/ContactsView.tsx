@@ -1,29 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  Building2,
-  Calendar,
-  Check,
-  ChevronDown,
-  ChevronRight,
-  Copy,
-  DollarSign,
-  Filter,
-  Landmark,
-  Mail,
-  MessageCircle,
-  MoreHorizontal,
-  Pencil,
-  Phone,
-  Plus,
-  StickyNote,
-  Trash2,
-  Upload,
-  User,
-  UserRound,
-  X,
-} from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Building2, Calendar, Check, ChevronDown, ChevronLeft, ChevronRight, Copy, DollarSign, Filter, Landmark, Mail, MessageCircle, MoreHorizontal, Pencil, Phone, Plus, StickyNote, Trash2, Upload, User, UserRound, X } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Overlay } from "@/components/ui/Overlay";
 import { SortMenu } from "@/components/ui/SortMenu";
@@ -63,6 +41,30 @@ type Panel = null | "note" | "revenue";
 /** Takes integer cents, because that is what the database stores. */
 const money = (cents: number) => `$${Math.round(cents / 100).toLocaleString()}`;
 
+/**
+ * Whether the three panels are stacked into one column.
+ *
+ * Watches the GRID'S OWN WIDTH rather than the viewport's, because that is what
+ * the layout actually keys off: the breakpoints here are container queries
+ * (`@min-[700px]`), and the container is the viewport minus the sidebar. A
+ * viewport media query would disagree with the layout through the whole range
+ * where the sidebar is present but the content is still narrow — claiming two
+ * columns while the user is looking at one.
+ */
+function useStacked(ref: React.RefObject<HTMLElement | null>): boolean {
+  const [stacked, setStacked] = useState(false);
+  useEffect(() => {
+    const node = ref.current;
+    if (!node || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(([entry]) => {
+      setStacked(entry.contentRect.width < 700);
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [ref]);
+  return stacked;
+}
+
 export function ContactsView({
   contacts,
   summaries,
@@ -78,6 +80,32 @@ export function ContactsView({
   currentUserId: string | null;
 }) {
   const [selectedId, setSelectedId] = useState(contacts[0]?.id ?? "");
+  /*
+     On a phone the three panels become one column in DOM order — details,
+     profile, then the list — so the index of contacts started 1,648px down a
+     852px screen. The user landed on the details of somebody they had not
+     chosen and had to scroll past two screens to reach the list.
+
+     So on a stacked layout this behaves like every contacts app on a phone:
+     the list IS the page, and choosing somebody opens them. Nothing about the
+     side-by-side layout changes, because there the list is already in view.
+  */
+  const gridRef = useRef<HTMLDivElement>(null);
+  const stacked = useStacked(gridRef);
+  const [showDetail, setShowDetail] = useState(false);
+  const openContact = useCallback((id: string) => {
+    setSelectedId(id);
+    setShowDetail(true);
+  }, []);
+  /* Both derived, and deliberately not synced.
+
+     The first version reset `showDetail` in an effect when the layout widened,
+     which React's own lint rule flags — and it was unnecessary. Every hiding
+     decision below is gated on `stacked`, so on a wide layout both of these are
+     false and nothing is hidden whatever `showDetail` happens to hold. There is
+     no state to correct, only state to ignore. */
+  const listOnly = stacked && !showDetail;
+  const detailOnly = stacked && showDetail;
   const [modal, setModal] = useState<ModalState>(null);
   const [panel, setPanel] = useState<Panel>(null);
   const [busy, setBusy] = useState(false);
@@ -190,6 +218,7 @@ export function ContactsView({
 
   return (
     <div
+      ref={gridRef}
       className={clsx(
         "mx-auto grid h-auto max-w-[1500px] animate-fade-up grid-cols-1 gap-4",
         /* Two columns: the picker stays pinned on the right — it is how you move
@@ -206,9 +235,25 @@ export function ContactsView({
         "@min-[1030px]:[grid-template-areas:'info_profile_list']"
       )}
     >
-      <InfoPanel contact={contact} summary={summary} className="@min-[700px]:[grid-area:info]" />
+      {detailOnly && (
+        /* The way back, and it has to exist before the panels it returns from.
+           Placed first in the column so it is the first thing under the header
+           rather than something to hunt for. */
+        <button
+          type="button"
+          onClick={() => setShowDetail(false)}
+          className="btn-soft focus-ring flex items-center gap-2 self-start rounded-xl px-3 py-2 text-sm font-medium"
+        >
+          <ChevronLeft className="h-4 w-4" /> All contacts
+        </button>
+      )}
+      <InfoPanel
+        contact={contact}
+        summary={summary}
+        className={clsx("@min-[700px]:[grid-area:info]", listOnly && "hidden")}
+      />
       <ProfilePanel
-        className="@min-[700px]:[grid-area:profile]"
+        className={clsx("@min-[700px]:[grid-area:profile]", listOnly && "hidden")}
         contact={contact}
         summary={summary}
         currentUserId={currentUserId}
@@ -219,10 +264,10 @@ export function ContactsView({
         busy={busy}
       />
       <ContactsList
-        className="@min-[700px]:[grid-area:list]"
+        className={clsx("@min-[700px]:[grid-area:list]", detailOnly && "hidden")}
         contacts={contacts}
         selectedId={contact.id}
-        onSelect={setSelectedId}
+        onSelect={openContact}
         onAdd={() => setModal("new")}
         onImport={() => setModal("import")}
         filter={filter}
