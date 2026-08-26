@@ -716,10 +716,33 @@ void main() {
 
   vec3 sunRight = normalize(cross(vec3(0.0, 0.0, 1.0), uSunDisplayDir));
   vec3 sunUp = cross(uSunDisplayDir, sunRight);
-  float sunFlatten = mix(1.0, 0.62, uSunLimbProximity);
-  vec2 sunOffset = vec2(dot(dir, sunRight), dot(dir, sunUp) / sunFlatten);
   float alongSun = dot(dir, uSunDisplayDir);
-  float sunAngle = length(sunOffset) / max(alongSun, 0.05);
+
+  /*
+     TWO angles, and keeping them separate is the whole point.
+
+     The first version squashed one angle and fed it to everything, so as the
+     sun approached the limb the disc, the corona and all six diffraction
+     spikes stretched together by up to 27% — reported, correctly, as the sun
+     distorting too much.
+
+     Refraction bends light passing through the AIR, so it distorts the sun's
+     own image. The aureole and the spikes are not the sun's image: they are
+     what the instrument does with a bright source — scattering in the optics
+     and light bending around an aperture. A lens does not become elliptical
+     because the thing it is looking at is near the horizon.
+
+     So the disc gets the flattened angle and the glow keeps the round one.
+  */
+  vec2 sunOffsetRound = vec2(dot(dir, sunRight), dot(dir, sunUp));
+  float sunAngle = length(sunOffsetRound) / max(alongSun, 0.05);
+
+  /* 0.82, not 0.62. A sun on the horizon loses about a fifth of its height to
+     refraction, which is the figure this now uses; 0.62 was nearly twice that
+     and read as a smear rather than as an ellipse. */
+  float sunFlatten = mix(1.0, 0.82, uSunLimbProximity);
+  vec2 sunOffset = vec2(sunOffsetRound.x, sunOffsetRound.y / sunFlatten);
+  float sunDiscAngle = length(sunOffset) / max(alongSun, 0.05);
 
   /*
      EXAGGERATED, and by a measured amount rather than a chosen one.
@@ -820,7 +843,7 @@ void main() {
        Multiplied by the radial falloff rather than added, so a spike is always
        fainter than the corona it comes from and cannot outlive it.
     */
-    vec2 spikeDir = sunOffset / max(length(sunOffset), 1.0e-9);
+    vec2 spikeDir = sunOffsetRound / max(length(sunOffsetRound), 1.0e-9);
     float spikes = pow(abs(cos(atan(spikeDir.y, spikeDir.x) * 3.0)), 22.0);
     float streak = spikes * pow(halo, 1.25) * 0.5;
 
@@ -852,13 +875,13 @@ void main() {
      angle comes out as zero and the disc would be painted behind the camera.
      An anti-sun, exactly opposite the real one, appearing whenever the sun is
      behind the viewer. */
-  if (sunAngle < SUN_RADIUS * 1.02 && notBlocked > 0.0 && alongSun > 0.0) {
+  if (sunDiscAngle < SUN_RADIUS * 1.02 && notBlocked > 0.0 && alongSun > 0.0) {
     /* Analytic edge, one pixel wide, from the screen-space derivative. A disc
        this small is nearly all edge, so a hard cut here reads as a polygon. */
-    float aa = max(fwidth(sunAngle), 1.0e-6);
-    float disc = 1.0 - smoothstep(SUN_RADIUS - aa, SUN_RADIUS + aa, sunAngle);
+    float aa = max(fwidth(sunDiscAngle), 1.0e-6);
+    float disc = 1.0 - smoothstep(SUN_RADIUS - aa, SUN_RADIUS + aa, sunDiscAngle);
 
-    float rr = clamp(sunAngle / SUN_RADIUS, 0.0, 1.0);
+    float rr = clamp(sunDiscAngle / SUN_RADIUS, 0.0, 1.0);
 
     /*
        Limb darkening, and it has to be carried by COLOUR rather than by

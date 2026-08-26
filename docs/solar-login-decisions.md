@@ -575,3 +575,44 @@ Verified by rendering and counting lit pixels rather than by reading the code:
 
 The small excess is the softened terminator and earthshine crossing the
 brightness threshold, which is what those are for.
+
+## 40. One angle doing two jobs
+
+Reported as the sun stretching too much as it passed behind the atmosphere and
+the planet. The refraction flattening was real and wanted; the way it was
+applied was not.
+
+**A single flattened angle fed everything.** `sunAngle` was computed from an
+offset whose vertical component had already been divided by the flattening
+factor, and that one number then drove the disc, the corona, and all six
+diffraction spikes. At the limb the whole glow — not just the sun — stretched
+horizontally by up to 27%.
+
+The distinction that fixes it is physical rather than aesthetic. Refraction
+bends light passing through **air**, so it distorts the sun's own image. The
+aureole and the spikes are not the sun's image: they are what the **instrument**
+does with a bright source — scattering inside the optics, and light bending
+around an aperture. A lens does not become elliptical because the thing it is
+looking at is near the horizon. So there are two angles now, and a test asserts
+that the round one is not quietly rebuilt from the flattened offset.
+
+**Two magnitudes were also wrong.**
+
+The squash was 0.62, nearly twice the real figure. A sun on the horizon loses
+about a fifth of its height to refraction, so it is 0.82 now — an ellipse rather
+than a smear.
+
+And it ramped over ±6° of altitude, which at this latitude is roughly eighty
+minutes either side of the horizon. The sun spent all of it visibly squashed,
+which reads as the shape the sun simply *has* rather than as something
+happening. Refraction only bends the image appreciably in the last degree or two,
+so the ramp is ±2.5° now. Measured through an actual sunset, the flattening
+window went from about 160 minutes to about 20:
+
+| UTC | limb proximity |
+| --- | --- |
+| 16:35 | 0.00 |
+| 16:45 | 0.16 |
+| 16:55 | **0.92** |
+| 17:05 | 0.25 |
+| 17:15 | 0.00 |

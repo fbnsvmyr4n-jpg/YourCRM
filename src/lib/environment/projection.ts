@@ -430,8 +430,16 @@ export function aimBody(
 
   return {
     direction: directionAt(displayAlt, azimuth),
-    /* Ramped over 6° of real altitude either side of the horizon — the span
-       over which a real sunset's colour and shape actually change. */
-    limbProximity: clamp01(1 - Math.abs(altitudeDeg) / 6),
+    /*
+       Ramped over 2.5° of real altitude, not 6°.
+
+       Six degrees is roughly eighty minutes either side of the horizon, and the
+       sun spent all of it visibly squashed — a permanent-looking distortion
+       rather than a moment. Refraction only bends the image appreciably in the
+       last degree or two before the horizon, when the light is raking through
+       the deepest slant of air. Narrowing it makes the flattening read as
+       something happening rather than as the shape the sun simply has.
+    */
+    limbProximity: clamp01(1 - Math.abs(altitudeDeg) / 2.5),
   };
 }

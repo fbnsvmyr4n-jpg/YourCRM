@@ -97,20 +97,48 @@ describe("the sun and moon are drawn by the shader, not by CSS", () => {
     /**
      * A real bug, found while adding the refraction flattening.
      *
-     * The flattened offset is divided by `max(alongSun, 0.05)` so the disc can
-     * be squashed along one axis. For a ray pointing directly AWAY from the
-     * sun, both components of that offset are zero — so the angle evaluates to
-     * zero, passes the radius test, and paints a second sun at the antipode of
-     * the real one. It appears whenever the sun is behind the viewer, which on
-     * this camera is most of the day.
+     * The offset is divided by `max(alongSun, 0.05)` so the disc can be
+     * squashed along one axis. For a ray pointing directly AWAY from the sun,
+     * both components of that offset are zero — so the angle evaluates to zero,
+     * passes the radius test, and paints a second sun at the antipode of the
+     * real one. It appears whenever the sun is behind the viewer, which on this
+     * camera is most of the day.
      *
      * The whole disc block must therefore be gated on facing the sun at all.
      */
     const block = FRAGMENT_SHADER.match(
-      /if \(sunAngle < SUN_RADIUS[^)]*\)[^{]*\{/
+      /if \(sunDiscAngle < SUN_RADIUS[^)]*\)[^{]*\{/
     );
     expect(block, "the sun disc block should exist").toBeTruthy();
     expect(block![0]).toContain("alongSun > 0.0");
+  });
+
+  it("flattens the disc without flattening the glow", () => {
+    /**
+     * Reported as the sun distorting too much as it set, and the cause was one
+     * angle doing two jobs. The flattened angle was fed to the disc, the corona
+     * AND all six diffraction spikes, so the entire glow stretched by up to 27%
+     * horizontally as the sun neared the limb.
+     *
+     * Refraction bends light passing through AIR, so it distorts the sun's own
+     * image. The aureole and the spikes are not the sun's image — they are what
+     * the instrument does with a bright source. A lens does not become
+     * elliptical because the thing it is looking at is near the horizon.
+     */
+    expect(FRAGMENT_SHADER, "the disc uses the flattened angle").toMatch(
+      /if \(sunDiscAngle < SUN_RADIUS/
+    );
+    expect(FRAGMENT_SHADER, "the halo uses the round angle").toMatch(
+      /float halo = SUN_RADIUS \/ max\(sunAngle,/
+    );
+    expect(FRAGMENT_SHADER, "the spikes use the round offset").toMatch(
+      /vec2 spikeDir = sunOffsetRound/
+    );
+    /* And the round angle must not be built from the flattened offset, which
+       would reconnect them while looking separate. */
+    expect(FRAGMENT_SHADER).toMatch(
+      /vec2 sunOffsetRound = vec2\(dot\(dir, sunRight\), dot\(dir, sunUp\)\);/
+    );
   });
 
   it("gates the moon disc on it being up, not on how much light it casts", () => {
