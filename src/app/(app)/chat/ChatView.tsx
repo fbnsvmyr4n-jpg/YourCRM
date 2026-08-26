@@ -31,6 +31,26 @@ function renderText(text: string) {
 
 type Knows = { contacts: number; deals: number; meetings: number };
 
+/**
+ * Whether the viewport is narrow enough to need the short placeholder.
+ *
+ * A placeholder is an attribute, not an element, so CSS cannot shorten it — it
+ * has to be chosen in JS. Defaults to false so the server and the first client
+ * render agree; the effect corrects it immediately after mount, which is
+ * invisible for a hint string.
+ */
+function useNarrow(): boolean {
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 639.98px)");
+    const sync = () => setNarrow(query.matches);
+    sync();
+    query.addEventListener("change", sync);
+    return () => query.removeEventListener("change", sync);
+  }, []);
+  return narrow;
+}
+
 export function ChatView({
   messages,
   aiEnabled,
@@ -42,6 +62,7 @@ export function ChatView({
 }) {
   const [items, setItems] = useState(messages);
   const [draft, setDraft] = useState("");
+  const narrow = useNarrow();
   const [busy, setBusy] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -91,7 +112,27 @@ export function ChatView({
   }
 
   return (
-    <div className="mx-auto flex h-auto max-w-[900px] animate-fade-up flex-col lg:h-[calc(100vh-104px)]">
+    /*
+       A chat has to own the screen it is on.
+
+       This was `h-auto` below `lg`, so on every phone and tablet the container
+       took its height from its contents — and since the conversation area is
+       `flex-1`, it had nothing to fill and collapsed. Measured on a 852px
+       viewport: the panel came out 326px tall with a FORTY PIXEL message area,
+       leaving two thirds of the screen empty below it. That is the whole of the
+       "squished" complaint; the parts were all correct, they just had no room.
+
+       `dvh`, not `vh`, and that matters on exactly the device this is for:
+       Safari's toolbar collapses as you scroll, so `100vh` is the TALLEST the
+       viewport ever gets and a `100vh` panel is permanently taller than the
+       screen — the composer ends up under the toolbar, which is the worst place
+       to put the one control the page exists for. `dvh` tracks the real height.
+
+       112px is the chrome above and below it: an 80px header plus main's 32px
+       of bottom padding, both measured rather than guessed. The `lg` value is
+       untouched.
+    */
+    <div className="mx-auto flex h-[calc(100dvh-112px)] max-w-[900px] animate-fade-up flex-col lg:h-[calc(100vh-104px)]">
       {/* Identity */}
       <div className="chat-hero mb-4 flex flex-wrap items-center justify-between gap-4 px-5 py-4">
         <div className="flex min-w-0 items-center gap-3.5">
@@ -113,7 +154,10 @@ export function ChatView({
                 {aiEnabled ? "AI CONNECTED" : "DATA MODE"}
               </span>
             </div>
-            <p className="mt-1.5 truncate text-xs text-muted">
+            {/* Wraps rather than truncates below `sm`. This line is the page's
+                claim about where its answers come from, and "0 deals and 0 m…"
+                cuts off exactly the part that makes the claim. */}
+            <p className="mt-1.5 text-xs text-muted sm:truncate">
               Answering from{" "}
               <strong className="font-semibold text-[var(--text)]">{knows.contacts}</strong> contacts,{" "}
               <strong className="font-semibold text-[var(--text)]">{knows.deals}</strong> deals and{" "}
@@ -133,6 +177,32 @@ export function ChatView({
       {/* Conversation */}
       <Card className="flex min-h-0 flex-1 flex-col !p-0">
         <div className="flex-1 space-y-4 overflow-y-auto p-5">
+          {/*
+              Something to look at before the first question.
+
+              The conversation area is `flex-1`, so on an empty chat it was a
+              blank panel taking most of the screen — the single biggest reason
+              this page read as unfinished. A first-run state is not decoration
+              here; it is the only thing standing between the user and a void.
+
+              The copy claims nothing the page cannot back up. The header above
+              already states exactly what it is answering from, and this repeats
+              the promise the Reports page makes: the figures come from the
+              user's own records rather than being estimated.
+          */}
+          {items.length === 0 && !busy && (
+            <div className="flex h-full flex-col items-center justify-center px-6 text-center">
+              <span className="chat-orb mb-4">
+                <Sparkles className="h-[22px] w-[22px]" />
+              </span>
+              <p className="text-base font-semibold">Ask about your pipeline</p>
+              <p className="mt-2 max-w-[34ch] text-sm leading-relaxed text-muted">
+                Answers come from your own contacts, deals and meetings — nothing is
+                estimated. Pick a question below, or type your own.
+              </p>
+            </div>
+          )}
+
           {items.map((m) => (
             <div key={m.id} className={clsx("flex", m.role === "user" ? "justify-end" : "justify-start")}>
               {m.role === "assistant" && (
@@ -202,7 +272,10 @@ export function ChatView({
           <input
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            placeholder="Ask about your pipeline, leads, meetings…"
+            /* Short on a phone: the full prompt renders as "Ask about your
+               pipeline, leads, meeti" in a 393px field, and a placeholder that
+               gets cut mid-word looks like a bug rather than a hint. */
+            placeholder={narrow ? "Ask anything…" : "Ask about your pipeline, leads, meetings…"}
             className="field-input flex-1"
           />
           <button

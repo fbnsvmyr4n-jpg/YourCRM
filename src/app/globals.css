@@ -992,6 +992,36 @@ textarea.field-input {
 }
 .chat-chips::-webkit-scrollbar { display: none; }
 
+/*
+   On a phone the suggestions wrap instead of scrolling.
+
+   They were a scrolling row, so the second chip read "Who should I follow up
+   w…" and the rest were off the edge entirely. These are the fastest way into
+   the assistant for someone who does not yet know what to ask — hiding them
+   past the right margin is the one place in this page where scrolling costs
+   the most.
+*/
+@media (max-width: 639.98px) {
+  .chat-chips {
+    flex-wrap: wrap;
+    overflow-x: visible;
+  }
+  /*
+     Full width, but compact.
+
+     These are whole questions rather than one-word filters, so at this width
+     they each take their own line whatever is done to them — stretching them
+     only made that honest. What matters is that four of them do not eat the
+     conversation, so the vertical padding comes down and the type with it.
+  */
+  .chat-chips > * {
+    flex: 1 1 100%;
+    text-align: center;
+    padding-block: 7px;
+    font-size: 13px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .chat-orb::before,
   .chat-live-dot::after { animation: none; }
