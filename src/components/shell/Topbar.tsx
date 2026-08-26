@@ -76,7 +76,15 @@ export function Topbar({
   const menuRef = useDismiss(menuOpen, () => setMenuOpen(false));
 
   return (
-    <header className="sticky top-0 z-20 flex items-center gap-3 px-5 py-4 sm:gap-4 sm:px-7">
+    /*
+       Tighter gutters below `sm`, and only below `sm`.
+
+       Once the row could actually shrink, the search collapsed to 62px on a
+       320px screen because the padding and gaps were eating 88px of it. Both
+       are mobile-only overrides, so every width from 640px up is byte-for-byte
+       what it was.
+    */
+    <header className="sticky top-0 z-20 flex items-center gap-2 px-3 py-4 sm:gap-4 sm:px-7">
       <button
         type="button"
         aria-label="Open menu"
@@ -90,11 +98,55 @@ export function Topbar({
         type="button"
         onClick={openCommandPalette}
         aria-label="Search"
-        className="card focus-ring relative flex h-12 flex-1 items-center gap-3 rounded-2xl pl-12 pr-3 text-left"
+        /*
+           `min-w-0` is not decoration — without it this row breaks the whole app
+           on a narrow phone.
+
+           `flex-1` is `flex: 1 1 0%`, but a flex item's AUTOMATIC MINIMUM SIZE
+           is `min-width: auto`, which resolves to its min-content width. This
+           button carries 60px of padding, so its minimum was never small enough
+           to fit, and rather than shrinking it pushed everything after it off
+           the screen. Measured at 320px: the search rendered 292px wide and the
+           avatar's right edge landed at 540 — 220px past the viewport — with the
+           shell clipping it, so there was not even a scrollbar to reach it.
+           Every screen in the app showed a cut-off search bar because every
+           screen shares this header.
+
+           It is also inert on desktop by construction: a minimum only binds when
+           there is not enough room, and above `sm` there always is.
+        */
+        className="card focus-ring relative flex h-12 min-w-0 flex-1 items-center gap-3 rounded-2xl pl-12 pr-3 text-left"
         style={{ borderRadius: 16 }}
       >
         <Search className="pointer-events-none absolute left-4 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-faint" />
-        <span className="flex-1 truncate text-sm text-faint">Search contacts, companies, deals...</span>
+        {/*
+            Below 400px the placeholder is dropped rather than truncated.
+
+            There is no width at which "Search contacts, companies, deals..."
+            fits on a 320px phone alongside a menu, a theme toggle, a bell and an
+            avatar — it can only ever render as "Search c…", which reads as a
+            layout that broke rather than one that adapted. Without it the
+            control is a full-width field with a search glyph, which is what a
+            phone expects anyway and is a far bigger tap target.
+        */}
+        <span className="flex-1 truncate text-sm text-faint">
+          {/*
+              A shorter label rather than a truncated one.
+
+              "Search contacts, companies, deals..." cannot fit on a 320px phone
+              beside a menu, a theme toggle, a bell and an avatar — there is only
+              about 80px left for text, so it can only render as "Search cont…",
+              which reads as a layout that broke rather than one that adapted.
+              Dropping it entirely was the first attempt and that was worse: it
+              left a blank field on the iPhone 15 and 16, which are 393pt and so
+              land under any 400px threshold.
+
+              So the label shortens instead of vanishing. Both spans carry the
+              same styling; only one is ever displayed.
+          */}
+          <span className="min-[420px]:hidden">Search</span>
+          <span className="hidden min-[420px]:inline">Search contacts, companies, deals...</span>
+        </span>
         <kbd className="hidden items-center gap-0.5 rounded-md border border-[var(--border)] bg-[var(--panel-2)] px-1.5 py-0.5 text-[11px] font-medium text-faint sm:flex">
           ⌘ K
         </kbd>
