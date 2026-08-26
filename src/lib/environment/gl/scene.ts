@@ -155,6 +155,7 @@ export class PlanetScene {
     for (const name of [
       "uResolution", "uSunDir", "uMoonDir", "uMoonLight", "uMoonVisible", "uCameraHeight",
       "uSunDisplayDir", "uMoonDisplayDir", "uSunLimbProximity", "uSunIntensity",
+      "uMoonIllumination",
       "uFov", "uPitch", "uYaw", "uEnuToEcef", "uExposure", "uSteps",
       "uLightSteps", "uCloudPhase", "uDay", "uNight", "uClouds",
     ]) {
@@ -667,6 +668,9 @@ export class PlanetScene {
        it casts. A thin crescent lights nothing and is still plainly visible, so
        the disc is gated on this and the ground wash on `uMoonLight`. */
     gl.uniform1f(u.uMoonVisible, state.moonVisible);
+    /* The real illuminated fraction, so the phase on screen is the phase
+       outside. A crescent night draws a crescent. */
+    gl.uniform1f(u.uMoonIllumination, moon.illuminatedFraction);
 
     /*
        Where the discs are DRAWN, which is not where the light comes from.

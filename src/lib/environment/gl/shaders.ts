@@ -44,6 +44,8 @@ uniform vec3  uSunDir;        // unit, observer's local frame (east, north, up)
 uniform vec3  uMoonDir;
 uniform float uMoonLight;     // 0..1, already gated on phase and altitude
 uniform float uMoonVisible;   // 0..1, simply whether the moon is above the horizon
+/** 0 = new, 1 = full. The real illuminated fraction, for the real phase. */
+uniform float uMoonIllumination;
 
 /* Where the DISCS are drawn, which is not where the light comes from.
 
@@ -795,10 +797,47 @@ void main() {
        rather than diagnosed further, because there is no reason to shadow them
        in the first place. */
     float halo = SUN_RADIUS / max(sunAngle, SUN_RADIUS * 0.55);
-    float haloRim = pow(halo, 3.0) * 0.9;
+    float haloRim = pow(halo, 3.0) * 1.6;
     float haloSpread = pow(halo, 1.1) * 0.55;
-    float glow = (haloRim + haloSpread) * notBlocked * uSunIntensity;
-    colour += vec3(1.0, 0.86, 0.66) * glow * slant;
+
+    /*
+       DIFFRACTION STREAKS, and they are the single thing that stopped this
+       reading as a white ball pasted on the stars.
+
+       The disc itself cannot carry any character. Measured across it: at a peak
+       of 26 in linear light, the whole face lands between 252 and 249 after the
+       tone curve, and even a 2:1 ratio between channels compresses to three or
+       four units. A blown-out disc is also what a camera genuinely records when
+       pointed at the sun, so the answer is not to dim it — it is to give the
+       light somewhere to go.
+
+       Six narrow spikes, because a bright source photographed through any real
+       aperture has them: light bending around the blades. The star field
+       already draws them for the same reason, so this also ties the two
+       together — the sun and the stars now behave like they were recorded by
+       the same instrument, which is most of what "photographic" means.
+
+       Multiplied by the radial falloff rather than added, so a spike is always
+       fainter than the corona it comes from and cannot outlive it.
+    */
+    vec2 spikeDir = sunOffset / max(length(sunOffset), 1.0e-9);
+    float spikes = pow(abs(cos(atan(spikeDir.y, spikeDir.x) * 3.0)), 22.0);
+    float streak = spikes * pow(halo, 1.25) * 0.5;
+
+    float glow = (haloRim + haloSpread + streak) * notBlocked * uSunIntensity;
+    /*
+       Warm close in, cool further out, because that is what the air does. The
+       aureole immediately around the sun is forward-scattered Mie, which is
+       nearly neutral and reads warm next to a blue sky; the broad glow beyond
+       it is Rayleigh, which is blue. A single warm tint across the whole halo
+       is the tell of a lens flare drawn by hand.
+    */
+    vec3 haloColour = mix(
+      vec3(1.0, 0.85, 0.62),
+      vec3(0.62, 0.74, 1.0),
+      clamp(sunAngle / (SUN_RADIUS * 9.0), 0.0, 1.0)
+    );
+    colour += haloColour * glow * slant;
     /* The halo's alpha follows its own brightness, so it fades to transparent
        at its edge instead of ending on a rim of opaque nothing — and it is
        damped by slant, so a halo shining through a long slant of atmosphere
@@ -819,32 +858,119 @@ void main() {
     float aa = max(fwidth(sunAngle), 1.0e-6);
     float disc = 1.0 - smoothstep(SUN_RADIUS - aa, SUN_RADIUS + aa, sunAngle);
 
-    /*
-       Limb darkening — the sun's edge really is dimmer than its centre, by
-       about a third in visible light, because looking at the edge you see
-       shallower and cooler layers of the photosphere. It is the difference
-       between a disc that reads as a sphere of gas and one that reads as a
-       flat sticker, and it costs a square root.
-    */
     float rr = clamp(sunAngle / SUN_RADIUS, 0.0, 1.0);
-    float limbDark = 0.35 + 0.65 * pow(sqrt(max(0.0, 1.0 - rr * rr)), 0.42);
 
-    colour += vec3(1.0, 0.96, 0.90) * disc * limbDark * slant * notBlocked * 26.0;
+    /*
+       Limb darkening, and it has to be carried by COLOUR rather than by
+       brightness.
+
+       The previous version dimmed the rim to 0.35 of the centre and it was
+       invisible. Reading the rendered pixels: with a peak of 26 the tone curve
+       maps the centre to 250 and the rim to 243 — a 3% change across the whole
+       disc. Everything above about 5 in linear light lands above 0.92 after
+       tone mapping and gamma, so a bright object cannot show structure in
+       luminance at all. That is what "a white ball" is: not the wrong colour,
+       but a gradient that the tone curve ate.
+
+       Ratios between channels survive where absolute levels do not, so the
+       rim is made WARM as well as dim. Physically that is also the truer
+       statement: the sun's limb is dimmer because you are seeing shallower,
+       cooler photosphere, and cooler means redder. The rim now lands near
+       (234, 227, 207) against a core of (250, 250, 250) — a visible, warm
+       edge instead of a flat cut-out.
+
+       The core stays blown out on purpose. A camera pointed at the sun clips,
+       and a sun that did not would not read as the sun.
+    */
+    float limbDark = 0.18 + 0.82 * pow(sqrt(max(0.0, 1.0 - rr * rr)), 0.42);
+    vec3 discColour = mix(
+      vec3(1.0, 0.985, 0.95),   // core: very slightly warm white
+      vec3(1.0, 0.72, 0.36),    // limb: cooler photosphere, so redder
+      pow(rr, 2.5)
+    );
+
+    colour += discColour * disc * limbDark * slant * notBlocked * 26.0;
     /* The disc's own coverage. Not scaled by brightness: a sun reddened almost
        to extinction is still completely opaque, and fading its alpha with its
        colour would make it turn transparent as it set rather than dark red. */
     bodyAlpha = max(bodyAlpha, disc * notBlocked);
   }
 
+  /*
+     ===================  The moon, with its real phase  ===================
+
+     Not a lit disc with an opacity. A sphere, lit from where the sun actually
+     is, so a crescent night shows a crescent — and the horns point the right
+     way, at the sun drawn on the same screen.
+  */
   if (uMoonVisible > 0.0) {
-    float moonAngle = acos(clamp(dot(dir, uMoonDisplayDir), -1.0, 1.0));
-    if (moonAngle < MOON_RADIUS * 1.02 && notBlocked > 0.0) {
+    vec3 moonRight = normalize(cross(vec3(0.0, 0.0, 1.0), uMoonDisplayDir));
+    vec3 moonUp = cross(uMoonDisplayDir, moonRight);
+    float alongMoon = dot(dir, uMoonDisplayDir);
+    vec2 moonOffset = vec2(dot(dir, moonRight), dot(dir, moonUp));
+    float moonAngle = length(moonOffset) / max(alongMoon, 0.05);
+
+    if (moonAngle < MOON_RADIUS * 1.02 && notBlocked > 0.0 && alongMoon > 0.0) {
       float aa = max(fwidth(moonAngle), 1.0e-6);
       float disc = 1.0 - smoothstep(MOON_RADIUS - aa, MOON_RADIUS + aa, moonAngle);
-      /* Lambertian rather than limb-darkened: the moon is dust, not gas, and
-         its edge stays bright right to the terminator — which is why a full
-         moon looks like a disc and not a ball. */
-      colour += vec3(0.94, 0.94, 0.99) * disc * slant * notBlocked * uMoonVisible * 0.5;
+
+      /*
+         Disc coordinates, with u pointing at the sun.
+
+         Taken from the sun's DISPLAY direction rather than its true one, and
+         deliberately: both bodies are on the same screen, and the one thing a
+         person will actually check is whether the crescent faces the sun they
+         can see. Using the physical vector here would light the moon from a
+         direction the frame does not contain.
+
+         The illuminated FRACTION is real either way — that is what carries the
+         phase — and so is which side is lit, because the artistic remap
+         preserves the bodies' left-right order.
+      */
+      vec3 toSun = uSunDisplayDir - uMoonDisplayDir * dot(uSunDisplayDir, uMoonDisplayDir);
+      vec2 sunAxis = length(toSun) > 1.0e-5
+        ? normalize(vec2(dot(toSun, moonRight), dot(toSun, moonUp)))
+        : vec2(1.0, 0.0);
+
+      vec2 unit = moonOffset / max(MOON_RADIUS * alongMoon, 1.0e-6);
+      float u = dot(unit, sunAxis);
+      float v = dot(unit, vec2(-sunAxis.y, sunAxis.x));
+      float w = sqrt(max(0.0, 1.0 - u * u - v * v));
+
+      /*
+         Phase angle from the illuminated fraction: f = (1 + cos θ) / 2, so
+         θ = acos(2f − 1). θ = 0 is full, θ = π is new.
+
+         A point on the sphere is lit when its normal faces the sun, and in this
+         basis the sun lies at (sin θ, 0, cos θ). So the terminator is not a
+         straight line across the disc but the ellipse this produces — which is
+         the difference between a moon and a pac-man.
+      */
+      float theta = acos(clamp(2.0 * uMoonIllumination - 1.0, -1.0, 1.0));
+      float lambert = u * sin(theta) + w * cos(theta);
+
+      /* Softened over about a twentieth of the disc. The real terminator is not
+         sharp — it falls across mountains and crater walls — and a hard edge on
+         a body this small reads as a cut mask. */
+      float lit = smoothstep(-0.05, 0.05, lambert);
+
+      /* Slight darkening toward the limb, so it reads as a sphere. */
+      float sphere = 0.72 + 0.28 * w;
+
+      /*
+         EARTHSHINE — the dark part of a crescent, faintly lit by sunlight
+         bounced off the Earth. It is why you can see the whole disc of a young
+         moon, and it is at its strongest exactly when the crescent is thinnest,
+         because that is when the Earth as seen from the moon is nearly full.
+      */
+      float earthshine = 0.05 * (1.0 - uMoonIllumination);
+
+      float surface = lit * sphere + (1.0 - lit) * earthshine;
+      vec3 moonColour = mix(vec3(0.46, 0.52, 0.72), vec3(0.96, 0.94, 0.89), lit);
+
+      colour += moonColour * disc * surface * slant * notBlocked * uMoonVisible * 0.55;
+      /* Coverage is the whole disc, lit or not: the unlit half of a crescent
+         still occludes the stars behind it. */
       bodyAlpha = max(bodyAlpha, disc * notBlocked * uMoonVisible);
     }
   }

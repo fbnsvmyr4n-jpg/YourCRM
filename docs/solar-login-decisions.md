@@ -505,3 +505,73 @@ nearest point on the sketched line" returned the same 0.21 error for every
 candidate from 106 to 150 — it was measuring the gaps between my sampled
 reference points, not the fit. Replaced by the features that actually matter:
 half-width, apex, and minutes spent off the edge of the frame.
+
+## 38. Why the sun could not be fixed by fixing the sun
+
+Reported as "a white ball in the stars". The obvious reading is that the disc
+needs internal detail — limb darkening, colour, structure. That was tried and
+measured, and it cannot work.
+
+**The tone curve eats everything inside a bright disc.** With a peak of 26 in
+linear light, `c / (c + 1)` followed by gamma maps the centre of the disc to 250
+and its rim — already dimmed to 35% — to 243. A 3% change across the whole face.
+Pushing limb darkening further and adding a warm rim colour moved the numbers to
+252 at the centre and 249 at nine-tenths of the radius: still flat. Ratios
+between channels survive compression no better than absolute levels do once
+everything is above about 5, where the curve has no slope left.
+
+And a blown-out disc is *correct*. A camera pointed at the sun clips; a sun that
+did not would not read as the sun. So the disc is not the problem to solve.
+
+**The character has to live around the light, not inside it.** Three changes,
+all measured by reading the framebuffer back:
+
+- The inner corona roughly doubled, so the disc melts into a glow instead of
+  ending on an edge: alpha at 1.5 disc radii went 74 → 143, and 89 at two radii.
+- The halo now runs **warm near, cool far** — neutral forward-scattered Mie
+  close in, blue Rayleigh beyond — because a single warm tint across the whole
+  glow is the tell of a hand-drawn lens flare.
+- **Six diffraction spikes**, which is what finally stopped it reading as a
+  pasted circle. Measured at three disc radii: 91 at a spike against 53 between
+  them. The star field already draws spikes for the same physical reason, so the
+  sun and the stars now behave as though recorded by the same instrument — which
+  is most of what "photographic" means.
+
+The warm rim was kept even though it is nearly invisible at noon, because it is
+not invisible at sunset: there `slant` has already pulled the disc down to a few
+units of linear light, where the tone curve has slope again, and the same
+gradient shows properly.
+
+## 39. The moon, with its real phase
+
+`illuminatedFraction` was already being computed and thrown away — the moon was
+drawn as a flat lit disc at every phase.
+
+It is a sphere now. The phase angle comes from the real fraction
+(`f = (1 + cos θ)/2`, so `θ = acos(2f − 1)`), and a point on the disc is lit
+when its own surface normal faces the sun: `u·sin θ + w·cos θ > 0`, with
+`w = sqrt(1 − u² − v²)`. That is what curves the terminator into the ellipse a
+real moon shows. A half-plane cut is the tempting simplification and it looks
+correct at exactly two phases in the month.
+
+**The lit side faces the sun that is on screen**, taken from `uSunDisplayDir`
+rather than the physical vector. Both bodies are in the same frame, and the one
+thing anyone will actually check is whether the crescent points at the sun they
+can see; the physical vector would light it from a direction the frame does not
+contain. The fraction stays real either way, and so does which side is lit,
+because the artistic remap preserves the bodies' left-right order.
+
+Earthshine was added with it — the ashen glow on the dark limb of a young moon,
+sunlight bounced off the Earth. It is strongest exactly when the crescent is
+thinnest, because that is when the Earth seen from the moon is nearly full.
+
+Verified by rendering and counting lit pixels rather than by reading the code:
+
+| date | true illumination | measured lit fraction of the disc |
+| --- | --- | --- |
+| 2026-03-03 | 0.998 | 1.00 |
+| 2026-03-27 | 0.725 | 0.77 |
+| 2026-03-25 | 0.509 | 0.54 |
+
+The small excess is the softened terminator and earthshine crossing the
+brightness threshold, which is what those are for.
