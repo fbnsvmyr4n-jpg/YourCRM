@@ -174,7 +174,7 @@ export default async function ReportsPage({
             * refresh — "look at July" becomes something to send rather than a
             * sequence of clicks to describe.
             */}
-          <div className="mt-3 flex flex-wrap items-center gap-1">
+          <div className="tab-row mt-3 flex flex-wrap items-center gap-1">
             {PERIODS.map((id) => (
               <Link
                 key={id}

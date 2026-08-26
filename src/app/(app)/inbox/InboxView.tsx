@@ -222,7 +222,7 @@ export function InboxView({
         {/* Category chips. These were decoration — a message had no category,
             so there was nothing for them to filter on. They now toggle a real
             filter and carry live counts. */}
-        <div className="flex flex-wrap items-center gap-2.5">
+        <div className="tab-row flex flex-wrap items-center gap-2.5">
         {MSG_CATEGORIES.map((c) => {
           const meta = CHIP_META[c];
           const Icon = meta.icon;
@@ -262,7 +262,7 @@ export function InboxView({
       </div>
 
         {/* Folder tabs */}
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="tab-row flex flex-wrap items-center gap-2">
         {inboxFilters.map((f) => {
           const active = filter === f;
           const count = f === "Unread" ? messages.filter((m) => m.unread && !m.trashed).length : undefined;

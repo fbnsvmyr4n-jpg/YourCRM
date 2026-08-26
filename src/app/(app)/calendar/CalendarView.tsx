@@ -219,7 +219,7 @@ export default function CalendarView({
             </h1>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="tab-row flex flex-wrap items-center gap-2">
             {(["Online", "In-Person"] as const).map((t) => {
               const s = TYPE_STYLE[t];
               const active = typeFilter === t;

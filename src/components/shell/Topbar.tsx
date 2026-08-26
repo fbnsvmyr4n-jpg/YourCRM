@@ -155,12 +155,25 @@ export function Topbar({
       <ThemeToggle />
 
       {/* Was a dead "Analytics" button. Now the shortcut to the assistant,
-          reachable from every page. */}
+          reachable from every page.
+
+          It was `sm:grid`, which meant it did not exist below 640px — so on
+          every phone the header showed a theme toggle where two buttons were
+          expected, and the assistant had no shortcut at all. On a product whose
+          headline feature is the assistant, hiding it on the device most people
+          carry is the wrong trade.
+
+          360px rather than 640: the budget is tight but real. Below `sm` the
+          chrome needs 284px with this button present, so at 320px the search
+          would be squeezed to 36px — narrower than its own icon — while at
+          360px it still has 76px and at 393px, which is the iPhone 15 and 16,
+          it has 109px. Every current iPhone clears 360; only the oldest SE
+          does not, and there it is the search that must win. */}
       <Link
         href="/chat"
         aria-label="Ask the AI assistant"
         title="Ask the AI assistant"
-        className="btn-soft focus-ring hidden h-10 w-10 place-items-center rounded-full sm:grid"
+        className="btn-soft focus-ring hidden h-10 w-10 place-items-center rounded-full min-[360px]:grid"
       >
         <Sparkles className="h-[18px] w-[18px] text-accent" />
       </Link>

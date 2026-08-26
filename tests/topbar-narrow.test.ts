@@ -75,3 +75,56 @@ describe("the top bar on a narrow screen", () => {
     expect(header).toMatch(/sm:px-7/);
   });
 });
+
+describe("the assistant shortcut is reachable on a phone", () => {
+  /**
+   * It was `sm:grid`, so it did not exist below 640px — on every phone the
+   * header showed a theme toggle where two buttons were expected, and the
+   * assistant had no shortcut at all. On a product whose headline feature is
+   * the assistant, hiding it on the device most people carry is the wrong
+   * trade.
+   */
+  const chatLink = (() => {
+    const at = source.indexOf('href="/chat"');
+    const match = source.slice(at).match(/className="([^"]*)"/);
+    if (!match) throw new Error("could not find the assistant shortcut");
+    return match[1];
+  })();
+
+  it("is not gated behind the desktop breakpoint", () => {
+    expect(chatLink).not.toMatch(/\bsm:grid\b/);
+  });
+
+  it("appears from 360px, where the header budget allows it", () => {
+    /* Below `sm` the chrome needs 284px with this button present: at 320px the
+       search would be squeezed to 36px, narrower than its own icon, while at
+       360px it keeps 76px. Every current iPhone clears 360. */
+    expect(chatLink).toMatch(/min-\[360px\]:grid/);
+  });
+});
+
+describe("filter rows scroll on a phone rather than wrapping", () => {
+  const css = readFileSync(
+    fileURLToPath(new URL("../src/app/globals.css", import.meta.url)),
+    "utf8"
+  );
+  const block = css.slice(css.indexOf("@media (max-width: 639.98px)"));
+
+  it("is scoped to below the desktop breakpoint", () => {
+    /**
+     * The whole rule has to live inside a max-width query. `.tab-row` is
+     * applied to rows that wrap perfectly well on a desktop, so if this ever
+     * escaped its media query it would turn every filter row in the app into a
+     * scroll container — the opposite of the fix, everywhere it was not needed.
+     */
+    expect(css).toMatch(/@media \(max-width: 639\.98px\)/);
+    expect(block).toMatch(/\.tab-row\s*\{[^}]*flex-wrap:\s*nowrap/);
+    expect(block).toMatch(/\.tab-row\s*\{[^}]*overflow-x:\s*auto/);
+  });
+
+  it("keeps the pills at their natural size", () => {
+    // A nowrap row that lets its children squash is worse than one that wraps.
+    expect(block).toMatch(/\.tab-row > \*\s*\{[^}]*flex:\s*0 0 auto/);
+  });
+});
+
