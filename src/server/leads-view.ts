@@ -154,7 +154,7 @@ export async function leadAnalytics(q: TenantQuery): Promise<LeadAnalytics> {
 export type AgeBucket = { id: string; label: string; count: number };
 
 export type LeadAgeing = {
-  /** Open leads carrying a usable timestamp, bucketed against the response target. */
+  /** Open leads carrying a usable timestamp, on the four rungs below. */
   buckets: AgeBucket[];
   /** Open leads counted in the buckets above. */
   dated: number;
@@ -173,37 +173,88 @@ export type LeadAgeing = {
    * is the thing this number is for.
    */
   medianMinutes: number | null;
-  /** Open, dated leads already past the two-hour target. */
+  /** Open, dated leads that missed the one-hour target. */
   breaching: number;
 };
 
 const MINUTE_MS = 60_000;
+const DAY_MS = 86_400_000;
 
-/** The response target this business works to: answer within two hours. */
-export const TARGET_MINUTES = 120;
-/** Past this, a lead has gone from late to neglected. */
-export const HARD_LIMIT_MINUTES = 1440;
+/** Call a new lead inside the hour. That is the whole incentive. */
+export const TARGET_MINUTES = 60;
+/** Past two days a lead is not late, it is neglected. */
+export const STALE_MINUTES = 2880;
 
 /**
- * How long the open leads have been waiting.
+ * The calendar date a timestamp falls on, in the business's own time zone.
  *
- * The buckets are hours, not weeks. A lead should be answered within an hour
- * or two and a day is the worst acceptable case, so week-and-month buckets
- * reported a page full of green while a six-hour-old lead was already late —
- * the scale hid the exact failure the panel exists to catch.
- *
- * Everything here is a count of records whose timestamp falls in a range, so
- * there is nothing to invent and nothing to estimate. Won leads are excluded:
- * the age of a closed deal is history, not work.
- *
- * `now` is injected so the buckets can be tested against fixed times instead
- * of whatever the clock says while the suite runs.
+ * "Yesterday" has to mean yesterday where the business is, not in UTC — a lead
+ * captured at 21:00 in Johannesburg is yesterday's work to the person opening
+ * this page, and UTC would still be calling it today. `en-CA` is used only
+ * because it formats as YYYY-MM-DD, which sorts and compares as a string.
  */
-export function leadAgeing(leads: LeadCard[], now: number = Date.now()): LeadAgeing {
+function dayKey(ts: number, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(ts));
+}
+
+/** The calendar day before `key`, done as date arithmetic so DST cannot shift it. */
+function previousDay(key: string): string {
+  const [y, m, d] = key.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d) - DAY_MS).toISOString().slice(0, 10);
+}
+
+/**
+ * How long the open leads have been waiting, on the ladder the business works.
+ *
+ * Four rungs, evaluated IN ORDER, so every open lead lands on exactly one and
+ * the counts always sum to `dated`:
+ *
+ *   1. Within the hour — the target, and the only rung that is good news.
+ *   2. Earlier today   — slipped past the hour, still saveable today.
+ *   3. Yesterday       — missed, and the first thing to work this morning.
+ *   4. Still waiting   — older than yesterday. Yesterday's lead lands here
+ *                        tomorrow if nobody calls it, which is the point.
+ *
+ * Order matters and is not cosmetic. A lead captured at 23:40 last night is an
+ * hour old at 00:40 — by the calendar it is "yesterday", but the person has
+ * done nothing wrong and the panel must not say they have. The hour rung is
+ * tested first, so recency always beats the calendar.
+ *
+ * Rungs 2–4 are calendar days rather than elapsed hours because that is how
+ * the work is actually organised: "the ones I didn't get to yesterday" is a
+ * pile someone can pick up, whereas "the ones between 19 and 43 hours old" is
+ * not. `timeZone` is the business's own, so the piles break where their day
+ * breaks.
+ *
+ * Everything here is a count of records whose timestamp falls in a range —
+ * nothing estimated, nothing derived from anything but `created_at`. Won leads
+ * are excluded: the age of a closed deal is history, not work.
+ *
+ * `timeZone` and `now` are injected so the ladder can be tested against fixed
+ * instants instead of whatever the clock and the server locale happen to say.
+ * `now` is last and defaulted: reading the clock AT the call site is an impure
+ * call during render, which the React compiler rejects outright.
+ */
+export function leadAgeing(
+  leads: LeadCard[],
+  timeZone: string = "UTC",
+  now: number = Date.now()
+): LeadAgeing {
   const open = leads.filter((l) => l.status !== "Closed Won");
 
+  const today = dayKey(now, timeZone);
+  const yesterday = previousDay(today);
+
+  const counts = { hour: 0, today: 0, yesterday: 0, waiting: 0 };
   const ages: number[] = [];
   let undated = 0;
+  let oldest: LeadAgeing["oldest"] = null;
+  let oldestMinutes = -1;
 
   for (const l of open) {
     const t = Date.parse(l.createdAt ?? "");
@@ -211,41 +262,43 @@ export function leadAgeing(leads: LeadCard[], now: number = Date.now()): LeadAge
       undated++;
       continue;
     }
+
     /* A timestamp in the future is bad data, not a negative age. It clamps to
-       zero — "captured, not yet waited" — rather than subtracting from a
-       bucket or producing "-3 hours waiting". */
-    ages.push(Math.max(0, Math.floor((now - t) / MINUTE_MS)));
-  }
-
-  const buckets: AgeBucket[] = [
-    {
-      id: "ontime",
-      label: "Within 2 hours",
-      count: ages.filter((m) => m <= TARGET_MINUTES).length,
-    },
-    {
-      id: "late",
-      label: "2–24 hours",
-      count: ages.filter((m) => m > TARGET_MINUTES && m <= HARD_LIMIT_MINUTES).length,
-    },
-    {
-      id: "cold",
-      label: "Over a day",
-      count: ages.filter((m) => m > HARD_LIMIT_MINUTES).length,
-    },
-  ];
-
-  let oldest: LeadAgeing["oldest"] = null;
-  let oldestMinutes = -1;
-  for (const l of open) {
-    const t = Date.parse(l.createdAt ?? "");
-    if (Number.isNaN(t)) continue;
+       zero — "captured, not yet waited" — rather than producing "-3 hours" or
+       landing on a rung by being ahead of the clock. */
     const minutes = Math.max(0, Math.floor((now - t) / MINUTE_MS));
+    ages.push(minutes);
+
     if (minutes > oldestMinutes) {
       oldestMinutes = minutes;
       oldest = { name: l.name, company: l.company, minutes };
     }
+
+    if (minutes < TARGET_MINUTES) counts.hour++;
+    else {
+      const key = dayKey(t, timeZone);
+      /* `>=` rather than `===`, and the difference is currently unobservable:
+         a future-dated lead clamps to zero minutes above and is caught by the
+         hour rung, so `key > today` cannot be reached from here. Mutating it
+         to `===` passes the whole suite for exactly that reason — an
+         equivalent mutant, not a gap in the tests.
+
+         It stays as `>=` because the two forms fail differently if the clamp
+         ever moves: `>=` files a stray future date under today, which is
+         harmless, while `===` would drop it onto "Still waiting" and accuse
+         somebody over a row that has not aged at all. */
+      if (key >= today) counts.today++;
+      else if (key === yesterday) counts.yesterday++;
+      else counts.waiting++;
+    }
   }
+
+  const buckets: AgeBucket[] = [
+    { id: "hour", label: "Within the hour", count: counts.hour },
+    { id: "today", label: "Earlier today", count: counts.today },
+    { id: "yesterday", label: "Yesterday", count: counts.yesterday },
+    { id: "waiting", label: "Still waiting", count: counts.waiting },
+  ];
 
   const sorted = [...ages].sort((a, b) => a - b);
   const medianMinutes =
@@ -261,7 +314,7 @@ export function leadAgeing(leads: LeadCard[], now: number = Date.now()): LeadAge
     undated,
     oldest,
     medianMinutes,
-    breaching: ages.filter((m) => m > TARGET_MINUTES).length,
+    breaching: ages.filter((m) => m >= TARGET_MINUTES).length,
   };
 }
 
@@ -295,7 +348,8 @@ export function formatWait(minutes: number): string {
  */
 export function waitTone(minutes: number | null): string {
   if (minutes === null) return "var(--text-muted)";
-  if (minutes <= TARGET_MINUTES) return "var(--green)";
-  if (minutes <= HARD_LIMIT_MINUTES) return "var(--amber)";
-  return "var(--red)";
+  if (minutes < TARGET_MINUTES) return "var(--green)";
+  if (minutes < 1440) return "var(--amber)";
+  if (minutes < STALE_MINUTES) return "var(--red)";
+  return "var(--red-deep)";
 }

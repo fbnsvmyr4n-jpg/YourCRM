@@ -10,6 +10,7 @@ import {
   type LeadAgeing,
   type LeadAnalytics,
 } from "@/server/leads-view";
+import { getSettings } from "@/server/repos/settings";
 import { withTenantPage } from "@/server/tenant-session";
 import { LeadCardsSection } from "./LeadCardsSection";
 
@@ -18,12 +19,16 @@ export const dynamic = "force-dynamic";
 export default async function LeadsPage() {
   const { leads, stats, ageing } = await withTenantPage(async (q) => {
     const rows = await listLeadsWithStatus(q);
+    /* "Yesterday" has to mean yesterday where the business is. Read in the
+       same transaction as the rows it buckets, so the day boundary and the
+       leads cannot come from two different reads. */
+    const { timeZone } = await getSettings(q);
     return {
       leads: rows,
       stats: await leadAnalytics(q),
       // Derived from the rows already in hand — no second query, and the
       // ageing cannot disagree with the list it sits beside.
-      ageing: leadAgeing(rows),
+      ageing: leadAgeing(rows, timeZone || "UTC"),
     };
   });
 
@@ -98,10 +103,14 @@ export default async function LeadsPage() {
 function WaitingCard({ ageing }: { ageing: LeadAgeing }) {
   const total = ageing.dated;
   const max = Math.max(1, ...ageing.buckets.map((b) => b.count));
+  /* Four rungs need four steps. green / amber / red is three, and two rows
+     sharing red reads as one severity — so the worst rung takes `--red-deep`,
+     a token defined once per theme rather than a hardcoded hex. */
   const TONE: Record<string, string> = {
-    ontime: "var(--green)",
-    late: "var(--amber)",
-    cold: "var(--red)",
+    hour: "var(--green)",
+    today: "var(--amber)",
+    yesterday: "var(--red)",
+    waiting: "var(--red-deep)",
   };
 
   return (
@@ -150,14 +159,24 @@ function WaitingCard({ ageing }: { ageing: LeadAgeing }) {
             {/* The target said out loud. A wait means nothing without the
                 number it is being judged against. */}
             <p className="mt-1 text-[10px] uppercase tracking-wide text-faint">
-              Target: within 2 hours
+              Target: within the hour
             </p>
           </div>
 
           <div className="mt-5 flex flex-1 flex-col justify-center gap-4">
             {ageing.buckets.map((b) => (
               <div key={b.id} className="flex items-center gap-3">
-                <span className="w-28 shrink-0 truncate text-xs text-muted">{b.label}</span>
+                {/* The label carries the tone once the rung is non-empty. A row
+                    reading "Still waiting  0" should not shout; one reading
+                    "Still waiting  4" should. */}
+                <span
+                  className="w-28 shrink-0 truncate text-xs"
+                  style={{
+                    color: b.count > 0 && b.id !== "hour" ? TONE[b.id] : "var(--text-muted)",
+                  }}
+                >
+                  {b.label}
+                </span>
                 <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-[var(--border)]">
                   <div
                     className="h-full rounded-full"
