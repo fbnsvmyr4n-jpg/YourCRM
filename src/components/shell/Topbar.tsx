@@ -244,9 +244,22 @@ export function Topbar({
           type="button"
           aria-expanded={menuOpen}
           onClick={() => setMenuOpen((v) => !v)}
-          className="btn-soft focus-ring flex items-center gap-2.5 rounded-full py-1 pl-1 pr-2.5"
+          /*
+             Symmetric padding once the label is gone.
+
+             `pl-1 pr-2.5` is right when the name and chevron follow the avatar:
+             the extra 6px on the right balances the text. Below `sm` both of
+             those are `hidden`, so the padding was wrapping a lone 36px circle
+             in 4px on the left and 10px on the right — the avatar sat 3px left
+             of the button's own centre, and the button rendered 50px wide next
+             to a 40px bell, so it also broke the rhythm of the row it ends.
+             Below `sm` it becomes a fixed 40px circle — the bell's exact size,
+             so the three round controls that end the row are one rhythm rather
+             than 40, 40, 46.
+          */
+          className="btn-soft focus-ring flex h-10 w-10 items-center justify-center gap-2.5 rounded-full p-0 sm:h-auto sm:w-auto sm:justify-start sm:py-1 sm:pl-1 sm:pr-2.5"
         >
-          <span className="accent-gradient grid h-9 w-9 place-items-center rounded-full text-[13px] font-semibold text-white">
+          <span className="accent-gradient grid h-8 w-8 place-items-center rounded-full text-[13px] font-semibold text-white sm:h-9 sm:w-9">
             {user.initials}
           </span>
           <span className="hidden text-left leading-tight sm:block">

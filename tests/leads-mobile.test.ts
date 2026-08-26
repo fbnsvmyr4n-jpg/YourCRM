@@ -31,6 +31,10 @@ const targetCard = readFileSync(
   fileURLToPath(new URL("../src/app/(app)/reports/SalesTargetCard.tsx", import.meta.url)),
   "utf8"
 );
+const topbar = readFileSync(
+  fileURLToPath(new URL("../src/components/shell/Topbar.tsx", import.meta.url)),
+  "utf8"
+);
 const cards = readFileSync(
   fileURLToPath(new URL("../src/app/(app)/leads/LeadCardsSection.tsx", import.meta.url)),
   "utf8"
@@ -41,7 +45,7 @@ describe("the leads page on a phone", () => {
     /* `flex flex-col sm:block` is the mechanism: below `sm` the order classes
        apply, from `sm` it is a plain block where `order` means nothing and the
        designed order returns. */
-    expect(page).toMatch(/flex max-w-\[1500px\] animate-fade-up flex-col sm:block/);
+    expect(page).toMatch(/flex max-w-\[1500px\] animate-fade-up flex-col gap-5 sm:block/);
     expect(page).toMatch(/order-2 sm:order-none/);
     expect(page).toMatch(/order-3 grid grid-cols-1 gap-5 sm:order-none/);
   });
@@ -104,6 +108,58 @@ describe("the leads page on a phone", () => {
     /* The card grid is untouched from `sm` up — same two-then-four columns it
        always had. Only its visibility is conditional. */
     expect(cards).toMatch(/mb-5 hidden grid-cols-2 gap-4 sm:grid @min-\[880px\]:grid-cols-4/);
+  });
+
+  it("spaces the reordered items from the container, not from the items", () => {
+    /**
+     * Every gap on this page used to be a margin on the item BELOW it, which
+     * is only correct while the document order holds. Reversing two items with
+     * `order` leaves the margin on whichever item still declares it, not on
+     * the boundary it was meant to fill.
+     *
+     * Measured at 375px: the leads list ended at y=1721 and Lead's Feed began
+     * at y=1721. Two bordered cards butted flush read as one overlapping the
+     * other, which is exactly how it was reported.
+     *
+     * `gap-5` belongs to the container, so it fills the boundary in either
+     * order, and it is desktop-inert by construction — from `sm` the box is
+     * `display:block`, where `gap` has no effect.
+     */
+    expect(page).toMatch(/flex max-w-\[1500px\] animate-fade-up flex-col gap-5 sm:block/);
+
+    /* The two margins that used to supply that spacing must not also apply
+       below `sm`, or the boundary is paid for twice. */
+    expect(page).toMatch(/pb-0 pt-1 sm:pb-5/);
+    expect(cards).toMatch(/"mt-0 sm:mt-5"/);
+  });
+
+  it("colours the filter strip at rest, not only when selected", () => {
+    /**
+     * The desktop cards carry their status hue all the time — a soft gradient
+     * wash and the count in the status colour. The strip painted only the
+     * SELECTED cell, so with "All" chosen (the default, and the one status
+     * with no colour of its own) every cell rendered grey and the colour
+     * language the rest of the page speaks vanished on a phone.
+     */
+    expect(cards).toMatch(/background: active \? soft : `linear-gradient\(135deg, \$\{soft\}, transparent 90%\)`/);
+
+    /* The count takes its hue unconditionally. `color: active ? color : undefined`
+       was the bug. */
+    expect(cards).toMatch(/leading-none" style=\{\{ color \}\}/);
+
+    /* Selection can no longer be carried by colour-vs-no-colour, so it is
+       carried by the flat wash and an underline. */
+    expect(cards).toMatch(/absolute inset-x-2 bottom-0 h-0\.5/);
+  });
+
+  it("centres the account button once its label is hidden", () => {
+    /* `pl-1 pr-2.5` balances the name and chevron that follow the avatar. Below
+       `sm` both are `hidden`, so that padding put the avatar 3px left of the
+       button's own centre and made the button 46px beside a 40px bell. */
+    expect(topbar).toMatch(/h-10 w-10 items-center justify-center gap-2\.5 rounded-full p-0 sm:h-auto sm:w-auto sm:justify-start sm:py-1 sm:pl-1 sm:pr-2\.5/);
+
+    /* A 36px avatar cannot centre inside a 40px button with a border. */
+    expect(topbar).toMatch(/h-8 w-8 place-items-center rounded-full[^"]*sm:h-9 sm:w-9/);
   });
 
   it("both filter controls drive the same state", () => {

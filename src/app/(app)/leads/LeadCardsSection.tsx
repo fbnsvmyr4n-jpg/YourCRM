@@ -102,7 +102,10 @@ export function LeadCardsSection({ leads }: { leads: LeadCard[] }) {
   }
 
   return (
-    <div className="mt-5">
+    /* `mt-5` separated this from the cards above it in document order. Below
+       `sm` the page reorders and puts this FIRST, where a top margin is both
+       wrong and double-counted against the container's `gap`. */
+    <div className="mt-0 sm:mt-5">
       {/*
           On a phone these are a segmented strip, not four cards.
 
@@ -122,6 +125,11 @@ export function LeadCardsSection({ leads }: { leads: LeadCard[] }) {
         {(["All", ...LEAD_STATUSES] as const).map((st) => {
           const active = filter === st;
           const tone = st === "All" ? null : STATUS_TONE[st];
+          /* "All" is the only cell with no status of its own, and it stays
+             neutral — exactly as the desktop card does. Giving it the page
+             accent was the first attempt and it measured out the same blue as
+             "New Lead" in the cell right beside it, so two adjacent filters
+             read as one. Neutral against three hues is the contrast. */
           const color = tone?.color ?? "var(--text)";
           const soft = tone?.soft ?? "var(--raise)";
           /* Short forms, because 85px of column will not hold "Follow-up
@@ -140,15 +148,39 @@ export function LeadCardsSection({ leads }: { leads: LeadCard[] }) {
               onClick={() => setFilter(st)}
               aria-pressed={active}
               className={clsx(
-                "focus-ring flex flex-col items-center gap-0.5 border-r border-[var(--border)] px-1 py-2.5 last:border-r-0 transition-colors",
+                "focus-ring relative flex flex-col items-center gap-0.5 border-r border-[var(--border)] px-1 py-2.5 last:border-r-0 transition-colors",
                 active ? "font-semibold" : "text-faint"
               )}
-              style={active ? { background: soft, color } : undefined}
+              /*
+                 Coloured at rest, not only when selected.
+
+                 The desktop cards carry their status colour all the time — a
+                 `linear-gradient(135deg, soft, transparent)` wash and the count
+                 in the status hue — and that is what makes the four of them
+                 readable at a glance. The strip only painted the SELECTED cell,
+                 so with "All" chosen (the default, and the one with no status
+                 of its own) every cell rendered grey and the colour language
+                 the rest of the page speaks disappeared on a phone.
+
+                 Same gradient, same hues, same compact row. Selection is now
+                 carried by the stronger flat wash and the underline below,
+                 which is a clearer signal than colour-vs-no-colour anyway.
+              */
+              style={{
+                background: active ? soft : `linear-gradient(135deg, ${soft}, transparent 90%)`,
+                color: active ? color : undefined,
+              }}
             >
               <span className="text-[10.5px] leading-tight">{short}</span>
-              <span className="text-lg font-bold tabular-nums leading-none" style={{ color: active ? color : undefined }}>
+              <span className="text-lg font-bold tabular-nums leading-none" style={{ color }}>
                 {counts[st] ?? 0}
               </span>
+              {active && (
+                <span
+                  className="absolute inset-x-2 bottom-0 h-0.5 rounded-full"
+                  style={{ background: color }}
+                />
+              )}
             </button>
           );
         })}

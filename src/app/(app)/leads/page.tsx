@@ -29,10 +29,22 @@ export default async function LeadsPage() {
        column, so the `order` classes below take effect; from `sm` it is a plain
        block again, where `order` is meaningless and the document order — the
        designed order — returns untouched.
+
+       The spacing has to move with them. Every gap on this page used to be a
+       margin on the item BELOW it, which is correct only while the document
+       order holds: reversing two items with `order` leaves the margin attached
+       to whichever item still declares it, not to the boundary it was meant to
+       fill. Measured at 375px, the leads list ended at y=1721 and Lead's Feed
+       began at y=1721 — the two cards butted flush, which reads as one card
+       overlapping another. `gap-5` puts the spacing on the CONTAINER, where it
+       belongs to the boundary rather than to an item, so it stays correct in
+       either order. It is desktop-inert by construction: from `sm` this is a
+       block box, and `gap` does nothing on a block box.
     */
-    <div className="mx-auto flex max-w-[1500px] animate-fade-up flex-col sm:block">
-      {/* Page header */}
-      <div className="pb-5 pt-1">
+    <div className="mx-auto flex max-w-[1500px] animate-fade-up flex-col gap-5 sm:block">
+      {/* Page header. The bottom padding becomes the container's `gap` below
+          `sm` — same 20px, counted once rather than twice. */}
+      <div className="pb-0 pt-1 sm:pb-5">
         <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Leads</h1>
         <p className="mt-1 text-sm text-muted">Track every lead, work your follow-ups, and close more deals.</p>
       </div>
