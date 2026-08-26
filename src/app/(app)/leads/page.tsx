@@ -1,62 +1,29 @@
-import Link from "next/link";
-import { Info, Settings2, Target } from "lucide-react";
-import { AreaChart } from "@/components/ui/AreaChart";
+import { Info } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
-import { Card, CardHeader } from "@/components/ui/Card";
+import { Card } from "@/components/ui/Card";
 import { STATUS_TONE, type LeadCard as LeadCardType } from "@/data/leads";
 import { leadAnalytics, listLeadsWithStatus, type LeadAnalytics } from "@/server/leads-view";
-import { reportData } from "@/server/analytics";
-import { getSettings } from "@/server/repos/settings";
 import { withTenantPage } from "@/server/tenant-session";
 import { LeadCardsSection } from "./LeadCardsSection";
-import { SalesTargetDetail } from "./SalesTargetDetail";
 
 export const dynamic = "force-dynamic";
 
 export default async function LeadsPage() {
-  const { leads, stats, revenueSeries, monthlyTarget, wonThisMonth } = await withTenantPage(
-    async (q) => {
-      const settings = await getSettings(q);
-      const report = await reportData(q);
+  const { leads, stats } = await withTenantPage(async (q) => ({
+    leads: await listLeadsWithStatus(q),
+    stats: await leadAnalytics(q),
+  }));
 
-      // Progress against target is real money from real won deals — the same
-      // source the dashboard and Reports read, so the three cannot disagree.
-      const monthStart = new Date();
-      monthStart.setUTCDate(1);
-      monthStart.setUTCHours(0, 0, 0, 0);
-
-      const wonThisMonth = report.weekly
-        .filter((w) => Date.parse(w.weekStart) >= monthStart.getTime())
-        .reduce((sum, w) => sum + w.wonCents, 0);
-
-      return {
-        leads: await listLeadsWithStatus(q),
-        stats: await leadAnalytics(q),
-        revenueSeries: report.weekly.map((w) => ({
-          label: new Date(w.weekStart).toLocaleDateString("en-GB", {
-            day: "numeric",
-            month: "short",
-          }),
-          value: Math.round(w.wonCents / 100),
-        })),
-        monthlyTarget: Math.round(settings.monthlyTargetCents / 100),
-        wonThisMonth: Math.round(wonThisMonth / 100),
-      };
-    }
-  );
-
-  // A target of zero is the default on a new account, and dividing by it gives
-  // Infinity. No target set is not 0% progress — it is no answer.
-  const pct = monthlyTarget > 0 ? Math.min(100, Math.round((wonThisMonth / monthlyTarget) * 100)) : null;
 
   return (
     /*
        On a phone the leads come first.
 
-       Collapsing the Sales Target panel moved the list from y=1305 to y=898 —
-       better, and still below the fold, because THREE analytics cards stack
-       above it: target, feed and sources. No amount of shrinking them gets a
-       lead onto the first screen of a page called "Sales Target & Leads".
+       Two analytics cards remain above the list in document order — feed and
+       sources — and neither is what someone opens this page to see. The Sales
+       Target card that used to sit here as well now lives on Reports, where a
+       target belongs beside the other headline numbers; that alone took 407px
+       off the top of this page.
 
        `flex flex-col sm:block` is the whole mechanism. Below `sm` this is a flex
        column, so the `order` classes below take effect; from `sm` it is a plain
@@ -66,13 +33,12 @@ export default async function LeadsPage() {
     <div className="mx-auto flex max-w-[1500px] animate-fade-up flex-col sm:block">
       {/* Page header */}
       <div className="pb-5 pt-1">
-        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Sales Target &amp; Leads</h1>
-        <p className="mt-1 text-sm text-muted">Track performance, manage leads, and close more deals.</p>
+        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Leads</h1>
+        <p className="mt-1 text-sm text-muted">Track every lead, work your follow-ups, and close more deals.</p>
       </div>
 
       {/* Top row */}
-      <div className="order-3 grid grid-cols-1 gap-5 sm:order-none @min-[960px]:grid-cols-[minmax(0,1.05fr)_minmax(0,1.1fr)_minmax(0,0.92fr)]">
-        <SalesTargetCard pct={pct} won={wonThisMonth} target={monthlyTarget} series={revenueSeries} />
+      <div className="order-3 grid grid-cols-1 gap-5 sm:order-none @min-[960px]:grid-cols-2">
         <LeadsFeedCard leads={leads} />
         <LeadSourcesCard stats={stats} />
       </div>
@@ -83,104 +49,6 @@ export default async function LeadsPage() {
         <LeadCardsSection leads={leads} />
       </div>
     </div>
-  );
-}
-
-/* ---------------- Sales Target ---------------- */
-
-function SalesTargetCard({
-  pct,
-  won,
-  target,
-  series,
-}: {
-  pct: number | null;
-  won: number;
-  target: number;
-  series: { label: string; value: number }[];
-}) {
-  return (
-    <Card>
-      <CardHeader
-        title="Sales Target"
-        icon={<Target className="h-[18px] w-[18px] text-accent" />}
-      />
-      <div className="flex items-start justify-between">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">Target Amount</p>
-          <p className="mt-1 text-4xl font-bold tracking-tight tabular-nums">
-            ${target.toLocaleString()}
-          </p>
-          <Link
-            href="/settings"
-            className="focus-ring mt-2 inline-flex items-center gap-1.5 text-xs text-muted transition-colors hover:text-accent"
-          >
-            Monthly Target <Settings2 className="h-3 w-3" />
-          </Link>
-        </div>
-        <span
-          className="rounded-xl border px-3 py-1.5 text-sm font-semibold text-green"
-          style={{ borderColor: "var(--green)", background: "var(--green-soft)" }}
-        >
-          ${won.toLocaleString()}
-        </span>
-      </div>
-
-      <SalesTargetDetail
-        summary={
-          /* What the row says when it is closed: the two numbers somebody
-             actually opens this panel for. */
-          <span className="flex items-baseline gap-2 text-sm">
-            <span className="font-semibold tabular-nums">${target.toLocaleString()}</span>
-            <span className="text-faint">target</span>
-            <span className="text-faint">·</span>
-            <span className="accent-text font-semibold tabular-nums">
-              {pct === null ? "—" : `${pct}%`}
-            </span>
-          </span>
-        }
-      >
-      <div className="mt-4 rounded-2xl border border-[var(--border)] p-4">
-        <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">Progress</p>
-        <p className="accent-text mt-1 text-3xl font-bold tabular-nums">{pct === null ? "—" : `${pct}%`}</p>
-        <p className="mt-2 text-xs text-muted">
-          {target > 0
-            ? `$${won.toLocaleString()} of $${target.toLocaleString()} this month`
-            : "Set a monthly target in Settings to track progress"}
-        </p>
-      </div>
-
-      {/* Gradient progress bar */}
-      <div className="mt-4">
-        <div className="relative h-3 w-full overflow-hidden rounded-full">
-          <div
-            className="absolute inset-0"
-            style={{
-              background: "linear-gradient(90deg,#e5484d 0%,#f5a524 45%,#16a34a 100%)",
-              opacity: 0.85,
-            }}
-          />
-          <div
-            className="absolute top-0 bottom-0 w-0.5 bg-white shadow"
-            style={{ left: `${pct ?? 0}%` }}
-          />
-        </div>
-        <div className="mt-1.5 flex justify-between text-[11px] text-faint">
-          <span>Start</span>
-          <span>Target</span>
-        </div>
-      </div>
-
-      {/* The chart sat in a 130px-wide sliver beside the progress figure, which
-          made it unreadable. Full width below the bar, and taller. */}
-      <div className="mt-5 border-t border-[var(--border)] pt-4">
-        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-faint">
-          Revenue — last 6 weeks
-        </p>
-        <AreaChart data={series} height={200} ticks={4} />
-      </div>
-      </SalesTargetDetail>
-    </Card>
   );
 }
 

@@ -13,14 +13,22 @@ import { describe, expect, it } from "vitest";
  * Collapsing the target moved it to y=898. Still below the fold, because the
  * other two cards remained: no amount of shrinking gets a lead onto the first
  * screen. Reordering did — y=184.
+ *
+ * The target then moved off this page entirely, to Reports. It is a headline
+ * number, not a lead, and Reports had every other headline number but no
+ * measure of whether they were good enough.
  */
 
 const page = readFileSync(
   fileURLToPath(new URL("../src/app/(app)/leads/page.tsx", import.meta.url)),
   "utf8"
 );
-const detail = readFileSync(
-  fileURLToPath(new URL("../src/app/(app)/leads/SalesTargetDetail.tsx", import.meta.url)),
+const reports = readFileSync(
+  fileURLToPath(new URL("../src/app/(app)/reports/page.tsx", import.meta.url)),
+  "utf8"
+);
+const targetCard = readFileSync(
+  fileURLToPath(new URL("../src/app/(app)/reports/SalesTargetCard.tsx", import.meta.url)),
   "utf8"
 );
 const cards = readFileSync(
@@ -38,21 +46,43 @@ describe("the leads page on a phone", () => {
     expect(page).toMatch(/order-3 grid grid-cols-1 gap-5 sm:order-none/);
   });
 
-  it("collapses the Sales Target panel without a media query", () => {
-    /**
-     * `hidden sm:block` means closed on a phone and open on a desktop FROM THE
-     * FIRST PAINT — server and client agree, so there is no hydration flash,
-     * and a desktop reader never depends on JavaScript to see a panel that was
-     * always visible there. State only ever opens it on a phone.
-     */
-    expect(detail).toMatch(/open \? "block" : "hidden"/);
-    expect(detail).toMatch(/sm:block/);
-    expect(detail).not.toMatch(/matchMedia|ResizeObserver/);
+  it("no longer carries the Sales Target card at all", () => {
+    /* Not hidden, not collapsed — absent. If the card ever came back here it
+       would silently re-add roughly 400px above the list on a phone, undoing
+       the reason this page was reordered in the first place. */
+    expect(page).not.toMatch(/SalesTargetCard/);
+    expect(page).not.toMatch(/monthlyTargetCents/);
+
+    /* And the title stopped promising something the page no longer shows. */
+    expect(page).not.toMatch(/Sales Target &amp; Leads/);
   });
 
-  it("keeps the collapsed panel reachable and labelled", () => {
-    expect(detail).toMatch(/aria-expanded=\{open\}/);
-    expect(detail).toMatch(/sm:hidden/);
+  it("hands the target to Reports, wired to real month-to-date revenue", () => {
+    expect(reports).toMatch(/<SalesTargetCard/);
+    expect(reports).toMatch(/monthlyTargetCents/);
+
+    /* Month-to-date, NOT the selected reporting period. A target is always
+       about this calendar month; if it followed the period control, "68% of
+       target" would mean something different depending on a dropdown that has
+       nothing to do with the target. */
+    expect(reports).toMatch(/setUTCDate\(1\)/);
+    expect(reports).toMatch(/reportData\(q\)/);
+  });
+
+  it("still refuses to divide by a target of zero", () => {
+    /* Zero is the default on a new account. No target set is not 0% progress —
+       it is no answer, so the card must receive null and say so. */
+    expect(reports).toMatch(/monthlyTarget > 0 \?/);
+    expect(reports).toMatch(/: null/);
+    expect(targetCard).toMatch(/pct: number \| null/);
+  });
+
+  it("does not render the six-week chart twice on Reports", () => {
+    /* On Leads this card carried the only chart on the page. Reports renders
+       the same six-week revenue series, larger, immediately below it — so the
+       chart came off the card in the move. */
+    expect(targetCard).not.toMatch(/AreaChart/);
+    expect(reports).toMatch(/<AreaChart data=\{r\.weekly\}/);
   });
 
   it("shows the filters as a segmented strip on a phone", () => {

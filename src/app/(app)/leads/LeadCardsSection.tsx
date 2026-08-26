@@ -5,7 +5,7 @@ import { useOpenFromQuery } from "@/lib/useOpenFromQuery";
 import { SortMenu } from "@/components/ui/SortMenu";
 
 import { useState } from "react";
-import { Mail, MapPin, MoreHorizontal, Pencil, Phone, Plus, Trash2, Users, X } from "lucide-react";
+import { ChevronDown, Mail, MapPin, MoreHorizontal, Pencil, Phone, Plus, Trash2, Users, X } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Overlay } from "@/components/ui/Overlay";
 import { SourceIcon } from "@/components/ui/SourceIcon";
@@ -296,14 +296,49 @@ function LeadCardItem({
   onEdit: () => void;
   onDelete: () => void;
 }) {
+  /* Closed on a phone, irrelevant on a desktop where the body never hides. */
+  const [open, setOpen] = useState(false);
   const tone = STATUS_TONE[lead.status] ?? { color: "var(--text-muted)", soft: "var(--raise)" };
   return (
-    <div className="card relative p-5">
-      <div className="flex items-start justify-between">
-        <div className="flex items-center gap-3">
+    <div className="card relative p-4 sm:p-5">
+      <div className="flex items-start justify-between gap-2">
+        {/*
+            On a phone the header row IS the lead, and tapping it opens the rest.
+
+            Measured with fifteen leads: each card was 245px, so the list alone
+            ran 3,675px and the whole page 5,182px — 6.7 screens — with the
+            analytics stranded at y=4,222 where nobody would ever scroll to find
+            them. A lead card showing email, phone, location, project, status
+            and source is a record you READ; a list of fifteen is something you
+            SCAN, and those are different jobs.
+
+            Collapsed it carries the three things you scan by — who, which
+            company, and what state they are in. Everything else is one tap
+            away, and on a desktop nothing is hidden at all.
+        */}
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          className="focus-ring -m-1 flex min-w-0 flex-1 items-center gap-3 rounded-xl p-1 text-left sm:pointer-events-none"
+        >
           <Avatar initials={lead.initials} color={lead.color} size="lg" />
-          <p className="text-base font-semibold">{lead.name}</p>
-        </div>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-base font-semibold">{lead.name}</span>
+            {/* Only worth the line on a phone, where the body is closed and this
+                is the only thing naming the business. */}
+            <span className="flex items-center gap-1.5 truncate text-xs text-muted sm:hidden">
+              <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: tone.color }} />
+              <span className="truncate">{lead.company || lead.status}</span>
+            </span>
+          </span>
+          <ChevronDown
+            className={clsx(
+              "h-4 w-4 shrink-0 text-faint transition-transform sm:hidden",
+              open && "rotate-180"
+            )}
+          />
+        </button>
         <div className="relative">
           <button onClick={onMenuToggle} className="focus-ring text-faint transition-colors hover:text-[var(--text)]" aria-label="Lead actions">
             <MoreHorizontal className="h-5 w-5" />
@@ -321,6 +356,7 @@ function LeadCardItem({
         </div>
       </div>
 
+      <div className={clsx("sm:block", open ? "block" : "hidden")}>
       <div className="mt-4 space-y-2 text-sm text-muted">
         <p className="flex items-center gap-2.5">
           <Mail className="h-4 w-4 shrink-0 text-faint" />
@@ -357,6 +393,7 @@ function LeadCardItem({
             <span className="truncate">{lead.source}</span>
           </span>
         </Field>
+      </div>
       </div>
     </div>
   );

@@ -19,7 +19,9 @@ import { companyRollups } from "@/server/repos/companies";
 import { getSettings } from "@/server/repos/settings";
 import { PERIODS, PERIOD_LABELS, isPeriod, resolvePeriod, type PeriodId } from "@/server/report-period";
 import { referralCredits } from "@/server/referrals";
+import { reportData } from "@/server/analytics";
 import { reportView } from "@/server/reports-view";
+import { SalesTargetCard } from "./SalesTargetCard";
 import { withTenantPage } from "@/server/tenant-session";
 import { ExportButton } from "./ExportButton";
 
@@ -58,17 +60,42 @@ export default async function ReportsPage({
   const periodId: PeriodId = isPeriod(requested) ? requested : "all-time";
   // Both in one tenant transaction — a referrer's credit cannot describe deals
   // a different read would not return.
-  const { r, referrers, accounts } = await withTenantPage(async (q) => {
+  const { r, referrers, accounts, monthlyTarget, wonThisMonth } = await withTenantPage(async (q) => {
     // The business's own time zone, so "July" is July where they are — read in
     // the same transaction as the figures it defines.
-    const { timeZone } = await getSettings(q);
-    const period = resolvePeriod(periodId, timeZone || "UTC");
+    const settings = await getSettings(q);
+    const period = resolvePeriod(periodId, settings.timeZone || "UTC");
+
+    /*
+       Month-to-date won, for the target card.
+
+       Read UNWINDOWED and separately from `reportView`, because the target is
+       always about this calendar month while the rest of this page follows
+       whichever period the user picked. Filtering the selected window would
+       make "68% of target" mean something different depending on a control
+       that has nothing to do with the target.
+    */
+    const monthStart = new Date();
+    monthStart.setUTCDate(1);
+    monthStart.setUTCHours(0, 0, 0, 0);
+    const toDate = await reportData(q);
+    const wonThisMonth = toDate.weekly
+      .filter((w) => Date.parse(w.weekStart) >= monthStart.getTime())
+      .reduce((sum, w) => sum + w.wonCents, 0);
+
     return {
       r: await reportView(q, period),
       referrers: await referralCredits(q),
       accounts: await companyRollups(q),
+      monthlyTarget: Math.round(settings.monthlyTargetCents / 100),
+      wonThisMonth: Math.round(wonThisMonth / 100),
     };
   });
+
+  // A target of zero is the default on a new account; dividing by it would give
+  // Infinity, so progress is simply unknown until one is set.
+  const targetPct =
+    monthlyTarget > 0 ? Math.min(100, Math.round((wonThisMonth / monthlyTarget) * 100)) : null;
 
   const kpis = [
     {
@@ -226,6 +253,20 @@ export default async function ReportsPage({
             <p className="text-xs text-faint">{k.sub}</p>
           </div>
         ))}
+      </div>
+
+      {/* Progress against the monthly target.
+
+          Directly under the headline numbers, because it is the one that says
+          whether they are good. Revenue Won answers "how much"; this answers
+          "is that enough", and the second question is the reason anybody opens
+          a reports page. */}
+      <div className="mt-5">
+        <SalesTargetCard
+          pct={targetPct}
+          won={wonThisMonth}
+          target={monthlyTarget}
+        />
       </div>
 
       {/* Revenue over time + pipeline */}
