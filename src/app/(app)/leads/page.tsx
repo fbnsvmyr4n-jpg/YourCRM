@@ -1,18 +1,29 @@
 import { Info } from "lucide-react";
-import { Avatar } from "@/components/ui/Avatar";
 import { Card } from "@/components/ui/Card";
-import { STATUS_TONE, type LeadCard as LeadCardType } from "@/data/leads";
-import { leadAnalytics, listLeadsWithStatus, type LeadAnalytics } from "@/server/leads-view";
+import type { LeadCard as LeadCardType } from "@/data/leads";
+import {
+  leadAgeing,
+  leadAnalytics,
+  listLeadsWithStatus,
+  type LeadAgeing,
+  type LeadAnalytics,
+} from "@/server/leads-view";
 import { withTenantPage } from "@/server/tenant-session";
 import { LeadCardsSection } from "./LeadCardsSection";
 
 export const dynamic = "force-dynamic";
 
 export default async function LeadsPage() {
-  const { leads, stats } = await withTenantPage(async (q) => ({
-    leads: await listLeadsWithStatus(q),
-    stats: await leadAnalytics(q),
-  }));
+  const { leads, stats, ageing } = await withTenantPage(async (q) => {
+    const rows = await listLeadsWithStatus(q);
+    return {
+      leads: rows,
+      stats: await leadAnalytics(q),
+      // Derived from the rows already in hand — no second query, and the
+      // ageing cannot disagree with the list it sits beside.
+      ageing: leadAgeing(rows),
+    };
+  });
 
 
   return (
@@ -51,7 +62,7 @@ export default async function LeadsPage() {
 
       {/* Top row */}
       <div className="order-3 grid grid-cols-1 gap-5 sm:order-none @min-[960px]:grid-cols-2">
-        <LeadsFeedCard leads={leads} />
+        <WaitingCard ageing={ageing} />
         <LeadSourcesCard stats={stats} />
       </div>
 
@@ -64,84 +75,129 @@ export default async function LeadsPage() {
   );
 }
 
-/* ---------------- Lead's Feed ---------------- */
+/* ---------------- Waiting on You ---------------- */
 
 /**
- * Real leads, newest first. The old version rendered a hardcoded `leadsFeed`
- * array complete with invented revenue figures, call durations and
- * cold/mid/hot "temperature" badges — none of which the app records.
+ * Replaces "Lead's Feed", which was the same array as the list beside it —
+ * same names, same companies, same statuses — re-sorted and cut to six. On a
+ * phone that meant scrolling past fifteen leads to reach six of the same
+ * leads, and it cost about 400px to say nothing new.
+ *
+ * This answers something the page could not answer at all. Every lead carries
+ * a capture date and it appeared nowhere: the list tells you WHO is in the
+ * pipeline, and nothing told you how long any of them had been sitting there,
+ * which is the reading that actually drives a call.
+ *
+ * Every figure is a count of records whose timestamp falls in a range — there
+ * is nothing estimated and nothing derived from anything but `created_at`.
+ * Leads with no usable date are counted separately and said out loud rather
+ * than being given an invented age or dropped silently.
  */
-function LeadsFeedCard({ leads }: { leads: LeadCardType[] }) {
-  // New leads first — they are the ones nobody has touched yet — then
-  // follow-ups, then wins.
-  const order: Record<string, number> = { "New Lead": 0, "Follow-up Required": 1, "Closed Won": 2 };
-  const rows = [...leads]
-    .sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9))
-    .slice(0, 6);
+function WaitingCard({ ageing }: { ageing: LeadAgeing }) {
+  const total = ageing.dated;
+  const max = Math.max(1, ...ageing.buckets.map((b) => b.count));
+  const TONE: Record<string, string> = {
+    week: "var(--green)",
+    month: "var(--amber)",
+    stale: "var(--red)",
+  };
+
   return (
     <Card className="flex flex-col">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-[15px] font-semibold tracking-tight">Lead&apos;s Feed</h3>
-        {/* New Leads belong in the feed too — it previously showed only
-            follow-ups and closed won, so a brand new lead was invisible on the
-            very panel meant to surface incoming work. */}
-        <div className="flex items-center gap-3 text-[11px] text-muted">
-          <Legend color="var(--accent)" label="New" />
-          <Legend color="var(--amber)" label="Follow-up" />
-          <Legend color="var(--green)" label="Won" />
-        </div>
+      <div className="mb-4">
+        <h3 className="text-[15px] font-semibold tracking-tight">Waiting on You</h3>
+        <p className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-faint">
+          How long open leads have sat <Info className="h-3 w-3" />
+        </p>
       </div>
 
-      {rows.length === 0 ? (
-        <p className="flex-1 py-10 text-center text-sm text-faint">No leads yet.</p>
+      {total === 0 && ageing.undated === 0 ? (
+        /* Not "0 days" — nothing is open, which is a different statement from
+           everything being answered instantly. */
+        <p className="flex-1 py-10 text-center text-sm text-faint">
+          Nothing open. Every lead is either won or closed.
+        </p>
       ) : (
-        <div className="flex flex-1 flex-col">
-          {rows.map((l, i) => (
-            <div
-              key={l.id}
-              className={`flex items-center gap-3 py-3 ${i === rows.length - 1 ? "" : "border-b border-[var(--border)]"}`}
-            >
-              <Avatar initials={l.initials} color={l.color} size="sm" />
-              <div className="min-w-0 flex-1 leading-tight">
-                <p className="truncate text-sm font-semibold">{l.name}</p>
-                <p className="truncate text-xs text-faint">{l.company}</p>
-              </div>
-              <div className="hidden min-w-0 flex-1 sm:block">
-                {/* `inline-block`, not the default `inline`: on an inline
-                    element `w-fit` is inert and vertical padding doesn't affect
-                    line height, so a wrapped badge bleeds over the line below
-                    it. `whitespace-nowrap` keeps it on one line. */}
-                <span
-                  className="inline-block w-fit whitespace-nowrap rounded-md px-2 py-0.5 text-[10px] font-semibold"
-                  style={{
-                    background: STATUS_TONE[l.status]?.soft ?? "var(--raise)",
-                    color: STATUS_TONE[l.status]?.color ?? "var(--text-muted)",
-                  }}
-                >
-                  {l.status}
+        <>
+          {/*
+              One number, not two.
+
+              An open-lead count was the obvious partner for it and would have
+              been the THIRD copy of that figure on this page: the filter strip
+              already shows Follow-up, and Lead Sources shows Open right beside
+              this card. Replacing a duplicate panel with a duplicated number
+              would have missed the point of removing the feed.
+          */}
+          <div className="rounded-2xl border border-[var(--border)] p-3 text-center">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-faint">
+              Typical wait
+            </p>
+            <p className="mt-0.5 text-2xl font-bold tabular-nums accent-text">
+              {ageing.medianDays === null
+                ? "—"
+                : ageing.medianDays === 0
+                  ? "<1 day"
+                  : `${ageing.medianDays} day${ageing.medianDays === 1 ? "" : "s"}`}
+            </p>
+            <p className="mt-0.5 text-[11px] text-faint">
+              median across {total} open lead{total === 1 ? "" : "s"}
+            </p>
+          </div>
+
+          <div className="mt-5 flex flex-1 flex-col justify-center gap-4">
+            {ageing.buckets.map((b) => (
+              <div key={b.id} className="flex items-center gap-3">
+                <span className="w-28 shrink-0 truncate text-xs text-muted">{b.label}</span>
+                <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-[var(--border)]">
+                  <div
+                    className="h-full rounded-full"
+                    style={{ width: `${(b.count / max) * 100}%`, background: TONE[b.id] }}
+                  />
+                </div>
+                <span className="w-12 shrink-0 text-right text-sm font-semibold tabular-nums">
+                  {b.count}
                 </span>
-                <p className="mt-1 truncate text-xs text-faint">Source: {l.source}</p>
               </div>
-              <span
-                className="h-2.5 w-2.5 shrink-0 rounded-full"
-                style={{ background: STATUS_TONE[l.status]?.color ?? "var(--border-strong)" }}
-              />
+            ))}
+
+            <div className="mt-auto border-t border-[var(--border)] pt-4">
+              {ageing.oldest ? (
+                <>
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-faint">
+                    Longest waiting
+                  </p>
+                  <p className="mt-1 truncate text-sm font-bold">{ageing.oldest.name}</p>
+                  <p className="truncate text-[11px] text-faint">
+                    {ageing.oldest.company ? `${ageing.oldest.company} · ` : ""}
+                    {/* "0 days" is accurate and reads like a placeholder. A
+                        lead captured today has waited no days, and "today" is
+                        the same fact in the words a person would use. */}
+                    {ageing.oldest.days === 0
+                      ? "captured today"
+                      : `${ageing.oldest.days} day${ageing.oldest.days === 1 ? "" : "s"}`}
+                  </p>
+                </>
+              ) : (
+                <p className="text-[11px] text-faint">
+                  No open lead carries a capture date yet.
+                </p>
+              )}
+
+              {/* Said out loud, because otherwise the bars would quietly
+                  disagree with the Open count on the panel beside this one. */}
+              {ageing.undated > 0 && (
+                <p className="mt-2 text-[11px] text-faint">
+                  {ageing.undated} without a capture date, not counted above.
+                </p>
+              )}
             </div>
-          ))}
-        </div>
+          </div>
+        </>
       )}
     </Card>
   );
 }
 
-function Legend({ color, label }: { color: string; label: string }) {
-  return (
-    <span className="flex items-center gap-1.5">
-      <span className="h-2 w-2 rounded-full" style={{ background: color }} />
-      {label}
-    </span>
-  );
-}
 
 /* ---------------- Lead Sources ---------------- */
 

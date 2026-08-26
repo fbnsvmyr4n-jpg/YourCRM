@@ -148,3 +148,88 @@ export async function leadAnalytics(q: TenantQuery): Promise<LeadAnalytics> {
       .sort((a, b) => b.count - a.count),
   };
 }
+
+/* ---------------- Lead ageing ---------------- */
+
+export type AgeBucket = { id: string; label: string; count: number };
+
+export type LeadAgeing = {
+  /** Open leads carrying a usable timestamp, bucketed by how long they have waited. */
+  buckets: AgeBucket[];
+  /** Open leads counted in the buckets above. */
+  dated: number;
+  /**
+   * Open leads with no usable capture date. Reported rather than bucketed:
+   * guessing an age for them would put a made-up number on the screen, and
+   * silently dropping them would make the buckets disagree with the "Open"
+   * count on the panel beside this one.
+   */
+  undated: number;
+  /** The single lead that has waited longest, or null when nothing is open. */
+  oldest: { name: string; company: string; days: number } | null;
+  /**
+   * Median rather than mean. One lead sitting for two years drags an average
+   * far past anything the user would recognise as typical, and a typical wait
+   * is the thing this number is for.
+   */
+  medianDays: number | null;
+};
+
+const DAY_MS = 86_400_000;
+
+/**
+ * How long the open leads have been waiting.
+ *
+ * Everything here is a count of records whose timestamp falls in a range, so
+ * there is nothing to invent and nothing to estimate. Won leads are excluded:
+ * the age of a closed deal is history, not work.
+ *
+ * `now` is injected so the buckets can be tested against fixed dates instead of
+ * whatever the clock says while the suite runs.
+ */
+export function leadAgeing(leads: LeadCard[], now: number = Date.now()): LeadAgeing {
+  const open = leads.filter((l) => l.status !== "Closed Won");
+
+  const ages: number[] = [];
+  let undated = 0;
+
+  for (const l of open) {
+    const t = Date.parse(l.createdAt ?? "");
+    if (Number.isNaN(t)) {
+      undated++;
+      continue;
+    }
+    /* A timestamp in the future is bad data, not a negative age. It clamps to
+       zero — "captured, not yet waited" — rather than subtracting from a
+       bucket or producing "-3 days waiting". */
+    ages.push(Math.max(0, Math.floor((now - t) / DAY_MS)));
+  }
+
+  const buckets: AgeBucket[] = [
+    { id: "week", label: "Under a week", count: ages.filter((d) => d <= 7).length },
+    { id: "month", label: "1–4 weeks", count: ages.filter((d) => d > 7 && d <= 30).length },
+    { id: "stale", label: "Over a month", count: ages.filter((d) => d > 30).length },
+  ];
+
+  let oldest: LeadAgeing["oldest"] = null;
+  let oldestDays = -1;
+  for (const l of open) {
+    const t = Date.parse(l.createdAt ?? "");
+    if (Number.isNaN(t)) continue;
+    const days = Math.max(0, Math.floor((now - t) / DAY_MS));
+    if (days > oldestDays) {
+      oldestDays = days;
+      oldest = { name: l.name, company: l.company, days };
+    }
+  }
+
+  const sorted = [...ages].sort((a, b) => a - b);
+  const medianDays =
+    sorted.length === 0
+      ? null
+      : sorted.length % 2 === 1
+        ? sorted[(sorted.length - 1) / 2]
+        : Math.round((sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2);
+
+  return { buckets, dated: ages.length, undated, oldest, medianDays };
+}
