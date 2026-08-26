@@ -119,7 +119,20 @@ export function LeadCardsSection({ leads }: { leads: LeadCard[] }) {
               onClick={() => setFilter(st)}
               aria-pressed={active}
               className={clsx(
-                "card focus-ring flex items-center justify-between gap-3 p-5 text-left transition-all",
+                /*
+                   Stacked on a phone, side by side from `sm`.
+
+                   Two of these sit per row at 393px, leaving each about 170px —
+                   and a row of icon, two lines of label and a 3xl number does
+                   not fit in 170px. It wrapped instead: "All Leads" broke onto
+                   two lines, "Follow-up Required" onto three, and the count
+                   ended up jammed against the text. Stacking gives the label the
+                   full width of the card and puts the number on its own line,
+                   where it can be read at a glance — which is the entire job of
+                   a count.
+                */
+                "card focus-ring flex flex-col items-start gap-2 p-4 text-left transition-all",
+                "sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:p-5",
                 active ? "ring-2" : "hover:-translate-y-0.5"
               )}
               style={{
@@ -127,18 +140,24 @@ export function LeadCardsSection({ leads }: { leads: LeadCard[] }) {
                 ...(active ? ({ "--tw-ring-color": color } as React.CSSProperties) : {}),
               }}
             >
-              <span className="flex items-center gap-3">
-                <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl" style={{ background: soft }}>
-                  <Users className="h-5 w-5" style={{ color }} />
+              <span className="flex w-full items-center gap-2.5 sm:gap-3">
+                <span
+                  className="grid h-9 w-9 shrink-0 place-items-center rounded-xl sm:h-11 sm:w-11"
+                  style={{ background: soft }}
+                >
+                  <Users className="h-4 w-4 sm:h-5 sm:w-5" style={{ color }} />
                 </span>
-                <span className="leading-tight">
+                <span className="min-w-0 leading-tight">
                   <span className="block text-sm font-semibold">{label}</span>
                   <span className="block text-xs text-faint">
                     {active ? "Showing these" : "Tap to filter"}
                   </span>
                 </span>
               </span>
-              <span className="text-3xl font-bold tabular-nums" style={{ color }}>
+              <span
+                className="text-2xl font-bold tabular-nums sm:text-3xl"
+                style={{ color }}
+              >
                 {String(counts[st] ?? 0).padStart(2, "0")}
               </span>
             </button>
