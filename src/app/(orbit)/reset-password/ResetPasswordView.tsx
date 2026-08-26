@@ -1,9 +1,11 @@
 "use client";
 
+import Link from "next/link";
+
 import { useActionState, useState } from "react";
 import { AlertCircle, ArrowRight, Check, Eye, EyeOff, Lock, ShieldCheck } from "lucide-react";
 import { resetPasswordAction, type ResetState } from "@/app/(auth)/reset-actions";
-import { BrandLockup, OrbitScene } from "@/components/login/OrbitScene";
+import { BrandLockup } from "@/components/login/OrbitScene";
 
 export function ResetPasswordView({
   token,
@@ -19,8 +21,6 @@ export function ResetPasswordView({
   const done = !!state?.ok;
 
   return (
-    <main className="relative flex min-h-screen w-full items-center justify-center overflow-hidden px-5 py-14">
-      <OrbitScene />
 
       <div className="orbit-form">
         <div className="orbit-in flex justify-center" style={{ ["--d" as string]: "0.15s" }}>
@@ -39,21 +39,21 @@ export function ResetPasswordView({
         </p>
 
         {done ? (
-          <a
+          <Link
             href="/login"
             className="orbit-in orbit-submit focus-ring mt-9 flex items-center justify-center gap-2.5"
             style={{ ["--d" as string]: "0.46s" }}
           >
             <Check className="h-[18px] w-[18px]" /> Sign In
-          </a>
+          </Link>
         ) : !valid ? (
-          <a
+          <Link
             href="/login"
             className="orbit-in orbit-quiet focus-ring mt-9 inline-block rounded-lg text-[0.9rem] font-medium"
             style={{ ["--d" as string]: "0.46s" }}
           >
             Request a new link
-          </a>
+          </Link>
         ) : (
           <form className="mt-8 space-y-3.5" action={action}>
             <input type="hidden" name="token" value={token} />
@@ -122,6 +122,5 @@ export function ResetPasswordView({
           Secure. Private. Always.
         </div>
       </div>
-    </main>
   );
 }

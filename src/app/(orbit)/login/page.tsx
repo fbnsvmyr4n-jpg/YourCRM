@@ -1,9 +1,11 @@
 "use client";
 
+import Link from "next/link";
+
 import { useActionState, useState } from "react";
 import { AlertCircle, ArrowRight, Eye, EyeOff, Lock, ShieldCheck, User } from "lucide-react";
 import { signInAction, type AuthState } from "@/app/(auth)/actions";
-import { BrandLockup, OrbitScene } from "@/components/login/OrbitScene";
+import { BrandLockup } from "@/components/login/OrbitScene";
 import { ResetRequestForm } from "@/components/login/ResetRequestForm";
 
 export default function LoginPage() {
@@ -13,8 +15,6 @@ export default function LoginPage() {
   const [state, formAction, pending] = useActionState<AuthState, FormData>(signInAction, undefined);
 
   return (
-    <main className="relative flex min-h-screen w-full items-center justify-center overflow-hidden px-5 py-14">
-      <OrbitScene />
 
       <div className="orbit-form">
         <div className="orbit-in flex justify-center" style={{ ["--d" as string]: "0.15s" }}>
@@ -149,9 +149,9 @@ export default function LoginPage() {
         <div className="orbit-footer">
         <p className="orbit-in mt-6 text-[0.88rem] orbit-quiet-text" style={{ ["--d" as string]: "0.94s" }}>
           New to YourCRM?{" "}
-          <a href="/signup" className="orbit-quiet font-medium underline-offset-4 hover:underline">
+          <Link href="/signup" className="orbit-quiet font-medium underline-offset-4 hover:underline">
             Create an account
-          </a>
+          </Link>
         </p>
 
         <div
@@ -163,6 +163,5 @@ export default function LoginPage() {
         </div>
         </div>
       </div>
-    </main>
   );
 }

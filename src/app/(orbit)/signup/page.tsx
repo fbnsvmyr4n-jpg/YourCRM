@@ -1,17 +1,17 @@
 "use client";
 
+import Link from "next/link";
+
 import { useActionState, useState } from "react";
 import { AlertCircle, ArrowRight, Eye, EyeOff, Lock, Mail, ShieldCheck, User } from "lucide-react";
 import { signUpAction, type AuthState } from "@/app/(auth)/actions";
-import { BrandLockup, OrbitScene } from "@/components/login/OrbitScene";
+import { BrandLockup } from "@/components/login/OrbitScene";
 
 export default function SignUpPage() {
   const [showPw, setShowPw] = useState(false);
   const [state, formAction, pending] = useActionState<AuthState, FormData>(signUpAction, undefined);
 
   return (
-    <main className="relative flex min-h-screen w-full items-center justify-center overflow-hidden px-5 py-14">
-      <OrbitScene />
 
       <div className="orbit-form">
         <div className="orbit-in flex justify-center" style={{ ["--d" as string]: "0.15s" }}>
@@ -88,9 +88,9 @@ export default function SignUpPage() {
         <div className="orbit-footer">
         <p className="orbit-in mt-6 text-[0.88rem] orbit-quiet-text" style={{ ["--d" as string]: "0.8s" }}>
           Already have an account?{" "}
-          <a href="/login" className="orbit-quiet font-medium underline-offset-4 hover:underline">
+          <Link href="/login" className="orbit-quiet font-medium underline-offset-4 hover:underline">
             Log in
-          </a>
+          </Link>
         </p>
 
         <div
@@ -102,6 +102,5 @@ export default function SignUpPage() {
         </div>
         </div>
       </div>
-    </main>
   );
 }

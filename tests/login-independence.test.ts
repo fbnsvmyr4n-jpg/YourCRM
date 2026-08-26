@@ -170,7 +170,7 @@ describe("the sign-in form itself", () => {
      * not an ancestor of the form's submission path — so even a component that
      * threw while rendering the sky would leave the credentials path intact.
      */
-    const page = read("src/app/login/page.tsx");
+    const page = read("src/app/(orbit)/login/page.tsx");
     expect(page).toMatch(/action=\{formAction\}/);
     expect(page).toMatch(/useActionState<AuthState, FormData>\(signInAction/);
   });
@@ -178,18 +178,30 @@ describe("the sign-in form itself", () => {
   it("does not await the environment before rendering the form", () => {
     // No `await` on anything environmental in the page: the form is present in
     // the first paint whether or not the sky ever resolves.
-    const page = read("src/app/login/page.tsx");
+    const page = read("src/app/(orbit)/login/page.tsx");
     expect(page).not.toMatch(/await\s+(resolveLocation|solarSnapshot|environmentFor)/);
   });
 
   it("keeps the backdrop out of the form's own subtree", () => {
-    // The scene renders alongside the form rather than wrapping it, so a
-    // failure in the sky cannot take the fields down with it.
-    const page = read("src/app/login/page.tsx");
-    const sceneAt = page.indexOf("<OrbitScene");
-    const formAt = page.indexOf("<form");
+    /**
+     * The property is unchanged — a failure in the sky must not be able to take
+     * the fields down with it — but it now lives in the LAYOUT rather than in
+     * the page.
+     *
+     * The scene moved there so that navigating between sign-in and sign-up
+     * stops tearing down the WebGL context and flashing the CSS fallback. This
+     * test moved with it rather than being deleted, because "the sky is a
+     * sibling of the form, never its parent" is exactly as important now as it
+     * was before, and a layout that wrapped `{children}` in the scene would
+     * reintroduce the coupling silently.
+     */
+    const layout = read("src/app/(orbit)/layout.tsx");
+    const sceneAt = layout.indexOf("<OrbitScene");
+    const childrenAt = layout.indexOf("{children}");
     expect(sceneAt).toBeGreaterThan(-1);
-    expect(formAt).toBeGreaterThan(sceneAt);
-    expect(page).not.toMatch(/<OrbitScene[^/]*>[\s\S]*<form/);
+    expect(childrenAt).toBeGreaterThan(sceneAt);
+    expect(layout, "the scene must not wrap the page").not.toMatch(
+      /<OrbitScene[^/]*>[\s\S]*\{children\}/
+    );
   });
 });
