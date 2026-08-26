@@ -47,4 +47,14 @@ next-env.d.ts
 # Local credential notes — never commit
 CREDENTIALS.local.txt
 *.local.txt
-.dev-db/
+# Every dev database, however it is named.
+#
+# This was `.dev-db/` and that trailing slash cost 40MB in a public repo: a
+# corrupted database was moved aside to `.dev-db.corrupt-<timestamp>` before
+# being rebuilt, the pattern did not match the new name, and the next `git add
+# -A` committed 1,082 binary heap pages. An ignore rule that only covers the
+# happy-path name is not an ignore rule.
+.dev-db*
+
+# Text scraped out of a corrupted dev database. Contact data, dev only.
+salvaged-dev-records.txt
