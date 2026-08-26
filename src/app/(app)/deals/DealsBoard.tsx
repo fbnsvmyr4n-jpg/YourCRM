@@ -242,7 +242,11 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
   const defaultStage = addOpen && addOpen !== true ? addOpen : "prospect";
 
   return (
-    <div className="mx-auto flex h-[calc(100vh-104px)] max-w-[1600px] animate-fade-up flex-col">
+    /* The fixed viewport height belongs to the side-by-side board. Once the
+       stages stack it would trap the whole pipeline inside one screen-height
+       box with its own scrollbar, so below `sm` the height is left to the
+       content and the page scrolls normally. */
+    <div className="mx-auto flex max-w-[1600px] animate-fade-up flex-col sm:h-[calc(100vh-104px)]">
       <div className="flex flex-wrap items-start justify-between gap-4 pb-4 pt-1">
         <div>
           <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Deals Pipeline</h1>
@@ -311,7 +315,20 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
         />
       </div>
 
-      <div className="-mx-1 flex flex-1 scroll-p-2 gap-4 overflow-x-auto px-1 pb-2">
+      {/*
+          Stacked on a phone, side by side from `sm`.
+
+          A kanban is a horizontal idea, and on a 393px screen that meant one
+          stage visible and the rest off the edge behind a scrollbar — the user
+          could not see their own pipeline without dragging sideways, and had no
+          way of knowing how many stages there were. Stacking turns it into a
+          list of stages, each full width, which is what every mobile board app
+          does for the same reason.
+
+          Dragging still works: the drop targets are unchanged, they are simply
+          laid out vertically now.
+      */}
+      <div className="-mx-1 flex flex-col gap-4 px-1 pb-2 sm:flex-1 sm:scroll-p-2 sm:flex-row sm:overflow-x-auto">
         {STAGES.map((stage) => {
           const stageDeals = items.filter((d) => d.stage === stage.id);
           const total = stageDeals.reduce((s, d) => s + d.value, 0);
@@ -330,7 +347,7 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
               }}
               onDrop={() => handleDrop(stage.id)}
               className={clsx(
-                "flex w-[300px] shrink-0 flex-col rounded-2xl border transition-colors",
+                "flex w-full flex-col rounded-2xl border transition-colors sm:w-[300px] sm:shrink-0",
                 isOver ? "border-[var(--border-strong)] bg-[var(--raise)]" : "border-[var(--border)]"
               )}
             >

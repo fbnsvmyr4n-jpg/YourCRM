@@ -103,28 +103,36 @@ describe("the assistant shortcut is reachable on a phone", () => {
   });
 });
 
-describe("filter rows scroll on a phone rather than wrapping", () => {
+describe("filter rows wrap tidily on a phone", () => {
   const css = readFileSync(
     fileURLToPath(new URL("../src/app/globals.css", import.meta.url)),
     "utf8"
   );
   const block = css.slice(css.indexOf("@media (max-width: 639.98px)"));
 
-  it("is scoped to below the desktop breakpoint", () => {
+  it("does not hide options behind a horizontal scroll", () => {
     /**
-     * The whole rule has to live inside a max-width query. `.tab-row` is
-     * applied to rows that wrap perfectly well on a desktop, so if this ever
-     * escaped its media query it would turn every filter row in the app into a
-     * scroll container — the opposite of the fix, everywhere it was not needed.
+     * The first attempt made these rows scroll sideways, which is the common
+     * native idiom and the wrong answer here: it puts filters off the edge of
+     * the screen. A filter nobody can see is a filter nobody uses, and nothing
+     * on a page this small should need sideways dragging to discover.
+     *
+     * So the rule must NOT reintroduce a scroll container.
      */
-    expect(css).toMatch(/@media \(max-width: 639\.98px\)/);
-    expect(block).toMatch(/\.tab-row\s*\{[^}]*flex-wrap:\s*nowrap/);
-    expect(block).toMatch(/\.tab-row\s*\{[^}]*overflow-x:\s*auto/);
+    expect(block).not.toMatch(/\.tab-row\s*\{[^}]*overflow-x:\s*auto/);
+    expect(block).not.toMatch(/\.tab-row\s*\{[^}]*flex-wrap:\s*nowrap/);
   });
 
-  it("keeps the pills at their natural size", () => {
-    // A nowrap row that lets its children squash is worse than one that wraps.
-    expect(block).toMatch(/\.tab-row > \*\s*\{[^}]*flex:\s*0 0 auto/);
+  it("lets the pills share each row instead of straggling", () => {
+    /* `flex: 1 1 auto` stretches every pill to fill the line it lands on, so
+       two on a row become two halves rather than two left-aligned pills with a
+       gap on the end — which is what read as unfinished. */
+    expect(block).toMatch(/\.tab-row > \*\s*\{[^}]*flex:\s*1 1 auto/);
+  });
+
+  it("is scoped to below the desktop breakpoint", () => {
+    /* `.tab-row` sits on rows that wrap perfectly well on a desktop. If this
+       escaped its media query it would restyle every filter row in the app. */
+    expect(css).toMatch(/@media \(max-width: 639\.98px\)/);
   });
 });
-

@@ -2113,42 +2113,29 @@ textarea.field-input {
 /* ---------------- Filter rows on a phone ---------------- */
 
 /*
-   A row of filters should scroll, not wrap.
+   A row of filters should wrap TIDILY, not scroll and not straggle.
 
    Every page rolls its own `flex flex-wrap items-center gap-2` for its tabs —
-   Inbox's folders, Reports' periods, Calendar's ranges, Leads' segments. On a
-   desktop that wraps to one tidy line. On a phone it breaks into two or three
-   ragged rows with orphans on the end, which is what reads as unfinished: the
-   controls are correct but they land wherever there happens to be space.
+   Inbox's folders, Reports' periods, Calendar's ranges. On a desktop that wraps
+   to one clean line. On a phone it broke into two or three ragged rows with
+   orphans on the end, which is what read as unfinished: the controls were
+   correct but they landed wherever there happened to be space.
 
-   Below `sm` this becomes a single horizontally scrollable row, which is what a
-   phone expects and what every native segmented control does. At `sm` and above
-   the rule reverts to wrapping, so desktop is byte-for-byte unchanged.
+   The first attempt made this a horizontally scrolling row, which is the common
+   native idiom — and it is the wrong answer here, because it hides options off
+   the edge of the screen. A filter the user cannot see is a filter they will
+   not use, and nothing on a page this small should require sideways scrolling
+   to discover.
 
-   `scrollbar-width: none` because a horizontal scrollbar across a row of pills
-   looks like a mistake; the overflow is discoverable by dragging, which is the
-   native idiom.
+   So the pills grow to share each row instead. `flex: 1 1 auto` lets every item
+   stretch to fill the line it lands on, so two on a row become two halves and
+   three become three thirds — deliberate rather than left-aligned with a gap on
+   the end. Everything stays on screen and every option stays visible.
 */
 @media (max-width: 639.98px) {
-  .tab-row {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    scrollbar-width: none;
-    -webkit-overflow-scrolling: touch;
-    /* Bleed to the card's edge so the row reads as scrollable rather than
-       clipped, and restore the inset with padding. */
-    margin-inline: calc(var(--tab-row-bleed, 0px) * -1);
-    padding-inline: var(--tab-row-bleed, 0px);
-    scroll-padding-inline: var(--tab-row-bleed, 0px);
-  }
-
-  .tab-row::-webkit-scrollbar {
-    display: none;
-  }
-
-  /* Pills must keep their size; a nowrap row that lets them squash is worse
-     than one that wraps. */
   .tab-row > * {
-    flex: 0 0 auto;
+    flex: 1 1 auto;
+    justify-content: center;
+    text-align: center;
   }
 }
