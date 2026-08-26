@@ -154,38 +154,50 @@ export async function leadAnalytics(q: TenantQuery): Promise<LeadAnalytics> {
 export type AgeBucket = { id: string; label: string; count: number };
 
 export type LeadAgeing = {
-  /** Open leads carrying a usable timestamp, bucketed by how long they have waited. */
+  /** Open leads carrying a usable timestamp, bucketed against the response target. */
   buckets: AgeBucket[];
   /** Open leads counted in the buckets above. */
   dated: number;
   /**
    * Open leads with no usable capture date. Reported rather than bucketed:
    * guessing an age for them would put a made-up number on the screen, and
-   * silently dropping them would make the buckets disagree with the "Open"
-   * count on the panel beside this one.
+   * silently dropping them would make the buckets disagree with the lead
+   * counts elsewhere on the page.
    */
   undated: number;
   /** The single lead that has waited longest, or null when nothing is open. */
-  oldest: { name: string; company: string; days: number } | null;
+  oldest: { name: string; company: string; minutes: number } | null;
   /**
-   * Median rather than mean. One lead sitting for two years drags an average
+   * Median rather than mean. One lead forgotten for a month drags an average
    * far past anything the user would recognise as typical, and a typical wait
    * is the thing this number is for.
    */
-  medianDays: number | null;
+  medianMinutes: number | null;
+  /** Open, dated leads already past the two-hour target. */
+  breaching: number;
 };
 
-const DAY_MS = 86_400_000;
+const MINUTE_MS = 60_000;
+
+/** The response target this business works to: answer within two hours. */
+export const TARGET_MINUTES = 120;
+/** Past this, a lead has gone from late to neglected. */
+export const HARD_LIMIT_MINUTES = 1440;
 
 /**
  * How long the open leads have been waiting.
+ *
+ * The buckets are hours, not weeks. A lead should be answered within an hour
+ * or two and a day is the worst acceptable case, so week-and-month buckets
+ * reported a page full of green while a six-hour-old lead was already late —
+ * the scale hid the exact failure the panel exists to catch.
  *
  * Everything here is a count of records whose timestamp falls in a range, so
  * there is nothing to invent and nothing to estimate. Won leads are excluded:
  * the age of a closed deal is history, not work.
  *
- * `now` is injected so the buckets can be tested against fixed dates instead of
- * whatever the clock says while the suite runs.
+ * `now` is injected so the buckets can be tested against fixed times instead
+ * of whatever the clock says while the suite runs.
  */
 export function leadAgeing(leads: LeadCard[], now: number = Date.now()): LeadAgeing {
   const open = leads.filter((l) => l.status !== "Closed Won");
@@ -201,35 +213,89 @@ export function leadAgeing(leads: LeadCard[], now: number = Date.now()): LeadAge
     }
     /* A timestamp in the future is bad data, not a negative age. It clamps to
        zero — "captured, not yet waited" — rather than subtracting from a
-       bucket or producing "-3 days waiting". */
-    ages.push(Math.max(0, Math.floor((now - t) / DAY_MS)));
+       bucket or producing "-3 hours waiting". */
+    ages.push(Math.max(0, Math.floor((now - t) / MINUTE_MS)));
   }
 
   const buckets: AgeBucket[] = [
-    { id: "week", label: "Under a week", count: ages.filter((d) => d <= 7).length },
-    { id: "month", label: "1–4 weeks", count: ages.filter((d) => d > 7 && d <= 30).length },
-    { id: "stale", label: "Over a month", count: ages.filter((d) => d > 30).length },
+    {
+      id: "ontime",
+      label: "Within 2 hours",
+      count: ages.filter((m) => m <= TARGET_MINUTES).length,
+    },
+    {
+      id: "late",
+      label: "2–24 hours",
+      count: ages.filter((m) => m > TARGET_MINUTES && m <= HARD_LIMIT_MINUTES).length,
+    },
+    {
+      id: "cold",
+      label: "Over a day",
+      count: ages.filter((m) => m > HARD_LIMIT_MINUTES).length,
+    },
   ];
 
   let oldest: LeadAgeing["oldest"] = null;
-  let oldestDays = -1;
+  let oldestMinutes = -1;
   for (const l of open) {
     const t = Date.parse(l.createdAt ?? "");
     if (Number.isNaN(t)) continue;
-    const days = Math.max(0, Math.floor((now - t) / DAY_MS));
-    if (days > oldestDays) {
-      oldestDays = days;
-      oldest = { name: l.name, company: l.company, days };
+    const minutes = Math.max(0, Math.floor((now - t) / MINUTE_MS));
+    if (minutes > oldestMinutes) {
+      oldestMinutes = minutes;
+      oldest = { name: l.name, company: l.company, minutes };
     }
   }
 
   const sorted = [...ages].sort((a, b) => a - b);
-  const medianDays =
+  const medianMinutes =
     sorted.length === 0
       ? null
       : sorted.length % 2 === 1
         ? sorted[(sorted.length - 1) / 2]
         : Math.round((sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2);
 
-  return { buckets, dated: ages.length, undated, oldest, medianDays };
+  return {
+    buckets,
+    dated: ages.length,
+    undated,
+    oldest,
+    medianMinutes,
+    breaching: ages.filter((m) => m > TARGET_MINUTES).length,
+  };
+}
+
+/**
+ * A wait, in the largest unit that still says something useful.
+ *
+ * Minutes below an hour, hours below a day, days beyond that. A lead answered
+ * in forty minutes reading as "0 days" was the reason this exists.
+ */
+export function formatWait(minutes: number): string {
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} min`;
+  if (minutes < 1440) {
+    const h = Math.floor(minutes / 60);
+    return `${h} hour${h === 1 ? "" : "s"}`;
+  }
+  const d = Math.floor(minutes / 1440);
+  return `${d} day${d === 1 ? "" : "s"}`;
+}
+
+/**
+ * The colour a wait should be shown in, judged against the target.
+ *
+ * A pure function rather than a ternary inlined in the card, because the amber
+ * and red paths are the ones that matter and an account whose leads are all
+ * fresh never renders them — they would ship unverified. Here they are covered
+ * by the suite regardless of what the data happens to look like.
+ *
+ * `null` is not a breach and not a success: it means nothing is open, which
+ * has no colour to report.
+ */
+export function waitTone(minutes: number | null): string {
+  if (minutes === null) return "var(--text-muted)";
+  if (minutes <= TARGET_MINUTES) return "var(--green)";
+  if (minutes <= HARD_LIMIT_MINUTES) return "var(--amber)";
+  return "var(--red)";
 }

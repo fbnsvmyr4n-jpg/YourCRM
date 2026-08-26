@@ -2,7 +2,9 @@ import { Info } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import type { LeadCard as LeadCardType } from "@/data/leads";
 import {
+  formatWait,
   leadAgeing,
+  waitTone,
   leadAnalytics,
   listLeadsWithStatus,
   type LeadAgeing,
@@ -97,9 +99,9 @@ function WaitingCard({ ageing }: { ageing: LeadAgeing }) {
   const total = ageing.dated;
   const max = Math.max(1, ...ageing.buckets.map((b) => b.count));
   const TONE: Record<string, string> = {
-    week: "var(--green)",
-    month: "var(--amber)",
-    stale: "var(--red)",
+    ontime: "var(--green)",
+    late: "var(--amber)",
+    cold: "var(--red)",
   };
 
   return (
@@ -132,15 +134,23 @@ function WaitingCard({ ageing }: { ageing: LeadAgeing }) {
             <p className="text-[10px] font-semibold uppercase tracking-wide text-faint">
               Typical wait
             </p>
-            <p className="mt-0.5 text-2xl font-bold tabular-nums accent-text">
-              {ageing.medianDays === null
-                ? "—"
-                : ageing.medianDays === 0
-                  ? "<1 day"
-                  : `${ageing.medianDays} day${ageing.medianDays === 1 ? "" : "s"}`}
+            {/* Coloured against the target rather than always accent: the whole
+                point of a two-hour target is that the number is either inside
+                it or it is not, and a figure that reads the same either way
+                makes the reader do that comparison themselves. */}
+            <p
+              className="mt-0.5 text-2xl font-bold tabular-nums"
+              style={{ color: waitTone(ageing.medianMinutes) }}
+            >
+              {ageing.medianMinutes === null ? "—" : formatWait(ageing.medianMinutes)}
             </p>
             <p className="mt-0.5 text-[11px] text-faint">
               median across {total} open lead{total === 1 ? "" : "s"}
+            </p>
+            {/* The target said out loud. A wait means nothing without the
+                number it is being judged against. */}
+            <p className="mt-1 text-[10px] uppercase tracking-wide text-faint">
+              Target: within 2 hours
             </p>
           </div>
 
@@ -169,12 +179,12 @@ function WaitingCard({ ageing }: { ageing: LeadAgeing }) {
                   <p className="mt-1 truncate text-sm font-bold">{ageing.oldest.name}</p>
                   <p className="truncate text-[11px] text-faint">
                     {ageing.oldest.company ? `${ageing.oldest.company} · ` : ""}
-                    {/* "0 days" is accurate and reads like a placeholder. A
-                        lead captured today has waited no days, and "today" is
-                        the same fact in the words a person would use. */}
-                    {ageing.oldest.days === 0
-                      ? "captured today"
-                      : `${ageing.oldest.days} day${ageing.oldest.days === 1 ? "" : "s"}`}
+                    {/* Minutes below an hour, hours below a day. A lead waiting
+                        forty minutes reading as "0 days" was the reason this
+                        formats at all. */}
+                    <span style={{ color: waitTone(ageing.oldest.minutes) }}>
+                      waiting {formatWait(ageing.oldest.minutes)}
+                    </span>
                   </p>
                 </>
               ) : (
@@ -224,12 +234,11 @@ function LeadSourcesCard({ stats }: { stats: LeadAnalytics }) {
         </p>
       </div>
 
-      <div className="grid grid-cols-4 gap-2 rounded-2xl border border-[var(--border)] p-3 text-center">
-        <MiniStat label="Total" value={String(stats.total)} accent />
-        <MiniStat label="New" value={String(stats.fresh)} />
-        <MiniStat label="Open" value={String(stats.open)} />
-        <MiniStat label="Won" value={String(stats.closed)} />
-      </div>
+      {/* The Total / New / Open / Won row that used to sit here is gone. It was
+          the same four numbers as the filter strip at the top of this page,
+          which shows them larger, first, and lets you tap them. Repeating a
+          figure does not reinforce it; it just costs the space something else
+          could have used. */}
 
       {stats.bySource.length === 0 ? (
         <p className="flex-1 py-10 text-center text-sm text-faint">No leads yet.</p>
@@ -283,11 +292,3 @@ function LeadSourcesCard({ stats }: { stats: LeadAnalytics }) {
   );
 }
 
-function MiniStat({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
-  return (
-    <div>
-      <p className="text-[10px] font-semibold uppercase tracking-wide text-faint">{label}</p>
-      <p className={`mt-1 text-lg font-bold ${accent ? "text-amber" : ""}`}>{value}</p>
-    </div>
-  );
-}
