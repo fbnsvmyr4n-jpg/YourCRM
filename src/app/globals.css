@@ -2052,16 +2052,46 @@ textarea.field-input {
 .orbit-footer::before {
   content: "";
   position: absolute;
-  /* Wider than tall, and generous on every side — the same rule as the card's
-     wash: an edge that can be found is a box. */
-  inset: -55% -40%;
+  /* Generous on every side — the same rule as the card's wash: an edge that can
+     be found is a box. Taller than before, because the fade now has to finish
+     outside the text rather than across it. */
+  inset: -80% -40%;
   z-index: -1;
   pointer-events: none;
+  /*
+     Flatter than it was, and wider.
+
+     The first version fell away as `..., 52% at 48%, transparent at 78%`, and
+     checked on a real iPhone that put barely any darkness under the two lines
+     that need it: the text sits about a third of the way out along the radius,
+     where the ramp has already given up most of its alpha. Measured, the
+     backdrop under "Secure. Private. Always." is (44, 103, 30) — sunlit
+     vegetation — which is 4.5:1 against the text on its own. Exactly on the AA
+     floor, for 12.8px text, with nothing in hand.
+
+     So the wash holds full strength across the middle and only falls off past
+     the text, rather than starting to fade the moment it leaves the centre.
+  */
+  /*
+     The radii are 50%, and that is a constraint rather than a preference.
+
+     A radial gradient is clipped by its own box. Set the radius larger than the
+     box and the gradient is cut off while its alpha is still non-zero, which
+     paints a hard rectangular edge across the picture — visible on the phone as
+     a straight horizontal seam through the planet just below the OAuth buttons.
+     Widening it to cover the text is what caused that; the wash was strong
+     enough and simply ended too abruptly.
+
+     At 50% each, the transparent stop lands exactly on the box edge, so the
+     fade completes instead of being truncated. Anything that needs more reach
+     has to grow the INSET, not the radius.
+  */
   background: radial-gradient(
-    62% 52% at 50% 50%,
+    50% 50% at 50% 50%,
     var(--env-footer-scrim, transparent) 0%,
-    color-mix(in srgb, var(--env-footer-scrim, transparent) 52%, transparent) 48%,
-    transparent 78%
+    var(--env-footer-scrim, transparent) 34%,
+    color-mix(in srgb, var(--env-footer-scrim, transparent) 58%, transparent) 64%,
+    transparent 100%
   );
 }
 
