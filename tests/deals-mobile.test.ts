@@ -27,11 +27,13 @@ describe("the deals board on a phone", () => {
      * Stacking hands the value the full card width. Five elements were
      * measurably clipped before; zero are now.
      */
+    /* The stacking now lives in the `wide` conditional — it applies to the two
+       tiles that share a row, which are the ones with a width problem. */
     expect(board).toMatch(
-      /card flex flex-col items-start gap-2 p-4 sm:flex-row sm:items-center sm:gap-3/
+      /"flex-col items-start gap-2 sm:flex-row sm:items-center sm:gap-3"/
     );
     /* The icon shrinks too, or stacking just spends the saved width on height. */
-    expect(board).toMatch(/h-9 w-9 shrink-0 place-items-center rounded-xl sm:h-11 sm:w-11/);
+    expect(board).toMatch(/wide \? "h-11 w-11" : "h-9 w-9"/);
   });
 
   it("makes the hover-only controls reachable where there is no hover", () => {
@@ -82,6 +84,58 @@ describe("the deals board on a phone", () => {
        after the code had lost it. */
     expect(board).toMatch(/className="focus-ring -m-1 flex min-w-0 items-center gap-2 rounded-lg p-1 text-left sm:pointer-events-none"/);
     expect(board).toMatch(/h-4 w-4 shrink-0 text-faint transition-transform sm:hidden/);
+  });
+
+  it("ranks the four summary figures instead of tiling them", () => {
+    /**
+     * Four equal boxes claimed four equal facts. Three are money and one is a
+     * count; among the money only Open Pipeline is about what can still
+     * happen, Closed Won is the scoreboard, and In Delivery is a sub-state of
+     * it. So Open Pipeline takes the full row, the two "won" figures pair
+     * beneath it — larger first — and the count lays out as a slim strip where
+     * a number that is not money stops competing with ones that are.
+     *
+     * Measured at 375px: hero 335x88, pair 162x132 each, strip 335x88.
+     *
+     * Three-across was the other candidate and it fails on measurement, not
+     * taste: it leaves ~86px of text column for a figure needing 94, which is
+     * exactly the truncation this page was just fixed for.
+     */
+    const spans = board.match(/className="col-span-2 @min-\[880px\]:col-span-1"/g) ?? [];
+    expect(spans).toHaveLength(2);
+
+    /* Order is the deliverable here, so it is asserted as a sequence rather
+       than as four independent labels. */
+    const labels = [...board.matchAll(/^\s*label="([^"]+)"/gm)].map((m) => m[1]);
+    expect(labels).toEqual(["Open Pipeline", "Closed Won", "In Delivery", "Total Deals"]);
+  });
+
+  it("keeps the wide tiles short so they read as a different rank", () => {
+    /* Stacking exists to buy width for the figure. A tile that already spans
+       the row has the width, so it keeps the icon beside the number — and that
+       height difference is what makes the hierarchy visible rather than just
+       asserted. */
+    expect(board).toMatch(/wide[\s\S]{0,12}\? "flex-row items-center gap-3"/);
+    expect(board).toMatch(/wide \? "h-11 w-11" : "h-9 w-9"/);
+  });
+
+  it("puts Add Deal on the row that names what it adds to", () => {
+    /**
+     * It sat under the page description, floating above four summary tiles
+     * that have nothing to do with adding anything — you reached it before you
+     * had seen the board it acts on. It now sits on a "Pipeline" heading row
+     * directly above the stages, which is the pattern the Leads page uses.
+     */
+    expect(board).toMatch(/<h2 className="text-lg font-semibold tracking-tight">Pipeline<\/h2>/);
+    /* The header block that used to hold it now holds only the title block. */
+    expect(board).not.toMatch(/card to leave it\.\s*<\/p>\s*<\/div>\s*<button/);
+  });
+
+  it("does not print a third copy of the deal count", () => {
+    /* "Total Deals 15" is the tile directly above the heading, and every stage
+       header below carries its own count. A count beside "Pipeline" would sit
+       between the two. */
+    expect(board).not.toMatch(/Pipeline[\s\S]{0,8}<span className="ml-2/);
   });
 
   it("drops the divider that has nothing left to divide", () => {

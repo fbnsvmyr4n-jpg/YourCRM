@@ -279,12 +279,6 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
             card to leave it.
           </p>
         </div>
-        <button
-          onClick={() => setAddOpen(true)}
-          className="btn-accent focus-ring flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold"
-        >
-          <Plus className="h-[16px] w-[16px]" /> Add Deal
-        </button>
       </div>
 
       {moveError ? (
@@ -304,22 +298,38 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
         </div>
       ) : null}
 
+      {/*
+          Ranked, not tiled.
+
+          Four equal boxes said these are four equal facts, and they are not.
+          Three are money and one is a count; and among the money, only Open
+          Pipeline is about what can still happen. Closed Won is the scoreboard,
+          In Delivery is a sub-state of it, and Total Deals is context for all
+          three.
+
+          So the grid gives Open Pipeline the full width, pairs the two "won"
+          figures beneath it — bigger one first — and lays the count out as a
+          slim strip at the bottom, where a number that is not money stops
+          competing with the ones that are.
+
+          Three across was the other candidate and it fails on measurement, not
+          taste: at 375px it leaves each card about 86px of text column and
+          "$379,800" needs 94, so it would bring back the truncation this page
+          was just fixed for.
+
+          Every span is `@min-[880px]:col-span-1`, so the desktop row of four
+          is exactly what it was.
+      */}
       <div className="mb-4 grid grid-cols-2 gap-3 @min-[880px]:grid-cols-4">
         <SummaryTile
+          className="col-span-2 @min-[880px]:col-span-1"
+          wide
           icon={<Wallet className="h-5 w-5" />}
           label="Open Pipeline"
           sub="Discovery and Demo"
           value={fullMoney(summary.open)}
           tone="var(--amber)"
           soft="var(--amber-soft)"
-        />
-        <SummaryTile
-          icon={<HandCoins className="h-5 w-5" />}
-          label="In Delivery"
-          sub="Won, being delivered"
-          value={fullMoney(summary.inDelivery)}
-          tone={PARTIAL}
-          soft="rgba(249,115,22,0.12)"
         />
         <SummaryTile
           icon={<Coins className="h-5 w-5" />}
@@ -330,6 +340,16 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
           soft="var(--green-soft)"
         />
         <SummaryTile
+          icon={<HandCoins className="h-5 w-5" />}
+          label="In Delivery"
+          sub="Won, being delivered"
+          value={fullMoney(summary.inDelivery)}
+          tone={PARTIAL}
+          soft="rgba(249,115,22,0.12)"
+        />
+        <SummaryTile
+          className="col-span-2 @min-[880px]:col-span-1"
+          wide
           icon={<GripVertical className="h-5 w-5" />}
           label="Total Deals"
           sub="Across all stages"
@@ -337,6 +357,28 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
           tone="var(--accent)"
           soft="var(--accent-soft)"
         />
+      </div>
+
+      {/*
+          The section heading the board never had, and where Add Deal belongs.
+
+          The button sat under the page description, floating above four
+          summary tiles that have nothing to do with adding anything — you
+          reached for it before you had seen the board it acts on. Here it sits
+          on the row that names the thing it adds to, which is the pattern the
+          Leads page already uses.
+      */}
+      <div className="mb-3 flex items-center justify-between gap-3">
+        {/* No count beside the heading. "Total Deals 15" is the tile directly
+            above it, and every stage header below carries its own — a third
+            copy in between would be the Lead Sources mistake again. */}
+        <h2 className="text-lg font-semibold tracking-tight">Pipeline</h2>
+        <button
+          onClick={() => setAddOpen(true)}
+          className="btn-accent focus-ring flex shrink-0 items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold"
+        >
+          <Plus className="h-[16px] w-[16px]" /> Add Deal
+        </button>
       </div>
 
       {/*
@@ -498,6 +540,8 @@ function SummaryTile({
   value,
   tone,
   soft,
+  wide,
+  className,
 }: {
   icon: React.ReactNode;
   label: string;
@@ -505,6 +549,9 @@ function SummaryTile({
   value: string;
   tone: string;
   soft: string;
+  /** Spans the full width on a phone, so it keeps the icon beside the figure. */
+  wide?: boolean;
+  className?: string;
 }) {
   return (
     /*
@@ -520,9 +567,24 @@ function SummaryTile({
        Stacking gives the value the full width of the card, which is the entire
        reason the card exists. From `sm` the row returns untouched.
     */
-    <div className="card flex flex-col items-start gap-2 p-4 sm:flex-row sm:items-center sm:gap-3">
+    <div
+      className={clsx(
+        "card flex p-4",
+        /* Stacking exists to buy width for the figure. A tile that already
+           spans the row has the width, so it keeps the icon beside the number
+           and stays short — which is what makes the wide ones read as a
+           different rank from the pair between them. */
+        wide
+          ? "flex-row items-center gap-3"
+          : "flex-col items-start gap-2 sm:flex-row sm:items-center sm:gap-3",
+        className
+      )}
+    >
       <span
-        className="grid h-9 w-9 shrink-0 place-items-center rounded-xl sm:h-11 sm:w-11"
+        className={clsx(
+          "grid shrink-0 place-items-center rounded-xl sm:h-11 sm:w-11",
+          wide ? "h-11 w-11" : "h-9 w-9"
+        )}
         style={{ background: soft, color: tone }}
       >
         {icon}
