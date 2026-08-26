@@ -103,9 +103,60 @@ export function LeadCardsSection({ leads }: { leads: LeadCard[] }) {
 
   return (
     <div className="mt-5">
+      {/*
+          On a phone these are a segmented strip, not four cards.
+
+          As cards they cost about 410px before a single lead appeared — two
+          rows of icon, label, sublabel and a large count, with "Follow-up
+          Required" still wrapping onto two lines at 393px. They are filters:
+          their whole job is to be tapped and to show a count, and neither needs
+          a 200px card to happen.
+
+          The strip is modelled on the Lead Sources panel further down this same
+          page, which already shows TOTAL / NEW / OPEN / WON as one compact row
+          and reads perfectly at this width. Reusing that language means the two
+          halves of the page agree with each other, and the row costs about 80px
+          instead of 410.
+      */}
+      <div className="mb-4 grid grid-cols-4 overflow-hidden rounded-2xl border border-[var(--border)] sm:hidden">
+        {(["All", ...LEAD_STATUSES] as const).map((st) => {
+          const active = filter === st;
+          const tone = st === "All" ? null : STATUS_TONE[st];
+          const color = tone?.color ?? "var(--text)";
+          const soft = tone?.soft ?? "var(--raise)";
+          /* Short forms, because 85px of column will not hold "Follow-up
+             Required" and a truncated filter name is worse than a shorter
+             one that is still unambiguous. */
+          const short =
+            st === "All" ? "All" :
+            st === "New Lead" ? "New" :
+            st === "Follow-up Required" ? "Follow-up" :
+            "Won";
+
+          return (
+            <button
+              key={st}
+              type="button"
+              onClick={() => setFilter(st)}
+              aria-pressed={active}
+              className={clsx(
+                "focus-ring flex flex-col items-center gap-0.5 border-r border-[var(--border)] px-1 py-2.5 last:border-r-0 transition-colors",
+                active ? "font-semibold" : "text-faint"
+              )}
+              style={active ? { background: soft, color } : undefined}
+            >
+              <span className="text-[10.5px] leading-tight">{short}</span>
+              <span className="text-lg font-bold tabular-nums leading-none" style={{ color: active ? color : undefined }}>
+                {counts[st] ?? 0}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
       {/* These four were static headings that counted leads but did nothing.
           They are the natural place to filter from, so they now do. */}
-      <div className="mb-5 grid grid-cols-2 gap-4 @min-[880px]:grid-cols-4">
+      <div className="mb-5 hidden grid-cols-2 gap-4 sm:grid @min-[880px]:grid-cols-4">
         {(["All", ...LEAD_STATUSES] as const).map((st) => {
           const active = filter === st;
           const tone = st === "All" ? null : STATUS_TONE[st];

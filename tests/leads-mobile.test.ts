@@ -55,12 +55,31 @@ describe("the leads page on a phone", () => {
     expect(detail).toMatch(/sm:hidden/);
   });
 
-  it("stacks the filter cards so their labels fit", () => {
-    /* Two per row at 393px leaves ~170px each, which cannot hold an icon, two
-       lines of label and a 3xl number side by side: "Follow-up Required" broke
-       onto three lines and the count jammed against it. */
-    expect(cards).toMatch(/flex flex-col items-start gap-2 p-4 text-left/);
-    expect(cards).toMatch(/sm:flex-row sm:items-center sm:justify-between/);
-    expect(cards).toMatch(/text-2xl font-bold tabular-nums sm:text-3xl/);
+  it("shows the filters as a segmented strip on a phone", () => {
+    /**
+     * Stacking the cards was the first attempt and it was not enough: four of
+     * them still cost about 410px before a single lead appeared, and "Follow-up
+     * Required" still wrapped onto two lines at 393px.
+     *
+     * They are filters. Their whole job is to be tapped and to carry a count,
+     * and neither needs a 200px card. The strip costs about 80px and is
+     * modelled on the Lead Sources panel further down the same page, which
+     * already shows TOTAL / NEW / OPEN / WON as one compact row.
+     */
+    expect(cards).toMatch(/grid grid-cols-4 overflow-hidden rounded-2xl[^"]*sm:hidden/);
+    expect(cards).toMatch(/st === "Follow-up Required" \? "Follow-up"/);
+  });
+
+  it("keeps the desktop cards, hidden only below sm", () => {
+    /* The card grid is untouched from `sm` up — same two-then-four columns it
+       always had. Only its visibility is conditional. */
+    expect(cards).toMatch(/mb-5 hidden grid-cols-2 gap-4 sm:grid @min-\[880px\]:grid-cols-4/);
+  });
+
+  it("both filter controls drive the same state", () => {
+    /* Two renderings of one filter. If they ever diverged, the strip would
+       report a selection the list did not honour. */
+    const setFilterCalls = (cards.match(/setFilter\(st\)/g) ?? []).length;
+    expect(setFilterCalls).toBeGreaterThanOrEqual(2);
   });
 });
