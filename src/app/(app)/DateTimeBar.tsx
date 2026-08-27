@@ -114,29 +114,12 @@ export function DateTimeBar({
        no icon block, one hairline rule separating the two halves, and colour
        reserved for the things on this page that actually mean something.
     */
-    <div className="card flex items-center justify-between gap-4 px-5 py-3.5">
+    <div className="card flex items-center justify-between gap-4 px-5 py-4">
       <div className="min-w-0">
-        {/*
-            The offset belongs up here with the weekday, not under the clock.
-
-            Sitting beneath the time it read as a caption ON the time and made
-            the whole right-hand block feel like two competing lines, which is
-            exactly what stopped the clock being the focal point. Up here it
-            pairs with the weekday — both are small, tracked, secondary facts
-            about the same instant — and the right side is left to the time
-            alone.
-        */}
-        <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-faint">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-faint">
           {weekday}
-          <span
-            className="flex items-center gap-1.5"
-            style={{ visibility: offset ? undefined : "hidden" }}
-          >
-            <span className="h-0.5 w-0.5 rounded-full bg-[var(--border-strong)]" aria-hidden />
-            {offset ?? "UTC+0"}
-          </span>
         </p>
-        <p className="mt-0.5 truncate text-[15px] font-semibold tracking-tight">
+        <p className="mt-1 truncate text-[15px] font-semibold tracking-tight">
           {/*
               A shorter date rather than a truncated one.
 
@@ -150,22 +133,50 @@ export function DateTimeBar({
         </p>
       </div>
 
-      <div className="flex shrink-0 items-center gap-3.5">
-        <span className="h-8 w-px bg-[var(--border)]" aria-hidden />
+      <div className="flex shrink-0 items-center gap-4">
         {/*
-            One line, one size. The seconds were 15px against a 26px hour and
-            minute, which made the clock look like it trailed off. They are the
-            same size now and keep only the lighter colour, so the figure reads
-            as one number that happens to have a quieter tail.
+            A hairline that fades out at both ends rather than stopping dead.
+
+            A flat rule butting into the card's padding draws attention to
+            itself; this one is only fully present where it is separating
+            something, which is the detail that stops a divider reading as a
+            border somebody forgot to remove.
         */}
-        <p
-          className="text-[26px] font-semibold leading-none tabular-nums tracking-tight sm:text-[30px]"
-          suppressHydrationWarning
-          style={{ visibility: live ? undefined : "hidden" }}
-        >
-          {hhmm}
-          <span className="text-faint">:{ss}</span>
-        </p>
+        <span
+          className="h-9 w-px shrink-0"
+          style={{
+            background:
+              "linear-gradient(to bottom, transparent, var(--border) 22%, var(--border) 78%, transparent)",
+          }}
+          aria-hidden
+        />
+        <div className="text-right">
+          <p
+            /*
+               Larger, and a step LIGHTER.
+
+               At display sizes a semibold clock reads as heavy rather than
+               confident — the weight that makes 15px legible is the weight that
+               makes 34px shout. Dropping to 500 and pulling the tracking in
+               slightly is the treatment a system typeface gets at this size,
+               and it lets the figure grow without dominating the card.
+            */
+            className="text-[30px] font-medium leading-none tabular-nums tracking-[-0.02em] sm:text-[34px]"
+            suppressHydrationWarning
+            style={{ visibility: live ? undefined : "hidden" }}
+          >
+            {hhmm}
+            {/* Smaller and lighter: the seconds are the least useful part of a
+                glanceable clock, but removing them makes it look frozen. */}
+            <span className="text-[16px] font-normal text-faint sm:text-[18px]">:{ss}</span>
+          </p>
+          <p
+            className="mt-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-faint"
+            style={{ visibility: offset ? undefined : "hidden" }}
+          >
+            {offset ?? "UTC+0"}
+          </p>
+        </div>
       </div>
     </div>
   );

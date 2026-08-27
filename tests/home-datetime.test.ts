@@ -82,43 +82,58 @@ describe("the dashboard date and time", () => {
     expect(bar).toMatch(/\?\? initialDate/);
   });
 
-  it("sets the seconds apart by colour alone, not by size", () => {
+  it("keeps the seconds subordinate — smaller AND lighter", () => {
     /**
-     * They were 15px against a 26px hour and minute, which made the clock look
-     * like it trailed off rather than like one number. The lighter colour was
-     * the part that worked, so it is the only thing left doing the work — the
-     * span carries `text-faint` and no size, weight or leading of its own, so
-     * it cannot drift from the figure it sits inside.
+     * Both arrangements were built and looked at. Same size differing only in
+     * colour reads as one number with a quieter tail; smaller and lighter reads
+     * as a clock with a ticking detail. The second is the one that was chosen
+     * after seeing both, so it is the one pinned here.
+     *
+     * The pairing matters more than either half: at the same weight as the
+     * hours the smaller size looks like a rendering fault rather than a
+     * decision, so `font-normal` and `text-faint` travel with it.
      */
-    expect(bar).toMatch(/<span className="text-faint">:\{ss\}<\/span>/);
-
-    /* And the size lives on the parent, once, for both halves. */
-    expect(bar).toMatch(/text-\[26px\] font-semibold leading-none tabular-nums tracking-tight sm:text-\[30px\]/);
+    expect(bar).toMatch(
+      /<span className="text-\[16px\] font-normal text-faint sm:text-\[18px\]">:\{ss\}<\/span>/
+    );
   });
 
-  it("keeps the offset off the clock, so nothing competes with it", () => {
+  it("carries the clock at a lighter weight than the labels around it", () => {
     /**
-     * Under the time it read as a caption ON the time and turned the right-hand
-     * block into two competing lines, which is what stopped the clock being the
-     * focal point. It belongs with the weekday: both are small, tracked,
-     * secondary facts about the same instant.
-     *
-     * Asserted structurally — the offset must appear INSIDE the weekday
-     * paragraph — because a test that only checked both strings exist would
-     * pass with them anywhere on the card, which is the arrangement being
-     * fixed.
+     * At display sizes a semibold clock reads as heavy rather than confident:
+     * the weight that makes 15px legible is the weight that makes 34px shout.
+     * 500 with the tracking pulled in slightly is the treatment a system
+     * typeface gets at this size, and it lets the figure grow without
+     * dominating the card.
      */
-    const eyebrow = bar.match(
-      /uppercase tracking-\[0\.16em\] text-faint">([\s\S]*?)<\/p>/
-    )?.[1];
-    expect(eyebrow).toBeDefined();
-    expect(eyebrow).toMatch(/\{weekday\}/);
-    expect(eyebrow).toMatch(/\{offset \?\? "UTC\+0"\}/);
+    expect(bar).toMatch(
+      /text-\[30px\] font-medium leading-none tabular-nums tracking-\[-0\.02em\] sm:text-\[34px\]/
+    );
+    /* Larger than the labels, so the size does the ranking that the weight no
+       longer does. */
+    expect(bar).not.toMatch(/text-\[30px\] font-semibold/);
+  });
 
-    /* The clock's own paragraph holds the time and nothing else. */
-    const clock = bar.match(/sm:text-\[30px\]"[\s\S]*?>([\s\S]*?)<\/p>/)?.[1];
-    expect(clock).toBeDefined();
-    expect(clock).not.toMatch(/offset/);
+  it("puts the offset under the clock, right-aligned with it", () => {
+    /**
+     * Tried both. Beside the weekday it left the clock uncontested; under the
+     * clock it groups the two facts about the same instant and keeps the left
+     * column purely calendar. The second was chosen after seeing both.
+     *
+     * Asserted structurally — the offset must sit inside the right-hand,
+     * right-aligned block — because checking only that both strings exist would
+     * pass with the offset anywhere on the card, including the arrangement this
+     * replaced.
+     */
+    const rightBlock = bar.match(/<div className="text-right">([\s\S]*?)<\/div>/)?.[1];
+    expect(rightBlock).toBeDefined();
+    expect(rightBlock).toMatch(/\{hhmm\}/);
+    expect(rightBlock).toMatch(/\{offset \?\? "UTC\+0"\}/);
+
+    /* And the weekday line is calendar only. */
+    const eyebrow = bar.match(/uppercase tracking-\[0\.16em\] text-faint">([\s\S]*?)<\/p>/)?.[1];
+    expect(eyebrow).toMatch(/\{weekday\}/);
+    expect(eyebrow).not.toMatch(/offset/);
   });
 
   it("reserves the space the clock will take", () => {
