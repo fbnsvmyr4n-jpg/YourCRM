@@ -299,3 +299,40 @@ describe("the blend state", () => {
   });
 });
 
+
+describe("the ocean glint", () => {
+  it("stays a highlight rather than becoming glare", () => {
+    /**
+     * Measured off the rendered frame at Cape Town, midday, by reading the
+     * canvas back with `gl.readPixels`. The band across the lower ocean
+     * averaged RGB (141,137,129) — R>G>B in almost exactly the 1 : 0.97 : 0.9
+     * of the glint tint, which is how it was identified as the cause rather
+     * than haze (which would read blue) or cloud (which would read neutral).
+     *
+     * Over open sea BLUE should be the strongest channel and it was the
+     * weakest: the highlight was not sitting on the water, it was erasing it.
+     * The band also ran 20% brighter than the planet directly above it.
+     *
+     * After: band mean luma 0.537 -> 0.455, level with the 0.455 of the earth
+     * above it rather than standing out from it.
+     *
+     * Pinned as numbers because the gain is the whole difference between a
+     * photographic cue and a blown highlight, and nothing else in this suite
+     * would notice it moving.
+     */
+    const gain = FRAGMENT_SHADER.match(
+      /vec3 glint = vec3\(1\.0, 0\.97, 0\.9\) \* specular \* water \* lit \* ([\d.]+);/
+    );
+    expect(gain, "glint line not found — was it renamed?").not.toBeNull();
+    expect(Number(gain![1])).toBeLessThanOrEqual(1.5);
+
+    /* Still broad, though. The sea is never flat, and a mirror-sharp point
+       reads as a lens artefact rather than as sunlight on water. */
+    const exponent = FRAGMENT_SHADER.match(
+      /float specular = pow\(max\(0\.0, dot\(n, halfway\)\), ([\d.]+)\);/
+    );
+    expect(exponent).not.toBeNull();
+    expect(Number(exponent![1])).toBeGreaterThanOrEqual(40);
+    expect(Number(exponent![1])).toBeLessThanOrEqual(80);
+  });
+});

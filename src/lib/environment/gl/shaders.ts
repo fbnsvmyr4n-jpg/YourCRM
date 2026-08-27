@@ -483,8 +483,25 @@ void main() {
        the wide silver smear you actually see.
     */
     vec3 halfway = normalize(uSunDir - dir);
-    float specular = pow(max(0.0, dot(n, halfway)), 34.0);
-    vec3 glint = vec3(1.0, 0.97, 0.9) * specular * water * lit * 2.6;
+    float specular = pow(max(0.0, dot(n, halfway)), 44.0);
+
+    /*
+       Dimmer and tighter than it was, because it had stopped reading as glint
+       and started reading as glare.
+
+       Measured off the rendered frame at Cape Town, midday: the band across
+       the lower ocean averaged RGB (141,137,129) — R>G>B in almost exactly the
+       1 : 0.97 : 0.9 of the tint below, which is how the glint was identified
+       as the cause rather than haze or cloud. Over open sea BLUE should be the
+       strongest channel and it was the weakest, so the highlight was not
+       sitting on the water, it was erasing it.
+
+       Still broad, because the sea is never flat and a mirror-sharp point
+       would look like a lens artefact. 44 rather than 34 narrows the smear
+       enough to have an edge; the halved gain is what stops it flattening the
+       colour underneath.
+    */
+    vec3 glint = vec3(1.0, 0.97, 0.9) * specular * water * lit * 1.35;
 
     /*
        Clouds with FORM, rather than a flat mask multiplied in.
