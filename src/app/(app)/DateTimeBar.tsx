@@ -116,8 +116,25 @@ export function DateTimeBar({
     */
     <div className="card flex items-center justify-between gap-4 px-5 py-3.5">
       <div className="min-w-0">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-faint">
+        {/*
+            The offset belongs up here with the weekday, not under the clock.
+
+            Sitting beneath the time it read as a caption ON the time and made
+            the whole right-hand block feel like two competing lines, which is
+            exactly what stopped the clock being the focal point. Up here it
+            pairs with the weekday — both are small, tracked, secondary facts
+            about the same instant — and the right side is left to the time
+            alone.
+        */}
+        <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-faint">
           {weekday}
+          <span
+            className="flex items-center gap-1.5"
+            style={{ visibility: offset ? undefined : "hidden" }}
+          >
+            <span className="h-0.5 w-0.5 rounded-full bg-[var(--border-strong)]" aria-hidden />
+            {offset ?? "UTC+0"}
+          </span>
         </p>
         <p className="mt-0.5 truncate text-[15px] font-semibold tracking-tight">
           {/*
@@ -135,20 +152,20 @@ export function DateTimeBar({
 
       <div className="flex shrink-0 items-center gap-3.5">
         <span className="h-8 w-px bg-[var(--border)]" aria-hidden />
-        <div className="text-right leading-none">
-          <p suppressHydrationWarning style={{ visibility: live ? undefined : "hidden" }}>
-            <span className="text-[26px] font-semibold tabular-nums tracking-tight">{hhmm}</span>
-            {/* Seconds at half the weight and size — present, so the clock
-                reads as running, without pulling the eye every tick. */}
-            <span className="ml-0.5 text-[15px] font-medium tabular-nums text-faint">:{ss}</span>
-          </p>
-          <p
-            className="mt-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-faint"
-            style={{ visibility: offset ? undefined : "hidden" }}
-          >
-            {offset ?? "UTC+0"}
-          </p>
-        </div>
+        {/*
+            One line, one size. The seconds were 15px against a 26px hour and
+            minute, which made the clock look like it trailed off. They are the
+            same size now and keep only the lighter colour, so the figure reads
+            as one number that happens to have a quieter tail.
+        */}
+        <p
+          className="text-[26px] font-semibold leading-none tabular-nums tracking-tight sm:text-[30px]"
+          suppressHydrationWarning
+          style={{ visibility: live ? undefined : "hidden" }}
+        >
+          {hhmm}
+          <span className="text-faint">:{ss}</span>
+        </p>
       </div>
     </div>
   );

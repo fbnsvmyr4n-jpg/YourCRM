@@ -82,6 +82,45 @@ describe("the dashboard date and time", () => {
     expect(bar).toMatch(/\?\? initialDate/);
   });
 
+  it("sets the seconds apart by colour alone, not by size", () => {
+    /**
+     * They were 15px against a 26px hour and minute, which made the clock look
+     * like it trailed off rather than like one number. The lighter colour was
+     * the part that worked, so it is the only thing left doing the work — the
+     * span carries `text-faint` and no size, weight or leading of its own, so
+     * it cannot drift from the figure it sits inside.
+     */
+    expect(bar).toMatch(/<span className="text-faint">:\{ss\}<\/span>/);
+
+    /* And the size lives on the parent, once, for both halves. */
+    expect(bar).toMatch(/text-\[26px\] font-semibold leading-none tabular-nums tracking-tight sm:text-\[30px\]/);
+  });
+
+  it("keeps the offset off the clock, so nothing competes with it", () => {
+    /**
+     * Under the time it read as a caption ON the time and turned the right-hand
+     * block into two competing lines, which is what stopped the clock being the
+     * focal point. It belongs with the weekday: both are small, tracked,
+     * secondary facts about the same instant.
+     *
+     * Asserted structurally — the offset must appear INSIDE the weekday
+     * paragraph — because a test that only checked both strings exist would
+     * pass with them anywhere on the card, which is the arrangement being
+     * fixed.
+     */
+    const eyebrow = bar.match(
+      /uppercase tracking-\[0\.16em\] text-faint">([\s\S]*?)<\/p>/
+    )?.[1];
+    expect(eyebrow).toBeDefined();
+    expect(eyebrow).toMatch(/\{weekday\}/);
+    expect(eyebrow).toMatch(/\{offset \?\? "UTC\+0"\}/);
+
+    /* The clock's own paragraph holds the time and nothing else. */
+    const clock = bar.match(/sm:text-\[30px\]"[\s\S]*?>([\s\S]*?)<\/p>/)?.[1];
+    expect(clock).toBeDefined();
+    expect(clock).not.toMatch(/offset/);
+  });
+
   it("reserves the space the clock will take", () => {
     /* `visibility: hidden` rather than not rendering it: an element that
        appears at hydration shoves everything beside it. */
