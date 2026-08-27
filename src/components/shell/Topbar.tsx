@@ -209,7 +209,7 @@ export function Topbar({
                 Nothing needs your attention right now.
               </p>
             ) : (
-              <div className="max-h-[min(60vh,420px)] overflow-y-auto">
+              <div className="max-h-[min(60dvh,420px)] overflow-y-auto">
                 {notifications.map((n) => {
                   const Icon = KIND_ICON[n.kind];
                   return (

@@ -652,7 +652,7 @@ function AttachmentViewer({
   return createPortal(
     <div className="fixed inset-0 z-50 grid place-items-center p-4" role="dialog" aria-modal="true">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="modal-surface relative z-10 flex max-h-[85vh] w-full max-w-2xl flex-col p-6">
+      <div className="modal-surface relative z-10 flex w-full max-w-2xl flex-col p-6">
         <div className="mb-4 flex items-start justify-between gap-3 border-b border-[var(--border)] pb-4">
           <div className="flex items-center gap-3">
             <FileIcon kind={attachment.kind} />

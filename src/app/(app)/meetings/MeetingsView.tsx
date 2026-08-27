@@ -1303,7 +1303,7 @@ function EditMeetingModal({
   return createPortal(
     <div className="fixed inset-0 z-50 grid place-items-center p-4" role="dialog" aria-modal="true">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="modal-surface relative z-10 max-h-[90vh] w-full max-w-md overflow-y-auto p-6">
+      <div className="modal-surface relative z-10 w-full max-w-md p-6">
         <div className="mb-5 flex items-center justify-between">
           <h2 className="text-lg font-semibold tracking-tight">Edit meeting</h2>
           <button type="button" onClick={onClose} className="text-faint hover:text-[var(--text)]" aria-label="Close">

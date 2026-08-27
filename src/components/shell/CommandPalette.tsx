@@ -164,7 +164,7 @@ export function CommandPalette() {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-start justify-center px-4 pt-[12vh]" role="dialog" aria-modal="true">
+    <div className="fixed inset-0 z-[60] flex items-start justify-center px-4 pt-[12dvh]" role="dialog" aria-modal="true">
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setOpen(false)} />
       <div className="glass relative z-10 w-full max-w-xl overflow-hidden rounded-2xl border border-[var(--border-strong)] shadow-2xl">
         {/* Input */}
@@ -187,7 +187,7 @@ export function CommandPalette() {
         </div>
 
         {/* Results */}
-        <div ref={listRef} className="max-h-[60vh] overflow-y-auto p-2">
+        <div ref={listRef} className="max-h-[60dvh] overflow-y-auto p-2">
           {records === null && (
             <p className="px-3 py-6 text-center text-sm text-faint">Loading…</p>
           )}

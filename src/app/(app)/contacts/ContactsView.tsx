@@ -181,7 +181,13 @@ export function ContactsView({
 
   if (!contact) {
     return (
-      <div className="grid h-[calc(100vh-104px)] place-items-center">
+      /* `dvh`, and a minimum rather than a fixed height. On iOS `100vh` is the
+         viewport with the toolbar HIDDEN, so this box was always taller than
+         the screen showing it and centred its content against a height the
+         reader could not see; the same reasoning the chat panel already
+         carries. A minimum also lets the message grow rather than be clipped
+         if it ever wraps to more lines than the box allows. */
+      <div className="grid min-h-[calc(100dvh-104px)] place-items-center">
         <div className="text-center">
           <p className="text-muted">No contacts yet.</p>
           {/* Import sits beside "add one" on the empty screen, because an
@@ -1252,8 +1258,11 @@ function ContactModal({
             hard to read. */}
         <form
           action={onSubmit}
-          className="modal-surface relative z-10 w-full max-w-lg overflow-y-auto p-6"
-          style={{ maxHeight: "90vh" }}
+          /* The cap lives in `.modal-surface` now. It was an inline style here,
+             which beats the stylesheet, so this one form would have quietly
+             kept `90vh` — the wrong unit on iOS — while every other modal in
+             the app was fixed. */
+          className="modal-surface relative z-10 w-full max-w-lg p-6"
         >
           <div className="mb-5 flex items-center justify-between">
             <h2 className="text-lg font-semibold tracking-tight">{editing ? "Edit Contact" : "Add Contact"}</h2>
@@ -1417,7 +1426,7 @@ function ImportModal({ onClose }: { onClose: () => void }) {
     <Overlay>
       <div className="fixed inset-0 z-50 grid place-items-center p-4" role="dialog" aria-modal="true">
         <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-        <div className="modal-surface relative z-10 max-h-[85vh] w-full max-w-lg overflow-y-auto p-6">
+        <div className="modal-surface relative z-10 w-full max-w-lg p-6">
           <div className="mb-4 flex items-start justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold tracking-tight">Import contacts</h2>

@@ -1049,6 +1049,32 @@ textarea.field-input {
   border: 1px solid var(--border-strong);
   border-radius: 20px;
   box-shadow: var(--shadow-lg);
+
+  /*
+     A panel taller than the screen scrolls. It used to be cut off.
+
+     Every modal wrapper centres its panel, so a panel with no height limit
+     overflowed at BOTH ends — the top and the bottom of the content were
+     simply not on screen, and with nothing scrollable there was no way to
+     reach either. Reported on the deal panel, where "Record a payment" sits
+     below a pain-points block and a partly-paid banner: the amount field and
+     its button were off the bottom of an iPhone.
+
+     Seven of the eleven panels in the app had no height limit at all, and the
+     four that did used `vh`. On iOS `vh` is the LARGE viewport — the height
+     with the browser toolbar hidden — so a panel at 90vh still runs underneath
+     Safari's toolbar whenever the toolbar is showing, which is most of the
+     time. `dvh` is the viewport as it currently is.
+
+     It lives here rather than on each panel so the next modal cannot be
+     written without it. The 2rem allows for the p-4 gutter its wrapper uses.
+  */
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+  /* Scrolling to the end of a modal should not then start dragging the page
+     behind it, which on iOS is how a dialog ends up scrolling the board it is
+     covering. */
+  overscroll-behavior: contain;
 }
 
 /* ------------------------------------------------------------------ */
