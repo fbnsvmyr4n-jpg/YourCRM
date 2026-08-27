@@ -114,6 +114,28 @@ describe("the dashboard date and time", () => {
     expect(bar).not.toMatch(/text-\[30px\] font-semibold/);
   });
 
+  it("scales the date to pair with the clock rather than caption it", () => {
+    /**
+     * At 15px/600 against a 34px/500 clock the left half read as a caption on
+     * the figure beside it — two different type sizes with nothing relating
+     * them across a divider. The date now takes the clock's treatment one step
+     * down: same weight, same negative tracking, 22/26px against 30/34.
+     *
+     * Deliberately NOT the same size. Two 34px figures either side of a
+     * hairline would read as a split card with no subject, so the ranking is
+     * carried by size once the weight is shared.
+     */
+    expect(bar).toMatch(
+      /text-\[22px\] font-medium leading-none tracking-\[-0\.02em\] sm:text-\[26px\]/
+    );
+    expect(bar).not.toMatch(/text-\[15px\] font-semibold tracking-tight/);
+
+    /* Shared weight, so nothing but size separates them. Measured: date 26px
+       w500, clock 34px w500 at 1280px. */
+    const weights = bar.match(/font-(medium|semibold|normal|bold)/g) ?? [];
+    expect(weights.filter((w) => w === "font-medium")).toHaveLength(2);
+  });
+
   it("puts the offset under the clock, right-aligned with it", () => {
     /**
      * Tried both. Beside the weekday it left the clock uncontested; under the

@@ -116,10 +116,24 @@ export function DateTimeBar({
     */
     <div className="card flex items-center justify-between gap-4 px-5 py-4">
       <div className="min-w-0">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-faint">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-faint">
           {weekday}
         </p>
-        <p className="mt-1 truncate text-[15px] font-semibold tracking-tight">
+        {/*
+            Scaled to sit beside the clock, not beneath it.
+
+            At 15px against a 34px time this line read as a caption on the
+            figure to its right rather than the other half of a pair — the two
+            sides of the card were two different type sizes with nothing
+            relating them. It takes the clock's treatment one step down: the
+            same weight (500), the same negative tracking, at 22/26px against
+            the clock's 30/34. Close enough to belong to it, far enough that the
+            time is still the thing the eye lands on.
+
+            Deliberately NOT the clock's exact size. Two 34px figures either
+            side of a hairline would read as a split card with no subject.
+        */}
+        <p className="mt-1 truncate text-[22px] font-medium leading-none tracking-[-0.02em] sm:text-[26px]">
           {/*
               A shorter date rather than a truncated one.
 
