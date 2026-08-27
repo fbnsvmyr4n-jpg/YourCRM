@@ -13,8 +13,15 @@
  * and none of that is observable from a test that can only read markup.
  */
 
-/** Distance from an edge, in px, within which the container starts moving. */
-export const EDGE_ZONE = 110;
+/**
+ * Distance from an edge, in px, within which the container starts moving.
+ *
+ * Wider than it first was. A narrow zone means aiming at a band near the edge
+ * before anything happens, which is most of what made reaching a far stage feel
+ * like work — you had to get the card into the right place before the board
+ * would even begin to help.
+ */
+export const EDGE_ZONE = 150;
 /**
  * Fastest scroll, in px per 60fps frame.
  *
@@ -23,7 +30,23 @@ export const EDGE_ZONE = 110;
  * 120Hz display the unscaled version moved 399px where a 60Hz display moved
  * 198, so the board was twice as fast on better hardware.
  */
-export const EDGE_MAX_SPEED = 22;
+export const EDGE_MAX_SPEED = 40;
+
+/**
+ * How sharply speed rises with depth into the zone.
+ *
+ * Below 1 the curve is fast off the mark and flattens near the edge, which is
+ * the opposite of what a linear ramp does. Linear meant a pointer a third of
+ * the way in got a third of the speed — about 8px a frame, slow enough that the
+ * board looked stuck and the natural response was to shove the card harder
+ * against the screen edge. At 0.55 that same third gives just over half speed
+ * and the board starts moving the moment you enter.
+ *
+ * It still passes through zero, so there is no step as the pointer crosses the
+ * boundary — the thing that would make it feel like a switch rather than a
+ * gradient.
+ */
+export const EDGE_RAMP = 0.55;
 
 /** One frame at 60fps. Elapsed time is divided by this to keep speed honest. */
 export const FRAME_MS = 1000 / 60;
@@ -54,6 +77,10 @@ export type Edges = { left: number; right: number };
  * full speed. A constant speed makes precise drops near the edge impossible,
  * because the moment you enter the zone the board leaves under you.
  *
+ * The ramp is a curve rather than a straight line — see `EDGE_RAMP`. Linear was
+ * the first version and it felt like work: a third of the way in bought a third
+ * of the speed, which looked like nothing happening.
+ *
  * @param clientX pointer position in viewport coordinates
  * @param edges   the container's own left/right in the same coordinates
  * @param zone    override for the trigger distance; the default is the export above
@@ -74,12 +101,12 @@ export function edgeScrollVelocity(
        window entirely — scrolls at full speed rather than accelerating without
        limit the further out it goes. */
     const depth = Math.min(1, (edges.left + zone - clientX) / zone);
-    return -max * depth;
+    return -max * Math.pow(depth, EDGE_RAMP);
   }
 
   if (clientX > edges.right - zone) {
     const depth = Math.min(1, (clientX - (edges.right - zone)) / zone);
-    return max * depth;
+    return max * Math.pow(depth, EDGE_RAMP);
   }
 
   return 0;

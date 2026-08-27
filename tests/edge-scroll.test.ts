@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   EDGE_MAX_SPEED,
+  EDGE_RAMP,
   EDGE_ZONE,
   FRAME_MS,
   edgeScrollStep,
@@ -47,6 +48,63 @@ describe("edge auto-scroll", () => {
     expect(shallow).toBeGreaterThan(0);
     expect(deep).toBeGreaterThan(shallow);
     expect(deep).toBeLessThanOrEqual(EDGE_MAX_SPEED);
+  });
+
+  it("is fast off the mark rather than proportional to depth", () => {
+    /**
+     * The complaint this exists to answer: reaching a far stage was slow and
+     * felt like work. A LINEAR ramp was why — a third of the way into the zone
+     * bought a third of the speed, about 8px a frame, which looks like nothing
+     * happening and invites shoving the card harder against the screen edge.
+     *
+     * The curve gives just over half speed at that same third. Every other
+     * assertion in this file is relative, so a silent regression to linear
+     * would pass all of them; this one would not.
+     */
+    const third = Math.abs(edgeScrollVelocity(board.right - EDGE_ZONE + EDGE_ZONE / 3, board));
+    expect(third).toBeGreaterThan(EDGE_MAX_SPEED * 0.5);
+
+    /* And shallow entry still moves the board rather than stalling in a dead
+       band: a tenth of the way in is worth more than a quarter speed. */
+    const tenth = Math.abs(edgeScrollVelocity(board.right - EDGE_ZONE + EDGE_ZONE / 10, board));
+    expect(tenth).toBeGreaterThan(EDGE_MAX_SPEED * 0.25);
+
+    expect(EDGE_RAMP).toBeLessThan(1);
+  });
+
+  it("crosses a hidden board quickly, in real units", () => {
+    /**
+     * Every other assertion here is expressed as a fraction of
+     * `EDGE_MAX_SPEED`, so halving that constant moves both sides of every
+     * comparison and none of them notice — a mutation that put the top speed
+     * back to its original value passed the entire file. The speed is the
+     * thing that was asked for, so it is pinned in units a person can feel.
+     *
+     * Measured at 1280px: the board shows 968px of 1,888px, so 920px sits off
+     * the right. Crossing that at full speed must be well under half a second,
+     * or reaching the last stage is the slog it was.
+     */
+    const pxPerSecond = EDGE_MAX_SPEED * 60;
+    expect(pxPerSecond).toBeGreaterThanOrEqual(2000);
+
+    const HIDDEN_PX = 920;
+    expect(HIDDEN_PX / pxPerSecond).toBeLessThan(0.5);
+
+    /* The zone is the other half of "easy". A narrow band has to be aimed at
+       before anything happens, which is work in itself — the same mutation
+       problem as the speed, so it is pinned in px rather than relative to
+       itself. */
+    expect(EDGE_ZONE).toBeGreaterThanOrEqual(120);
+  });
+
+  it("still passes through zero at the boundary", () => {
+    /* Being quick off the mark must not become a step. A floor speed would
+       make crossing the boundary a switch rather than a gradient, which is the
+       thing that reads as a glitch. */
+    expect(edgeScrollVelocity(board.right - EDGE_ZONE, board)).toBe(0);
+    const sliver = Math.abs(edgeScrollVelocity(board.right - EDGE_ZONE + 0.01, board));
+    expect(sliver).toBeGreaterThan(0);
+    expect(sliver).toBeLessThan(EDGE_MAX_SPEED * 0.1);
   });
 
   it("clamps rather than accelerating without limit past the edge", () => {
