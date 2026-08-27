@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { edgeScrollStep, edgeScrollVelocity } from "@/lib/edge-scroll";
 import { ArrowRightLeft, ChevronDown, Coins, Flame, GripVertical, HandCoins, Plus, Trash2, Wallet, X } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Overlay } from "@/components/ui/Overlay";
@@ -68,6 +69,69 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
   const [folded, setFolded] = useState<Set<StageId>>(new Set());
   /** The deal whose stage the phone is choosing. Never set above `sm`. */
   const [moving, setMoving] = useState<Deal | null>(null);
+
+  /*
+     Scrolling the board while a card is being dragged over its edge.
+
+     The board is wider than the window from `sm` up, and dragging a card
+     toward a stage that is off screen did nothing — the card stopped at the
+     edge, so reaching a later stage meant dropping it somewhere it did not
+     belong, scrolling, and picking it up again.
+
+     A rAF loop rather than scrolling from `dragover` itself: `dragover` only
+     fires while the pointer MOVES, so a card held still against the edge —
+     which is exactly what someone does when waiting for the board to come to
+     them — would stop scrolling until they jiggled it.
+
+     Inert on a phone by construction. Below `sm` the stages are a vertical
+     stack with nothing to scroll horizontally, and touch never fires a drag at
+     all.
+  */
+  const boardRef = useRef<HTMLDivElement | null>(null);
+  const velocity = useRef(0);
+  const frame = useRef<number | null>(null);
+
+  const stopEdgeScroll = useCallback(() => {
+    velocity.current = 0;
+    if (frame.current !== null) {
+      cancelAnimationFrame(frame.current);
+      frame.current = null;
+    }
+  }, []);
+
+  /* Scaled by real elapsed time, not assumed to be 60fps. Measured on a 120Hz
+     display the unscaled loop moved 399px where 60Hz moved 198 — the board was
+     literally twice as fast on better hardware. */
+  const lastAt = useRef(0);
+  const step = useCallback((now: number) => {
+    const el = boardRef.current;
+    if (!el || velocity.current === 0) {
+      frame.current = null;
+      return;
+    }
+    const elapsed = lastAt.current === 0 ? 0 : now - lastAt.current;
+    lastAt.current = now;
+    el.scrollLeft += edgeScrollStep(velocity.current, elapsed);
+    frame.current = requestAnimationFrame(step);
+  }, []);
+
+  const edgeScroll = useCallback(
+    (clientX: number) => {
+      const el = boardRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      velocity.current = edgeScrollVelocity(clientX, { left: r.left, right: r.right });
+      if (velocity.current !== 0 && frame.current === null) {
+        lastAt.current = 0;
+        frame.current = requestAnimationFrame(step);
+      }
+    },
+    [step]
+  );
+
+  /* A drag that ends while the board is still moving would leave the loop
+     running against a card nobody is holding. */
+  useEffect(() => stopEdgeScroll, [stopEdgeScroll]);
   const [addOpen, setAddOpen] = useState<StageId | true | null>(null);
   const [active, setActive] = useState<Deal | null>(null);
   const [busy, setBusy] = useState(false);
@@ -416,7 +480,19 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
           so on a phone the board looked interactive and simply was not. Every
           card carries a Move control below `sm` instead; see `MoveSheet`.
       */}
-      <div className="-mx-1 flex flex-col gap-4 px-1 pb-2 sm:flex-1 sm:scroll-p-2 sm:flex-row sm:overflow-x-auto">
+      <div
+        ref={boardRef}
+        /* Bubbles up from the stage columns, so this sees every dragover on the
+           board without each column having to forward one. */
+        onDragOver={(e) => edgeScroll(e.clientX)}
+        onDragLeave={(e) => {
+          /* Only when the pointer has actually left the board, not when it
+             crosses between two columns inside it. */
+          if (!e.currentTarget.contains(e.relatedTarget as Node)) stopEdgeScroll();
+        }}
+        onDrop={stopEdgeScroll}
+        className="-mx-1 flex flex-col gap-4 px-1 pb-2 sm:flex-1 sm:scroll-p-2 sm:flex-row sm:overflow-x-auto"
+      >
         {STAGES.map((stage) => {
           const stageDeals = items.filter((d) => d.stage === stage.id);
           const total = stageDeals.reduce((s, d) => s + d.value, 0);
@@ -507,6 +583,7 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
                     onDragEnd={() => {
                       setDragId(null);
                       setOverStage(null);
+                      stopEdgeScroll();
                     }}
                     onOpen={() => setActive(deal)}
                     onMove={() => setMoving(deal)}
