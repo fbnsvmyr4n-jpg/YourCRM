@@ -1,7 +1,7 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import { CalendarDays } from "lucide-react";
+import { utcOffsetLabel } from "@/lib/zoned";
 
 /**
  * The date and time, as their own panel.
@@ -46,10 +46,18 @@ const getServerSnapshot = (): number | null => null;
 
 export function DateTimeBar({
   timeZone,
-  /** Rendered on the server in `timeZone`, so the first paint is already right. */
+  /*
+     Both rendered on the server in `timeZone`, so the first paint is already
+     right rather than blank. Passed as two fields rather than one string the
+     client splits: "Thursday, 27 August 2026" only splits on a comma in the
+     locales that put one there, and that is a silent breakage the moment the
+     format changes.
+  */
+  initialWeekday,
   initialDate,
 }: {
   timeZone: string;
+  initialWeekday: string;
   initialDate: string;
 }) {
   const seconds = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
@@ -60,9 +68,11 @@ export function DateTimeBar({
      rolls over at midnight without a reload and cannot drift from the clock
      beside it. Before that it is the server's value, formatted in the same
      zone by the same rules. */
+  const weekday =
+    at?.toLocaleDateString("en-GB", { weekday: "long", timeZone }) ?? initialWeekday;
+
   const dateFull =
     at?.toLocaleDateString("en-GB", {
-      weekday: "long",
       day: "numeric",
       month: "long",
       year: "numeric",
@@ -71,9 +81,9 @@ export function DateTimeBar({
 
   const dateShort =
     at?.toLocaleDateString("en-GB", {
-      weekday: "short",
       day: "numeric",
       month: "short",
+      year: "numeric",
       timeZone,
     }) ?? initialDate;
 
@@ -85,60 +95,61 @@ export function DateTimeBar({
     timeZone,
   });
 
-  /* The zone label is derived from the same `timeZone` that formats the clock,
-     so it can never caption a time it does not describe. */
-  const zone = at
-    ? new Intl.DateTimeFormat("en-GB", { timeZone, timeZoneName: "short" })
-        .formatToParts(at)
-        .find((p) => p.type === "timeZoneName")?.value
-    : undefined;
+  /* Derived from the same `timeZone` that formats the clock, so it can never
+     caption a time it does not describe. */
+  const offset = at ? utcOffsetLabel(timeZone, at) : null;
+
+  /* Split so the seconds can be de-emphasised: they change every tick and are
+     the least useful part of a glanceable clock, but removing them makes it
+     look frozen. */
+  const [hhmm, ss] = (time ?? "00:00:00").split(/:(?=\d\d$)/);
 
   return (
-    <div className="card flex items-center justify-between gap-3 px-4 py-3">
-      <div className="flex min-w-0 items-center gap-3">
-        <span
-          className="grid h-10 w-10 shrink-0 place-items-center rounded-xl"
-          style={{ background: "var(--accent-soft)" }}
-        >
-          <CalendarDays className="h-[18px] w-[18px] text-accent" />
-        </span>
-        <div className="min-w-0 leading-tight">
+    /*
+       Quieter than it was.
+
+       The first version led with a filled accent-blue icon tile and a large
+       accent-blue clock, which made a piece of ambient information the loudest
+       thing above the greeting. This states the same facts and stops competing:
+       no icon block, one hairline rule separating the two halves, and colour
+       reserved for the things on this page that actually mean something.
+    */
+    <div className="card flex items-center justify-between gap-4 px-5 py-3.5">
+      <div className="min-w-0">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-faint">
+          {weekday}
+        </p>
+        <p className="mt-0.5 truncate text-[15px] font-semibold tracking-tight">
           {/*
               A shorter date rather than a truncated one.
 
-              "Wednesday, 27 August 2026" needs about 210px and a 375px phone
-              has roughly 150px here once the icon and the clock are placed, so
-              it could only ever render as "Wednesday, 27 Aug…" — a layout that
-              looks broken rather than one that adapted. Both spans carry the
-              same styling; only one is ever displayed.
+              "27 August 2026" beside a running clock needs more room than a
+              375px phone has here, so it could only ever render as "27 Augu…" —
+              a layout that looks broken rather than one that adapted. Both
+              spans carry the same styling; only one is ever displayed.
           */}
-          <p className="truncate text-sm font-semibold">
-            <span className="min-[430px]:hidden">{dateShort}</span>
-            <span className="hidden min-[430px]:inline">{dateFull}</span>
+          <span className="min-[430px]:hidden">{dateShort}</span>
+          <span className="hidden min-[430px]:inline">{dateFull}</span>
+        </p>
+      </div>
+
+      <div className="flex shrink-0 items-center gap-3.5">
+        <span className="h-8 w-px bg-[var(--border)]" aria-hidden />
+        <div className="text-right leading-none">
+          <p suppressHydrationWarning style={{ visibility: live ? undefined : "hidden" }}>
+            <span className="text-[26px] font-semibold tabular-nums tracking-tight">{hhmm}</span>
+            {/* Seconds at half the weight and size — present, so the clock
+                reads as running, without pulling the eye every tick. */}
+            <span className="ml-0.5 text-[15px] font-medium tabular-nums text-faint">:{ss}</span>
           </p>
-          <p className="text-[11px] text-faint">
-            {/* Reserved, not omitted: without a placeholder the second line
-                appears at hydration and shoves the first one upward. */}
-            <span style={{ visibility: zone ? undefined : "hidden" }}>{zone ?? "GMT"}</span>
-            {/* "Local time" was the first label and it is not true: this clock
-                runs in the BUSINESS's zone, which is the viewer's local time
-                only when the two happen to match. Someone reading this from
-                another country would be told their own local time and shown
-                the office's. */}
-            {" · Business time"}
+          <p
+            className="mt-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-faint"
+            style={{ visibility: offset ? undefined : "hidden" }}
+          >
+            {offset ?? "UTC+0"}
           </p>
         </div>
       </div>
-
-      <p
-        className="shrink-0 text-2xl font-bold tabular-nums tracking-tight text-accent sm:text-[28px]"
-        /* The width is reserved before hydration so nothing shifts when the
-           clock arrives. */
-        style={{ visibility: live ? undefined : "hidden" }}
-        suppressHydrationWarning
-      >
-        {time ?? "00:00:00"}
-      </p>
     </div>
   );
 }

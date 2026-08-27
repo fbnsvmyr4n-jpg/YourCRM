@@ -102,3 +102,38 @@ export function instantToWallClock(
     return null;
   }
 }
+
+/**
+ * A zone's current distance from UTC, as a label: "UTC+2", "UTC-4", "UTC+5:30".
+ *
+ * `timeZoneName: "shortOffset"` rather than `"short"`. `short` returns whatever
+ * the zone is commonly CALLED — "BST" for London, "SAST" for Johannesburg,
+ * "UTC" for UTC — which is an abbreviation, not an offset, and tells a reader
+ * nothing about how far from UTC they are.
+ *
+ * It also has to be derived rather than computed. Not every zone is a whole
+ * number of hours from UTC: India is +5:30 and the Chatham Islands are +12:45,
+ * so anything dividing by 3600000 rounds real places into the wrong offset. And
+ * the answer moves — London is +0 in January and +1 in July — which is why an
+ * instant is required rather than assumed.
+ *
+ * @param at the moment to measure at; DST means the answer depends on it.
+ */
+export function utcOffsetLabel(timeZone: string, at: Date): string | null {
+  let raw: string | undefined;
+  try {
+    raw = new Intl.DateTimeFormat("en-GB", { timeZone, timeZoneName: "shortOffset" })
+      .formatToParts(at)
+      .find((p) => p.type === "timeZoneName")?.value;
+  } catch {
+    // An unknown zone throws rather than falling back, and a label is not worth
+    // taking the page down for.
+    return null;
+  }
+  if (!raw) return null;
+
+  const named = raw.replace(/^GMT/, "UTC");
+  /* UTC itself comes back as a bare "GMT" with no sign. Left alone it would be
+     the one zone in the world that does not state an offset. */
+  return /[+-]/.test(named) ? named : `${named}+0`;
+}

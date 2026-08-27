@@ -132,8 +132,8 @@ export default async function DashboardPage() {
      by the business zone, so at 01:00 in Johannesburg the page printed
      yesterday's date beside a count of today's meetings.
   */
+  const weekdayLabel = now.toLocaleDateString("en-GB", { weekday: "long", timeZone });
   const dateLabel = now.toLocaleDateString("en-GB", {
-    weekday: "long",
     day: "numeric",
     month: "long",
     year: "numeric",
@@ -239,7 +239,7 @@ export default async function DashboardPage() {
             half regardless of how narrow it is — which is what squeezed the
             revenue chart to 225px on a page that had 920px to give. */}
         <div className="@container flex flex-col gap-5">
-          <DateTimeBar timeZone={timeZone} initialDate={dateLabel} />
+          <DateTimeBar timeZone={timeZone} initialWeekday={weekdayLabel} initialDate={dateLabel} />
 
           <Hero
             greeting={greeting(now.getHours())}

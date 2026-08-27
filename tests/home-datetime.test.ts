@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { utcOffsetLabel } from "@/lib/zoned";
 
 /**
  * The date and time on the dashboard.
@@ -23,7 +24,9 @@ describe("the dashboard date and time", () => {
   it("is its own panel, above the greeting, at every width", () => {
     /* One element in the flow rather than a media-query variant, so desktop
        and mobile get the same arrangement — which is what was asked for. */
-    expect(page).toMatch(/<DateTimeBar timeZone=\{timeZone\} initialDate=\{dateLabel\} \/>/);
+    expect(page).toMatch(
+      /<DateTimeBar timeZone=\{timeZone\} initialWeekday=\{weekdayLabel\} initialDate=\{dateLabel\} \/>/
+    );
 
     /* And the greeting card no longer carries them. */
     expect(page).not.toMatch(/LiveClock/);
@@ -40,6 +43,7 @@ describe("the dashboard date and time", () => {
      * meetings, and both looked authoritative.
      */
     expect(page).toMatch(/timeZone: settings\.timeZone \|\| "UTC"/);
+    expect(page).toMatch(/weekday: "long", timeZone \}/);
     expect(page).toMatch(/month: "long",\s*\n\s*year: "numeric",\s*\n\s*timeZone,/);
     /* Anchored on the assignment, not the bare call. The comment explaining
        the fix quotes the old code verbatim, so a loose negative match fails
@@ -48,20 +52,20 @@ describe("the dashboard date and time", () => {
     expect(page).not.toMatch(/const dateLabel = now\.toLocaleDateString\("en-US"/);
   });
 
-  it("formats the clock and its zone label from the same zone", () => {
+  it("formats the clock and its offset from the same zone", () => {
     /* A label that came from anywhere else could caption a time it does not
        describe — the worst kind of wrong, because it looks precise. */
     const clockZone = /toLocaleTimeString\("en-GB", \{[\s\S]*?timeZone,[\s\S]*?\}\)/.test(bar);
     expect(clockZone).toBe(true);
-    expect(bar).toMatch(/new Intl\.DateTimeFormat\("en-GB", \{ timeZone, timeZoneName: "short" \}\)/);
+    expect(bar).toMatch(/utcOffsetLabel\(timeZone, at\)/);
   });
 
-  it("does not call the business's clock the reader's local time", () => {
-    /* "Local time" was the first label and it is only true when the viewer and
-       the office share a zone. Someone reading from another country would be
-       told their own local time and shown the office's. */
-    expect(bar).toMatch(/" · Business time"/);
+  it("shows the offset, not a name for the zone", () => {
+    /* "Business time" said nothing about where the clock is. The offset is the
+       part a reader can act on. */
+    expect(bar).not.toMatch(/" · Business time"/);
     expect(bar).not.toMatch(/" · Local time"/);
+    expect(bar).toMatch(/\{offset \?\? "UTC\+0"\}/);
   });
 
   it("renders nothing live on the server", () => {
@@ -82,7 +86,7 @@ describe("the dashboard date and time", () => {
     /* `visibility: hidden` rather than not rendering it: an element that
        appears at hydration shoves everything beside it. */
     expect(bar).toMatch(/visibility: live \? undefined : "hidden"/);
-    expect(bar).toMatch(/visibility: zone \? undefined : "hidden"/);
+    expect(bar).toMatch(/visibility: offset \? undefined : "hidden"/);
   });
 
   it("shortens the date rather than truncating it on a phone", () => {
@@ -98,5 +102,54 @@ describe("the dashboard date and time", () => {
        would be correct in one of them and wrong in the other two. */
     expect(bar).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
     expect(bar).not.toMatch(/rgba?\(/);
+  });
+});
+
+describe("the UTC offset label", () => {
+  /* A fixed instant in northern summer, so the two hemispheres' DST states are
+     both exercised by the zones below. */
+  const JULY = new Date("2026-07-15T12:00:00Z");
+  const JANUARY = new Date("2026-01-15T12:00:00Z");
+
+  it("states an offset for every zone, including UTC itself", () => {
+    /* UTC comes back from Intl as a bare "GMT" with no sign. Left alone it
+       would be the one zone in the world that does not state an offset. */
+    expect(utcOffsetLabel("UTC", JULY)).toBe("UTC+0");
+    expect(utcOffsetLabel("Africa/Johannesburg", JULY)).toBe("UTC+2");
+    expect(utcOffsetLabel("America/New_York", JULY)).toBe("UTC-4");
+  });
+
+  it("keeps the zones that are not whole hours from UTC", () => {
+    /**
+     * The reason this is derived from Intl rather than computed. India is
+     * +5:30 and the Chatham Islands are +12:45; anything dividing a millisecond
+     * offset by 3600000 rounds both into an offset nobody lives in.
+     */
+    expect(utcOffsetLabel("Asia/Kolkata", JULY)).toBe("UTC+5:30");
+    expect(utcOffsetLabel("Pacific/Chatham", JULY)).toBe("UTC+12:45");
+  });
+
+  it("moves with daylight saving, so it needs the instant", () => {
+    /* London is +0 in January and +1 in July. A label computed once at module
+       load would be wrong for half the year. */
+    expect(utcOffsetLabel("Europe/London", JANUARY)).toBe("UTC+0");
+    expect(utcOffsetLabel("Europe/London", JULY)).toBe("UTC+1");
+
+    /* Southern hemisphere runs the other way. */
+    expect(utcOffsetLabel("Australia/Sydney", JANUARY)).toBe("UTC+11");
+    expect(utcOffsetLabel("Australia/Sydney", JULY)).toBe("UTC+10");
+  });
+
+  it("never uses the zone's common name in place of its offset", () => {
+    /* `timeZoneName: "short"` returns "BST" for London in July and "SAST" for
+       Johannesburg — an abbreviation, not an offset. */
+    expect(utcOffsetLabel("Europe/London", JULY)).not.toMatch(/BST/);
+    expect(utcOffsetLabel("Africa/Johannesburg", JULY)).not.toMatch(/SAST/);
+  });
+
+  it("returns null for an unknown zone rather than throwing", () => {
+    /* Intl throws on a bad zone, and a label is not worth taking the page down
+       for. */
+    expect(utcOffsetLabel("Not/AZone", JULY)).toBeNull();
   });
 });
