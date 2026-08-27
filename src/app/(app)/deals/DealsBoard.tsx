@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ChevronDown, Coins, Flame, GripVertical, HandCoins, Plus, Trash2, Wallet, X } from "lucide-react";
+import { ArrowRightLeft, ChevronDown, Coins, Flame, GripVertical, HandCoins, Plus, Trash2, Wallet, X } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Overlay } from "@/components/ui/Overlay";
 import { BOARD_STAGES as STAGES, carriesMoney } from "@/data/pipeline";
@@ -66,6 +66,8 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
      `sm:flex`, so from `sm` up the columns are laid out whatever this holds.
   */
   const [folded, setFolded] = useState<Set<StageId>>(new Set());
+  /** The deal whose stage the phone is choosing. Never set above `sm`. */
+  const [moving, setMoving] = useState<Deal | null>(null);
   const [addOpen, setAddOpen] = useState<StageId | true | null>(null);
   const [active, setActive] = useState<Deal | null>(null);
   const [busy, setBusy] = useState(false);
@@ -114,7 +116,19 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
     const id = dragId;
     setDragId(null);
     if (!id) return;
+    await moveDeal(id, stage);
+  }
 
+  /**
+   * The one path a deal changes stage by.
+   *
+   * Dragging and the phone's Move sheet both land here rather than each doing
+   * their own optimistic update. The interesting parts below — the split merge,
+   * the whole-board snapshot, the rollback on a refusal — are exactly the parts
+   * a second copy would get subtly wrong, and the two would then disagree only
+   * in the cases nobody tests by hand.
+   */
+  async function moveDeal(id: string, stage: StageId) {
     const current = items.find((d) => d.id === id);
     if (!current || current.stage === stage) return;
 
@@ -396,8 +410,11 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
           list of stages, each full width, which is what every mobile board app
           does for the same reason.
 
-          Dragging still works: the drop targets are unchanged, they are simply
-          laid out vertically now.
+          Dragging is a desktop-only affordance and always was, though this
+          comment used to claim otherwise. iOS Safari does not fire the HTML5
+          drag events for touch at all — there is no `dragstart` from a finger —
+          so on a phone the board looked interactive and simply was not. Every
+          card carries a Move control below `sm` instead; see `MoveSheet`.
       */}
       <div className="-mx-1 flex flex-col gap-4 px-1 pb-2 sm:flex-1 sm:scroll-p-2 sm:flex-row sm:overflow-x-auto">
         {STAGES.map((stage) => {
@@ -492,6 +509,7 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
                       setOverStage(null);
                     }}
                     onOpen={() => setActive(deal)}
+                    onMove={() => setMoving(deal)}
                     onDelete={() => handleDelete(deal.id)}
                   />
                 ))}
@@ -509,6 +527,21 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
 
       {addOpen !== null && (
         <AddDealModal busy={busy} defaultStage={defaultStage} onClose={() => setAddOpen(null)} onSubmit={handleAdd} />
+      )}
+
+      {moving && (
+        /* Looked up live rather than used from the snapshot taken when Move was
+           tapped, so the sheet cannot go on offering a stage the deal has
+           already left. Same reason the detail panel below does it. */
+        <MoveSheet
+          deal={items.find((d) => d.id === moving.id) ?? moving}
+          onClose={() => setMoving(null)}
+          onPick={async (stage) => {
+            const id = moving.id;
+            setMoving(null);
+            await moveDeal(id, stage);
+          }}
+        />
       )}
 
       {active && (
@@ -603,12 +636,104 @@ function SummaryTile({
   );
 }
 
+/**
+ * Choosing a stage, for the devices that cannot drag.
+ *
+ * iOS Safari does not fire the HTML5 drag events for touch — there is no
+ * `dragstart` from a finger — so the board was interactive-looking and inert on
+ * every iPhone. Two ways to fix that: reimplement dragging on pointer events,
+ * or give the phone a control that says what dragging says.
+ *
+ * This is the second, and it is the better fit for THIS board rather than
+ * merely the cheaper one. Below `sm` the stages are a vertical stack, so
+ * dragging a card from Discovery to Delivery means holding a finger down while
+ * the page auto-scrolls past nine cards — a gesture that also has to be
+ * disambiguated from the scroll it is fighting. A picker is two taps, needs no
+ * long-press, and is reachable by a screen reader, which a custom drag is not.
+ *
+ * Desktop never sees it: the control that opens it is `sm:hidden` and dragging
+ * there is untouched.
+ */
+function MoveSheet({
+  deal,
+  onClose,
+  onPick,
+}: {
+  deal: Deal;
+  onClose: () => void;
+  onPick: (stage: StageId) => void;
+}) {
+  return (
+    <Overlay>
+      <div className="fixed inset-0 z-50 grid place-items-end p-3 sm:place-items-center" role="dialog" aria-modal="true">
+        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+        <div className="modal-surface relative z-10 w-full max-w-md p-5">
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="truncate text-base font-semibold tracking-tight">Move deal</h2>
+              <p className="truncate text-xs text-faint">
+                {deal.title} · {deal.contact}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="shrink-0 text-faint hover:text-[var(--text)]"
+              aria-label="Close"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            {STAGES.map((stage) => {
+              const here = deal.stage === stage.id;
+              return (
+                <button
+                  key={stage.id}
+                  type="button"
+                  onClick={() => (here ? onClose() : onPick(stage.id))}
+                  aria-current={here ? "true" : undefined}
+                  className={clsx(
+                    "focus-ring flex w-full items-center gap-3 rounded-xl border px-3.5 py-3 text-left transition-colors",
+                    here
+                      ? "border-[var(--border-strong)] bg-[var(--raise)]"
+                      : "border-[var(--border)] hover:border-[var(--border-strong)]"
+                  )}
+                >
+                  <span
+                    className="h-2.5 w-2.5 shrink-0 rounded-full"
+                    style={{ background: stage.color }}
+                  />
+                  <span className="min-w-0 flex-1 leading-tight">
+                    <span className="block text-sm font-semibold">{stage.label}</span>
+                    {/* The same exit criterion the column header carries, so
+                        the choice is made against the rule rather than the
+                        name. */}
+                    <span className="mt-0.5 block truncate text-[11px] text-faint">{stage.exit}</span>
+                  </span>
+                  {here && (
+                    <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-faint">
+                      Current
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </Overlay>
+  );
+}
+
 function DealCard({
   deal,
   dragging,
   onDragStart,
   onDragEnd,
   onOpen,
+  onMove,
   onDelete,
 }: {
   deal: Deal;
@@ -616,6 +741,7 @@ function DealCard({
   onDragStart: () => void;
   onDragEnd: () => void;
   onOpen: () => void;
+  onMove: () => void;
   onDelete: () => void;
 }) {
   const showsMoney = carriesMoney(deal.stage);
@@ -640,7 +766,25 @@ function DealCard({
       style={{ boxShadow: "0 1px 2px rgba(0,0,0,0.04)", ...({ "--partial": PARTIAL } as React.CSSProperties) }}
     >
       <div className="flex items-start justify-between gap-2">
-        <p className="text-sm font-semibold leading-snug">{deal.title}</p>
+        <p className="min-w-0 flex-1 text-sm font-semibold leading-snug">{deal.title}</p>
+        {/*
+            The phone's replacement for dragging.
+
+            `sm:hidden`, so the desktop card is untouched and keeps the drag it
+            already has. `stopPropagation` because the card itself opens the
+            detail sheet on click.
+        */}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onMove();
+          }}
+          aria-label={`Move "${deal.title}" to another stage`}
+          className="btn-soft focus-ring -my-1 flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold text-muted sm:hidden"
+        >
+          <ArrowRightLeft className="h-3 w-3" /> Move
+        </button>
         <button
           onClick={(e) => {
             e.stopPropagation();
