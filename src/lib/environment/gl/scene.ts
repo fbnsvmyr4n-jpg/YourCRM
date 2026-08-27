@@ -1,7 +1,7 @@
 import { FRAGMENT_SHADER, VERTEX_SHADER } from "./shaders";
 import { decodeStars, localSiderealTime, STAR_FRAGMENT, STAR_VERTEX, type StarField } from "./stars";
 import type { EnvironmentState } from "../model";
-import { aimBody } from "../projection";
+import { cameraAnchor, reframeDirection, aimBody } from "../projection";
 import type { Coordinates, MoonSnapshot, SolarSnapshot } from "../../solar/types";
 
 /**
@@ -666,8 +666,35 @@ export class PlanetScene {
 
     const u = this.uniforms;
     gl.uniform2f(u.uResolution, width, height);
-    gl.uniform3fv(u.uSunDir, localDirection(sun.altitudeDeg, sun.azimuthDeg));
-    gl.uniform3fv(u.uMoonDir, localDirection(moon.altitudeDeg, moon.azimuthDeg));
+
+    /*
+       The camera stands behind the observer, not on top of them.
+
+       Traced against this shader's own numbers, the nearest ground a camera
+       directly above the observer could see was 19.6° of arc away — 2,174km —
+       so the observer's own location sat that far BELOW the bottom of the
+       frame and was never on screen. From Cape Town, facing the solar-noon
+       bearing of due north, the visible band began over Angola.
+
+       `cameraAnchor` steps back along that bearing so the observer lands about
+       78% of the way down the frame, inside the planet rather than under it.
+
+       The lighting has to move with it. `uSunDir` is a vector in the local
+       east/north/up of whatever point the shader's origin sits over, so
+       leaving it in the observer's frame would light the ground from 28° of
+       arc wrong and slide the terminator across the map — at sunrise, the most
+       visible thing in the frame. `reframeDirection` writes the same real
+       direction in the anchor's axes instead.
+    */
+    const anchor = cameraAnchor(where, facingDeg);
+    gl.uniform3fv(
+      u.uSunDir,
+      reframeDirection(localDirection(sun.altitudeDeg, sun.azimuthDeg), where, anchor)
+    );
+    gl.uniform3fv(
+      u.uMoonDir,
+      reframeDirection(localDirection(moon.altitudeDeg, moon.azimuthDeg), where, anchor)
+    );
     gl.uniform1f(u.uMoonLight, state.moonlight * 6);
     /* Whether the moon is UP, which is a different question from how much light
        it casts. A thin crescent lights nothing and is still plainly visible, so
@@ -715,7 +742,7 @@ export class PlanetScene {
     gl.uniform1f(u.uFov, FOV_RAD);
     gl.uniform1f(u.uPitch, PITCH_RAD);
     gl.uniform1f(u.uYaw, (facingDeg * Math.PI) / 180);
-    gl.uniformMatrix3fv(u.uEnuToEcef, false, enuToEcef(where));
+    gl.uniformMatrix3fv(u.uEnuToEcef, false, enuToEcef(anchor));
     /*
        Exposure is FLAT, and that is the correction rather than the original
        plan. Lifting the night side by 0.9 to "make it visible" amplified the
@@ -861,7 +888,9 @@ function localDirection(altitudeDeg: number, azimuthDeg: number): Float32Array {
  * order, which is the same thing written down — a transposition here would put
  * the user somewhere plausible and wrong, which is the hardest kind to notice.
  */
-function enuToEcef(where: Coordinates): Float32Array {
+/* Takes only what it reads. The camera anchor is a bare point on the globe
+   rather than a located user, and it has no `source` to declare. */
+function enuToEcef(where: { latitude: number; longitude: number }): Float32Array {
   const lat = (where.latitude * Math.PI) / 180;
   const lon = (where.longitude * Math.PI) / 180;
   const sLat = Math.sin(lat), cLat = Math.cos(lat);

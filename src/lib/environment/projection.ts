@@ -443,3 +443,109 @@ export function aimBody(
     limbProximity: clamp01(1 - Math.abs(altitudeDeg) / 2.5),
   };
 }
+
+/* ---------------- Where the camera actually stands ---------------- */
+
+/**
+ * How far the camera sits behind the observer, in degrees of arc.
+ *
+ * The camera used to sit directly above the observer, and that put the
+ * observer's own location off the bottom of the screen. The geometry, traced
+ * against the shader's real 58° frame at 5,500km with a -41° pitch:
+ *
+ *   frame centre       sky — no ground at all
+ *   limb               53.0° of arc away  (5,880km)
+ *   bottom of frame    19.6° of arc away  (2,174km)
+ *
+ * So the nearest ground the camera could see was already 2,174km away, and the
+ * observer was 2,174km below the frame. From Cape Town, facing the solar-noon
+ * bearing of due north, the visible band began somewhere over Angola — which is
+ * exactly the "shows Southern Africa but cuts off Cape Town" that was reported.
+ * There was no zoom or accuracy problem: the place was never on screen.
+ *
+ * 28° puts it at about 78% of the way down the frame. The earth occupies the
+ * band from ndcY -0.54 (the limb) to -1.0 (the bottom edge), so this lands the
+ * observer near the middle of the planet rather than balanced on its edge.
+ */
+export const CAMERA_ARC_DEG = 28;
+
+/**
+ * The ground point the camera stands over, given where the observer is and
+ * which way the composition faces.
+ *
+ * Backwards along the facing bearing, so the observer ends up AHEAD of the
+ * camera and therefore inside the frame. Standard destination-point formula on
+ * a sphere; `arcDeg` is angular, so it needs no radius and is exact for any.
+ */
+export function cameraAnchor(
+  where: { latitude: number; longitude: number },
+  facingDeg: number,
+  arcDeg: number = CAMERA_ARC_DEG
+): { latitude: number; longitude: number } {
+  const rad = Math.PI / 180;
+  const lat = where.latitude * rad;
+  const lon = where.longitude * rad;
+  // Behind the observer, not in front of them.
+  const brg = (facingDeg + 180) * rad;
+  const d = arcDeg * rad;
+
+  const sinLat = Math.sin(lat) * Math.cos(d) + Math.cos(lat) * Math.sin(d) * Math.cos(brg);
+  const lat2 = Math.asin(Math.max(-1, Math.min(1, sinLat)));
+  const lon2 =
+    lon +
+    Math.atan2(
+      Math.sin(brg) * Math.sin(d) * Math.cos(lat),
+      Math.cos(d) - Math.sin(lat) * sinLat
+    );
+
+  return {
+    latitude: lat2 / rad,
+    // Back into (-180, 180]; a camera near the date line otherwise reads as
+    // being most of a world away from where it is.
+    longitude: (((lon2 / rad + 540) % 360) - 180),
+  };
+}
+
+/** East/north/up at a point, as columns of a matrix into earth-fixed coordinates. */
+function enuAxes(where: { latitude: number; longitude: number }) {
+  const rad = Math.PI / 180;
+  const la = where.latitude * rad;
+  const lo = where.longitude * rad;
+  const sLa = Math.sin(la), cLa = Math.cos(la);
+  const sLo = Math.sin(lo), cLo = Math.cos(lo);
+  return {
+    east: [-sLo, cLo, 0] as const,
+    north: [-sLa * cLo, -sLa * sLo, cLa] as const,
+    up: [cLa * cLo, cLa * sLo, sLa] as const,
+  };
+}
+
+/**
+ * The same direction, written in a different place's local frame.
+ *
+ * The shader lights the planet with `uSunDir`, which is a vector in the
+ * observer's east/north/up — so moving the camera without re-expressing it
+ * would light the ground from a direction 28° of arc wrong and slide the
+ * terminator across the map. At sunrise the terminator is the most visible
+ * thing in the frame, so that would have been an obvious break traded for a
+ * fixed one.
+ *
+ * A direction is a fact about the world, not about the frame it is written in:
+ * lift it into earth-fixed coordinates through one frame's axes, and read it
+ * back down through the other's.
+ */
+export function reframeDirection(
+  dir: ArrayLike<number>,
+  from: { latitude: number; longitude: number },
+  to: { latitude: number; longitude: number }
+): [number, number, number] {
+  const a = enuAxes(from);
+  const b = enuAxes(to);
+
+  const ecef = [0, 1, 2].map(
+    (i) => dir[0] * a.east[i] + dir[1] * a.north[i] + dir[2] * a.up[i]
+  );
+
+  const dot = (v: readonly number[]) => ecef[0] * v[0] + ecef[1] * v[1] + ecef[2] * v[2];
+  return [dot(b.east), dot(b.north), dot(b.up)];
+}
