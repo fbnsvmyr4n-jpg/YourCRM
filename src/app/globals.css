@@ -822,6 +822,30 @@ body {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--ring);
 }
+
+/* ------------------------------------------------------------------ */
+/* Typing into anything, on a phone                                    */
+/*                                                                     */
+/* iOS Safari zooms the whole page whenever a focused form control has  */
+/* a font smaller than 16px, and it does NOT zoom back out on blur.     */
+/* Every input in this app was 14px, so the first tap into any field    */
+/* left the page scaled up with its right-hand side off the screen —    */
+/* reported as the deal panel hiding its content, but it happened on    */
+/* every form in the CRM and it was never the layout's fault.           */
+/*                                                                     */
+/* 16px is the threshold, not a preference: below it Safari zooms, at   */
+/* it Safari does not. Checkboxes, radios and ranges are excluded       */
+/* because they render no text and a font size only changes their box.  */
+/*                                                                     */
+/* Below `sm` only, so every width from 640px up keeps the 14px it has. */
+@media (max-width: 639.98px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  select,
+  textarea,
+  .field-input {
+    font-size: 16px;
+  }
+}
 .field-input:disabled { opacity: 0.55; cursor: not-allowed; }
 
 /* Multi-line variant. */

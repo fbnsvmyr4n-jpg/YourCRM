@@ -87,6 +87,37 @@ describe("modal panels on a phone", () => {
     }
   });
 
+  it("keeps form controls at 16px on a phone, so Safari does not zoom", () => {
+    /**
+     * Watched happen on a real iPhone: the deals page fitted the screen, then
+     * the moment a modal's autofocused input took focus the whole page scaled
+     * up and its right-hand side went off screen. iOS Safari zooms whenever a
+     * focused control has a font under 16px, and it does not zoom back out on
+     * blur — so one tap into any field left the page stuck that way.
+     *
+     * Every input in the app was 14px, so this happened on every form in the
+     * CRM. It reads as the layout being broken and never was.
+     *
+     * 16px is a threshold, not a preference: below it Safari zooms, at it
+     * Safari does not.
+     */
+    const rule = css.slice(css.indexOf("@media (max-width: 639.98px)"));
+    expect(rule).not.toHaveLength(0);
+    const block = rule.slice(0, rule.indexOf("}\n}") + 3);
+    expect(block).toMatch(/font-size:\s*16px/);
+    expect(block).toMatch(/select/);
+    expect(block).toMatch(/textarea/);
+    expect(block).toMatch(/\.field-input/);
+
+    /* Checkboxes and radios render no text, so a font size only changes their
+       box — they are excluded deliberately. */
+    expect(block).toMatch(/:not\(\[type="checkbox"\]\)/);
+    expect(block).toMatch(/:not\(\[type="radio"\]\)/);
+
+    /* Below `sm` only. Measured: 16px at 375px, 14px at 1280px. */
+    expect(rule.slice(0, 40)).toMatch(/max-width:\s*639\.98px/);
+  });
+
   it("never sizes a mobile box to a height the phone does not have", () => {
     /**
      * `h-[calc(100vh-…)]` with no breakpoint prefix applies on a phone, where
