@@ -10,7 +10,7 @@ import { useSyncExternalStore } from "react";
  * the label are derived from it — the relative half re-derives on a timer, so
  * "just now" becomes "5 minutes ago" while the page sits open.
  *
- * Same server/client split as `LiveClock`: the server snapshot is null because
+ * Same server/client split as `DateTimeBar`: the server snapshot is null because
  * the two can be in different time zones, and rendering the server's idea of
  * local time would both mismatch on hydration and mislead.
  */

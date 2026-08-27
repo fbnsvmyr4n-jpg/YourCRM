@@ -11,7 +11,7 @@ import { useSyncExternalStore } from "react";
  * is the only version of that field worth having: it answers "is this a
  * reasonable hour to call them?"
  *
- * Same server/client split as `LiveClock` — the server renders nothing, because
+ * Same server/client split as `DateTimeBar` — the server renders nothing, because
  * it would be computing against its own idea of now.
  */
 

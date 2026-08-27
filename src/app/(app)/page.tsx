@@ -4,7 +4,6 @@ import { Avatar, type AvatarColor } from "@/components/ui/Avatar";
 import { AreaChart } from "@/components/ui/AreaChart";
 import { Card, CardHeader, ViewAll } from "@/components/ui/Card";
 import { FocusMenu, type FocusItem } from "@/components/home/FocusMenu";
-import { LiveClock } from "@/components/ui/LiveClock";
 import { iconMap, toneStyles, type Tone } from "@/components/ui/tone";
 import { activityFeed } from "@/server/feed";
 import { reportData } from "@/server/analytics";
@@ -13,6 +12,7 @@ import { listDeals } from "@/server/repos/deals";
 import { listMeetings } from "@/server/repos/meetings";
 import { listMessages, unreadCount } from "@/server/repos/inbox";
 import { getSettings } from "@/server/repos/settings";
+import { DateTimeBar } from "./DateTimeBar";
 import { instantToWallClock } from "@/lib/zoned";
 import { currentUser, withTenantPage } from "@/server/tenant-session";
 
@@ -38,7 +38,7 @@ function relativeDay(iso: string, now: Date) {
 export default async function DashboardPage() {
   const me = await currentUser();
 
-  const { contacts, meetingsToday, unread, wonDeals, revenueSeries, feed, report, followUps, upcoming } =
+  const { contacts, meetingsToday, unread, wonDeals, revenueSeries, feed, report, followUps, upcoming, timeZone } =
     await withTenantPage(async (q) => {
       const settings = await getSettings(q);
       const todayKey =
@@ -117,14 +117,27 @@ export default async function DashboardPage() {
         report,
         // Read so the unread panel has a first sender to name.
         firstUnread: (await listMessages(q, "unread"))[0] ?? null,
+        // The business's own zone, so the date on screen counts the same day
+        // the meetings below it are filtered by.
+        timeZone: settings.timeZone || "UTC",
       };
     });
 
   const now = new Date();
-  const dateLabel = now.toLocaleDateString("en-US", {
+  /*
+     Formatted in the BUSINESS's zone, not the server's.
+
+     This was `toLocaleDateString("en-US", …)` with no `timeZone`, which on
+     Vercel means UTC. "Meetings Today" a few pixels away was already filtered
+     by the business zone, so at 01:00 in Johannesburg the page printed
+     yesterday's date beside a count of today's meetings.
+  */
+  const dateLabel = now.toLocaleDateString("en-GB", {
     weekday: "long",
     day: "numeric",
     month: "long",
+    year: "numeric",
+    timeZone,
   });
 
   // ---- derived, real numbers ----
@@ -226,10 +239,11 @@ export default async function DashboardPage() {
             half regardless of how narrow it is — which is what squeezed the
             revenue chart to 225px on a page that had 920px to give. */}
         <div className="@container flex flex-col gap-5">
+          <DateTimeBar timeZone={timeZone} initialDate={dateLabel} />
+
           <Hero
             greeting={greeting(now.getHours())}
             name={me?.name.split(" ")[0] ?? "there"}
-            date={dateLabel}
             summary={`You have ${meetingsToday.length} meeting${meetingsToday.length === 1 ? "" : "s"} and ${openLeadCount} follow-up${openLeadCount === 1 ? "" : "s"} today.`}
             stats={heroStats}
           />
@@ -281,13 +295,11 @@ export default async function DashboardPage() {
 function Hero({
   greeting,
   name,
-  date,
   summary,
   stats,
 }: {
   greeting: string;
   name: string;
-  date: string;
   summary: string;
   stats: { icon: string; tone: Tone; label: string; value: number }[];
 }) {
@@ -303,12 +315,10 @@ function Hero({
       <div className="relative">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <p className="flex items-center gap-2.5 text-xs font-medium uppercase tracking-[0.14em] text-faint">
-              {date}
-              <span className="h-1 w-1 rounded-full bg-[var(--border-strong)]" />
-              <LiveClock className="tabular-nums text-accent" />
-            </p>
-            <h2 className="mt-1 text-2xl font-bold tracking-tight sm:text-[27px]">
+            {/* The date and the clock used to sit here as an eyebrow. They are
+                their own panel above this card now — a caption on a greeting is
+                not where somebody looks for the time. */}
+            <h2 className="text-2xl font-bold tracking-tight sm:text-[27px]">
               {greeting}, {name} 👋
             </h2>
             <p className="mt-1.5 text-sm text-muted">{summary}</p>
