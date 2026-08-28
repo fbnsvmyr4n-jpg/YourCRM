@@ -247,7 +247,28 @@ export function Topbar({
         </button>
 
         {bellOpen && (
-          <div className="popover absolute right-0 top-12 z-30 w-[min(92vw,380px)] overflow-hidden p-0">
+          /*
+              Pinned to the screen on a phone, to the bell on a desktop.
+
+              `absolute right-0` anchors the panel's right edge to the BELL, and
+              the bell is not at the right edge of the screen — the avatar sits
+              after it. Measured at 320: the bell's right edge is at 260 and the
+              panel is 294 wide (92vw), so it started at -34 and the first 34px
+              of every row — the word "Notifications", the icon, the start of
+              each title — were off the side of the screen with no way to reach
+              them. Half a notification is not a notification.
+
+              Below `sm` it is `fixed` with equal gutters instead, which pins it
+              to the viewport rather than to whatever control opened it: 12 to
+              308 at 320px wide. Verified that no ancestor establishes a
+              containing block for fixed positioning — no transform, filter,
+              backdrop-filter, perspective, contain or will-change anywhere up
+              the tree — so this resolves against the viewport, not the header.
+
+              From `sm` up every one of these is switched back off and the panel
+              is exactly the one it always was.
+          */
+          <div className="popover fixed left-3 right-3 top-[72px] z-30 overflow-hidden p-0 sm:absolute sm:left-auto sm:right-0 sm:top-12 sm:w-[min(92vw,380px)]">
             <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3">
               <p className="text-sm font-semibold">Notifications</p>
               <span className="text-xs text-faint">

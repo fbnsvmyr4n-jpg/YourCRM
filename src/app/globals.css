@@ -1023,6 +1023,22 @@ textarea.field-input {
 .chat-chips::-webkit-scrollbar { display: none; }
 
 /*
+   The hero orb comes down on a phone.
+
+   46px is right on a desktop, where the hero is a strip across a wide page. On
+   a 320x575 screen that hero measured 178px — 31% of the viewport, against a
+   conversation of 40 — and the orb sets its floor, so it shrinks along with
+   everything else around it.
+*/
+@media (max-width: 639.98px) {
+  .chat-orb {
+    height: 38px;
+    width: 38px;
+    border-radius: 13px;
+  }
+}
+
+/*
    On a phone the suggestions wrap instead of scrolling.
 
    They were a scrolling row, so the second chip read "Who should I follow up
@@ -1035,6 +1051,24 @@ textarea.field-input {
   .chat-chips {
     flex-wrap: wrap;
     overflow-x: visible;
+  }
+  /*
+     Once the conversation starts, they stand down.
+
+     Wrapped full-width they measure 191px, and on a 320x575 screen that is more
+     than the card had left after the composer — the transcript came out FORTY
+     pixels tall and the messages could not be read, which is what was reported.
+
+     Empty, they are the point of the screen and keep the room: there is nothing
+     to read yet and they are the fastest way in for someone who does not know
+     what to ask. With messages on screen the transcript is what the page is
+     for, and the composer is right there to type into.
+
+     Not a horizontal scroller — that puts most of them off the right edge,
+     which is the one thing this page must never do.
+  */
+  .chat-chips[data-conversation="true"] {
+    display: none;
   }
   /*
      Full width, but compact.

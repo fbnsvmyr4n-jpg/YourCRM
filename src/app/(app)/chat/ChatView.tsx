@@ -133,15 +133,29 @@ export function ChatView({
        untouched.
     */
     <div className="mx-auto flex h-[calc(100dvh-112px)] max-w-[900px] animate-fade-up flex-col lg:h-[calc(100vh-104px)]">
-      {/* Identity */}
-      <div className="chat-hero mb-4 flex flex-wrap items-center justify-between gap-4 px-5 py-4">
-        <div className="flex min-w-0 items-center gap-3.5">
+      {/*
+          Identity — and on a phone it has to earn its height.
+
+          Measured at 320x575 it was 178px: 31% of the whole viewport, for a
+          title, a status pill and a sentence. The conversation below it got 40.
+          Nothing here is wrong on a desktop, where 178px of a 900px screen is
+          nothing; it is the phone where a fixed-height page has to spend its
+          pixels on the part the user came for.
+
+          Three things give it back, all `max-sm:` and all reversed at `sm`:
+          tighter padding, a smaller orb, and — the big one — the reset button
+          stops wrapping onto a line of its own by becoming an icon.
+      */}
+      <div className="chat-hero mb-3 flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:mb-4 sm:gap-4 sm:px-5 sm:py-4">
+        {/* `flex-1` so it shrinks instead of pushing the button onto its own
+            row — the 56px that wrapping used to cost. */}
+        <div className="flex min-w-0 flex-1 items-center gap-3 sm:gap-3.5">
           <span className="chat-orb">
             <Sparkles className="h-[22px] w-[22px]" />
           </span>
           <div className="min-w-0 leading-tight">
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-[19px] font-bold tracking-tight">CRM Assistant</h1>
+              <h1 className="text-base font-bold tracking-tight sm:text-[19px]">CRM Assistant</h1>
               <span
                 className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold tracking-wide"
                 style={
@@ -154,10 +168,31 @@ export function ChatView({
                 {aiEnabled ? "AI CONNECTED" : "DATA MODE"}
               </span>
             </div>
-            {/* Wraps rather than truncates below `sm`. This line is the page's
-                claim about where its answers come from, and "0 deals and 0 m…"
-                cuts off exactly the part that makes the claim. */}
-            <p className="mt-1.5 text-xs text-muted sm:truncate">
+            {/*
+                The same claim, in one line instead of three.
+
+                Below `sm` the prose wrapped to three lines at 320px — most of
+                the hero's height for a sentence whose actual content is three
+                numbers. The counts are the claim; "Answering from" and "live"
+                are the framing, and the badge beside the title already says the
+                page is live. So the phone gets the numbers, separated rather
+                than narrated, on one line that truncates only in the impossible
+                case.
+
+                Both are rendered and one is displayed, so there is no
+                client-only string and nothing to mismatch on hydration.
+            */}
+            {/* Wraps rather than truncates. With the reset button now beside it
+                the line is narrow enough to clip, and it rendered "15 contacts ·
+                15 deals · 0 …" — cutting off the third number, which is the one
+                thing this line exists to state. A second line costs 16px; a
+                claim that stops mid-figure costs the claim. */}
+            <p className="mt-1 text-xs text-muted sm:hidden">
+              <strong className="font-semibold text-[var(--text)]">{knows.contacts}</strong> contacts ·{" "}
+              <strong className="font-semibold text-[var(--text)]">{knows.deals}</strong> deals ·{" "}
+              <strong className="font-semibold text-[var(--text)]">{knows.meetings}</strong> meetings
+            </p>
+            <p className="mt-1.5 hidden text-xs text-muted sm:block sm:truncate">
               Answering from{" "}
               <strong className="font-semibold text-[var(--text)]">{knows.contacts}</strong> contacts,{" "}
               <strong className="font-semibold text-[var(--text)]">{knows.deals}</strong> deals and{" "}
@@ -165,18 +200,37 @@ export function ChatView({
             </p>
           </div>
         </div>
+        {/* Icon-only on a phone. With the label it was wider than the room left
+            beside the title, so it wrapped to a row of its own and took 56px
+            with it — the single biggest line item in the hero. The action is
+            unchanged and still labelled for screen readers. */}
         <button
           onClick={reset}
           disabled={busy}
-          className="btn-soft focus-ring flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-medium disabled:opacity-50"
+          aria-label="New chat"
+          title="New chat"
+          className="btn-soft focus-ring flex shrink-0 items-center gap-2 rounded-xl p-2.5 text-sm font-medium disabled:opacity-50 sm:px-3.5 sm:py-2"
         >
-          <RotateCcw className="h-4 w-4" /> New chat
+          <RotateCcw className="h-4 w-4" /> <span className="hidden sm:inline">New chat</span>
         </button>
       </div>
 
       {/* Conversation */}
       <Card className="flex min-h-0 flex-1 flex-col !p-0">
-        <div className="flex-1 space-y-4 overflow-y-auto p-5">
+        {/*
+            `min-h-0` is what keeps the composer on the screen.
+
+            A flex item's automatic minimum size is its CONTENT height, so
+            without this the transcript refused to shrink below what it held and
+            pushed the composer out of the bottom of the card instead. Measured
+            at 320x575: the card ended at 543 while the composer ran 506 to 585
+            — hanging 42px below the card and off the viewport entirely, which
+            is the overlap in the report.
+
+            With it, the transcript is the part that gives way. That is the
+            right way round: it scrolls, and the composer does not.
+        */}
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
           {/*
               Something to look at before the first question.
 
@@ -246,8 +300,37 @@ export function ChatView({
         </div>
 
         {/* Suggestions — kept for the whole conversation, and rewritten as the
-            user types so a half-formed question is one click from an answer. */}
-        <div className="chat-chips border-t border-[var(--border)] px-5 py-3">
+            user types so a half-formed question is one click from an answer.
+
+            On a phone they stand down once the conversation starts.
+
+            They wrap full-width there, one question per line, which measured
+            191px — on a 320x575 screen that is a third of the viewport and more
+            than the whole card had left after the composer. It is why the
+            transcript came out FORTY pixels tall and the messages were
+            unreadable.
+
+            Empty, they are the point of the screen and can have the room: there
+            is nothing to read yet, and they are the fastest way in for someone
+            who does not know what to ask. Once there are messages the transcript
+            is what the page is for, and the composer is right there to type in.
+
+            Not a horizontal scroller — that hides most of them off the right
+            edge, which is the one thing this page must not do.
+
+            Desktop keeps them throughout: `max-sm:` only, and there is room. */}
+        <div
+          /*
+              A data attribute rather than `max-sm:hidden`, because the utility
+              cannot win here. `.chat-chips` sets `display: flex` from
+              globals.css, which is UNLAYERED, and unlayered CSS beats every
+              Tailwind utility regardless of source order — measured: the class
+              was applied and the chips still rendered. The rule that hides them
+              has to live beside the rule that shows them.
+          */
+          data-conversation={items.length > 0 ? "true" : undefined}
+          className="chat-chips shrink-0 border-t border-[var(--border)] px-5 py-3"
+        >
           {suggestions.map((s) => (
             <button
               key={s}
@@ -267,7 +350,9 @@ export function ChatView({
             e.preventDefault();
             send(draft);
           }}
-          className="flex items-center gap-3 border-t border-[var(--border)] p-4"
+          /* `shrink-0`: the composer is the one control this page exists for
+             and must never be the thing that gives way. */
+          className="flex shrink-0 items-center gap-3 border-t border-[var(--border)] p-4"
         >
           <input
             value={draft}
