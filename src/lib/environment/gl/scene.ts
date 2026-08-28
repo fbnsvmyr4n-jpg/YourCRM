@@ -111,7 +111,13 @@ function sceneBlend(gl: WebGL2RenderingContext): void {
   );
 }
 
-type Textures = { day: WebGLTexture; night: WebGLTexture; clouds: WebGLTexture; moon: WebGLTexture };
+type Textures = {
+  day: WebGLTexture;
+  night: WebGLTexture;
+  clouds: WebGLTexture;
+  moon: WebGLTexture;
+  elev: WebGLTexture;
+};
 
 export class PlanetScene {
   private gl: WebGL2RenderingContext;
@@ -157,7 +163,7 @@ export class PlanetScene {
       "uSunDisplayDir", "uMoonDisplayDir", "uSunLimbProximity", "uSunIntensity",
       "uMoonIllumination",
       "uFov", "uPitch", "uYaw", "uEnuToEcef", "uExposure", "uSteps",
-      "uLightSteps", "uCloudPhase", "uDay", "uNight", "uClouds",
+      "uLightSteps", "uCloudPhase", "uDay", "uNight", "uClouds", "uElev",
       "uMoon", "uMoonNorthAngle",
     ]) {
       const location = gl.getUniformLocation(program, name);
@@ -294,13 +300,17 @@ export class PlanetScene {
       });
 
     try {
-      const [day, night, clouds, moon] = await Promise.all([
+      const [day, night, clouds, moon, elev] = await Promise.all([
         load(`earth-day-${set}.jpg`),
         load(`earth-night-${set}.jpg`),
         load(`earth-clouds-${set}.jpg`),
         /* One size only: the moon is about fifty pixels across, so a 1K map is
            already far finer than the disc can show, and it is 86kB. */
         load("moon-1k.jpg"),
+        /* Elevation ships in two tiers, not four. Relief is a low-frequency
+           cue — the shape of a range, not of a ridge — so 4K already carries
+           more than the frame can resolve, and the small set stays small. */
+        load(`earth-elev-${set === "2k" ? "2k" : "4k"}.png`),
       ]);
       if (this.disposed) return false;
       this.textures = {
@@ -308,6 +318,7 @@ export class PlanetScene {
         night: this.upload(night, 1),
         clouds: this.upload(clouds, 2),
         moon: this.upload(moon, 3),
+        elev: this.upload(elev, 4),
       };
 
       /**
@@ -796,6 +807,7 @@ export class PlanetScene {
     gl.uniform1i(u.uNight, 1);
     gl.uniform1i(u.uClouds, 2);
     gl.uniform1i(u.uMoon, 3);
+    gl.uniform1i(u.uElev, 4);
 
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }

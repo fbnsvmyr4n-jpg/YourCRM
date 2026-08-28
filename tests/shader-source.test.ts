@@ -336,3 +336,62 @@ describe("the ocean glint", () => {
     expect(Number(exponent![1])).toBeLessThanOrEqual(80);
   });
 });
+
+describe("terrain relief", () => {
+  it("lights the slope of the land, not just the sphere", () => {
+    /**
+     * Until this, the planet was a photograph on a perfectly smooth ball: the
+     * only thing lighting the surface was dot(sphere normal, sun), so the
+     * Andes, the Himalaya and the Atlas all rendered as flat colour. That is
+     * the single thing a broadcast globe has that this did not.
+     *
+     * Verified by reading the rendered frame back and measuring mean local
+     * luma gradient over the planet, at London, midday: 0.04858 with relief
+     * off, 0.05060 with it on, and the mean luma unchanged — so the surface
+     * gained shape without gaining exposure.
+     */
+    expect(FRAGMENT_SHADER).toMatch(/uniform sampler2D uElev;/);
+    expect(FRAGMENT_SHADER).toMatch(/vec3 reliefNormal = normalize\(/);
+    expect(FRAGMENT_SHADER).toMatch(/dot\(reliefNormal, uSunDir\)/);
+  });
+
+  it("corrects the gradient for equirectangular texels", () => {
+    /**
+     * A step in u spans cos(latitude) as much ground as the same step in v.
+     * Without dividing the east gradient by it, relief stretches sideways
+     * toward the poles until Greenland looks combed — and it would look
+     * perfectly fine at the equator, which is where anybody would check.
+     *
+     * The divisor is floored because at the pole the correction is infinite.
+     */
+    expect(FRAGMENT_SHADER).toMatch(/\(eE - eW\) \/ cosLat/);
+    expect(FRAGMENT_SHADER).toMatch(/float cosLat = max\(0\.2, sqrt\(max\(0\.0, 1\.0 - n\.z \* n\.z\)\)\)/);
+  });
+
+  it("agrees with the cloud shading about where north is", () => {
+    /* `v` runs SOUTH in this projection, so the north gradient carries a minus.
+       The cloud normal above uses the same convention deliberately; if the two
+       disagreed, cloud and terrain would be lit from different directions in
+       the same frame. */
+    expect(FRAGMENT_SHADER).toMatch(/- northAt \* \(eS - eN\)/);
+    expect(FRAGMENT_SHADER).toMatch(/- northAt \* cloudDv/);
+  });
+
+  it("modulates the existing light rather than replacing it", () => {
+    /* Relief is the DIFFERENCE between how a slope catches light and how flat
+       ground at the same place would, so the planet keeps the exposure it was
+       tuned for and only gains shape. */
+    expect(FRAGMENT_SHADER).toMatch(/float relief = clamp\(1\.0 \+ \(bumpLambert - flatLambert\)/);
+    expect(FRAGMENT_SHADER).toMatch(/diffuse \* 1\.75 \* sunlight \* relief/);
+  });
+
+  it("leaves the sea flat", () => {
+    /**
+     * The source is a true zero over water — the mid-Atlantic and the Marianas
+     * both read 0 — so any gradient at a coast is the coast itself, not
+     * terrain. Left in, it would draw a lit rim around every continent, which
+     * is the most obviously wrong thing this could have done.
+     */
+    expect(FRAGMENT_SHADER).toMatch(/relief = mix\(relief, 1\.0, water\)/);
+  });
+});

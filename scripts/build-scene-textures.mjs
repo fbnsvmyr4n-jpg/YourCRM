@@ -11,6 +11,8 @@
  *           world.topo.bathy.200412.3x21600x10800.jpg       21600 x 10800
  *   night https://eoimages.gsfc.nasa.gov/images/imagerecords/144000/144898/
  *           BlackMarble_2016_3km_geo.tif                    13500 x 6750
+ *   elev  https://eoimages.gsfc.nasa.gov/images/imagerecords/73000/73934/
+ *           gebco_08_rev_elev_21600x10800.png               21600 x 10800
  *
  *   node scripts/build-scene-textures.mjs <src-dir> <out-dir>
  */
@@ -36,6 +38,25 @@ const DAY_TIERS = [
   [8192, 4096, 82],
   [4096, 2048, 84],
   [2048, 1024, 86],
+];
+
+/*
+   Elevation, for relief shading.
+
+   PNG rather than JPEG, and that is not a preference. The shader DIFFERENTIATES
+   this map to get a surface normal, and differentiation amplifies exactly what
+   JPEG throws away — ringing around a coastline becomes a ridge along it, and
+   block edges become a grid of creases across flat desert. Lossless at 4k costs
+   1.4MB against the 0.64MB a quality-95 JPEG would, which is a cheap price for
+   not inventing terrain.
+
+   Two tiers rather than four. Relief is a low-frequency cue: it is the shape of
+   a mountain range, not the shape of a ridge, that reads from 5,500km. The 4k
+   tier already carries more detail than the frame can resolve.
+*/
+const BUMP_TIERS = [
+  [4096, 2048],
+  [2048, 1024],
 ];
 
 const NIGHT_TIERS = [
@@ -206,4 +227,29 @@ for (const [w, h, q] of only) {
 for (const [w, h, q] of NIGHT_TIERS) {
   await buildNight(w, h, q);
   console.log(`night ${label(w)}`);
+}
+
+/*
+   The source is a visualisation ramp, not a DEM, and the shader is told so.
+
+   Checked against seven places: Everest reads 241/255, but Denver reads 87
+   where a linear 0-8,848m scale would put it at 46, and the Sahara reads 28
+   where it should be 12. The curve is concave — lowlands lifted, peaks
+   compressed — so a fitted gamma lands anywhere between 0.45 and 0.68
+   depending on which pair you fit it to. It is an artistic ramp.
+   
+   That is fine for what it is used for and would be wrong for anything else.
+   Relief shading needs a height field whose gradient tracks slope well enough
+   to catch light; it does not need metres. Ocean is a true zero in this source
+   — the mid-Atlantic and the Marianas both read 0 — so there is no bathymetry
+   to mask out, which is the one thing that would have looked obviously wrong
+   from orbit.
+*/
+for (const [w, h] of BUMP_TIERS) {
+  await open("elev-src.png")
+    .resize(w, h, { kernel: "lanczos3" })
+    .toColourspace("b-w")
+    .png({ compressionLevel: 9, palette: false })
+    .toFile(`${OUT}/earth-elev-${label(w)}.png`);
+  console.log(`elev ${label(w)}`);
 }

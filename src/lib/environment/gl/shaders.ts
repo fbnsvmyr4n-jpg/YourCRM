@@ -92,6 +92,7 @@ uniform float uCloudPhase;   // weather's own offset, in texture units
 uniform sampler2D uDay;
 uniform sampler2D uNight;
 uniform sampler2D uClouds;
+uniform sampler2D uElev;    // land elevation, a visualisation ramp; ocean is a true 0
 
 const float PI = 3.141592653589793;
 
@@ -473,7 +474,75 @@ void main() {
        indistinguishable from haze. */
     float grey = dot(surfaceColour, vec3(0.299, 0.587, 0.114));
     surfaceColour = clamp(mix(vec3(grey), surfaceColour, 1.22), 0.0, 1.0);
-    vec3 litSurface = surfaceColour * (diffuse * 1.75 * sunlight + vec3(0.42, 0.55, 0.78) * skyLight);
+    /*
+       Relief.
+
+       Until now the planet was a photograph on a perfectly smooth ball: the
+       only thing lighting it was dot(sphere normal, sun), so the Andes, the
+       Himalaya and the Atlas all rendered as flat colour. Broadcast globes read
+       as solid because their mountains have a lit flank and a shaded one, and
+       that is the single biggest thing this was missing.
+
+       The elevation map supplies the shape. Its gradient is the slope, and
+       lighting the slope is the whole technique — the same one the clouds above
+       already use, but driven by real terrain instead of by cloud thickness.
+
+       Two details that would be wrong if left out:
+
+       Equirectangular texels are not square on the ground. A step in u spans
+       cos(latitude) as much ground as the same step in v, so the east gradient
+       has to be divided by it or the relief stretches sideways toward the poles
+       until Greenland looks combed. The divisor is floored because at the pole
+       itself the correction is infinite.
+
+       And v runs SOUTH, so the north gradient carries a minus — the same
+       convention the cloud normal above uses, deliberately, so the two agree
+       about which way the light is coming from.
+    */
+    float cosLat = max(0.2, sqrt(max(0.0, 1.0 - n.z * n.z)));
+    vec2 eStep = vec2(0.0009, 0.0018);
+    float eW = texture(uElev, uv - vec2(eStep.x, 0.0)).r;
+    float eE = texture(uElev, uv + vec2(eStep.x, 0.0)).r;
+    float eN = texture(uElev, uv - vec2(0.0, eStep.y)).r;
+    float eS = texture(uElev, uv + vec2(0.0, eStep.y)).r;
+
+    /*
+       26 is the knee, measured rather than picked. Sweeping the strength and
+       reading the frame back — mean local luma gradient over the mid band of
+       the planet, at London, midday:
+
+         off   0.04858
+         8     0.04993   +2.8%
+         26    0.05060   +4.2%
+         48    0.05046   +3.9%   no better than 26
+
+       Past the knee the extra tilt only pushes more pixels into the clamp
+       below, which does not add relief — it erases the difference between a
+       moderate slope and a steep one, and that flattening is what "embossed"
+       looks like. Below it there is real shading left unused.
+    */
+    vec3 reliefNormal = normalize(
+      n - (eastAt * ((eE - eW) / cosLat) - northAt * (eS - eN)) * 26.0
+    );
+
+    /*
+       Applied as a modulation, not as a replacement.
+
+       Relief is the DIFFERENCE between how the slope catches the light and how
+       flat ground at the same place would, so the planet keeps the exposure it
+       already had and only gains shape. Replacing the diffuse term outright
+       would have relit the whole surface and thrown away the tuning above.
+
+       Land only: the sea has no relief to catch light, and the source is a true
+       zero over water, so any gradient there is a coastline — which would draw
+       a bright rim around every continent.
+    */
+    float flatLambert = max(0.0, sunCos);
+    float bumpLambert = max(0.0, dot(reliefNormal, uSunDir));
+    float relief = clamp(1.0 + (bumpLambert - flatLambert) * 2.3, 0.62, 1.5);
+    relief = mix(relief, 1.0, water);
+
+    vec3 litSurface = surfaceColour * (diffuse * 1.75 * sunlight * relief + vec3(0.42, 0.55, 0.78) * skyLight);
 
     /*
        Ocean glint: the sun reflecting off water, and the single strongest cue

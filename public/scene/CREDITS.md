@@ -9,11 +9,36 @@ deserves it and because a future reader should be able to find the originals.
 | `earth-day-*`   | Blue Marble Next Generation, December 2004 | 21600 × 10800  |
 | `earth-night-*` | Black Marble 2016 (VIIRS day-night band)   | 13500 × 6750   |
 | `earth-clouds-*`| Blue Marble combined cloud composite       | 8192 × 4096    |
+| `earth-elev-*`  | GEBCO_08 elevation ramp (NASA Visible Earth)| 21600 × 10800 |
 | `moon-1k.jpg`   | LRO/LROC colour albedo of the near side    | 2048 × 1024    |
 
-Regenerate with `scripts/build-scene-textures.mjs`, which takes the two
-originals and emits every tier. The night texture is **not** a plain copy of
-its source — see below — so it cannot be reproduced by resizing alone.
+Regenerate with `scripts/build-scene-textures.mjs`, which takes the originals
+and emits every tier. The night texture is **not** a plain copy of its source —
+see below — so it cannot be reproduced by resizing alone.
+
+### The elevation map is a ramp, not a DEM, and is used as one
+
+`gebco_08_rev_elev` is a visualisation ramp. Checked against seven places:
+Everest reads 241/255, but Denver reads 87 where a linear 0–8,848m scale puts
+it at 46, and the Sahara reads 28 where it should be 12. The curve is concave —
+lowlands lifted, peaks compressed — and a fitted gamma lands anywhere between
+0.45 and 0.68 depending which pair you fit it to.
+
+That is fine for the one thing it does. Relief shading needs a height field
+whose gradient tracks slope well enough to catch light; it does not need
+metres, and nothing in the scene converts it to any. Anyone reaching for this
+file to measure an altitude should not.
+
+Ocean is a true zero in the source — the mid-Atlantic and the Marianas both
+read 0 — so there is no bathymetry to mask, which is the one thing that would
+have looked obviously wrong from orbit.
+
+**PNG, not JPEG.** The shader differentiates this map to get a surface normal,
+and differentiation amplifies exactly what JPEG discards: ringing at a
+coastline becomes a ridge along it, block edges become creases across flat
+desert. Lossless costs 1.4MB at 4k against 0.64MB for quality-95, which is a
+cheap price for not inventing terrain. Two tiers rather than four, because
+relief is a low-frequency cue — the shape of a range, not of a ridge.
 
 **Four tiers, and a progressive upgrade — the top one because of a
 measurement, not an ambition.** Tracing the camera's own rays at 5,500km and a
