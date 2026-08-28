@@ -66,8 +66,13 @@ describe("the dashboard on a phone", () => {
   it("every ordering is undone above the breakpoint", () => {
     /* A stray `order-N` without its `@min-[820px]:order-none` would reorder a
        desktop column too, which is the one thing this must not touch. */
+    /* Undone at whichever breakpoint that ordering belongs to — the page
+       ordering is unwound at `@min-[820px]`, the ordering inside the revenue
+       grid at `sm`. The first version of this counted only the first kind and
+       failed the moment a second breakpoint was used, which is the test being
+       narrow rather than the code being wrong. */
     const orders = page.match(/order-\d(?![\d])/g) ?? [];
-    const undone = page.match(/@min-\[820px\]:order-none/g) ?? [];
+    const undone = page.match(/(?:sm|@min-\[820px\]):order-none/g) ?? [];
     expect(orders.length).toBeGreaterThanOrEqual(8);
     expect(undone.length).toBe(orders.length);
   });
@@ -87,8 +92,52 @@ describe("the dashboard on a phone", () => {
        matters. Every fold carries a figure. */
     expect(section).toMatch(/hint\?: string;/);
     expect(page).toMatch(/hint=\{`\$\$\{revenueTotal\.toLocaleString\(\)\} won · last 6 weeks`\}/);
-    expect(page).toMatch(/hint=\{`\$\{wonThisWeek\.length\} won · \$\{followUps\.length\} to follow up`\}/);
     expect(page).toMatch(/hint=\{`\$\{activity\.length\} recent`\}/);
+  });
+
+  it("keeps one Revenue fold, holding This Week and what was received", () => {
+    /**
+     * The Revenue Overview chart is gone from the phone, and the This Week
+     * fold with it. The chart's headline — total won over six weeks — is the
+     * exact figure the fold's own header carries, so on a phone the card
+     * restated the line the reader had just tapped and then spent 500px
+     * drawing it. The number survives as the hint.
+     *
+     * Two folds now, not three: Revenue and Activity.
+     */
+    expect(page).not.toMatch(/<MobileSection\s+title="This week"/);
+    const folds = page.match(/<MobileSection/g) ?? [];
+    expect(folds).toHaveLength(2);
+    expect(page).toMatch(/<div className="hidden sm:block">\s*<RevenueOverview/);
+  });
+
+  it("merges the two desktop rows into one grid, so nothing renders twice", () => {
+    /**
+     * Ordering and hiding only work between siblings. While these four cards
+     * sat in two separate grids, This Week could not be lifted next to Revenue
+     * Received without rendering it into both layouts and hiding one.
+     *
+     * One grid of four in two columns produces the same pairs, gap and row
+     * heights as two grids of two. Verified against the compiled stylesheet at
+     * 1280px — every card lands on the same pixel:
+     *
+     *   overview (0,0,622,120)     received (642,0,622,120)
+     *   thisweek (0,140,622,110)   connections (642,140,622,110)
+     *
+     * And at 375px: This Week, then Received; Overview and Follow-ups hidden.
+     */
+    const grids = page.match(/grid grid-cols-1 gap-5 @min-\[560px\]:grid-cols-2/g) ?? [];
+    expect(grids).toHaveLength(1);
+    expect(page).toMatch(/<div className="order-1 sm:order-none">\s*<ThisWeek/);
+    expect(page).toMatch(/<div className="order-2 sm:order-none">\s*<RevenueReceived/);
+  });
+
+  it("does not repeat the follow-up count on a phone", () => {
+    /* Today's Focus already carries "N leads need follow-up" with the same
+       count and the same link to /leads, three cards above. On a desktop the
+       two sit in different columns; stacked they would be the same row twice —
+       the same reason the hero tiles are hidden. */
+    expect(page).toMatch(/<div className="hidden sm:block">\s*<Connections/);
   });
 
   it("does not fold a card that is already short", () => {

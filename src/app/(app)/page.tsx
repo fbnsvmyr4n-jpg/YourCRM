@@ -265,33 +265,67 @@ export default async function DashboardPage() {
             />
           </div>
 
+          {/*
+              One grid of four, where there were two grids of two.
+
+              On a desktop this renders exactly what it did: two columns, so
+              row one is Revenue Overview | Revenue Received and row two is
+              This Week | Follow-ups — the same pairs, the same gap, the same
+              row heights, because both grids already had two equal columns.
+
+              Merging them is what makes the phone possible without rendering
+              any card twice. Ordering and hiding only work between siblings,
+              and while these four sat in two separate grids, This Week could
+              not be lifted next to Revenue Received without duplicating it
+              into both layouts.
+          */}
           <div className="order-5 @min-[820px]:order-none">
             <MobileSection
               title="Revenue"
               hint={`$${revenueTotal.toLocaleString()} won · last 6 weeks`}
             >
               <div className="grid grid-cols-1 gap-5 @min-[560px]:grid-cols-2">
-                <RevenueOverview series={revenueSeries} total={revenueTotal} />
-                <RevenueReceived rows={revenueRows} now={now} />
-              </div>
-            </MobileSection>
-          </div>
+                {/*
+                    The chart is desktop-only now.
 
-          <div className="order-6 @min-[820px]:order-none">
-            <MobileSection
-              title="This week"
-              hint={`${wonThisWeek.length} won · ${followUps.length} to follow up`}
-            >
-              <div className="grid grid-cols-1 gap-5 @min-[560px]:grid-cols-2">
-                <ThisWeek
-                  wonThisWeek={wonThisWeek.length}
-                  wonValue={Math.round(
-                    wonThisWeek.reduce((sum, d) => sum + d.amountCents, 0) / 100
-                  )}
-                  needFollowUp={openLeadCount}
-                  totalLeads={contacts.length}
-                />
-                <Connections items={followUps} />
+                    Its headline — the total won over six weeks — is the exact
+                    figure this fold's own header carries, so on a phone the
+                    card restated the line the reader had just tapped, then
+                    spent 500px drawing it. The number is not lost; it is the
+                    hint above.
+                */}
+                <div className="hidden sm:block">
+                  <RevenueOverview series={revenueSeries} total={revenueTotal} />
+                </div>
+
+                {/* Second on a phone, so This Week leads. Untouched from `sm`. */}
+                <div className="order-2 sm:order-none">
+                  <RevenueReceived rows={revenueRows} now={now} />
+                </div>
+
+                {/* First on a phone. On a desktop it stays in the second row,
+                    which is where the DOM order already puts it. */}
+                <div className="order-1 sm:order-none">
+                  <ThisWeek
+                    wonThisWeek={wonThisWeek.length}
+                    wonValue={Math.round(
+                      wonThisWeek.reduce((sum, d) => sum + d.amountCents, 0) / 100
+                    )}
+                    needFollowUp={openLeadCount}
+                    totalLeads={contacts.length}
+                  />
+                </div>
+
+                {/*
+                    Follow-ups is desktop-only, for the reason the hero tiles
+                    are: Today's Focus already carries "N leads need follow-up"
+                    with the same count and the same link to /leads, three
+                    cards above this one. On a desktop the two sit in different
+                    columns; on a phone they would be the same row twice.
+                */}
+                <div className="hidden sm:block">
+                  <Connections items={followUps} />
+                </div>
               </div>
             </MobileSection>
           </div>
