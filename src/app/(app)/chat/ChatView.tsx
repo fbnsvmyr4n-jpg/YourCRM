@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { RotateCcw, Send, Sparkles } from "lucide-react";
-import { Card } from "@/components/ui/Card";
+import { instantToWallClock } from "@/lib/zoned";
 import type { ChatMessage } from "@/server/repos/chat";
 import { intentOf, suggestFor } from "@/server/chat-answers";
 import { clsx } from "@/lib/clsx";
@@ -32,6 +32,26 @@ function renderText(text: string) {
 type Knows = { contacts: number; deals: number; meetings: number };
 
 /**
+ * "12 March 2026" from a `YYYY-MM-DD` key, for the day separator.
+ *
+ * Built from the parts rather than `new Date(key)` and a locale format: the
+ * key is already wall-clock in the business's zone, so re-parsing it as a date
+ * would re-apply an offset and can land the pill on the wrong day either side
+ * of midnight. Splitting the string cannot drift.
+ */
+const MONTHS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+function dayLabel(key: string): string {
+  const [year, month, day] = key.split("-");
+  const name = MONTHS[Number(month) - 1];
+  if (!name) return key;
+  return `${Number(day)} ${name} ${year}`;
+}
+
+/**
  * Whether the viewport is narrow enough to need the short placeholder.
  *
  * A placeholder is an attribute, not an element, so CSS cannot shorten it — it
@@ -55,10 +75,14 @@ export function ChatView({
   messages,
   aiEnabled,
   knows,
+  timeZone,
 }: {
   messages: ChatMessage[];
   aiEnabled: boolean;
   knows: Knows;
+  /** The business's zone. See `page.tsx`: bubble times must not be formatted
+      against the device, or the server and the client disagree. */
+  timeZone: string;
 }) {
   const [items, setItems] = useState(messages);
   const [draft, setDraft] = useState("");
@@ -183,84 +207,86 @@ export function ChatView({
     */
     <div className="mx-auto -mb-6 flex h-[calc(100dvh-88px)] max-w-[900px] animate-fade-up flex-col sm:mb-0 sm:h-[calc(100dvh-112px)] lg:h-[calc(100vh-104px)]">
       {/*
-          Identity — and on a phone it has to earn its height.
+          A contact bar, the way a messaging app does it.
 
-          Measured at 320x575 it was 178px: 31% of the whole viewport, for a
-          title, a status pill and a sentence. The conversation below it got 40.
-          Nothing here is wrong on a desktop, where 178px of a 900px screen is
-          nothing; it is the phone where a fixed-height page has to spend its
-          pixels on the part the user came for.
+          It was a hero card: a bordered, tinted panel with a title, a status
+          pill and a sentence, 178px tall on a 575px screen against a
+          conversation of 40. A chat app does not put a poster above the
+          conversation — it puts a thin bar with who you are talking to, their
+          status, and the actions, and gives every remaining pixel to the
+          messages. That is most of why the reference feels effortless: there is
+          almost nothing between the reader and the thread.
 
-          Three things give it back, all `max-sm:` and all reversed at `sm`:
-          tighter padding, a smaller orb, and — the big one — the reset button
-          stops wrapping onto a line of its own by becoming an icon.
+          So: one row, avatar and name and a live status line, a hairline under
+          it, and no panel. The status line replaces the badge — "Answering from
+          your live CRM data" says what DATA MODE said, in the place and voice a
+          messaging app says "online".
       */}
-      <div className="chat-hero mb-3 flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:mb-4 sm:gap-4 sm:px-5 sm:py-4">
-        {/* `flex-1` so it shrinks instead of pushing the button onto its own
-            row — the 56px that wrapping used to cost. */}
-        <div className="flex min-w-0 flex-1 items-center gap-3 sm:gap-3.5">
-          <span className="chat-orb">
-            <Sparkles className="h-[22px] w-[22px]" />
-          </span>
-          <div className="min-w-0 leading-tight">
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-base font-bold tracking-tight sm:text-[19px]">CRM Assistant</h1>
-              <span
-                className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold tracking-wide"
-                style={
-                  aiEnabled
-                    ? { background: "var(--green-soft)", color: "var(--green)" }
-                    : { background: "var(--amber-soft)", color: "var(--amber)" }
-                }
-              >
-                <span className="chat-live-dot" />
-                {aiEnabled ? "AI CONNECTED" : "DATA MODE"}
-              </span>
-            </div>
+      <div className="mb-1 flex items-center gap-3 border-b border-[var(--border)] px-1 pb-3 sm:gap-3.5">
+        <span className="chat-orb shrink-0">
+          <Sparkles className="h-[22px] w-[22px]" />
+        </span>
+        <div className="min-w-0 flex-1 leading-tight">
+          <h1 className="truncate text-base font-semibold tracking-tight">CRM Assistant</h1>
+          {/*
+              Where "online" goes in the reference, and it does the same job the
+              badge used to: says whether the answers are live. It reads as a
+              status rather than a label because that is what it is, and the dot
+              carries the same colour the pill did — green when the model is
+              connected, amber when it is answering from data alone.
+
+              The counts are gone. They were never a fact anybody acted on, and
+              a contact bar states who you are talking to, not an inventory.
+          */}
+          <p className="flex items-center gap-1.5 truncate text-xs text-muted">
+            <span
+              className="chat-live-dot"
+              style={{ color: aiEnabled ? "var(--green)" : "var(--amber)" }}
+            />
+            {aiEnabled ? "Online" : "Answering from your data"}
             {/*
-                No counts line on a phone.
+                The receipts, where there is room for them.
 
-                It was asked whether something more useful could go here, and the
-                honest answer is no. Anything genuinely actionable — what is due,
-                who is waiting — is the Home page's job, and repeating it here
-                would be the duplication this app keeps having to remove. The
-                counts themselves are not a fact anybody acts on; the badge
-                beside the title already carries the only thing that changes what
-                you do, which is whether answers are live.
-
-                So the room goes to the conversation instead: two wrapped lines
-                on a 575px screen, plus the margin above them, is 32px that the
-                transcript can use.
-
-                The desktop keeps it. There it is one line in a wide strip, it
-                costs nothing, and it is the page stating on its face that the
-                answers are grounded in real records rather than invented.
+                The counts were the page's evidence for the claim that it
+                answers from real records, and dropping them entirely would take
+                the honesty with the clutter. On a desktop they fit on the
+                status line, which is exactly where a messaging app puts "last
+                seen" — a fact about the other party, stated once. On a phone
+                the line stays short.
             */}
-            <p className="mt-1.5 hidden text-xs text-muted sm:block sm:truncate">
-              Answering from{" "}
-              <strong className="font-semibold text-[var(--text)]">{knows.contacts}</strong> contacts,{" "}
-              <strong className="font-semibold text-[var(--text)]">{knows.deals}</strong> deals and{" "}
-              <strong className="font-semibold text-[var(--text)]">{knows.meetings}</strong> meetings — live.
-            </p>
-          </div>
+            <span className="hidden truncate sm:inline">
+              · {knows.contacts} contacts, {knows.deals} deals, {knows.meetings} meetings
+            </span>
+          </p>
         </div>
-        {/* Icon-only on a phone. With the label it was wider than the room left
-            beside the title, so it wrapped to a row of its own and took 56px
-            with it — the single biggest line item in the hero. The action is
-            unchanged and still labelled for screen readers. */}
+        {/* The reference puts video and voice here; ours has one action, and it
+            is the same one it always was. */}
         <button
           onClick={reset}
           disabled={busy}
           aria-label="New chat"
           title="New chat"
-          className="btn-soft focus-ring flex shrink-0 items-center gap-2 rounded-xl p-2.5 text-sm font-medium disabled:opacity-50 sm:px-3.5 sm:py-2"
+          className="btn-soft focus-ring grid h-10 w-10 shrink-0 place-items-center rounded-full disabled:opacity-50"
         >
-          <RotateCcw className="h-4 w-4" /> <span className="hidden sm:inline">New chat</span>
+          <RotateCcw className="h-[18px] w-[18px]" />
         </button>
       </div>
 
-      {/* Conversation */}
-      <Card className="flex min-h-0 flex-1 flex-col !p-0">
+      {/*
+          The conversation is the page, not a panel on it.
+
+          It was wrapped in a `Card`: a bordered, translucent box with the
+          messages inside it, so a bubble sat on a panel that sat on the page —
+          three surfaces deep, with a frame drawn around the one thing the
+          screen is for. No messaging app does that, and it is the other half of
+          why the reference reads as effortless: the thread runs edge to edge and
+          the only shapes are the bubbles.
+
+          So the frame goes and the messages sit on the page background
+          directly. The composer keeps a hairline above it, which is the one
+          rule the reference does draw.
+      */}
+      <div className="flex min-h-0 flex-1 flex-col">
         {/*
             `min-h-0` is what keeps the composer on the screen.
 
@@ -278,7 +304,10 @@ export function ChatView({
             stops there instead of handing the gesture on to the page behind it,
             which is what made a flick past the last message rubber-band the
             whole app. */}
-        <div ref={logRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-5">
+        {/* `space-y` is gone: runs set their own spacing, 2.5 between turns and
+            0.5 within one, the way the reference tucks a burst together. A flat
+            16px gutter made every message its own island. */}
+        <div ref={logRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 py-1">
           {/*
               Something to look at before the first question.
 
@@ -323,35 +352,104 @@ export function ChatView({
             </div>
           )}
 
-          {items.map((m) => (
-            <div key={m.id} className={clsx("flex", m.role === "user" ? "justify-end" : "justify-start")}>
-              {m.role === "assistant" && (
-                <span className="chat-orb-sm mr-2.5 mt-0.5">
-                  <Sparkles className="h-4 w-4" />
-                </span>
-              )}
-              <div
-                className={clsx(
-                  "max-w-[85%] whitespace-pre-wrap rounded-2xl px-4 py-3 text-sm leading-relaxed",
-                  m.role === "user" ? "text-white" : "text-[var(--text)]"
+          {/*
+              The day pill, centred, the way the reference stamps a thread.
+
+              Only where the day actually changes — a separator that repeats on
+              every message is decoration, and one that never appears leaves a
+              long thread with no anchor in time at all.
+          */}
+          {items.map((m, i) => {
+            const mine = m.role === "user";
+            const day = instantToWallClock(m.at, timeZone)?.date;
+            const previousDay = i > 0 ? instantToWallClock(items[i - 1].at, timeZone)?.date : null;
+            const newDay = !!day && day !== previousDay;
+            /* A run is consecutive messages from the same side. The reference
+               tucks them together and only tails the last one, which is what
+               makes a burst read as one turn rather than three objects. */
+            const startsRun = i === 0 || items[i - 1].role !== m.role;
+            const endsRun = i === items.length - 1 || items[i + 1].role !== m.role;
+            const clock = instantToWallClock(m.at, timeZone);
+
+            return (
+              <div key={m.id}>
+                {newDay && (
+                  <div className="flex justify-center py-3">
+                    <span
+                      className="rounded-lg px-2.5 py-1 text-[11px] font-medium text-muted"
+                      style={{ background: "var(--raise)" }}
+                    >
+                      {dayLabel(day!)}
+                    </span>
+                  </div>
                 )}
-                style={
-                  m.role === "user"
-                    ? { backgroundImage: "linear-gradient(135deg,var(--accent-from),var(--accent-to))" }
-                    : { background: "var(--raise)" }
-                }
-              >
-                {renderText(m.text)}
+                <div
+                  className={clsx(
+                    "flex",
+                    mine ? "justify-end" : "justify-start",
+                    newDay ? "" : startsRun ? "mt-2.5" : "mt-0.5"
+                  )}
+                >
+                {/*
+                    No avatar beside every message.
+
+                    The reference shows one in a group chat and none in a
+                    one-to-one, because in a two-party thread the side of the
+                    screen already says who spoke — an icon on every line is
+                    repeating what the alignment states, and it costs 42px of
+                    the bubble's width on a 320px screen.
+                */}
+                <div
+                  className={clsx(
+                    "relative max-w-[78%] rounded-2xl px-3 py-2 text-sm leading-relaxed",
+                    mine ? "text-white" : "text-[var(--text)]",
+                    /* The tail. A real WhatsApp bubble grows a pointed flick on
+                       the outer corner of the last message in a run; squaring
+                       that one corner reads as the same thing and survives a
+                       gradient fill, which a clipped pseudo-element does not. */
+                    endsRun && (mine ? "rounded-br-md" : "rounded-bl-md")
+                  )}
+                  style={
+                    mine
+                      ? { backgroundImage: "linear-gradient(135deg,var(--accent-from),var(--accent-to))" }
+                      : { background: "var(--raise)" }
+                  }
+                >
+                  {/*
+                      The time sits INSIDE the bubble, on the last line, right.
+
+                      That is the detail that makes the reference dense without
+                      feeling cramped: no separate metadata row, no gap between
+                      messages spent on a timestamp. A float does it — a short
+                      message keeps the time beside it on the same line, and a
+                      long one wraps around it.
+
+                      It has to come AFTER the text. A float attaches to the
+                      line box it is encountered on, so placed first it sat at
+                      the TOP right of a multi-line bubble with the text flowing
+                      under it — which is not where anyone looks for it.
+                  */}
+                  <span className="whitespace-pre-wrap">{renderText(m.text)}</span>
+                  <span
+                    className={clsx(
+                      "pointer-events-none float-right ml-2 mt-1.5 select-none text-[10px] leading-none",
+                      mine ? "text-white/70" : "text-faint"
+                    )}
+                  >
+                    {clock?.time}
+                  </span>
+                  </div>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
 
           {busy && (
-            <div className="flex justify-start">
-              <span className="chat-orb-sm mr-2.5 mt-0.5">
-                <Sparkles className="h-4 w-4" />
-              </span>
-              <div className="flex items-center gap-1.5 rounded-2xl px-4 py-3.5" style={{ background: "var(--raise)" }}>
+            <div className="mt-2.5 flex justify-start">
+              <div
+                className="flex items-center gap-1.5 rounded-2xl rounded-bl-md px-4 py-3"
+                style={{ background: "var(--raise)" }}
+              >
                 {[0, 150, 300].map((d) => (
                   <span
                     key={d}
@@ -418,8 +516,20 @@ export function ChatView({
           }}
           /* `shrink-0`: the composer is the one control this page exists for
              and must never be the thing that gives way. */
-          className="flex shrink-0 items-center gap-3 border-t border-[var(--border)] p-4"
+          className="flex shrink-0 items-end gap-2 border-t border-[var(--border)] px-2 py-2.5"
         >
+          {/*
+              A pill and a round button, which is what the reference uses and
+              what every messaging app has converged on: the field looks like
+              something you speak into rather than a form control, and the send
+              key is a target your thumb finds without looking.
+
+              `rounded-full` and `!rounded-full` — `.field-input` sets its own
+              radius from globals.css, which is unlayered and therefore beats
+              the utility. Same trap as `.chat-chips`; important is the way
+              past it that does not mean editing the shared input style for
+              every other form in the app.
+          */}
           <input
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
@@ -427,18 +537,18 @@ export function ChatView({
                pipeline, leads, meeti" in a 393px field, and a placeholder that
                gets cut mid-word looks like a bug rather than a hint. */
             placeholder={narrow ? "Ask anything…" : "Ask about your pipeline, leads, meetings…"}
-            className="field-input flex-1"
+            className="field-input flex-1 !rounded-full px-4"
           />
           <button
             type="submit"
             disabled={busy || !draft.trim()}
-            className="btn-accent focus-ring grid h-11 w-11 shrink-0 place-items-center rounded-xl disabled:opacity-40"
+            className="btn-accent focus-ring grid h-11 w-11 shrink-0 place-items-center rounded-full transition-opacity disabled:opacity-40"
             aria-label="Send"
           >
             <Send className="h-[18px] w-[18px]" />
           </button>
         </form>
-      </Card>
+      </div>
     </div>
   );
 }

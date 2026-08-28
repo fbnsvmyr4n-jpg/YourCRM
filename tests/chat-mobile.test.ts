@@ -48,18 +48,6 @@ describe("the assistant fills the phone screen", () => {
     expect(view).toMatch(/items\.length === 0 && !busy/);
   });
 
-  it("keeps the claim about where answers come from intact", () => {
-    /* "Answering from 0 deals and 0 m…" cuts off exactly the part that makes
-       the claim. The desktop line still only truncates from `sm`; the phone now
-       gets its own shorter line, which wraps rather than truncating for the
-       same reason. Both are rendered and one is displayed, so there is no
-       client-only string to mismatch on hydration. */
-    expect(view).toMatch(/text-xs text-muted sm:block sm:truncate/);
-    /* And on a phone there is no counts line at all now — see "drops the counts
-       line on a phone" below. The desktop claim is the one that survives. */
-    const code = view.replace(/\/\*[\s\S]*?\*\//g, "");
-    expect(code).not.toMatch(/sm:hidden">\s*<strong/);
-  });
 });
 
 describe("the suggestions stay on screen", () => {
@@ -116,8 +104,19 @@ describe("the conversation gets the room", () => {
   });
 
   it("never lets the composer be the thing that shrinks", () => {
-    expect(view).toMatch(/className="flex shrink-0 items-center gap-3 border-t/);
-    expect(view).toMatch(/className="chat-chips shrink-0 border-t/);
+    /* Token-based, not the whole class string. This has now broken twice on
+       changes to the PAINT while proving nothing about the layout — once when
+       `overscroll-contain` was added, once when the composer became a pill.
+       What matters is only that neither of these can be picked as the flex item
+       that collapses. */
+    const composerCls = (() => {
+      const at = view.indexOf("onSubmit={(e) => {");
+      const rest = view.slice(at);
+      const i = rest.indexOf('className="') + 11;
+      return rest.slice(i, rest.indexOf('"', i));
+    })();
+    expect(composerCls.split(/\s+/)).toContain("shrink-0");
+    expect(view).toMatch(/className="chat-chips shrink-0\b/);
   });
 
   it("stands the suggestions down once the conversation starts", () => {
@@ -141,22 +140,6 @@ describe("the conversation gets the room", () => {
     expect(base).not.toMatch(/display:\s*none/);
   });
 
-  it("spends less of the phone on the hero", () => {
-    /* 178px of a 575px viewport for a title, a pill and a sentence, while the
-       conversation below it had 40. Each of these is reversed at `sm`, where
-       178px of a 900px screen costs nothing. */
-    expect(view).toMatch(/mb-3 flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:mb-4 sm:gap-4 sm:px-5 sm:py-4/);
-    expect(view).toMatch(/text-base font-bold tracking-tight sm:text-\[19px\]/);
-    /* The reset button stops wrapping onto a row of its own — 56px, the single
-       biggest line item — by dropping its label. */
-    expect(view).toMatch(/<span className="hidden sm:inline">New chat<\/span>/);
-    expect(view).toMatch(/aria-label="New chat"/);
-    /* And the left group shrinks rather than shoving it down there. */
-    expect(view).toMatch(/flex min-w-0 flex-1 items-center gap-3 sm:gap-3\.5/);
-    /* The orb sets the hero's floor, so it comes down too. */
-    const orb = css.slice(css.indexOf(".chat-orb {"));
-    expect(orb).toMatch(/@media \(max-width: 639\.98px\)[\s\S]{0,200}?\.chat-orb\s*\{[^}]*height:\s*38px/);
-  });
 });
 
 describe("the notifications panel", () => {
@@ -233,37 +216,15 @@ describe("the page holds still", () => {
   it("stops a flick past the last message from dragging the app", () => {
     /* Without this, reaching either end of the conversation hands the gesture
        on to the page behind it and the whole thing rubber-bands. */
-    expect(view).toMatch(/overflow-y-auto overscroll-contain p-5/);
+    const logCls = (() => {
+      const rest = view.slice(view.indexOf("ref={logRef}"));
+      const i = rest.indexOf('className="') + 11;
+      return rest.slice(i, rest.indexOf('"', i));
+    })();
+    expect(logCls.split(/\s+/)).toContain("overscroll-contain");
   });
 });
 
-describe("the hero says only what is worth saying", () => {
-  it("drops the counts line on a phone", () => {
-    /**
-     * Asked whether something more useful could replace it; the honest answer
-     * was no. Anything actionable — what is due, who is waiting — is the Home
-     * page's job, and repeating it here is the duplication this app keeps
-     * having to remove. The counts are not a fact anybody acts on, and the
-     * badge beside the title already carries the one thing that changes what
-     * you do: whether the answers are live.
-     *
-     * Worth 32px on a 575px screen, handed to the conversation. Measured: hero
-     * 99px to 79.
-     */
-    const code = view.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
-    const counts = code.match(/knows\.contacts/g) ?? [];
-    /* Exactly one place renders them, and it is the `sm:`-only line. */
-    expect(counts.length).toBe(1);
-    expect(code).toMatch(/hidden text-xs text-muted sm:block sm:truncate[\s\S]{0,200}?knows\.contacts/);
-  });
-
-  it("keeps the grounding claim on the desktop", () => {
-    /* There it is one line in a wide strip, costs nothing, and is the page
-       saying on its face that the answers come from real records. */
-    expect(view).toMatch(/Answering from/);
-    expect(view).toMatch(/meetings — live\./);
-  });
-});
 
 describe("the suggestions get out of the way", () => {
   it("stand down the moment there is a draft", () => {
@@ -323,5 +284,119 @@ describe("the first-run panel fits the phone", () => {
 
   it("keeps the heading, which is what the panel is for", () => {
     expect(view).toMatch(/<p className="text-base font-semibold">Ask about your pipeline<\/p>/);
+  });
+});
+
+/**
+ * The messaging-app layout.
+ *
+ * Asked for against a WhatsApp screenshot: the same look and feel, our colours.
+ * What makes that reference effortless is not its palette — it is that almost
+ * nothing sits between the reader and the thread.
+ *
+ * Ours had a bordered hero card above a bordered conversation card, so a bubble
+ * sat on a panel that sat on the page: three surfaces deep, with a frame drawn
+ * around the only thing the screen is for.
+ */
+describe("the conversation is the page", () => {
+  const code = view.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+
+  it("has no card frame around the thread", () => {
+    expect(code).not.toMatch(/<Card/);
+    expect(code).not.toMatch(/components\/ui\/Card/);
+  });
+
+  it("replaces the hero card with a contact bar", () => {
+    /* One row: who you are talking to, their status, the action. No panel, no
+       tint, no border box — a hairline under it and nothing else. */
+    expect(code).not.toMatch(/chat-hero/);
+    expect(view).toMatch(/border-b border-\[var\(--border\)\] px-1 pb-3/);
+    /* The status line takes the badge's job and its colour, so live still reads
+       green and data-only still reads amber. */
+    expect(view).toMatch(/aiEnabled \? "var\(--green\)" : "var\(--amber\)"/);
+    expect(view).toMatch(/aiEnabled \? "Online" : "Answering from your data"/);
+  });
+
+  it("keeps the receipts, on the desktop status line", () => {
+    /**
+     * The counts were the page's evidence for claiming it answers from real
+     * records; dropping them with the hero would have taken the honesty along
+     * with the clutter. They now sit where a messaging app puts "last seen",
+     * and only where there is room for them.
+     */
+    expect(view).toMatch(/hidden truncate sm:inline/);
+    expect(view).toMatch(/\{knows\.contacts\} contacts, \{knows\.deals\} deals, \{knows\.meetings\} meetings/);
+  });
+});
+
+describe("the bubbles", () => {
+  it("carry their own time, inside, on the last line", () => {
+    /**
+     * The detail that makes the reference dense without feeling cramped: no
+     * separate metadata row, no gap between messages spent on a timestamp.
+     *
+     * The float must come AFTER the text. A float attaches to the line box it
+     * is encountered on, so placed first it sat at the TOP right of a
+     * multi-line bubble with the text flowing beneath it. Measured after the
+     * swap: 15px from the bubble's bottom against 37 from its top.
+     */
+    const bubble = view.slice(view.indexOf("const mine = m.role"));
+    const textAt = bubble.indexOf("renderText(m.text)");
+    const timeAt = bubble.indexOf("{clock?.time}");
+    /* Both must EXIST before their order means anything. Written as a bare
+       `toBeGreaterThan`, deleting the message text passed the assertion: -1 is
+       less than any real index, so the test proved nothing about a bubble with
+       no text in it. Caught by mutation. */
+    expect(textAt).toBeGreaterThanOrEqual(0);
+    expect(timeAt).toBeGreaterThanOrEqual(0);
+    expect(timeAt).toBeGreaterThan(textAt);
+    expect(view).toMatch(/float-right ml-2 mt-1\.5/);
+  });
+
+  it("reads the time in the business's zone, not the device's", () => {
+    /* Formatting against the browser renders one string on the server and
+       another after hydration. `instantToWallClock` is deterministic given a
+       zone, so both agree. */
+    /* Both call sites, named. Asserted loosely as just
+       `instantToWallClock(m.at, timeZone)`, hardcoding a zone on the CLOCK line
+       still passed — the regex was satisfied by the DAY line, which reads
+       identically. Caught by mutation. */
+    expect(view).toMatch(/const clock = instantToWallClock\(m\.at, timeZone\)/);
+    expect(view).toMatch(/const day = instantToWallClock\(m\.at, timeZone\)/);
+    expect(view).toMatch(/timeZone: string/);
+  });
+
+  it("tucks a run together and tails only its last message", () => {
+    /* Consecutive messages from one side are one turn, not three objects. */
+    expect(view).toMatch(/const startsRun = i === 0 \|\| items\[i - 1\]\.role !== m\.role/);
+    expect(view).toMatch(/const endsRun = i === items\.length - 1 \|\| items\[i \+ 1\]\.role !== m\.role/);
+    expect(view).toMatch(/endsRun && \(mine \? "rounded-br-md" : "rounded-bl-md"\)/);
+    expect(view).toMatch(/startsRun \? "mt-2\.5" : "mt-0\.5"/);
+  });
+
+  it("drops the avatar beside every message", () => {
+    /* The reference shows one in a group chat and none in a one-to-one: the
+       side of the screen already says who spoke, and the icon cost 42px of
+       bubble width on a 320px screen. */
+    const code = view.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+    expect(code).not.toMatch(/chat-orb-sm/);
+  });
+
+  it("stamps the day only where it changes", () => {
+    /* A separator on every message is decoration; one that never appears leaves
+       a long thread with no anchor in time. */
+    expect(view).toMatch(/const newDay = !!day && day !== previousDay/);
+    expect(view).toMatch(/dayLabel\(day!\)/);
+  });
+
+  it("builds the day label from the key rather than re-parsing it", () => {
+    /**
+     * The key is already wall-clock in the business's zone. `new Date(key)`
+     * would re-apply an offset and can land the pill on the wrong day either
+     * side of midnight; splitting the string cannot drift.
+     */
+    const label = view.slice(view.indexOf("function dayLabel"), view.indexOf("function dayLabel") + 320);
+    expect(label).toMatch(/key\.split\("-"\)/);
+    expect(label).not.toMatch(/new Date/);
   });
 });
