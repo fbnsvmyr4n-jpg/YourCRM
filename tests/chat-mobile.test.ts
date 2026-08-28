@@ -431,7 +431,8 @@ describe("the composer holds the bottom edge", () => {
      * 320x575 after the change: --chat-vh 575px, main scrollable by 0, an 8px
      * gap under the composer that does not move.
      */
-    expect(view).toMatch(/root\.style\.setProperty\("--chat-vh", `\$\{Math\.round\(viewport\?\.height \?\? window\.innerHeight\)\}px`\)/);
+    expect(view).toMatch(/const visible = viewport\?\.height \?\? window\.innerHeight/);
+    expect(view).toMatch(/root\.style\.setProperty\("--chat-vh", `\$\{Math\.round\(visible\)\}px`\)/);
     expect(view).toMatch(/h-\[calc\(var\(--chat-vh\)-88px\)\]/);
     /* And a sane value before JS runs, so the first paint is not a calc()
        against an undefined variable. */
@@ -533,5 +534,43 @@ describe("the prediction bar", () => {
        1280: the bar is not displayed and the chips still are. */
     const bar = view.slice(view.indexOf("{prediction && ("));
     expect(bar.slice(0, 700)).toMatch(/sm:hidden/);
+  });
+});
+
+describe("the keyboard", () => {
+  it("is handled as a pan, not as a resize", () => {
+    /**
+     * Treating it like a toolbar transition blanked the page — reproduced on
+     * the simulator with the software keyboard enabled, and identical to the
+     * report: keyboard up, everything above it empty.
+     *
+     * The two are different events. A toolbar moves the viewport by a few
+     * dozen pixels and the layout should follow exactly, which is the gap fix.
+     * The keyboard takes about half the screen and Safari answers it by
+     * PANNING to the focused field. Doing both at once makes them fight: the
+     * layout shrinks so the composer moves UP the document, while the viewport
+     * pans DOWN to where the composer used to be, and what is left between
+     * them is empty background.
+     */
+    expect(view).toMatch(/const keyboardUp = window\.innerHeight - visible > 180/);
+  });
+
+  it("hands the page back to Safari while it is up", () => {
+    /* Full height and no scroll lock, which is what lets Safari's pan land on
+       the composer instead of on nothing. */
+    const branch = view.slice(view.indexOf("if (keyboardUp) {"));
+    expect(branch.slice(0, 300)).toMatch(/root\.classList\.remove\("chat-open"\)/);
+    expect(branch.slice(0, 300)).toMatch(/--chat-vh", `\$\{Math\.round\(window\.innerHeight\)\}px`/);
+  });
+
+  it("takes the lock back when the keyboard goes away", () => {
+    /* Otherwise the gap this whole mechanism exists to remove returns the
+       moment anyone types once. The class is re-added on every settled
+       viewport, not only on mount. */
+    const settled = view.slice(view.indexOf("root.classList.add(\"chat-open\")"));
+    expect(settled.slice(0, 200)).toMatch(/--chat-vh", `\$\{Math\.round\(visible\)\}px`/);
+    /* And it is inside `apply`, not a one-off beside it. */
+    const effect = view.slice(view.indexOf("const apply = () => {"), view.indexOf("window.addEventListener(\"resize\", apply)"));
+    expect(effect).toMatch(/root\.classList\.add\("chat-open"\)/);
   });
 });

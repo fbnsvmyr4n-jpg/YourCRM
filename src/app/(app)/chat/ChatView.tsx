@@ -143,11 +143,41 @@ export function ChatView({
     const viewport = window.visualViewport;
 
     const apply = () => {
-      root.style.setProperty("--chat-vh", `${Math.round(viewport?.height ?? window.innerHeight)}px`);
+      const visible = viewport?.height ?? window.innerHeight;
+
+      /*
+         The keyboard is a different animal from the toolbar, and treating them
+         alike blanked the page.
+
+         A toolbar transition moves the viewport by a few dozen pixels and the
+         layout should follow it exactly — that is the gap fix. The keyboard
+         takes roughly half the screen, and Safari answers it by PANNING to
+         bring the focused field into view. Do both at once and they fight: the
+         layout shrinks, so the composer moves UP the document, while the
+         viewport pans DOWN to where the composer used to be. What is left in
+         between is empty background — reproduced on the simulator with the
+         software keyboard enabled, and it is exactly the blank screen in the
+         report.
+
+         So when the keyboard is up the page is handed back to Safari: the
+         layout keeps its full height and the scroll lock comes off, which is
+         what lets that pan land on the composer instead of on nothing. The
+         180px threshold is well above any toolbar transition and well below any
+         keyboard.
+      */
+      const keyboardUp = window.innerHeight - visible > 180;
+
+      if (keyboardUp) {
+        root.classList.remove("chat-open");
+        root.style.setProperty("--chat-vh", `${Math.round(window.innerHeight)}px`);
+        return;
+      }
+
+      root.classList.add("chat-open");
+      root.style.setProperty("--chat-vh", `${Math.round(visible)}px`);
     };
 
     apply();
-    root.classList.add("chat-open");
     viewport?.addEventListener("resize", apply);
     viewport?.addEventListener("scroll", apply);
     window.addEventListener("resize", apply);
