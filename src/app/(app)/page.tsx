@@ -13,6 +13,7 @@ import { listMeetings } from "@/server/repos/meetings";
 import { listMessages, unreadCount } from "@/server/repos/inbox";
 import { getSettings } from "@/server/repos/settings";
 import { DateTimeBar } from "./DateTimeBar";
+import { MobileSection } from "./MobileSection";
 import { instantToWallClock } from "@/lib/zoned";
 import { currentUser, withTenantPage } from "@/server/tenant-session";
 
@@ -232,46 +233,87 @@ export default async function DashboardPage() {
 
   return (
     <div className="mx-auto max-w-[1500px] animate-fade-up">
-      <div className="grid grid-cols-1 gap-5 @min-[820px]:grid-cols-[minmax(0,1fr)_346px]">
+      {/*
+          On a phone this is one column of ten cards, and the order they arrive
+          in is the order they were written for TWO columns — so everything in
+          the right rail landed at the bottom. Today's Focus, which is the most
+          actionable card on the page and sits top-right on a desktop, was
+          seventh.
+
+          `contents` below the breakpoint dissolves the two column wrappers so
+          every card becomes a direct child of this flex column and can be
+          ordered against the others. From `@min-[820px]` the wrappers come back
+          and the desktop grid is untouched.
+      */}
+      <div className="flex flex-col gap-5 @min-[820px]:grid @min-[820px]:grid-cols-[minmax(0,1fr)_346px]">
         {/* ---------------- MAIN COLUMN ----------------
             A container in its own right. Without this the two-up rows below
             would size themselves against `<main>` and split *this* column in
             half regardless of how narrow it is — which is what squeezed the
             revenue chart to 225px on a page that had 920px to give. */}
-        <div className="@container flex flex-col gap-5">
-          <DateTimeBar timeZone={timeZone} initialWeekday={weekdayLabel} initialDate={dateLabel} />
-
-          <Hero
-            greeting={greeting(now.getHours())}
-            name={me?.name.split(" ")[0] ?? "there"}
-            summary={`You have ${meetingsToday.length} meeting${meetingsToday.length === 1 ? "" : "s"} and ${openLeadCount} follow-up${openLeadCount === 1 ? "" : "s"} today.`}
-            stats={heroStats}
-          />
-
-          <div className="grid grid-cols-1 gap-5 @min-[560px]:grid-cols-2">
-            <RevenueOverview series={revenueSeries} total={revenueTotal} />
-            <RevenueReceived rows={revenueRows} now={now} />
+        <div className="@container contents @min-[820px]:flex @min-[820px]:flex-col @min-[820px]:gap-5">
+          <div className="order-1 @min-[820px]:order-none">
+            <DateTimeBar timeZone={timeZone} initialWeekday={weekdayLabel} initialDate={dateLabel} />
           </div>
 
-          <div className="grid grid-cols-1 gap-5 @min-[560px]:grid-cols-2">
-            <ThisWeek
-              wonThisWeek={wonThisWeek.length}
-              wonValue={Math.round(
-                wonThisWeek.reduce((sum, d) => sum + d.amountCents, 0) / 100
-              )}
-              needFollowUp={openLeadCount}
-              totalLeads={contacts.length}
+          <div className="order-2 @min-[820px]:order-none">
+            <Hero
+              greeting={greeting(now.getHours())}
+              name={me?.name.split(" ")[0] ?? "there"}
+              summary={`You have ${meetingsToday.length} meeting${meetingsToday.length === 1 ? "" : "s"} and ${openLeadCount} follow-up${openLeadCount === 1 ? "" : "s"} today.`}
+              stats={heroStats}
             />
-            <Connections items={followUps} />
           </div>
 
-          <Reminders items={upcoming} />
+          <div className="order-5 @min-[820px]:order-none">
+            <MobileSection
+              title="Revenue"
+              hint={`$${revenueTotal.toLocaleString()} won · last 6 weeks`}
+            >
+              <div className="grid grid-cols-1 gap-5 @min-[560px]:grid-cols-2">
+                <RevenueOverview series={revenueSeries} total={revenueTotal} />
+                <RevenueReceived rows={revenueRows} now={now} />
+              </div>
+            </MobileSection>
+          </div>
+
+          <div className="order-6 @min-[820px]:order-none">
+            <MobileSection
+              title="This week"
+              hint={`${wonThisWeek.length} won · ${followUps.length} to follow up`}
+            >
+              <div className="grid grid-cols-1 gap-5 @min-[560px]:grid-cols-2">
+                <ThisWeek
+                  wonThisWeek={wonThisWeek.length}
+                  wonValue={Math.round(
+                    wonThisWeek.reduce((sum, d) => sum + d.amountCents, 0) / 100
+                  )}
+                  needFollowUp={openLeadCount}
+                  totalLeads={contacts.length}
+                />
+                <Connections items={followUps} />
+              </div>
+            </MobileSection>
+          </div>
+
+          <div className="order-7 @min-[820px]:order-none">
+            <MobileSection title="Reminders" hint={`${upcoming.length} upcoming`}>
+              <Reminders items={upcoming} />
+            </MobileSection>
+          </div>
         </div>
 
         {/* ---------------- RIGHT RAIL ---------------- */}
-        <div className="flex flex-col gap-5">
-          <TodaysFocus items={focus} />
-          <QuickActions />
+        <div className="contents @min-[820px]:flex @min-[820px]:flex-col @min-[820px]:gap-5">
+          {/* Third and fourth on a phone, not seventh and eighth. These are the
+              two cards that say what to do next; the rest of the page reports
+              on what already happened. */}
+          <div className="order-3 @min-[820px]:order-none">
+            <TodaysFocus items={focus} />
+          </div>
+          <div className="order-4 @min-[820px]:order-none">
+            <QuickActions />
+          </div>
           {/* The feed card is taken out of flow in the two-column layout.
               `flex: 1 1 0%` controls how leftover space is *distributed*; it
               does not stop an item contributing its full content height to the
@@ -281,8 +323,10 @@ export default async function DashboardPage() {
               contributes nothing, so the main column decides the height and
               the feed fills exactly what it is given. The `min-h` is what this
               wrapper contributes instead. */}
-          <div className="@min-[820px]:relative @min-[820px]:min-h-[300px] @min-[820px]:flex-1">
-            <ActivityFeed items={activity} />
+          <div className="order-8 @min-[820px]:order-none @min-[820px]:relative @min-[820px]:min-h-[300px] @min-[820px]:flex-1">
+            <MobileSection title="Activity" hint={`${activity.length} recent`}>
+              <ActivityFeed items={activity} />
+            </MobileSection>
           </div>
         </div>
       </div>
