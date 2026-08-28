@@ -100,6 +100,23 @@ export function ChatView({
 
   const suggestions = useMemo(() => suggestFor(draft, asked), [draft, asked]);
 
+  /*
+     Whether the reader is past needing suggestions.
+
+     Two things end it, and a seeded greeting is neither.
+
+     TYPING: once there is a draft the reader has decided what to ask, and four
+     tappable questions below the box are just something between them and their
+     own sentence. On a phone they are also 191px of it.
+
+     HAVING ASKED: a `role === "user"` message, not merely a message. `items`
+     is seeded with an assistant greeting and `reset()` keeps it, so counting
+     messages meant the suggestions never came back after New chat — the reader
+     tapped it and landed on a greeting with nothing to tap and no empty state
+     either, which is a worse first-run than the one they started with.
+  */
+  const engaged = draft.trim().length > 0 || items.some((m) => m.role === "user");
+
   async function send(text: string) {
     const question = text.trim();
     if (!question || busy) return;
@@ -201,20 +218,6 @@ export function ChatView({
               </span>
             </div>
             {/*
-                The same claim, in one line instead of three.
-
-                Below `sm` the prose wrapped to three lines at 320px — most of
-                the hero's height for a sentence whose actual content is three
-                numbers. The counts are the claim; "Answering from" and "live"
-                are the framing, and the badge beside the title already says the
-                page is live. So the phone gets the numbers, separated rather
-                than narrated, on one line that truncates only in the impossible
-                case.
-
-                Both are rendered and one is displayed, so there is no
-                client-only string and nothing to mismatch on hydration.
-            */}
-            {/*
                 No counts line on a phone.
 
                 It was asked whether something more useful could go here, and the
@@ -295,7 +298,25 @@ export function ChatView({
                 <Sparkles className="h-[22px] w-[22px]" />
               </span>
               <p className="text-base font-semibold">Ask about your pipeline</p>
-              <p className="mt-2 max-w-[34ch] text-sm leading-relaxed text-muted">
+              {/*
+                  The paragraph is desktop-only, because on a phone it does not
+                  fit and does not earn the space.
+
+                  Measured at 320x575: with the suggestions showing, the
+                  transcript gets 126px and this empty state needs 182 — so the
+                  orb and the heading were scrolled off the top and the reader
+                  arrived at a paragraph cut mid-sentence. That is the reported
+                  screenshot.
+
+                  It is also the most redundant text on the page. It ends "Pick a
+                  question below, or type your own", and the questions are
+                  directly below and the composer directly under those. The
+                  chips ARE this instruction, spelled out and tappable.
+
+                  What is left on a phone is an orb, "Ask about your pipeline",
+                  and four real questions — which is the whole idea, and fits.
+              */}
+              <p className="mt-2 hidden max-w-[34ch] text-sm leading-relaxed text-muted sm:block">
                 Answers come from your own contacts, deals and meetings — nothing is
                 estimated. Pick a question below, or type your own.
               </p>
@@ -373,7 +394,7 @@ export function ChatView({
               was applied and the chips still rendered. The rule that hides them
               has to live beside the rule that shows them.
           */
-          data-conversation={items.length > 0 ? "true" : undefined}
+          data-engaged={engaged ? "true" : undefined}
           className="chat-chips shrink-0 border-t border-[var(--border)] px-5 py-3"
         >
           {suggestions.map((s) => (

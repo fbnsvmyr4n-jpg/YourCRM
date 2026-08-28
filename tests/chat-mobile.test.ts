@@ -133,9 +133,9 @@ describe("the conversation gets the room", () => {
      * chips still rendered. The rule that hides them has to live beside the
      * rule that shows them.
      */
-    expect(view).toMatch(/data-conversation=\{items\.length > 0 \? "true" : undefined\}/);
+    expect(view).toMatch(/data-engaged=\{engaged \? "true" : undefined\}/);
     const block = css.slice(css.indexOf("@media (max-width: 639.98px)", css.indexOf(".chat-chips")));
-    expect(block).toMatch(/\.chat-chips\[data-conversation="true"\]\s*\{[^}]*display:\s*none/);
+    expect(block).toMatch(/\.chat-chips\[data-engaged="true"\]\s*\{[^}]*display:\s*none/);
     /* And only there — on a desktop they stay for the whole conversation. */
     const base = css.slice(css.indexOf(".chat-chips {"), css.indexOf("}", css.indexOf(".chat-chips {")));
     expect(base).not.toMatch(/display:\s*none/);
@@ -262,5 +262,66 @@ describe("the hero says only what is worth saying", () => {
        saying on its face that the answers come from real records. */
     expect(view).toMatch(/Answering from/);
     expect(view).toMatch(/meetings — live\./);
+  });
+});
+
+describe("the suggestions get out of the way", () => {
+  it("stand down the moment there is a draft", () => {
+    /**
+     * Asked for directly: once you are typing you should see the box and the
+     * conversation, nothing else. Measured at 320x575 — transcript 125px with
+     * them showing, 316px the moment a character is typed.
+     */
+    expect(view).toMatch(/const engaged = draft\.trim\(\)\.length > 0 \|\| items\.some\(\(m\) => m\.role === "user"\)/);
+  });
+
+  it("comes back after New chat", () => {
+    /**
+     * The bug the previous condition had. `items` is seeded with an assistant
+     * greeting and `reset()` keeps it — `prev.slice(0, 1)` — so `items.length >
+     * 0` was true on a freshly reset chat. Tapping New chat left the reader on
+     * a greeting with nothing to tap and no empty state either, which is a
+     * worse first run than the one they started with.
+     *
+     * A USER message is what ends the first run, and a greeting is not one.
+     */
+    expect(view).toMatch(/items\.some\(\(m\) => m\.role === "user"\)/);
+    const code = view.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+    /* `reset` still keeps the greeting — this test is about the condition, and
+       would be vacuous if the seeding ever went away silently. */
+    expect(code).toMatch(/prev\.slice\(0, 1\)/);
+    expect(code).not.toMatch(/data-engaged=\{items\.length/);
+  });
+
+  it("leaves the desktop alone on both counts", () => {
+    /* Measured at 1280: suggestions still `flex` while typing, blurb still
+       shown. The rule that hides them lives inside the phone media query. */
+    const block = css.slice(css.indexOf("@media (max-width: 639.98px)", css.indexOf(".chat-chips")));
+    expect(block).toMatch(/data-engaged/);
+    const base = css.slice(css.indexOf(".chat-chips {"), css.indexOf("}", css.indexOf(".chat-chips {")));
+    expect(base).not.toMatch(/display:\s*none/);
+  });
+});
+
+describe("the first-run panel fits the phone", () => {
+  it("drops the paragraph below sm", () => {
+    /**
+     * Reported as text cut off at the top of the panel, and the arithmetic
+     * says why: with the suggestions showing the transcript gets 126px and this
+     * empty state needed 182, so the orb and the heading scrolled off and the
+     * reader arrived at a paragraph cut mid-sentence.
+     *
+     * It is also the most redundant text on the page — it ends "Pick a question
+     * below, or type your own", and the questions are directly below it with
+     * the composer under those. The chips are that instruction, tappable.
+     *
+     * What is left on a phone is the orb, the heading and four real questions.
+     * Measured after: nothing clipped.
+     */
+    expect(view).toMatch(/className="mt-2 hidden max-w-\[34ch\] text-sm leading-relaxed text-muted sm:block"/);
+  });
+
+  it("keeps the heading, which is what the panel is for", () => {
+    expect(view).toMatch(/<p className="text-base font-semibold">Ask about your pipeline<\/p>/);
   });
 });

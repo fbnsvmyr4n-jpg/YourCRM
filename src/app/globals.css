@@ -1053,21 +1053,25 @@ textarea.field-input {
     overflow-x: visible;
   }
   /*
-     Once the conversation starts, they stand down.
+     Once the reader is typing, or has already asked something, they stand down.
 
      Wrapped full-width they measure 191px, and on a 320x575 screen that is more
      than the card had left after the composer — the transcript came out FORTY
      pixels tall and the messages could not be read, which is what was reported.
 
-     Empty, they are the point of the screen and keep the room: there is nothing
-     to read yet and they are the fastest way in for someone who does not know
-     what to ask. With messages on screen the transcript is what the page is
-     for, and the composer is right there to type into.
+     Untouched, they are the point of the screen and keep the room: there is
+     nothing to read yet and they are the fastest way in for someone who does
+     not know what to ask. The moment there is a draft, the reader has decided
+     what to ask and four questions between them and their own sentence are
+     just something in the way.
 
      Not a horizontal scroller — that puts most of them off the right edge,
      which is the one thing this page must never do.
+
+     See `engaged` in ChatView for why it is a user message rather than any
+     message: the greeting is seeded and survives New chat.
   */
-  .chat-chips[data-conversation="true"] {
+  .chat-chips[data-engaged="true"] {
     display: none;
   }
   /*
