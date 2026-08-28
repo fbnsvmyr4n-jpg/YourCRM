@@ -552,7 +552,7 @@ void main() {
        the wide silver smear you actually see.
     */
     vec3 halfway = normalize(uSunDir - dir);
-    float specular = pow(max(0.0, dot(n, halfway)), 44.0);
+    float specular = pow(max(0.0, dot(n, halfway)), 115.0);
 
     /*
        Dimmer and tighter than it was, because it had stopped reading as glint
@@ -570,7 +570,7 @@ void main() {
        enough to have an edge; the halved gain is what stops it flattening the
        colour underneath.
     */
-    vec3 glint = vec3(1.0, 0.97, 0.9) * specular * water * lit * 1.35;
+    vec3 glint = vec3(1.0, 0.97, 0.9) * specular * water * lit * 0.95;
 
     /*
        Clouds with FORM, rather than a flat mask multiplied in.
