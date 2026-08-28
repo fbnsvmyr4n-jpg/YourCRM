@@ -115,10 +115,25 @@ export function Topbar({
            It is also inert on desktop by construction: a minimum only binds when
            there is not enough room, and above `sm` there always is.
         */
-        className="card focus-ring relative flex h-12 min-w-0 flex-1 items-center gap-3 rounded-2xl pl-12 pr-3 text-left"
+        /*
+           Below 390px this is an icon button, not a field.
+
+           There is no width under 390 where a labelled search survives beside a
+           menu, a theme toggle, an assistant, a bell and an avatar. Measured
+           with all six present: at 320 the field is 44px and at 360 it is 88 —
+           against 60px of its own padding, so the label had 2px and 28px to
+           live in and rendered as "Sea…". That is the layout looking broken
+           rather than adapted, which is exactly how it was reported.
+
+           So under 390 it stops pretending to be a field: same size as the menu
+           button beside it, glyph centred, no label. Above 390 the label has
+           58px and fits, and every rule here switches off — from 390 up this is
+           byte-for-byte the header it always was.
+        */
+        className="card focus-ring relative flex h-11 w-11 shrink-0 min-w-0 items-center justify-center gap-3 rounded-2xl text-left min-[390px]:h-12 min-[390px]:w-auto min-[390px]:flex-1 min-[390px]:shrink min-[390px]:justify-start min-[390px]:pl-12 min-[390px]:pr-3"
         style={{ borderRadius: 16 }}
       >
-        <Search className="pointer-events-none absolute left-4 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-faint" />
+        <Search className="pointer-events-none absolute left-1/2 top-1/2 h-[18px] w-[18px] -translate-x-1/2 -translate-y-1/2 text-faint min-[390px]:left-4 min-[390px]:translate-x-0" />
         {/*
             Below 400px the placeholder is dropped rather than truncated.
 
@@ -129,7 +144,7 @@ export function Topbar({
             control is a full-width field with a search glyph, which is what a
             phone expects anyway and is a far bigger tap target.
         */}
-        <span className="flex-1 truncate text-sm text-faint">
+        <span className="hidden flex-1 truncate text-sm text-faint min-[390px]:block">
           {/*
               A shorter label rather than a truncated one.
 
@@ -143,16 +158,34 @@ export function Topbar({
 
               So the label shortens instead of vanishing. Both spans carry the
               same styling; only one is ever displayed.
+
+              740, not 420. The long form was swapped in at 420 and does not fit
+              there, or anywhere near it: measured, it needs 237px of text box
+              and gets 88 at 420, 161 at 660 and 201 at 700. So from 420 all the
+              way past the desktop breakpoint it rendered as "Search contacts,
+              compa…" — the truncation this whole block exists to avoid, just at
+              a width nobody thought to check. It first fits at 736; 740 is the
+              round number above that.
           */}
-          <span className="min-[420px]:hidden">Search</span>
-          <span className="hidden min-[420px]:inline">Search contacts, companies, deals...</span>
+          <span className="min-[740px]:hidden">Search</span>
+          <span className="hidden min-[740px]:inline">Search contacts, companies, deals...</span>
         </span>
         <kbd className="hidden items-center gap-0.5 rounded-md border border-[var(--border)] bg-[var(--panel-2)] px-1.5 py-0.5 text-[11px] font-medium text-faint sm:flex">
           ⌘ K
         </kbd>
       </button>
 
-      <ThemeToggle />
+      {/*
+          `ml-auto` takes up the slack the search no longer absorbs.
+
+          Below 390 the search is a fixed-width button, so nothing in the row
+          grows and the controls would pack to the left with a gap after the
+          avatar. This pushes the cluster back to the right edge. It is inert
+          from 390 up — the search is `flex-1` again there, free space is zero,
+          and `auto` margins have nothing to distribute.
+      */}
+      <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-4">
+        <ThemeToggle />
 
       {/* Was a dead "Analytics" button. Now the shortcut to the assistant,
           reachable from every page.
@@ -173,7 +206,25 @@ export function Topbar({
         href="/chat"
         aria-label="Ask the AI assistant"
         title="Ask the AI assistant"
-        className="btn-soft focus-ring hidden h-10 w-10 place-items-center rounded-full min-[360px]:grid"
+        /*
+           Present at every width, and never squashed.
+
+           `min-[360px]:grid` still hid it on the narrowest phones — and on a
+           393pt iPhone with Display Zoom turned on, which reports a 320px
+           viewport, so a current handset lost the assistant entirely. That is
+           how it was reported: the shortcut simply missing from the header.
+
+           It was also missing a `shrink-0`. Measured at 320 with it unhidden,
+           flex shrank it to 26px — a tap target well under the 44px minimum,
+           and a circle visibly smaller than the bell beside it. Unhiding alone
+           would have produced a button that was there but wrong.
+
+           The room comes from the search, which stops being a field below 390
+           and becomes an icon button the same size as the menu. Nothing is
+           lost: it opens the same command palette, with a bigger tap target
+           than the label it gave up.
+        */
+        className="btn-soft focus-ring grid h-10 w-10 shrink-0 place-items-center rounded-full"
       >
         <Sparkles className="h-[18px] w-[18px] text-accent" />
       </Link>
@@ -301,6 +352,7 @@ export function Topbar({
             </form>
           </div>
         )}
+        </div>
       </div>
     </header>
   );

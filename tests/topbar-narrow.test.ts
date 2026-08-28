@@ -53,14 +53,26 @@ describe("the top bar on a narrow screen", () => {
      * on a desktop it appears to do nothing at all.
      */
     expect(searchClassName.split(/\s+/)).toContain("min-w-0");
-    expect(searchClassName.split(/\s+/)).toContain("flex-1");
+    /* `flex-1` is now conditional: below 390 this is a fixed-width icon button,
+       not a field, so there is nothing to flex. From 390 up — every width this
+       assertion was originally written about — it is `flex-1` again, and the
+       automatic-minimum-size trap above still applies exactly as it did. */
+    expect(searchClassName.split(/\s+/)).toContain("min-[390px]:flex-1");
   });
 
   it("shortens the placeholder rather than truncating it", () => {
     /* There is no width at which the full placeholder fits on a 320px phone
-       beside four other controls; it can only render as "Search cont…". */
-    expect(source).toMatch(/min-\[420px\]:hidden">Search</);
-    expect(source).toMatch(/hidden min-\[420px\]:inline">Search contacts/);
+       beside four other controls; it can only render as "Search cont…".
+
+       The threshold moved from 420 to 740, because 420 was never where it fit.
+       Measured against the compiled stylesheet, the long form needs 237px of
+       text box and had 88 at 420, 161 at 660 and 201 at 700 — so from 420 to
+       past the desktop breakpoint it rendered as "Search contacts, compa…",
+       the exact truncation this pair of spans exists to prevent. It first fits
+       at 736. */
+    expect(source).toMatch(/min-\[740px\]:hidden">Search</);
+    expect(source).toMatch(/hidden min-\[740px\]:inline">Search contacts/);
+    expect(source).not.toMatch(/min-\[420px\]/);
   });
 
   it("keeps every desktop value untouched", () => {
@@ -95,11 +107,59 @@ describe("the assistant shortcut is reachable on a phone", () => {
     expect(chatLink).not.toMatch(/\bsm:grid\b/);
   });
 
-  it("appears from 360px, where the header budget allows it", () => {
-    /* Below `sm` the chrome needs 284px with this button present: at 320px the
-       search would be squeezed to 36px, narrower than its own icon, while at
-       360px it keeps 76px. Every current iPhone clears 360. */
-    expect(chatLink).toMatch(/min-\[360px\]:grid/);
+  it("is not gated behind ANY width", () => {
+    /**
+     * `min-[360px]:grid` replaced `sm:grid` and was still a gate. It looked
+     * safe — every current iPhone is at least 360pt — but Display Zoom makes a
+     * 393pt iPhone report a 320px viewport, so a current handset with an
+     * accessibility setting turned on lost the shortcut entirely. That is how
+     * this was reported: missing from the header on a real phone.
+     *
+     * The room now comes from the search instead, which stops being a field
+     * below 390. Nothing is traded away: it opens the same command palette
+     * with a bigger tap target than the label it gave up.
+     */
+    expect(chatLink).not.toMatch(/\bhidden\b/);
+    expect(chatLink).not.toMatch(/min-\[\d+px\]:grid/);
+    expect(chatLink).toMatch(/\bgrid\b/);
+  });
+
+  it("keeps its full size when the row is tight", () => {
+    /* Unhiding it was not enough. Measured at 320 without `shrink-0`, flex
+       squashed it to 26px — present, but a tap target well under the 44px
+       minimum and visibly smaller than the bell beside it. */
+    expect(chatLink).toMatch(/shrink-0/);
+    expect(chatLink).toMatch(/h-10 w-10/);
+  });
+
+  it("is an icon button below 390, and a field again above it", () => {
+    /**
+     * Where the room comes from, and the half that must not leak upward.
+     * Measured with all six controls present: the search is 44px at 320 and 88
+     * at 360, against 60px of its own padding — which is why the placeholder in
+     * the reported screenshot read "Sea…". Below 390 it matches the menu button
+     * beside it; at 390 it is a 118px field whose label fits.
+     */
+    expect(searchClassName).toMatch(/\bh-11 w-11 shrink-0\b/);
+    expect(searchClassName).toMatch(/justify-center/);
+    for (const restored of [
+      "min-\\[390px\\]:h-12",
+      "min-\\[390px\\]:w-auto",
+      "min-\\[390px\\]:justify-start",
+      "min-\\[390px\\]:pl-12",
+      "min-\\[390px\\]:pr-3",
+    ]) {
+      expect(searchClassName).toMatch(new RegExp(restored));
+    }
+    /* The glyph moves back from centred to the left inset with it. */
+    expect(source).toMatch(/-translate-x-1\/2[\s\S]{0,80}?min-\[390px\]:left-4 min-\[390px\]:translate-x-0/);
+  });
+
+  it("right-aligns the controls once nothing in the row grows", () => {
+    /* Below 390 the search is fixed-width, so without this the cluster packs
+       left and leaves a gap after the avatar. Inert from 390 up, where the
+       search is `flex-1` again and there is no free space to distribute. */
+    expect(source).toMatch(/className="ml-auto flex shrink-0 items-center gap-2 sm:gap-4"/);
   });
 });
 
