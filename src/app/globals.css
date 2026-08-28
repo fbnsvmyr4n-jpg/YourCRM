@@ -1023,6 +1023,42 @@ textarea.field-input {
 .chat-chips::-webkit-scrollbar { display: none; }
 
 /*
+   The chat page's idea of "the screen".
+
+   `100dvh` until JavaScript can say better: it is the right value on the server
+   and in any browser without `visualViewport`, and ChatView overwrites it with
+   the real visible height on mount. Declared here rather than inline so the
+   first paint has a sane number instead of a `calc()` against an undefined
+   variable.
+*/
+:root {
+  --chat-vh: 100dvh;
+}
+
+/*
+   While the chat is open, the document does not scroll.
+
+   The gap under the composer was the bottom of a document longer than the
+   screen, scrolling into view. iOS collapses its toolbar as you scroll and the
+   keyboard does not shrink `dvh` at all, so the page always had somewhere to
+   go and empty background to show when it went there.
+
+   With the layout pinned to `--chat-vh` there is nothing below the composer to
+   reveal; this makes sure a rubber-band cannot go looking for it anyway, and
+   stops the toolbar collapsing, which is what made the height oscillate.
+
+   Phone only. On a desktop this page has never scrolled and the shell expects
+   the document to behave normally.
+*/
+@media (max-width: 639.98px) {
+  html.chat-open,
+  html.chat-open body {
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+}
+
+/*
    The hero orb comes down on a phone.
 
    46px is right on a desktop, where the hero is a strip across a wide page. On

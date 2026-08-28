@@ -185,7 +185,11 @@ describe("the chat reaches the bottom of the phone", () => {
      * plus an 8px breath. Measured after: a 9px gap, and the page still does
      * not scroll.
      */
-    expect(view).toMatch(/-mb-6 flex h-\[calc\(100dvh-88px\)\]/);
+    /* The height now comes from `--chat-vh` rather than `dvh` — see "sizes the
+       page from the visible viewport" below for why. What this assertion is
+       about is the `-mb-6`: main's 32px footer padding is right for a page you
+       scroll and wrong for one that fills the screen. */
+    expect(view).toMatch(/-mb-6 flex h-\[calc\(var\(--chat-vh\)-88px\)\]/);
   });
 
   it("gives the desktop back its footer margin and its height", () => {
@@ -398,5 +402,79 @@ describe("the bubbles", () => {
     const label = view.slice(view.indexOf("function dayLabel"), view.indexOf("function dayLabel") + 320);
     expect(label).toMatch(/key\.split\("-"\)/);
     expect(label).not.toMatch(/new Date/);
+  });
+});
+
+/**
+ * The gap under the composer.
+ *
+ * Reported as a band of empty background that appears when the page is
+ * scrolled and is absent when it is not — "unprofessional and unfinished", and
+ * it is: what scrolls into view down there is the bottom of a document longer
+ * than the screen.
+ *
+ * `100dvh` is why. On iOS it is a moving target — Safari collapses its toolbar
+ * as you scroll and expands it as you scroll back, and the keyboard does not
+ * shrink `dvh` at all — so the layout was sized against a height that did not
+ * match the region the user could actually see.
+ */
+describe("the composer holds the bottom edge", () => {
+  it("sizes the page from the visible viewport, not dvh", () => {
+    /**
+     * `visualViewport.height` is the one number that always describes what the
+     * user can see: toolbar collapsed or not, keyboard up or down. Measured at
+     * 320x575 after the change: --chat-vh 575px, main scrollable by 0, an 8px
+     * gap under the composer that does not move.
+     */
+    expect(view).toMatch(/root\.style\.setProperty\("--chat-vh", `\$\{Math\.round\(viewport\?\.height \?\? window\.innerHeight\)\}px`\)/);
+    expect(view).toMatch(/h-\[calc\(var\(--chat-vh\)-88px\)\]/);
+    /* And a sane value before JS runs, so the first paint is not a calc()
+       against an undefined variable. */
+    expect(css).toMatch(/:root\s*\{[^}]*--chat-vh:\s*100dvh/);
+  });
+
+  it("follows the viewport while it is moving, not just once", () => {
+    /* A toolbar collapse is a continuous transition and the keyboard is an
+       animation; reading the height once on mount would pin the layout to
+       whatever the viewport happened to be at that instant. */
+    expect(view).toMatch(/viewport\?\.addEventListener\("resize", apply\)/);
+    expect(view).toMatch(/viewport\?\.addEventListener\("scroll", apply\)/);
+  });
+
+  it("writes the height straight to the DOM rather than through state", () => {
+    /* This fires on every frame of a toolbar transition. Re-rendering the whole
+       conversation that often would be visible — and a `setState` in an effect
+       is what the React compiler rejects. */
+    const effect = view.slice(view.indexOf("const root = document.documentElement;"));
+    expect(effect.slice(0, 900)).not.toMatch(/setState|useState/);
+  });
+
+  it("leaves nothing behind on the next page", () => {
+    /**
+     * The risk of locking a global. Without the teardown every other page in
+     * the app inherits a frozen body and a stale height — a bug far worse than
+     * the gap this fixes, and one that would only show up two navigations
+     * later. Verified live: after routing to /deals the class is gone, the
+     * inline property is cleared and overflow is back to normal.
+     */
+    expect(view).toMatch(/root\.classList\.remove\("chat-open"\)/);
+    expect(view).toMatch(/root\.style\.removeProperty\("--chat-vh"\)/);
+    expect(view).toMatch(/window\.removeEventListener\("resize", apply\)/);
+    expect(view).toMatch(/viewport\?\.removeEventListener\("resize", apply\)/);
+    expect(view).toMatch(/viewport\?\.removeEventListener\("scroll", apply\)/);
+  });
+
+  it("stops the rubber-band going looking for the gap", () => {
+    /* With the layout pinned there is nothing below the composer to reveal, but
+       iOS will still pan a page that cannot scroll. Phone only: on a desktop
+       this page has never scrolled and the shell expects the document to
+       behave normally. */
+    const block = css.slice(css.indexOf("html.chat-open"));
+    expect(block).toMatch(/overflow:\s*hidden/);
+    expect(block).toMatch(/overscroll-behavior:\s*none/);
+    const guarded = css.slice(0, css.indexOf("html.chat-open"));
+    expect(guarded.lastIndexOf("@media (max-width: 639.98px)")).toBeGreaterThan(
+      guarded.lastIndexOf("@media (min-width")
+    );
   });
 });

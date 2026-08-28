@@ -111,6 +111,55 @@ export function ChatView({
     log.scrollTo({ top: log.scrollHeight, behavior: "smooth" });
   }, [items, busy]);
 
+  /*
+     Pin the page to what is actually VISIBLE, and stop it scrolling.
+
+     `100dvh` is the dynamic viewport, and on iOS that is a moving target: the
+     Safari toolbar collapses as you scroll and expands as you scroll back, and
+     the keyboard does not shrink `dvh` at all. Both leave the document taller
+     than the part of it you can see, so the page scrolls — and what scrolls
+     into view under the composer is empty background. That is the gap: not a
+     margin, but the bottom of a document that is longer than the screen.
+
+     `visualViewport.height` is the one number that always describes the region
+     the user can actually see — toolbar collapsed or not, keyboard up or down.
+     Writing it to a custom property lets the layout follow it exactly, so the
+     composer sits on the bottom edge of the visible area at every moment
+     instead of at the bottom of a document that extends past it.
+
+     With nothing left to scroll, the toolbar stops collapsing too, which is
+     what stops the height oscillating in the first place.
+
+     Direct DOM writes rather than state: this runs on every frame of a toolbar
+     transition, and re-rendering the whole conversation each time would be
+     visible. It is also why there is no `setState` here for the React compiler
+     to object to.
+  */
+  useEffect(() => {
+    const root = document.documentElement;
+    const viewport = window.visualViewport;
+
+    const apply = () => {
+      root.style.setProperty("--chat-vh", `${Math.round(viewport?.height ?? window.innerHeight)}px`);
+    };
+
+    apply();
+    root.classList.add("chat-open");
+    viewport?.addEventListener("resize", apply);
+    viewport?.addEventListener("scroll", apply);
+    window.addEventListener("resize", apply);
+
+    return () => {
+      viewport?.removeEventListener("resize", apply);
+      viewport?.removeEventListener("scroll", apply);
+      window.removeEventListener("resize", apply);
+      /* Both undone on the way out, or every other page inherits a locked
+         body and a stale height. */
+      root.classList.remove("chat-open");
+      root.style.removeProperty("--chat-vh");
+    };
+  }, []);
+
   // What this conversation has already covered, so the idle strip suggests
   // something new rather than re-offering a question just answered.
   const asked = useMemo(
@@ -205,7 +254,7 @@ export function ChatView({
        Both are reversed from `sm` up, where the page keeps its footer margin and
        the height it always had.
     */
-    <div className="mx-auto -mb-6 flex h-[calc(100dvh-88px)] max-w-[900px] animate-fade-up flex-col sm:mb-0 sm:h-[calc(100dvh-112px)] lg:h-[calc(100vh-104px)]">
+    <div className="mx-auto -mb-6 flex h-[calc(var(--chat-vh)-88px)] max-w-[900px] animate-fade-up flex-col sm:mb-0 sm:h-[calc(100dvh-112px)] lg:h-[calc(100vh-104px)]">
       {/*
           A contact bar, the way a messaging app does it.
 
