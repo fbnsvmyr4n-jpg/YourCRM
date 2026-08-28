@@ -88,8 +88,56 @@ describe("the dashboard on a phone", () => {
     expect(section).toMatch(/hint\?: string;/);
     expect(page).toMatch(/hint=\{`\$\$\{revenueTotal\.toLocaleString\(\)\} won · last 6 weeks`\}/);
     expect(page).toMatch(/hint=\{`\$\{wonThisWeek\.length\} won · \$\{followUps\.length\} to follow up`\}/);
-    expect(page).toMatch(/hint=\{`\$\{upcoming\.length\} upcoming`\}/);
     expect(page).toMatch(/hint=\{`\$\{activity\.length\} recent`\}/);
+  });
+
+  it("does not fold a card that is already short", () => {
+    /* A fold has to earn its tap. Reminders is a short list with its own
+       heading, so collapsing it hid nothing and added a step — three folds on
+       this page, not four. Reported as tedious, and this was part of why. */
+    expect(page).not.toMatch(/<MobileSection title="Reminders"/);
+    expect(page).toMatch(/<Reminders items=\{upcoming\} \/>/);
+  });
+
+  it("shows the same numbers once, not twice", () => {
+    /**
+     * Three of the hero's four stat tiles read the SAME variables Today's
+     * Focus reads a card below — `openLeadCount`, `meetingsToday.length` and
+     * `unread`. On a desktop the two sit in different columns and the
+     * repetition is a glance apart; stacked on a phone they are the same four
+     * numbers one after the other.
+     *
+     * Today's Focus is the copy worth keeping: every row carries a line of
+     * context and links somewhere, where a tile is a bare number. It also
+     * retires the fourth tile, "Contacts" — a raw row count that only ever
+     * goes up — in favour of deals closed, the money won and active clients.
+     */
+    expect(page).toMatch(/mt-5 hidden grid-cols-2 gap-3 sm:grid @min-\[520px\]:grid-cols-4/);
+    /* And the duplicate route to the same screen goes with it: Quick Actions,
+       four cards down this same page, already has Schedule Meeting. */
+    expect(page).toMatch(/btn-accent focus-ring hidden items-center gap-2 rounded-xl px-4 py-2\.5 text-sm font-semibold sm:flex/);
+  });
+
+  it("remembers whether a section was left open", () => {
+    /**
+     * The fold was reported as tedious, and re-opening the same card every
+     * morning is why. `useSyncExternalStore` rather than an effect writing
+     * state: stored preferences are an external mutable source, the server
+     * snapshot is the default so there is no hydration mismatch, and setting
+     * state inside an effect is what the React compiler rejects.
+     */
+    expect(section).toMatch(/useSyncExternalStore\(\s*subscribe,/);
+    expect(section).toMatch(/\(\) => defaultOpen\s*\)/);
+    expect(section).toMatch(/const key = `dash-open:\$\{id\}`/);
+  });
+
+  it("never lets a blocked storage break the page", () => {
+    /* Private windows, cleared site data and browsers set to block site data
+       all THROW on access rather than returning null. Losing the memory is a
+       small thing; losing the dashboard is not. */
+    const guards = section.match(/try \{/g) ?? [];
+    expect(guards.length).toBeGreaterThanOrEqual(2);
+    expect(section).toMatch(/catch \{\s*return fallback;/);
   });
 
   it("leaves the essentials open", () => {

@@ -296,10 +296,11 @@ export default async function DashboardPage() {
             </MobileSection>
           </div>
 
+          {/* Not folded. A fold has to earn its tap: this card is a short list
+              with its own heading, so collapsing it hid nothing and added a
+              step. Three folds on this page, not four. */}
           <div className="order-7 @min-[820px]:order-none">
-            <MobileSection title="Reminders" hint={`${upcoming.length} upcoming`}>
-              <Reminders items={upcoming} />
-            </MobileSection>
+            <Reminders items={upcoming} />
           </div>
         </div>
 
@@ -367,16 +368,39 @@ function Hero({
             </h2>
             <p className="mt-1.5 text-sm text-muted">{summary}</p>
           </div>
+          {/* Quick Actions, four cards further down this same page, already has
+              a Schedule Meeting button. Two routes to one screen inside one
+              viewport is a choice the reader has to make for no reason, and on
+              a phone they are close enough together to be seen at once.
+              Desktop keeps it: there the two sit in different columns, and it
+              has not been reported as confusing there. */}
           <Link
             href="/meetings"
-            className="btn-accent focus-ring flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold"
+            className="btn-accent focus-ring hidden items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold sm:flex"
           >
             Schedule Meeting
             <ChevronRight className="h-4 w-4" />
           </Link>
         </div>
 
-        <div className="mt-5 grid grid-cols-2 gap-3 @min-[520px]:grid-cols-4">
+        {/*
+            Hidden on a phone, because it is the same information twice.
+
+            Three of these four tiles read the SAME variables Today's Focus
+            reads a card below — `openLeadCount`, `meetingsToday.length` and
+            `unread`. On a desktop the two sit in different columns and the
+            repetition is a glance apart; stacked on a phone they are the same
+            four numbers, one after the other, and the second copy is the one
+            worth keeping: every row there carries a line of context ("Next:
+            09:00 with …", "You're all caught up") and links somewhere, where a
+            tile is a bare number.
+
+            It also answers the fourth tile. "Contacts" was a raw row count —
+            the least useful figure on the page, since it only ever goes up.
+            What replaces it on a phone is Today's Focus's own fourth row:
+            deals closed, with the money won and the number of active clients.
+        */}
+        <div className="mt-5 hidden grid-cols-2 gap-3 sm:grid @min-[520px]:grid-cols-4">
           {stats.map((s) => {
             const Icon = iconMap[s.icon];
             const t = toneStyles[s.tone];
