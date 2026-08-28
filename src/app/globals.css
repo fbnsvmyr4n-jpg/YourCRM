@@ -1206,10 +1206,27 @@ textarea.field-input {
   z-index: 0;
   overflow: hidden;
   background:
-    /* Only one wash, and only where the planet's atmosphere would actually
-       light the sky — everything else stays black so the rim reads as the
-       brightest thing in the frame. */
+    /* The tight, bright wash where the planet's atmosphere actually lights the
+       sky. Unchanged — the rim still reads as the brightest thing in the frame. */
     radial-gradient(120% 46% at 50% 104%, rgba(24, 54, 102, 0.42), transparent 62%),
+    /*
+       A second, much wider and much fainter ramp, because the sky above that
+       wash was flat.
+
+       Measured by compositing the sky against the star canvas and profiling it
+       in tenths: the CSS contributed 0.01178 luma at every one of the top SEVEN
+       tenths of the frame — identical to five decimal places. All the tonal
+       variation up there came from stars alone, and the sky itself stopped dead
+       at black three-quarters of the way up. That hard floor is what flattened
+       the background: real orbital views fall off continuously from the horizon
+       to the zenith, they do not step from a lit band into pure black.
+
+       Wide enough to reach the top of the frame (165% tall, centred below it)
+       and faint enough not to compete with the stars — the lift is about 0.008
+       luma at the zenith against a 0.7 star peak, which is roughly one part in
+       ninety. It changes the ground the stars sit on, not the stars.
+    */
+    radial-gradient(190% 165% at 50% 115%, rgba(18, 40, 80, 0.13), transparent 95%),
     #020306;
 }
 
