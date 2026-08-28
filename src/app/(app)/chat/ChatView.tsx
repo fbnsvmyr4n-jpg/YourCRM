@@ -141,21 +141,6 @@ export function ChatView({
 
     const apply = () => {
       root.style.setProperty("--chat-vh", `${Math.round(viewport?.height ?? window.innerHeight)}px`);
-
-      /*
-         Put the page back where it belongs.
-
-         Focusing the composer makes Safari pan the page up to reveal it, and
-         because the document has nothing to scroll that pan is never undone —
-         dismissing the keyboard left the contact bar off the top of the screen
-         and the gap back underneath, permanently, until a reload. Verified on
-         the simulator before and after.
-
-         Zero is the only correct scroll position on a page that fills the
-         screen, so it is simply asserted whenever the viewport moves. A no-op
-         when nothing was panned.
-      */
-      if (window.scrollY !== 0) window.scrollTo(0, 0);
     };
 
     apply();

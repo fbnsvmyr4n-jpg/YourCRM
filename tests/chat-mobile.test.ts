@@ -464,22 +464,6 @@ describe("the composer holds the bottom edge", () => {
     expect(view).toMatch(/viewport\?\.removeEventListener\("scroll", apply\)/);
   });
 
-  it("puts the page back after the keyboard pans it", () => {
-    /**
-     * Focusing the composer makes Safari pan the page up to reveal it, and
-     * because the document has nothing to scroll that pan is never undone.
-     * Observed on the simulator: dismissing the keyboard left the contact bar
-     * off the top of the screen and the gap back underneath, permanently,
-     * until a reload — the same symptom as the original report, arrived at by
-     * a different route.
-     *
-     * Zero is the only correct scroll position on a page that fills the screen,
-     * so it is asserted whenever the viewport moves. A no-op when nothing was
-     * panned, which is why it is guarded rather than called unconditionally.
-     */
-    expect(view).toMatch(/if \(window\.scrollY !== 0\) window\.scrollTo\(0, 0\)/);
-  });
-
   it("stops the rubber-band going looking for the gap", () => {
     /* With the layout pinned there is nothing below the composer to reveal, but
        iOS will still pan a page that cannot scroll. Phone only: on a desktop
