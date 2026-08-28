@@ -979,6 +979,16 @@ function DealModal({
   const canPay = (deal.stage === "demo" || deal.stage === "discovery") && deal.value > 0;
   const canValue = carriesMoney(deal.stage) && !isWon(deal);
 
+  /*
+     The amount starts at the whole outstanding balance, because that is what
+     usually arrives. Held as a string rather than a number so the field can be
+     emptied while it is being retyped — a numeric `0` in here would fight the
+     user by refilling the box the moment they cleared it.
+  */
+  const [amount, setAmount] = useState(String(deal.value));
+  const entered = Math.min(deal.value, Math.max(0, Number(amount) || 0));
+  const settles = entered === deal.value && entered > 0;
+
   return (
     <Overlay>
       <div className="fixed inset-0 z-50 grid place-items-center p-4" role="dialog" aria-modal="true">
@@ -996,9 +1006,31 @@ function DealModal({
             </button>
           </div>
 
-          <PainPoints deal={deal} busy={busy} onChange={onPainPoints} />
+          {/*
+              On a phone, money first.
 
-          <AskForReferral deal={deal} busy={busy} />
+              Opening a deal to record a payment meant scrolling past the demo
+              coaching to reach the form — the reason you tapped the card was
+              the last thing on the screen, and on a deal carrying four or five
+              pain points it was off the bottom entirely.
+
+              `sm:block` on the wrapper and `sm:order-none` on the children mean
+              the desktop modal is laid out exactly as before: a block container
+              with the same two children in the same order, where the `mb-3`
+              margins collapse out of these wrappers unchanged.
+          */}
+          <div className="flex flex-col sm:block">
+            {/* `-mb-3` cancels the coaching block's own bottom margin now that
+                it is last in the phone order, rather than leaving a trailing
+                gap under the final card. Both roots use `mb-3`, so it is
+                exact — and it is off above `sm`, where nothing moved. */}
+            <div className="order-2 max-sm:-mb-3 sm:order-none">
+              <PainPoints deal={deal} busy={busy} onChange={onPainPoints} />
+
+              <AskForReferral deal={deal} busy={busy} />
+            </div>
+
+            <div className="order-1 sm:order-none">
 
           {isPartiallyPaid(deal) && deal.splitTotal && (
             <div className="mb-4 rounded-xl p-3" style={{ background: "rgba(249,115,22,0.10)" }}>
@@ -1036,21 +1068,58 @@ function DealModal({
                   min={1}
                   max={deal.value}
                   required
-                  autoFocus
-                  placeholder={String(deal.value)}
+                  /*
+                     Filled in, not hinted at.
+
+                     This was a PLACEHOLDER showing the outstanding amount, and
+                     an autofocused empty field — so the commonest event in the
+                     whole app, "they paid the invoice", meant a keyboard
+                     covering the button and five digits typed to reproduce a
+                     number already on the screen. Prefilled, paid-in-full is a
+                     single tap and nothing has to be typed at all.
+
+                     `autoFocus` goes with it. There is nothing to type, and
+                     raising the keyboard immediately hid the very button the
+                     tap was heading for.
+                  */
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  /* A part payment stays one gesture too: focusing selects the
+                     whole figure, so typing replaces it rather than editing
+                     around a caret dropped mid-number. */
+                  onFocus={(e) => e.target.select()}
                   className="field-input"
                 />
               </label>
 
               {error && <p className="mt-2 text-xs" style={{ color: "var(--red)" }}>{error}</p>}
 
-              <div className="mt-3 flex justify-end gap-2">
+              <div className="mt-3 flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
+                {/*
+                    What this tap is about to do, in money, before it happens.
+
+                    A payment either settles the deal or leaves a balance, and
+                    which one it is was previously discoverable only afterwards
+                    — by watching whether the card vanished from the board. It
+                    is the part people get wrong, so it is stated in the tense
+                    of something not yet done.
+                */}
+                <p className="mr-auto text-xs text-muted">
+                  {settles
+                    ? "Closes the deal."
+                    : entered > 0
+                      ? `${fullMoney(deal.value - entered)} stays open here.`
+                      : " "}
+                </p>
                 <button
                   type="submit"
                   disabled={busy}
                   className="btn-accent focus-ring rounded-xl px-4 py-2 text-sm font-semibold disabled:opacity-60"
                 >
-                  {busy ? "Recording…" : "Record payment"}
+                  {/* The button names the amount, so the figure is confirmed
+                      where the decision is made rather than in a field above
+                      it. */}
+                  {busy ? "Recording…" : entered > 0 ? `Record ${fullMoney(entered)}` : "Record payment"}
                 </button>
               </div>
             </form>
@@ -1107,6 +1176,8 @@ function DealModal({
                     : "Deals in this stage don't carry a value yet — move it to Discovery once there's a number to put on it."}
             </p>
           )}
+            </div>
+          </div>
         </div>
       </div>
     </Overlay>
