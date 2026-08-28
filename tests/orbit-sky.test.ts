@@ -68,3 +68,62 @@ describe("the login sky", () => {
     expect(sky).toMatch(/#020306;/);
   });
 });
+
+describe("the Milky Way's colour temperature", () => {
+  const field = readFileSync(
+    fileURLToPath(new URL("../src/components/login/ConstellationField.tsx", import.meta.url)),
+    "utf8"
+  );
+
+  it("runs warm at the core and cool along the far arm", () => {
+    /**
+     * Measured over the sky region: 97% of painted pixels carried real
+     * saturation, but every coloured one fell in a 90° span of hue — cyan
+     * through blue to violet — with 57% inside a single 30° bucket. Structure
+     * everywhere, one colour. That is what still read as plain after the sky
+     * gained its ramp.
+     *
+     * A/B on mean (R−B) across eight vertical slices of the sky, alpha-weighted:
+     *
+     *   before  -67 -84 -96 -88 -72 -73 -94 -100    spread 32.7
+     *   after   -83 -94 -96 -84 -71 -56 -51  -70    spread 45.1
+     *
+     * Not just wider. Before, the warmest slices sat in the middle with cool at
+     * both ends — incidental, wherever the galactic core happened to land. After,
+     * it climbs from slice 2 to slice 6, which is a direction rather than an
+     * accident.
+     *
+     * And it costs nothing: sky luma 0.05964 -> 0.05721, marginally darker.
+     */
+    expect(field).toMatch(/g\.globalCompositeOperation = "source-atop";/);
+    expect(field).toMatch(/const temperature = g\.createLinearGradient\(-len \* 0\.5, 0, len \* 0\.5, 0\)/);
+    /* Warm at the core end, cool at the far one. */
+    expect(field).toMatch(/temperature\.addColorStop\(0\.0, "rgba\(255, 214, 158/);
+    expect(field).toMatch(/temperature\.addColorStop\(1\.0, "rgba\(122, 166, 255/);
+  });
+
+  it("recolours rather than adds light", () => {
+    /**
+     * The first attempt at this was faint warm CLOUDS, and it failed on the
+     * measurement: over a blue band, a warm wash at low alpha lifts red and
+     * green without ever overtaking the blue, so the sky came out 21% brighter
+     * and no more colourful. It was reverted rather than shipped.
+     *
+     * `source-atop` is the difference — it paints only where pixels already
+     * exist and contributes no light of its own. `screen` or `source-over`
+     * here would put the brightness back.
+     */
+    const block = field.slice(
+      field.indexOf("const temperature = g.createLinearGradient"),
+      field.indexOf("g.globalCompositeOperation = \"source-over\";", field.indexOf("const temperature"))
+    );
+    expect(block).not.toMatch(/screen/);
+    expect(field).toMatch(/source-atop[\s\S]{0,900}?g\.fillRect\(-len \/ 2, -halfWidth \* 2, len, halfWidth \* 4\)/);
+  });
+
+  it("still leaves the plain variant free of the saturated nebula", () => {
+    /* The login sky is not the constellations demo. Those clouds run alpha
+       0.24–0.42 in magenta and purple, which is a poster rather than a window. */
+    expect(field).toMatch(/const clouds = plain \? \[\] : \[/);
+  });
+});

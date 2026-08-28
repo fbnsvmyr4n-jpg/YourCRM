@@ -214,6 +214,37 @@ function paintMilkyWay(w: number, h: number, plain = false): HTMLCanvasElement {
     g.fill();
   }
 
+  /*
+     Colour temperature ALONG the band, not just brightness across it.
+
+     Measured over the sky region: 97% of painted pixels carry real saturation,
+     but every coloured one fell inside a 90° span of hue — cyan through blue to
+     violet — with 57% in a single 30° bucket. Structure everywhere, one colour.
+     That is what still read as plain after the sky gained its ramp.
+
+     Adding faint warm CLOUDS was the first attempt and it failed on the
+     measurement: over a blue band, a warm wash at low alpha lifts red and green
+     without ever overtaking the blue, so the sky came out 21% brighter and no
+     more colourful. Brightness is not colour.
+
+     `source-atop` recolours what is already painted and adds no light of its
+     own, which is the difference. The gradient runs the length of the band —
+     gold at the galactic core where dust reddens everything, neutral through
+     the middle, cool blue out along the far arm. It is what a long exposure of
+     the Milky Way actually shows, and it tints the clustered stars with the
+     band they sit in rather than leaving them a uniform blue-white.
+  */
+  g.globalCompositeOperation = "source-atop";
+  const temperature = g.createLinearGradient(-len * 0.5, 0, len * 0.5, 0);
+  temperature.addColorStop(0.0, "rgba(255, 214, 158, 0.34)");
+  temperature.addColorStop(0.22, "rgba(255, 226, 190, 0.26)");
+  temperature.addColorStop(0.46, "rgba(226, 226, 232, 0.10)");
+  temperature.addColorStop(0.72, "rgba(150, 186, 255, 0.20)");
+  temperature.addColorStop(1.0, "rgba(122, 166, 255, 0.30)");
+  g.fillStyle = temperature;
+  g.fillRect(-len / 2, -halfWidth * 2, len, halfWidth * 4);
+  g.globalCompositeOperation = "source-over";
+
   // Nebula. The reference sky has a genuinely saturated magenta cloud rather
   // than a faint tint, so this is built from several overlapping blobs at
   // different scales — one big radial reads as a spotlight, a cluster of them
