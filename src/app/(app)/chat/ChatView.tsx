@@ -65,9 +65,26 @@ export function ChatView({
   const narrow = useNarrow();
   const [busy, setBusy] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
+  const logRef = useRef<HTMLDivElement>(null);
 
+  /*
+     Scroll the TRANSCRIPT, not the page.
+
+     `endRef.current.scrollIntoView()` walks up to the nearest scrollable
+     ancestor and moves whatever it finds — and when the iOS keyboard opens, the
+     visual viewport shrinks while `dvh` does not, so the document itself
+     becomes scrollable. Every reply then dragged the whole page up and took the
+     header off the top of the screen with it. That is the jump in the report:
+     not the messages moving, but the app moving around them.
+
+     Setting `scrollTop` on the log addresses one element and cannot touch
+     anything else, so the header stays where it is and only the conversation
+     moves.
+  */
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    const log = logRef.current;
+    if (!log) return;
+    log.scrollTo({ top: log.scrollHeight, behavior: "smooth" });
   }, [items, busy]);
 
   // What this conversation has already covered, so the idle strip suggests
@@ -132,7 +149,22 @@ export function ChatView({
        of bottom padding, both measured rather than guessed. The `lg` value is
        untouched.
     */
-    <div className="mx-auto flex h-[calc(100dvh-112px)] max-w-[900px] animate-fade-up flex-col lg:h-[calc(100vh-104px)]">
+    /*
+       On a phone the composer sits at the bottom of the screen, not 33px above
+       it.
+
+       `main` ends in 32px of bottom padding, which is right for a page you
+       scroll and wrong for one that fills the screen: it left a band of empty
+       background under the composer while the conversation above it was
+       starved. `-mb-6` gives 24 of those pixels back and `88px` — the 80px
+       header plus an 8px breath — replaces the 112 that assumed the padding was
+       still there. Eight is enough to keep the card off the very edge without
+       reading as a gap.
+
+       Both are reversed from `sm` up, where the page keeps its footer margin and
+       the height it always had.
+    */
+    <div className="mx-auto -mb-6 flex h-[calc(100dvh-88px)] max-w-[900px] animate-fade-up flex-col sm:mb-0 sm:h-[calc(100dvh-112px)] lg:h-[calc(100vh-104px)]">
       {/*
           Identity — and on a phone it has to earn its height.
 
@@ -182,16 +214,25 @@ export function ChatView({
                 Both are rendered and one is displayed, so there is no
                 client-only string and nothing to mismatch on hydration.
             */}
-            {/* Wraps rather than truncates. With the reset button now beside it
-                the line is narrow enough to clip, and it rendered "15 contacts ·
-                15 deals · 0 …" — cutting off the third number, which is the one
-                thing this line exists to state. A second line costs 16px; a
-                claim that stops mid-figure costs the claim. */}
-            <p className="mt-1 text-xs text-muted sm:hidden">
-              <strong className="font-semibold text-[var(--text)]">{knows.contacts}</strong> contacts ·{" "}
-              <strong className="font-semibold text-[var(--text)]">{knows.deals}</strong> deals ·{" "}
-              <strong className="font-semibold text-[var(--text)]">{knows.meetings}</strong> meetings
-            </p>
+            {/*
+                No counts line on a phone.
+
+                It was asked whether something more useful could go here, and the
+                honest answer is no. Anything genuinely actionable — what is due,
+                who is waiting — is the Home page's job, and repeating it here
+                would be the duplication this app keeps having to remove. The
+                counts themselves are not a fact anybody acts on; the badge
+                beside the title already carries the only thing that changes what
+                you do, which is whether answers are live.
+
+                So the room goes to the conversation instead: two wrapped lines
+                on a 575px screen, plus the margin above them, is 32px that the
+                transcript can use.
+
+                The desktop keeps it. There it is one line in a wide strip, it
+                costs nothing, and it is the page stating on its face that the
+                answers are grounded in real records rather than invented.
+            */}
             <p className="mt-1.5 hidden text-xs text-muted sm:block sm:truncate">
               Answering from{" "}
               <strong className="font-semibold text-[var(--text)]">{knows.contacts}</strong> contacts,{" "}
@@ -230,7 +271,11 @@ export function ChatView({
             With it, the transcript is the part that gives way. That is the
             right way round: it scrolls, and the composer does not.
         */}
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
+        {/* `overscroll-contain`: reaching the top or bottom of the conversation
+            stops there instead of handing the gesture on to the page behind it,
+            which is what made a flick past the last message rubber-band the
+            whole app. */}
+        <div ref={logRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-5">
           {/*
               Something to look at before the first question.
 

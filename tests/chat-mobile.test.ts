@@ -55,9 +55,10 @@ describe("the assistant fills the phone screen", () => {
        same reason. Both are rendered and one is displayed, so there is no
        client-only string to mismatch on hydration. */
     expect(view).toMatch(/text-xs text-muted sm:block sm:truncate/);
-    expect(view).toMatch(/<p className="mt-1 text-xs text-muted sm:hidden">/);
-    const phoneLine = view.slice(view.indexOf('mt-1 text-xs text-muted sm:hidden'));
-    expect(phoneLine.slice(0, 400)).not.toMatch(/truncate/);
+    /* And on a phone there is no counts line at all now — see "drops the counts
+       line on a phone" below. The desktop claim is the one that survives. */
+    const code = view.replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(code).not.toMatch(/sm:hidden">\s*<strong/);
   });
 });
 
@@ -104,7 +105,14 @@ describe("the conversation gets the room", () => {
      * With it, the transcript is what gives way, which is the right way round:
      * it scrolls, the composer does not.
      */
-    expect(view).toMatch(/className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5"/);
+    /* Anchored on the two tokens that carry the behaviour rather than the whole
+       class string — the paint around them has changed twice already, and a
+       test that breaks on a repaint while proving nothing about the layout is
+       the kind you learn to ignore. */
+    const log = view.slice(view.indexOf("ref={logRef}"));
+    const cls = log.slice(log.indexOf('className="') + 11, log.indexOf('"', log.indexOf('className="') + 11));
+    expect(cls.split(/\s+/)).toContain("min-h-0");
+    expect(cls.split(/\s+/)).toContain("flex-1");
   });
 
   it("never lets the composer be the thing that shrinks", () => {
@@ -179,5 +187,80 @@ describe("the notifications panel", () => {
     for (const restored of ["sm:absolute", "sm:left-auto", "sm:right-0", "sm:top-12", "sm:w-\\[min\\(92vw,380px\\)\\]"]) {
       expect(panel).toMatch(new RegExp(restored));
     }
+  });
+});
+
+describe("the chat reaches the bottom of the phone", () => {
+  it("does not leave a band of background under the composer", () => {
+    /**
+     * `main` ends in 32px of bottom padding — right for a page you scroll,
+     * wrong for one that fills the screen. Measured at 320x575 it left 33px of
+     * empty background below the composer while the conversation above it was
+     * starved.
+     *
+     * `-mb-6` gives 24 of those back and the height drops to the 80px header
+     * plus an 8px breath. Measured after: a 9px gap, and the page still does
+     * not scroll.
+     */
+    expect(view).toMatch(/-mb-6 flex h-\[calc\(100dvh-88px\)\]/);
+  });
+
+  it("gives the desktop back its footer margin and its height", () => {
+    /* Measured at 1280 after the change: shell 696px against a 800px viewport,
+       which is the `100vh-104px` it always was, and margin-bottom 0. */
+    expect(view).toMatch(/sm:mb-0 sm:h-\[calc\(100dvh-112px\)\] lg:h-\[calc\(100vh-104px\)\]/);
+  });
+});
+
+describe("the page holds still", () => {
+  it("scrolls the transcript rather than the document", () => {
+    /**
+     * The jump that made the page feel unsteady. `scrollIntoView` walks up to
+     * the nearest scrollable ancestor and moves whatever it finds — and when
+     * the iOS keyboard opens, the visual viewport shrinks while `dvh` does not,
+     * so the DOCUMENT becomes scrollable. Every reply then dragged the whole
+     * app up and took the header off the top of the screen, which is exactly
+     * what the reported screenshot shows.
+     *
+     * Addressing the log element directly cannot touch anything else. Measured
+     * after a reply: scrollY 0, header still at y=0, log pinned to its bottom.
+     */
+    expect(view).toMatch(/log\.scrollTo\(\{ top: log\.scrollHeight, behavior: "smooth" \}\)/);
+    const code = view.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+    expect(code).not.toMatch(/scrollIntoView/);
+  });
+
+  it("stops a flick past the last message from dragging the app", () => {
+    /* Without this, reaching either end of the conversation hands the gesture
+       on to the page behind it and the whole thing rubber-bands. */
+    expect(view).toMatch(/overflow-y-auto overscroll-contain p-5/);
+  });
+});
+
+describe("the hero says only what is worth saying", () => {
+  it("drops the counts line on a phone", () => {
+    /**
+     * Asked whether something more useful could replace it; the honest answer
+     * was no. Anything actionable — what is due, who is waiting — is the Home
+     * page's job, and repeating it here is the duplication this app keeps
+     * having to remove. The counts are not a fact anybody acts on, and the
+     * badge beside the title already carries the one thing that changes what
+     * you do: whether the answers are live.
+     *
+     * Worth 32px on a 575px screen, handed to the conversation. Measured: hero
+     * 99px to 79.
+     */
+    const code = view.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+    const counts = code.match(/knows\.contacts/g) ?? [];
+    /* Exactly one place renders them, and it is the `sm:`-only line. */
+    expect(counts.length).toBe(1);
+    expect(code).toMatch(/hidden text-xs text-muted sm:block sm:truncate[\s\S]{0,200}?knows\.contacts/);
+  });
+
+  it("keeps the grounding claim on the desktop", () => {
+    /* There it is one line in a wide strip, costs nothing, and is the page
+       saying on its face that the answers come from real records. */
+    expect(view).toMatch(/Answering from/);
+    expect(view).toMatch(/meetings — live\./);
   });
 });
