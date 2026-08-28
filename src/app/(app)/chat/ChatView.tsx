@@ -90,6 +90,9 @@ export function ChatView({
   const [busy, setBusy] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   const logRef = useRef<HTMLDivElement>(null);
+  /* So accepting a prediction hands the caret straight back to the composer
+     rather than dropping focus and closing the keyboard. */
+  const inputRef = useRef<HTMLInputElement>(null);
 
   /*
      Scroll the TRANSCRIPT, not the page.
@@ -182,13 +185,44 @@ export function ChatView({
      tappable questions below the box are just something between them and their
      own sentence. On a phone they are also 191px of it.
 
-     HAVING ASKED: a `role === "user"` message, not merely a message. `items`
-     is seeded with an assistant greeting and `reset()` keeps it, so counting
-     messages meant the suggestions never came back after New chat — the reader
-     tapped it and landed on a greeting with nothing to tap and no empty state
-     either, which is a worse first-run than the one they started with.
+     HAVING ASKED: a `role === "user"` message, not merely a message.
+
+     The reason is narrower than an earlier version of this comment claimed.
+     Nothing is seeded here — `listChat` returns exactly what is stored and
+     `clearChat` is a DELETE with no reseed — so the greeting it described does
+     not exist. What actually kept the suggestions away after New chat was
+     `reset()` holding on to `prev.slice(0, 1)`, which is the user's own first
+     question. That is fixed at the source now.
+
+     Testing the ROLE is still right, and cheaply so: it says the reader has
+     asked something, which is the thing that actually ends a first run,
+     regardless of what else a future version might put in the list.
   */
   const engaged = draft.trim().length > 0 || items.some((m) => m.role === "user");
+
+  /*
+     What they are probably about to ask, offered while they type it.
+
+     The suggestions stand down the moment there is a draft, which is right —
+     four questions between someone and their own sentence is clutter. But it
+     leaves the reader typing a whole question by thumb with no help at all, and
+     `suggestFor` is already ranking the pool against the draft on every
+     keystroke: the answer was being computed and thrown away.
+
+     So one line, the single best match, in the place a phone keyboard puts its
+     predictions. Only when it is actually adding something — a prediction
+     identical to what has already been typed is noise, and one offered before
+     there is anything to predict from is a guess.
+
+     Below `sm` only. On a desktop the suggestion row never went away and
+     already updates as you type, so this would be the same question twice.
+  */
+  const prediction =
+    draft.trim().length >= 2 &&
+    suggestions[0] &&
+    suggestions[0].toLowerCase() !== draft.trim().toLowerCase()
+      ? suggestions[0]
+      : null;
 
   async function send(text: string) {
     const question = text.trim();
@@ -212,7 +246,21 @@ export function ChatView({
     setBusy(true);
     try {
       await clearChatAction();
-      setItems((prev) => prev.slice(0, 1));
+      /*
+         Empty, because that is what the server now holds.
+
+         This was `prev.slice(0, 1)`, which keeps the FIRST message — and
+         nothing is seeded here, so the first message is whatever the user asked
+         first. New chat therefore deleted every message on the server and left
+         the user's own opening question sitting on screen, with the suggestions
+         still hidden behind it because the thread technically still contained a
+         user message. Reported exactly that way: tapping refresh brought back
+         "What's my pipeline worth?".
+
+         `clearChat` is a DELETE with no reseed, so an empty list is the only one
+         that matches the server after it.
+      */
+      setItems([]);
     } finally {
       setBusy(false);
     }
@@ -557,6 +605,33 @@ export function ChatView({
           ))}
         </div>
 
+        {/*
+            The prediction bar — one row, where a phone keyboard puts its own.
+
+            Tapping it fills the composer rather than sending. The reader is
+            mid-sentence and may have meant something adjacent; completing their
+            typing and leaving the send to them is the difference between a
+            shortcut and a hijack. It is still one tap instead of a whole
+            question thumbed in.
+
+            `sm:hidden` because the desktop suggestion row never went away and
+            already re-ranks on every keystroke — this would be the same
+            question offered twice.
+        */}
+        {prediction && (
+          <button
+            type="button"
+            onClick={() => {
+              setDraft(prediction);
+              inputRef.current?.focus();
+            }}
+            className="focus-ring flex shrink-0 items-center gap-2 border-t border-[var(--border)] px-4 py-2 text-left sm:hidden"
+          >
+            <Sparkles className="h-3.5 w-3.5 shrink-0 text-accent" />
+            <span className="truncate text-[13px] text-muted">{prediction}</span>
+          </button>
+        )}
+
         {/* Composer */}
         <form
           onSubmit={(e) => {
@@ -580,6 +655,7 @@ export function ChatView({
               every other form in the app.
           */}
           <input
+            ref={inputRef}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             /* Short on a phone: the full prompt renders as "Ask about your

@@ -240,22 +240,27 @@ describe("the suggestions get out of the way", () => {
     expect(view).toMatch(/const engaged = draft\.trim\(\)\.length > 0 \|\| items\.some\(\(m\) => m\.role === "user"\)/);
   });
 
-  it("comes back after New chat", () => {
+  it("comes back after New chat, because New chat actually clears", () => {
     /**
-     * The bug the previous condition had. `items` is seeded with an assistant
-     * greeting and `reset()` keeps it — `prev.slice(0, 1)` — so `items.length >
-     * 0` was true on a freshly reset chat. Tapping New chat left the reader on
-     * a greeting with nothing to tap and no empty state either, which is a
-     * worse first run than the one they started with.
+     * Reported: tapping New chat brought the user's own last question back on
+     * screen with the suggestions still hidden behind it.
      *
-     * A USER message is what ends the first run, and a greeting is not one.
+     * `reset()` was doing `prev.slice(0, 1)` — keep the FIRST message. An
+     * earlier version of this test justified that as preserving a seeded
+     * greeting, and there is no such thing: `listChat` returns exactly what is
+     * stored and `clearChat` is a DELETE with no reseed. So the first message
+     * is whatever the user asked first, and New chat deleted every message on
+     * the server while leaving that one on screen — which also kept `engaged`
+     * true, because the thread still contained a user message.
+     *
+     * An empty list is the only one that matches the server after a clear.
      */
-    expect(view).toMatch(/items\.some\(\(m\) => m\.role === "user"\)/);
+    expect(view).toMatch(/await clearChatAction\(\);[\s\S]{0,900}?setItems\(\[\]\)/);
     const code = view.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
-    /* `reset` still keeps the greeting — this test is about the condition, and
-       would be vacuous if the seeding ever went away silently. */
-    expect(code).toMatch(/prev\.slice\(0, 1\)/);
-    expect(code).not.toMatch(/data-engaged=\{items\.length/);
+    expect(code).not.toMatch(/prev\.slice\(0, 1\)/);
+    /* And the condition still keys off having ASKED, which is what ends a first
+       run whatever else the list may hold later. */
+    expect(view).toMatch(/items\.some\(\(m\) => m\.role === "user"\)/);
   });
 
   it("leaves the desktop alone on both counts", () => {
@@ -476,5 +481,57 @@ describe("the composer holds the bottom edge", () => {
     expect(guarded.lastIndexOf("@media (max-width: 639.98px)")).toBeGreaterThan(
       guarded.lastIndexOf("@media (min-width")
     );
+  });
+});
+
+/**
+ * Predictive text, once the suggestions have stood down.
+ *
+ * They vanish on the first keystroke, which is right — four questions between
+ * someone and their own sentence is clutter. But it left the reader thumbing a
+ * whole question with no help, while `suggestFor` was already ranking the pool
+ * against the draft on every keystroke and throwing the answer away.
+ */
+describe("the prediction bar", () => {
+  it("offers the best match for what is being typed", () => {
+    /* Verified live at 320px: typing "how many le" predicts "How many leads do
+       I have?" in a single row above the composer. */
+    expect(view).toMatch(/const prediction =/);
+    expect(view).toMatch(/suggestions\[0\]/);
+  });
+
+  it("stays quiet when it has nothing to add", () => {
+    /**
+     * Two ways it would be noise rather than help: offered before there is
+     * anything to predict from, and offered when it merely repeats what has
+     * already been typed in full.
+     */
+    expect(view).toMatch(/draft\.trim\(\)\.length >= 2/);
+    expect(view).toMatch(/suggestions\[0\]\.toLowerCase\(\) !== draft\.trim\(\)\.toLowerCase\(\)/);
+  });
+
+  it("completes the sentence rather than sending it", () => {
+    /**
+     * The reader is mid-sentence and may have meant something adjacent.
+     * Completing their typing and leaving the send to them is the difference
+     * between a shortcut and a hijack — and it is still one tap instead of a
+     * whole question thumbed in.
+     *
+     * Verified live: tapping it set the draft, kept focus in the composer, and
+     * sent nothing.
+     */
+    const bar = view.slice(view.indexOf("{prediction && ("));
+    expect(bar.slice(0, 600)).toMatch(/setDraft\(prediction\)/);
+    expect(bar.slice(0, 600)).not.toMatch(/send\(/);
+    /* Focus goes straight back, or accepting it closes the keyboard. */
+    expect(bar.slice(0, 600)).toMatch(/inputRef\.current\?\.focus\(\)/);
+  });
+
+  it("is a phone control only", () => {
+    /* The desktop suggestion row never went away and already re-ranks on every
+       keystroke; this would be the same question offered twice. Verified at
+       1280: the bar is not displayed and the chips still are. */
+    const bar = view.slice(view.indexOf("{prediction && ("));
+    expect(bar.slice(0, 700)).toMatch(/sm:hidden/);
   });
 });
