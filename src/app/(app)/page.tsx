@@ -283,6 +283,9 @@ export default async function DashboardPage() {
             <MobileSection
               title="Revenue"
               hint={`$${revenueTotal.toLocaleString()} won · last 6 weeks`}
+              /* Green, the same green Leads gives "Closed Won" — this section is
+                 money that has been banked. */
+              tone={{ color: "var(--green)", soft: "var(--green-soft)" }}
             >
               <div className="grid grid-cols-1 gap-5 @min-[560px]:grid-cols-2">
                 {/*
@@ -359,7 +362,13 @@ export default async function DashboardPage() {
               the feed fills exactly what it is given. The `min-h` is what this
               wrapper contributes instead. */}
           <div className="order-8 @min-[820px]:order-none @min-[820px]:relative @min-[820px]:min-h-[300px] @min-[820px]:flex-1">
-            <MobileSection title="Activity" hint={`${activity.length} recent`}>
+            <MobileSection
+              title="Activity"
+              hint={`${activity.length} recent`}
+              /* Accent, the same accent Leads gives "New Lead" — this is what
+                 has just happened rather than what it was worth. */
+              tone={{ color: "var(--accent)", soft: "var(--accent-soft)" }}
+            >
               <ActivityFeed items={activity} />
             </MobileSection>
           </div>

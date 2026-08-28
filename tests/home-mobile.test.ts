@@ -81,9 +81,15 @@ describe("the dashboard on a phone", () => {
     /* The control is `sm:hidden` and the body `sm:contents`, so from `sm` up
        the wrapper contributes no box at all and the desktop grid sees exactly
        the children it saw before. */
-    expect(section).toMatch(/className="btn-soft focus-ring flex w-full items-center justify-between gap-3 rounded-2xl px-4 py-3 text-left sm:hidden"/);
-    expect(section).toMatch(/clsx\("sm:contents", open \? "block" : "hidden"\)/);
-    expect(section).toMatch(/<section className="flex flex-col gap-3 sm:contents">/);
+    /* The header is `sm:hidden` and the body `sm:contents`, so from `sm` up the
+       wrapper contributes no box at all. Anchored on the tokens that carry
+       that, not on the whole class string — the styling around them changed
+       when the folds were given the Leads colour language, and a test that
+       pins the paint breaks on every visual change while proving nothing about
+       the behaviour. */
+    expect(section).toMatch(/text-left transition-colors sm:hidden/);
+    expect(section).toMatch(/clsx\("sm:contents", open \? "flex flex-col gap-4 p-3" : "hidden"\)/);
+    expect(section).toMatch(/"flex flex-col sm:contents"/);
   });
 
   it("says what is inside without being opened", () => {
@@ -202,5 +208,46 @@ describe("the dashboard on a phone", () => {
       const closedAt = page.lastIndexOf("</MobileSection>", at);
       expect(opened > closedAt, `${essential} is inside a fold`).toBe(false);
     }
+  });
+});
+
+describe("how a fold looks", () => {
+  it("speaks the Leads page's colour language", () => {
+    /**
+     * The folds were plain grey pills on a page whose sibling screens are
+     * colour-coded, so they read as a different product. Leads washes its
+     * status cards with `linear-gradient(135deg, soft, transparent 90%)` over
+     * a `{ color, soft }` tone and states the tone once more as a filled dot.
+     * The same wash, the same palette, the same dot.
+     */
+    expect(section).toMatch(/linear-gradient\(135deg, \$\{tone\.soft\}, transparent 90%\)/);
+    expect(section).toMatch(/style=\{\{ background: tone\.color \}\}/);
+
+    /* And the tones come from the same variables Leads uses, not new ones. */
+    expect(page).toMatch(/tone=\{\{ color: "var\(--green\)", soft: "var\(--green-soft\)" \}\}/);
+    expect(page).toMatch(/tone=\{\{ color: "var\(--accent\)", soft: "var\(--accent-soft\)" \}\}/);
+  });
+
+  it("becomes one card when open, not a heading above a card", () => {
+    /**
+     * Closed it is its own rounded object. Open, the border and the radius
+     * move to the section and the header gives up both, so the group is a
+     * single rounded box with a titled top edge and the cards nested inside —
+     * rather than a pill, a gap, and whatever card happened to follow it.
+     */
+    expect(section).toMatch(/open && "overflow-hidden rounded-2xl border border-\[var\(--border\)\]"/);
+    expect(section).toMatch(/open\s*\?\s*"border-b border-\[var\(--border\)\]"\s*:\s*"rounded-2xl border border-\[var\(--border\)\]"/);
+
+    /* Inset, so the cards read as contents rather than as siblings. */
+    expect(section).toMatch(/open \? "flex flex-col gap-4 p-3" : "hidden"/);
+  });
+
+  it("keeps all of it off the desktop", () => {
+    /* Every one of these is a phone treatment. `sm:contents` on both the
+       section and the body means the desktop grid still sees exactly the
+       children it saw before — no border, no padding, no wrapper box. */
+    expect(section).toMatch(/"flex flex-col sm:contents"/);
+    expect(section).toMatch(/clsx\("sm:contents", open \? "flex flex-col gap-4 p-3" : "hidden"\)/);
+    expect(section).toMatch(/text-left transition-colors sm:hidden/);
   });
 });

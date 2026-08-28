@@ -25,12 +25,18 @@ import { clsx } from "@/lib/clsx";
 export function MobileSection({
   title,
   hint,
+  tone,
   children,
   defaultOpen = false,
 }: {
   title: string;
   /** A count or figure worth seeing without opening it. */
   hint?: string;
+  /**
+   * The section's colour, in the language the Leads page already speaks:
+   * `{ color, soft }` from the same palette its status tones come from.
+   */
+  tone: { color: string; soft: string };
   children: React.ReactNode;
   defaultOpen?: boolean;
 }) {
@@ -61,7 +67,22 @@ export function MobileSection({
   const toggle = useCallback(() => write(key, !read(key, defaultOpen)), [key, defaultOpen]);
 
   return (
-    <section className="flex flex-col gap-3 sm:contents">
+    /*
+       Open, this is ONE card — not a header floating above a separate one.
+
+       It read as two boxes: a pill, a gap, then whatever card was inside. The
+       heading did not look like it owned the thing under it, so opening a
+       section produced two objects rather than one section with a title. When
+       open the border and the radius move to this element and the header loses
+       both, so the group is a single rounded box with a titled top edge and
+       the cards nested inside it.
+    */
+    <section
+      className={clsx(
+        "flex flex-col sm:contents",
+        open && "overflow-hidden rounded-2xl border border-[var(--border)]"
+      )}
+    >
       {/* The header exists only on a phone. On a desktop these cards carry
           their own headings and a second one would be a duplicate. */}
       <button
@@ -69,21 +90,48 @@ export function MobileSection({
         onClick={toggle}
         aria-expanded={open}
         aria-controls={id}
-        className="btn-soft focus-ring flex w-full items-center justify-between gap-3 rounded-2xl px-4 py-3 text-left sm:hidden"
+        className={clsx(
+          "focus-ring flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors sm:hidden",
+          /* Closed it is its own rounded object; open it is the top edge of the
+             group below it, so it gives up its border and its radius. */
+          open
+            ? "border-b border-[var(--border)]"
+            : "rounded-2xl border border-[var(--border)]"
+        )}
+        /* The same wash the Leads cards use — `linear-gradient(135deg, soft,
+           transparent 90%)` — so a fold on the dashboard and a filter on Leads
+           read as the same family rather than two designs in one product. */
+        style={{ background: `linear-gradient(135deg, ${tone.soft}, transparent 90%)` }}
       >
-        <span className="min-w-0">
-          <span className="block truncate text-sm font-semibold">{title}</span>
-          {hint && <span className="mt-0.5 block truncate text-[11px] text-faint">{hint}</span>}
+        <span className="flex min-w-0 items-center gap-2.5">
+          {/* The tone, stated once. Leads uses a filled dot for the same job. */}
+          <span
+            className="h-2 w-2 shrink-0 rounded-full"
+            style={{ background: tone.color }}
+            aria-hidden
+          />
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-semibold">{title}</span>
+            {hint && <span className="mt-0.5 block truncate text-[11px] text-faint">{hint}</span>}
+          </span>
         </span>
         <ChevronDown
-          className={clsx(
-            "h-4 w-4 shrink-0 text-faint transition-transform",
-            open && "rotate-180"
-          )}
+          className={clsx("h-4 w-4 shrink-0 transition-transform", open && "rotate-180")}
+          style={{ color: tone.color }}
         />
       </button>
 
-      <div id={id} className={clsx("sm:contents", open ? "block" : "hidden")}>
+      {/*
+          Inset, so the cards inside read as contents rather than as siblings of
+          the header. The tint is the same tone at a fraction of the strength —
+          enough to tie the group together, not enough to compete with the cards
+          sitting on it.
+      */}
+      <div
+        id={id}
+        className={clsx("sm:contents", open ? "flex flex-col gap-4 p-3" : "hidden")}
+        style={open ? { background: `linear-gradient(180deg, ${tone.soft}, transparent 60%)` } : undefined}
+      >
         {children}
       </div>
     </section>
