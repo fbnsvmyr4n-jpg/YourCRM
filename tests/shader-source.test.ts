@@ -402,3 +402,49 @@ describe("terrain relief", () => {
     expect(FRAGMENT_SHADER).toMatch(/relief = mix\(relief, 1\.0, water\)/);
   });
 });
+
+describe("tone mapping", () => {
+  it("compresses brightness without bleaching the colour out of it", () => {
+    /**
+     * The third and last cause of the "glare at the bottom of the globe", and
+     * the only one that was not the ocean glint at all.
+     *
+     * Located by reading the frame back and looking for the hottest pixels
+     * rather than averaging regions — which had hidden it. 83% of everything
+     * above 0.62 luma sat in the bottom three rows, mean RGB (176,165,136), a
+     * ratio of 1 : 0.936 : 0.774. That is markedly warmer than the glint tint
+     * of 1 : 0.97 : 0.9, so it was never specular: it was sunlit desert.
+     *
+     * Inverting the curve on those pixels gave a linear colour of
+     * (0.795, 0.626, 0.337) arriving at the tone map, and per-channel Reinhard
+     * delivered (0.443, 0.385, 0.252). Saturation 0.576 in, 0.431 out — a
+     * quarter of the colour gone, and gone precisely where the image is
+     * brightest, because each channel compresses by a different amount. That
+     * is what reads as glare: not more light, but light with the colour
+     * bleached out of it.
+     *
+     * Measured after, same frame, same regions:
+     *
+     *   hot core saturation   0.226 -> 0.269
+     *   bottom band           0.192 -> 0.216 saturation, luma 0.410 -> 0.411
+     *
+     * Colour restored at constant brightness, which is the whole point — the
+     * fix is not a dimmer planet, it is a planet that keeps its hue when lit.
+     */
+    expect(FRAGMENT_SHADER).toMatch(/float lum = dot\(colour, vec3\(0\.2126, 0\.7152, 0\.0722\)\)/);
+    expect(FRAGMENT_SHADER).toMatch(/vec3 preserved = colour \* \(lum \/ \(1\.0 \+ lum\)\) \/ max\(lum, 1e-4\)/);
+    expect(FRAGMENT_SHADER).toMatch(/colour = mix\(perChannel, preserved, 0\.75\)/);
+  });
+
+  it("keeps a share of per-channel so saturated highlights still roll off", () => {
+    /* A fully ratio-preserving map lets a saturated bright colour push one
+       channel past 1 and clip anyway, which trades bleaching for a hard edge.
+       The blend keeps nearly all the colour and lets the remaining quarter of
+       per-channel behaviour handle the extremes. */
+    const blend = FRAGMENT_SHADER.match(/colour = mix\(perChannel, preserved, ([\d.]+)\)/);
+    expect(blend).not.toBeNull();
+    expect(Number(blend![1])).toBeGreaterThan(0.5);
+    expect(Number(blend![1])).toBeLessThan(1.0);
+    expect(FRAGMENT_SHADER).toMatch(/colour = clamp\(colour, 0\.0, 1\.0\);/);
+  });
+});

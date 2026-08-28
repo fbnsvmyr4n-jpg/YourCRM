@@ -1150,9 +1150,35 @@ void main() {
 
   colour *= uExposure;
 
-  // Tone map, then encode. Without this the limb clips to flat white exactly
-  // where the scattering is most interesting.
-  colour = colour / (colour + vec3(1.0));
+  /*
+     Tone map, then encode. Without this the limb clips to flat white exactly
+     where the scattering is most interesting.
+
+     Mostly on LUMINANCE rather than per channel, and that is the difference
+     between bright and harsh.
+
+     Per-channel Reinhard compresses each channel by a different amount, so the
+     brighter a colour is the more it drifts toward white. Reading the rendered
+     frame back over the sunlit ground at the bottom of the globe and inverting
+     the curve: the linear colour arriving here is (0.795, 0.626, 0.337) — warm
+     desert — and per-channel mapping delivered (0.443, 0.385, 0.252). Its
+     saturation fell from 0.576 to 0.431, a quarter of the colour gone, exactly
+     where the image is brightest. That is what reads as glare: not more light,
+     but light with the colour bleached out of it.
+
+     Scaling by a luminance-mapped ratio compresses the brightness and leaves
+     the ratios between channels alone, so sunlit sand stays sand.
+
+     Blended rather than pure, because a fully ratio-preserving map lets a
+     saturated bright colour push a channel past 1 and clip anyway. 0.75 keeps
+     nearly all the colour while the remaining quarter of per-channel behaviour
+     rolls the extremes off.
+  */
+  float lum = dot(colour, vec3(0.2126, 0.7152, 0.0722));
+  vec3 perChannel = colour / (colour + vec3(1.0));
+  vec3 preserved = colour * (lum / (1.0 + lum)) / max(lum, 1e-4);
+  colour = mix(perChannel, preserved, 0.75);
+  colour = clamp(colour, 0.0, 1.0);
   colour = pow(colour, vec3(1.0 / 2.2));
 
   /*
