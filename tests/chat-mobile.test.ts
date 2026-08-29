@@ -189,7 +189,7 @@ describe("the chat reaches the bottom of the phone", () => {
        page from the visible viewport" below for why. What this assertion is
        about is the `-mb-6`: main's 32px footer padding is right for a page you
        scroll and wrong for one that fills the screen. */
-    expect(view).toMatch(/-mb-6 flex h-\[calc\(var\(--chat-vh\)-var\(--chat-chrome\)\)\]/);
+    expect(view).toMatch(/-mb-6 flex h-\[calc\(var\(--chat-vh\)-88px\)\]/);
   });
 
   it("gives the desktop back its footer margin and its height", () => {
@@ -448,8 +448,8 @@ describe("the composer holds the bottom edge", () => {
      * 320x575 after the change: --chat-vh 575px, main scrollable by 0, an 8px
      * gap under the composer that does not move.
      */
-    expect(view).toMatch(/setProperty\("--chat-vh", `\$\{Math\.round\(viewport\?\.height \?\? window\.innerHeight\)\}px`\)/);
-    expect(view).toMatch(/h-\[calc\(var\(--chat-vh\)-var\(--chat-chrome\)\)\]/);
+    expect(view).toMatch(/setProperty\(\s*"--chat-vh",\s*`\$\{Math\.round\(window\.visualViewport\?\.height \?\? window\.innerHeight\)\}px`\s*\)/);
+    expect(view).toMatch(/h-\[calc\(var\(--chat-vh\)-88px\)\]/);
     /* And a sane value before JS runs, so the first paint is not a calc()
        against an undefined variable. */
     expect(css).toMatch(/:root\s*\{[^}]*--chat-vh:\s*100dvh/);
@@ -459,8 +459,8 @@ describe("the composer holds the bottom edge", () => {
     /* A toolbar collapse is a continuous transition and the keyboard is an
        animation; reading the height once on mount would pin the layout to
        whatever the viewport happened to be at that instant. */
-    expect(view).toMatch(/viewport\?\.addEventListener\("resize", apply\)/);
-    expect(view).toMatch(/viewport\?\.addEventListener\("scroll", apply\)/);
+    expect(view).toMatch(/viewport\?\.addEventListener\("resize", applyHeight\)/);
+    expect(view).toMatch(/viewport\?\.addEventListener\("scroll", applyHeight\)/);
   });
 
   it("writes the height straight to the DOM rather than through state", () => {
@@ -481,9 +481,9 @@ describe("the composer holds the bottom edge", () => {
      */
     expect(view).toMatch(/root\.classList\.remove\("chat-open"\)/);
     expect(view).toMatch(/root\.style\.removeProperty\("--chat-vh"\)/);
-    expect(view).toMatch(/window\.removeEventListener\("resize", apply\)/);
-    expect(view).toMatch(/viewport\?\.removeEventListener\("resize", apply\)/);
-    expect(view).toMatch(/viewport\?\.removeEventListener\("scroll", apply\)/);
+    expect(view).toMatch(/window\.removeEventListener\("resize", applyHeight\)/);
+    expect(view).toMatch(/viewport\?\.removeEventListener\("resize", applyHeight\)/);
+    expect(view).toMatch(/viewport\?\.removeEventListener\("scroll", applyHeight\)/);
   });
 
   it("stops the rubber-band going looking for the gap", () => {
@@ -600,101 +600,6 @@ describe("nothing moves the composer while typing", () => {
  *   transcript              38px    175px
  *   composer on screen        no     yes
  */
-describe("the chrome stands down while typing", () => {
-  it("hides the app header on a phone", () => {
-    /* The header is navigation, and someone with the keyboard up is not
-       navigating. It lives in the shell, so the chat reaches it with a class on
-       the root rather than by rendering it differently. */
-    expect(view).toMatch(/if \(focused && roomIfChromeStays < MIN_TRANSCRIPT\) root\.classList\.add\("chat-typing"\)/);
-    expect(view).toMatch(/else root\.classList\.remove\("chat-typing"\)/);
-    const block = css.slice(css.indexOf("html.chat-typing"));
-    expect(block).toMatch(/html\.chat-typing header,[\s\S]{0,120}?display:\s*none/);
-  });
-
-  it("hides the contact bar by the same rule, not a parallel one", () => {
-    /**
-     * It used to be keyed on `focused` in React while the header was keyed on
-     * the CSS class, and the two disagreed: at heights where the header had
-     * already come back the bar was still hidden, which is neither layout.
-     * One rule, one class.
-     */
-    expect(view).toMatch(/className="chat-contact-bar /);
-    const block = css.slice(css.indexOf("html.chat-typing"));
-    expect(block).toMatch(/html\.chat-typing \.chat-contact-bar/);
-    const code = view.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
-    expect(code).not.toMatch(/focused && "max-sm:hidden"/);
-  });
-
-  it("keeps the chrome when there is room for it", () => {
-    /**
-     * The point the reference makes: with the keyboard up it still shows the
-     * contact bar, the conversation AND the composer. It can, because a native
-     * app has no browser chrome — Safari spends about 110pt on its own before
-     * this layout gets a say.
-     *
-     * So the test is what the conversation WOULD get if everything stayed, and
-     * the chrome is surrendered only when that is too little to read. Measured:
-     *
-     *   250px visible (Safari)    -> chrome goes, transcript 175
-     *   364px visible (installed) -> chrome stays, transcript 152
-     */
-    expect(view).toMatch(/const roomIfChromeStays = visible - APP_HEADER - CONTACT_BAR - COMPOSER - BREATH/);
-    expect(view).toMatch(/const MIN_TRANSCRIPT = 120/);
-  });
-
-  it("re-decides when the viewport moves, not only when focus does", () => {
-    /* The keyboard arriving is a viewport change, not a focus change. Deciding
-       once on focus would settle the question before the height that answers it
-       had moved. */
-    const effect = view.slice(view.indexOf("const decide = () =>"));
-    expect(effect.slice(0, 900)).toMatch(/viewport\?\.addEventListener\("resize", decide\)/);
-  });
-
-  it("stops reserving height for a header that is not there", () => {
-    /**
-     * The height is `--chat-vh` minus the chrome above and below. With the
-     * header hidden, a fixed 88px would leave 80px of empty space where it used
-     * to be — the gap this project has already fixed once, reappearing by a
-     * different route. A variable is the only way the layout can follow.
-     */
-    expect(view).toMatch(/h-\[calc\(var\(--chat-vh\)-var\(--chat-chrome\)\)\]/);
-    expect(css).toMatch(/--chat-chrome:\s*88px/);
-    const block = css.slice(css.indexOf("html.chat-typing"));
-    expect(block).toMatch(/--chat-chrome:\s*8px/);
-  });
-
-  it("gives it all back when the keyboard goes", () => {
-    /* Both are keyed on `focused`, which flips once in and once out, so there
-       is nothing to leave behind. Measured after blur: header 80, contact bar
-       53, chrome 88 — exactly as before. */
-    expect(view).toMatch(/root\.classList\.remove\("chat-typing"\);\s*\};/);
-  });
-
-  it("leaves the desktop alone", () => {
-    /* Measured at 1280 with the composer focused: header 80, contact bar 59,
-       chrome 88. Focus does not cost half a desktop screen. */
-    const block = css.slice(css.indexOf("html.chat-typing"));
-    const guard = css.slice(0, css.indexOf("html.chat-typing"));
-    expect(guard.lastIndexOf("@media (max-width: 639.98px)")).toBeGreaterThan(
-      guard.lastIndexOf("@media (min-width")
-    );
-    expect(block).toBeTruthy();
-  });
-
-  it("no longer guesses the keyboard from two numbers that both move", () => {
-    /**
-     * The previous attempt compared `window.innerHeight` with
-     * `visualViewport.height` and branched when the gap was large. On this
-     * iPhone `innerHeight` shrinks WITH the keyboard, so the gap stayed near
-     * zero and the branch never fired — which is why the page kept blanking
-     * after it was supposedly fixed.
-     */
-    const code = view.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
-    expect(code).not.toMatch(/keyboardUp/);
-    expect(code).not.toMatch(/window\.innerHeight - visible/);
-  });
-});
-
 describe("New chat means new", () => {
   it("clears the half-typed question as well as the messages", () => {
     /**
@@ -732,5 +637,81 @@ describe("New chat means new", () => {
     const reset = view.slice(at, view.indexOf("\n  }", at));
     expect(reset).toMatch(/inputRef\.current\?\.blur\(\)/);
     expect(reset).toMatch(/setFocused\(false\)/);
+  });
+});
+
+/**
+ * The composer does not move while you type.
+ *
+ * Reported from a recording of the installed app: tapping the box blanked the
+ * screen — background only, with the text caret visible alone in it — until a
+ * word was typed, at which point everything reappeared.
+ *
+ * Opening the keyboard is two things at once: the viewport shrinks over the
+ * length of an animation, and WebKit pans the page to bring the focused field
+ * into view. We were resizing on every frame of that shrink, so the composer
+ * kept moving UP the document while WebKit was still travelling towards where
+ * it had been. The pan landed on empty background.
+ *
+ *   700px -> 364px while focused    --chat-vh   composer
+ *   before the fix                  followed    moved
+ *   after                           700px       629-696, unchanged
+ */
+describe("the layout freezes while the composer has the caret", () => {
+  it("stops following the viewport while focused", () => {
+    /* The whole fix, in one guard. Measured across idle, focused, and a
+       336px keyboard-sized shrink: `--chat-vh` stays 700px and the composer
+       stays at 629-696 in all three. */
+    expect(view).toMatch(/if \(focusedRef\.current\) return;/);
+  });
+
+  it("reads focus from a ref, not from the closure", () => {
+    /**
+     * The listeners are bound once. Reading `focused` directly would capture
+     * the value at bind time and freeze the closure instead of the layout —
+     * which is the opposite of the intent and would look identical until
+     * someone typed.
+     */
+    expect(view).toMatch(/const focusedRef = useRef\(false\)/);
+    expect(view).toMatch(/focusedRef\.current = focused/);
+  });
+
+  it("catches up the moment the freeze lifts", () => {
+    /**
+     * Without this a viewport change that happened while the caret was in the
+     * box would be ignored for good: the listener declines to act while frozen,
+     * and after blur nothing fires again to reconsider. Measured: blurred at
+     * 364px, `--chat-vh` goes from a frozen 700 to 364.
+     *
+     * On a phone the closing keyboard does produce a resize, so it would
+     * correct itself — but only by luck, and losing focus any other way would
+     * leave the page sized for a keyboard that is no longer there.
+     */
+    expect(view).toMatch(/if \(!focused\) applyHeight\(\);/);
+  });
+
+  it("tears the lock down only on unmount", () => {
+    /**
+     * The catch-up is its own effect precisely so this one can keep empty deps.
+     * Folded together, every focus change would run the cleanup and strip
+     * `--chat-vh` and the scroll lock mid-interaction — a flash of unstyled
+     * layout on every tap into the box.
+     */
+    const setup = view.slice(view.indexOf("const viewport = window.visualViewport;"));
+    expect(setup).toMatch(/\}, \[applyHeight\]\);/);
+    expect(setup).toMatch(/root\.classList\.remove\("chat-open"\)/);
+  });
+
+  it("no longer hides the app chrome to make room", () => {
+    /**
+     * That was the previous attempt, and it was one more thing moving at the
+     * worst possible moment. Freezing buys the same room without moving
+     * anything: WebKit's pan carries the header off the top by itself, which is
+     * what the reference looks like anyway.
+     */
+    const code = view.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+    expect(code).not.toMatch(/chat-typing/);
+    expect(css).not.toMatch(/chat-typing/);
+    expect(code).not.toMatch(/MIN_TRANSCRIPT|APP_HEADER|CONTACT_BAR/);
   });
 });

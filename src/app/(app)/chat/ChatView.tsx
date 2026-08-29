@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { RotateCcw, Send, Sparkles } from "lucide-react";
 import { instantToWallClock } from "@/lib/zoned";
 import type { ChatMessage } from "@/server/repos/chat";
@@ -30,22 +30,6 @@ function renderText(text: string) {
 }
 
 type Knows = { contacts: number; deals: number; meetings: number };
-
-/*
-   The fixed furniture of the chat screen, measured rather than guessed, and
-   used to decide whether the app chrome can stay while the keyboard is up.
-
-   They only have to be close. The question they answer is "would there be a
-   readable conversation left", and a few pixels either way does not change it.
-*/
-const APP_HEADER = 80;
-const CONTACT_BAR = 53;
-const COMPOSER = 67;
-const BREATH = 8;
-/* Below this a transcript is a hint that messages exist rather than something
-   you can read — about two lines of one bubble. It is the point at which the
-   header and the contact bar stop being worth their height. */
-const MIN_TRANSCRIPT = 120;
 
 /**
  * "12 March 2026" from a `YYYY-MM-DD` key, for the day separator.
@@ -107,6 +91,12 @@ export function ChatView({
   /* Whether the composer holds the caret. On a phone that means the keyboard is
      up, which is the only reliable, non-flickering signal for it. */
   const [focused, setFocused] = useState(false);
+  /* Read by the viewport listener, which is bound once and would otherwise
+     close over a stale `focused`. */
+  const focusedRef = useRef(false);
+  useEffect(() => {
+    focusedRef.current = focused;
+  }, [focused]);
   const endRef = useRef<HTMLDivElement>(null);
   const logRef = useRef<HTMLDivElement>(null);
   /* So accepting a prediction hands the caret straight back to the composer
@@ -134,128 +124,76 @@ export function ChatView({
   }, [items, busy]);
 
   /*
-     Pin the page to what is actually VISIBLE, and stop it scrolling.
+     Size the page to what is actually VISIBLE, and freeze while typing.
 
-     `100dvh` is the dynamic viewport, and on iOS that is a moving target: the
-     Safari toolbar collapses as you scroll and expands as you scroll back, and
-     the keyboard does not shrink `dvh` at all. Both leave the document taller
-     than the part of it you can see, so the page scrolls — and what scrolls
-     into view under the composer is empty background. That is the gap: not a
-     margin, but the bottom of a document that is longer than the screen.
-
-     `visualViewport.height` is the one number that always describes the region
-     the user can actually see — toolbar collapsed or not, keyboard up or down.
-     Writing it to a custom property lets the layout follow it exactly, so the
-     composer sits on the bottom edge of the visible area at every moment
-     instead of at the bottom of a document that extends past it.
-
-     With nothing left to scroll, the toolbar stops collapsing too, which is
-     what stops the height oscillating in the first place.
-
-     Direct DOM writes rather than state: this runs on every frame of a toolbar
-     transition, and re-rendering the whole conversation each time would be
-     visible. It is also why there is no `setState` here for the React compiler
-     to object to.
+     `100dvh` is the dynamic viewport, and on iOS it is a moving target: the
+     toolbar collapses as you scroll and the keyboard does not shrink it at all.
+     Following `visualViewport.height` instead puts the composer on the bottom
+     edge of the region the reader can actually see, which is what removed the
+     dead band under the box.
   */
-  /*
-     While the composer has focus, the app chrome stands down.
-
-     With the keyboard up the visible strip is about 250px on this phone, and
-     the app header takes 80 of it and the contact bar another 56. That left
-     roughly forty pixels for the conversation — the screen recording shows a
-     single sliver of one bubble above the box, and at other moments nothing at
-     all. Reading what you just asked while you type the next thing is the
-     entire job of a chat screen, and it was the part being squeezed out.
-
-     Neither piece earns its place at that moment. The header is navigation, and
-     you are not navigating; the contact bar says who you are talking to, and
-     you know. Hidden, the same strip gives the conversation about 175px, which
-     is a real view rather than a hint of one. Both come back the instant the
-     keyboard does.
-
-     BUT ONLY WHEN IT IS ACTUALLY TIGHT. An earlier version dropped them
-     whenever anyone typed, which threw away the contact bar even where there
-     was plenty of room for it — and the reference this page is modelled on
-     keeps its contact bar with the keyboard up. It can, because a native app
-     has no browser chrome; Safari spends around 110pt on its URL bar and
-     accessory bar before our layout gets a say.
-
-     So the test is what the conversation WOULD get if everything stayed, and
-     the chrome is given up only when that is too little to read:
-
-       Safari, keyboard up     ~250px visible ->  42px -> chrome goes
-       Installed, keyboard up  ~364px visible -> 156px -> chrome stays
-
-     Which is why installing it matters: the installed app then behaves exactly
-     like the reference, and the browser tab degrades gracefully instead of
-     showing a sliver of one bubble.
-  */
-  useEffect(() => {
+  const applyHeight = useCallback(() => {
     const root = document.documentElement;
-    const viewport = window.visualViewport;
-
-    const decide = () => {
-      const visible = viewport?.height ?? window.innerHeight;
-      /* What the conversation would be left with if nothing stood down. */
-      const roomIfChromeStays = visible - APP_HEADER - CONTACT_BAR - COMPOSER - BREATH;
-      if (focused && roomIfChromeStays < MIN_TRANSCRIPT) root.classList.add("chat-typing");
-      else root.classList.remove("chat-typing");
-    };
-
-    decide();
-    /* The keyboard arriving is a viewport change, not a focus change, so the
-       decision has to be re-taken when the height moves as well as when the
-       caret does. */
-    viewport?.addEventListener("resize", decide);
-    window.addEventListener("resize", decide);
-
-    return () => {
-      viewport?.removeEventListener("resize", decide);
-      window.removeEventListener("resize", decide);
-      root.classList.remove("chat-typing");
-    };
-  }, [focused]);
-
-  useEffect(() => {
-    const root = document.documentElement;
-    const viewport = window.visualViewport;
-
+    root.classList.add("chat-open");
     /*
-       One rule: the layout is exactly the visible viewport.
+       FROZEN while the composer holds the caret.
 
-       An earlier version tried to detect the keyboard by comparing
-       `window.innerHeight` against `visualViewport.height` and to hand the page
-       back to Safari when the gap was large. It did not work, and the screen
-       recording shows why: on this iPhone `innerHeight` shrinks WITH the
-       keyboard, so the difference stays near zero, the branch never fired, and
-       the layout went on shrinking while the reader watched the conversation
-       disappear.
+       This is the fix for the box vanishing as you tap it. Opening the keyboard
+       is not one event but two at once: the viewport shrinks over the length of
+       an animation, and WebKit pans the page to bring the focused field into
+       view. We were resizing on every frame of that shrink — so the composer
+       kept moving UP the document while WebKit was still travelling towards
+       where it had been. The pan landed on empty background, which is the blank
+       screen in the recording, with the caret sitting alone in it.
 
-       Guessing at the keyboard from two numbers that both move was the mistake.
-       The room comes from hiding chrome while typing instead — see
-       `chat-typing` — which leaves the rule here simple enough to be right:
-       follow what is visible, always.
+       Nothing moves now. The layout keeps the height it had before the keyboard
+       arrived, WebKit's pan finds the composer exactly where it aimed, and what
+       ends up on screen is the bottom of the conversation with the box under it
+       — the header simply scrolls off the top, which is what the reference
+       looks like anyway.
+
+       A ref rather than the state value: the listeners are bound once, and
+       reading state here would freeze the closure instead of the layout.
     */
-    const apply = () => {
-      root.classList.add("chat-open");
-      root.style.setProperty("--chat-vh", `${Math.round(viewport?.height ?? window.innerHeight)}px`);
-    };
+    if (focusedRef.current) return;
+    root.style.setProperty(
+      "--chat-vh",
+      `${Math.round(window.visualViewport?.height ?? window.innerHeight)}px`
+    );
+  }, []);
 
-    apply();
-    viewport?.addEventListener("resize", apply);
-    viewport?.addEventListener("scroll", apply);
-    window.addEventListener("resize", apply);
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    applyHeight();
+    viewport?.addEventListener("resize", applyHeight);
+    viewport?.addEventListener("scroll", applyHeight);
+    window.addEventListener("resize", applyHeight);
 
     return () => {
-      viewport?.removeEventListener("resize", apply);
-      viewport?.removeEventListener("scroll", apply);
-      window.removeEventListener("resize", apply);
-      /* Both undone on the way out, or every other page inherits a locked
-         body and a stale height. */
+      viewport?.removeEventListener("resize", applyHeight);
+      viewport?.removeEventListener("scroll", applyHeight);
+      window.removeEventListener("resize", applyHeight);
+      /* Only on unmount, or every other page inherits a locked body and a stale
+         height. */
+      const root = document.documentElement;
       root.classList.remove("chat-open");
       root.style.removeProperty("--chat-vh");
     };
-  }, []);
+  }, [applyHeight]);
+
+  /*
+     Catch up the moment the freeze lifts.
+
+     Without this, a viewport change that happened while the caret was in the
+     box would be ignored for good: the listener declines to act while frozen,
+     and after blur nothing fires again to reconsider. On a phone the closing
+     keyboard does produce a resize, so it would correct itself — but only by
+     luck, and losing focus any other way would leave the page sized for a
+     keyboard that is no longer there.
+  */
+  useEffect(() => {
+    if (!focused) applyHeight();
+  }, [focused, applyHeight]);
 
   // What this conversation has already covered, so the idle strip suggests
   // something new rather than re-offering a question just answered.
@@ -431,7 +369,7 @@ export function ChatView({
        Both are reversed from `sm` up, where the page keeps its footer margin and
        the height it always had.
     */
-    <div className="mx-auto -mb-6 flex h-[calc(var(--chat-vh)-var(--chat-chrome))] max-w-[900px] animate-fade-up flex-col sm:mb-0 sm:h-[calc(100dvh-112px)] lg:h-[calc(100vh-104px)]">
+    <div className="mx-auto -mb-6 flex h-[calc(var(--chat-vh)-88px)] max-w-[900px] animate-fade-up flex-col sm:mb-0 sm:h-[calc(100dvh-112px)] lg:h-[calc(100vh-104px)]">
       {/*
           A contact bar, the way a messaging app does it.
 
@@ -448,12 +386,12 @@ export function ChatView({
           your live CRM data" says what DATA MODE said, in the place and voice a
           messaging app says "online".
       */}
-      {/* Hidden by the same rule that hides the app header, and for the same
-          reason — see `chat-typing` in globals.css. Driven from CSS rather than
-          from `focused` here so the two cannot disagree: keyed on React state
-          the bar stayed hidden at heights where the header had already come
-          back, which is neither layout. */}
-      <div className="chat-contact-bar mb-1 flex items-center gap-3 border-b border-[var(--border)] px-1 pb-3 sm:gap-3.5">
+      {/* It no longer hides while typing. It used to, to buy the conversation
+          room on a cramped screen — but freezing the layout buys the same room
+          without moving anything, and WebKit's own pan carries this off the top
+          of the screen when the keyboard opens. Hiding it as well was a second
+          thing changing at the worst possible moment. */}
+      <div className="mb-1 flex items-center gap-3 border-b border-[var(--border)] px-1 pb-3 sm:gap-3.5">
         <span className="chat-orb shrink-0">
           <Sparkles className="h-[22px] w-[22px]" />
         </span>
