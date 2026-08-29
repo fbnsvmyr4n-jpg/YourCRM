@@ -231,13 +231,30 @@ describe("the page holds still", () => {
 
 
 describe("the suggestions get out of the way", () => {
-  it("stand down the moment there is a draft", () => {
+  it("stand down as soon as the composer has focus", () => {
     /**
-     * Asked for directly: once you are typing you should see the box and the
-     * conversation, nothing else. Measured at 320x575 — transcript 125px with
-     * them showing, 316px the moment a character is typed.
+     * Asked for as "once you are typing you should see the box and the
+     * conversation, nothing else", and first built on the DRAFT — which is what
+     * made the composer disappear and come back.
+     *
+     * Keyed on the draft, the chips toggled every time the box went empty and
+     * non-empty. That is 191px of layout appearing and vanishing on single
+     * keystrokes, and with the keyboard up — where the page is handed to Safari,
+     * which pans on focus and not on reflow — it shoved the composer out of the
+     * visible strip and back. Traced frame by frame in a screen recording: with
+     * "What" typed the composer is on screen; a moment later, empty, the chips
+     * are back and the composer is gone.
+     *
+     * Focus cannot flicker — one state change in, one out — and someone with
+     * the keyboard open is writing, not browsing questions.
+     *
+     * Measured at 390px across blurred, focused, typing, prediction shown,
+     * prediction gone and cleared: the composer's bottom edge is 692 in every
+     * one of them.
      */
-    expect(view).toMatch(/const engaged = draft\.trim\(\)\.length > 0 \|\| items\.some\(\(m\) => m\.role === "user"\)/);
+    expect(view).toMatch(/const engaged = focused \|\| draft\.trim\(\)\.length > 0 \|\| items\.some\(\(m\) => m\.role === "user"\)/);
+    expect(view).toMatch(/onFocus=\{\(\) => setFocused\(true\)\}/);
+    expect(view).toMatch(/onBlur=\{\(\) => setFocused\(false\)\}/);
   });
 
   it("comes back after New chat, because New chat actually clears", () => {
@@ -572,5 +589,35 @@ describe("the keyboard", () => {
     /* And it is inside `apply`, not a one-off beside it. */
     const effect = view.slice(view.indexOf("const apply = () => {"), view.indexOf("window.addEventListener(\"resize\", apply)"));
     expect(effect).toMatch(/root\.classList\.add\("chat-open"\)/);
+  });
+});
+
+describe("nothing moves the composer while typing", () => {
+  it("floats the prediction instead of stacking it", () => {
+    /**
+     * The smaller cousin of the chip flicker. In the flow, the prediction row
+     * pushed the composer down 34px as it appeared and pulled it back up as it
+     * went — on the same keystroke that produced it. With the keyboard up that
+     * is the composer sliding under the edge of the visible strip and back,
+     * once per word.
+     *
+     * Out of the flow, it cannot move anything. Measured at 390px: composer
+     * bottom 692 with the prediction showing and 692 without.
+     */
+    expect(view).toMatch(/absolute bottom-full left-0 right-0/);
+    /* Opaque, because it now sits OVER the end of the conversation rather than
+       above it. */
+    expect(view).toMatch(/bg-\[var\(--panel-solid\)\]/);
+    /* And it needs a positioned parent to hang from. */
+    expect(view).toMatch(/<div className="relative shrink-0">/);
+  });
+
+  it("leaves the desktop suggestion row alone", () => {
+    /* Measured at 1280 with the composer focused: the chips are still shown and
+       the prediction is not. Focus is a phone concern — there is no keyboard
+       taking half the screen. */
+    const block = css.slice(css.indexOf("@media (max-width: 639.98px)", css.indexOf(".chat-chips")));
+    expect(block).toMatch(/data-engaged/);
+    expect(view).toMatch(/absolute bottom-full[^"]*sm:hidden/);
   });
 });

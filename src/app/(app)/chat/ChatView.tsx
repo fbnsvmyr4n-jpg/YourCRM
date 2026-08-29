@@ -88,6 +88,9 @@ export function ChatView({
   const [draft, setDraft] = useState("");
   const narrow = useNarrow();
   const [busy, setBusy] = useState(false);
+  /* Whether the composer holds the caret. On a phone that means the keyboard is
+     up, which is the only reliable, non-flickering signal for it. */
+  const [focused, setFocused] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   const logRef = useRef<HTMLDivElement>(null);
   /* So accepting a prediction hands the caret straight back to the composer
@@ -209,11 +212,26 @@ export function ChatView({
   /*
      Whether the reader is past needing suggestions.
 
-     Two things end it, and a seeded greeting is neither.
+     FOCUS, and this is the important one — it is what made the composer
+     disappear and come back.
 
-     TYPING: once there is a draft the reader has decided what to ask, and four
-     tappable questions below the box are just something between them and their
-     own sentence. On a phone they are also 191px of it.
+     The suggestions used to stand down on the DRAFT, so with the keyboard up
+     they toggled every time the box went empty and non-empty: type a letter and
+     191px of chips vanish, delete it and 191px come back. Each toggle reflows
+     the column, and since the keyboard case hands the page to Safari — which
+     only pans on focus, not on reflow — the composer was shoved out of the
+     visible strip and back on almost every keystroke. Traced frame by frame in
+     the screen recording: with "What" typed the composer is there; a moment
+     later, empty, the chips are back and the composer is gone.
+
+     Focus is the honest signal. Someone with the keyboard open is writing, not
+     browsing questions, and it cannot flicker: it is one state change on the
+     way in and one on the way out. It also leaves the keyboard case showing
+     what the reference shows and nothing else — the thread, the box, and at
+     most one line of prediction.
+
+     TYPING: kept as well, for the desktop, where there is no focus ring around
+     a keyboard and a draft is still the moment suggestions stop helping.
 
      HAVING ASKED: a `role === "user"` message, not merely a message.
 
@@ -228,7 +246,7 @@ export function ChatView({
      asked something, which is the thing that actually ends a first run,
      regardless of what else a future version might put in the list.
   */
-  const engaged = draft.trim().length > 0 || items.some((m) => m.role === "user");
+  const engaged = focused || draft.trim().length > 0 || items.some((m) => m.role === "user");
 
   /*
      What they are probably about to ask, offered while they type it.
@@ -647,31 +665,43 @@ export function ChatView({
             `sm:hidden` because the desktop suggestion row never went away and
             already re-ranks on every keystroke — this would be the same
             question offered twice.
-        */}
-        {prediction && (
-          <button
-            type="button"
-            onClick={() => {
-              setDraft(prediction);
-              inputRef.current?.focus();
-            }}
-            className="focus-ring flex shrink-0 items-center gap-2 border-t border-[var(--border)] px-4 py-2 text-left sm:hidden"
-          >
-            <Sparkles className="h-3.5 w-3.5 shrink-0 text-accent" />
-            <span className="truncate text-[13px] text-muted">{prediction}</span>
-          </button>
-        )}
 
-        {/* Composer */}
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            send(draft);
-          }}
-          /* `shrink-0`: the composer is the one control this page exists for
-             and must never be the thing that gives way. */
-          className="flex shrink-0 items-end gap-2 border-t border-[var(--border)] px-2 py-2.5"
-        >
+            It FLOATS above the composer rather than sitting in the column.
+
+            In the flow it pushed the composer down 34px as it appeared and
+            pulled it back up as it went, on the same keystroke that produced
+            it. With the keyboard up that is 34px of the composer sliding under
+            the edge of the visible strip and back, once per word — the smaller
+            cousin of the 191px chip flicker, and just as distracting. Taken out
+            of the flow, the composer does not move at all while typing.
+        */}
+        <div className="relative shrink-0">
+          {prediction && (
+            <button
+              type="button"
+              onClick={() => {
+                setDraft(prediction);
+                inputRef.current?.focus();
+              }}
+              /* Opaque, because it now sits over the end of the conversation
+                 rather than above it. */
+              className="focus-ring absolute bottom-full left-0 right-0 flex items-center gap-2 border-t border-[var(--border)] bg-[var(--panel-solid)] px-4 py-2 text-left sm:hidden"
+            >
+              <Sparkles className="h-3.5 w-3.5 shrink-0 text-accent" />
+              <span className="truncate text-[13px] text-muted">{prediction}</span>
+            </button>
+          )}
+
+          {/* Composer */}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              send(draft);
+            }}
+            /* `shrink-0`: the composer is the one control this page exists for
+               and must never be the thing that gives way. */
+            className="flex shrink-0 items-end gap-2 border-t border-[var(--border)] px-2 py-2.5"
+          >
           {/*
               A pill and a round button, which is what the reference uses and
               what every messaging app has converged on: the field looks like
@@ -688,6 +718,8 @@ export function ChatView({
             ref={inputRef}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
             /* Short on a phone: the full prompt renders as "Ask about your
                pipeline, leads, meeti" in a 393px field, and a placeholder that
                gets cut mid-word looks like a bug rather than a hint. */
@@ -702,7 +734,8 @@ export function ChatView({
           >
             <Send className="h-[18px] w-[18px]" />
           </button>
-        </form>
+          </form>
+        </div>
       </div>
     </div>
   );
