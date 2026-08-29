@@ -1033,6 +1033,40 @@ textarea.field-input {
 */
 :root {
   --chat-vh: 100dvh;
+  /*
+     What sits above and below the chat, in pixels.
+
+     80 for the app header plus an 8px breath under the composer. It is a
+     variable rather than a number in the class because it changes: with the
+     keyboard up the header is hidden, and the layout has to stop reserving
+     height for something that is not there.
+  */
+  --chat-chrome: 88px;
+}
+
+/*
+   Typing owns the screen.
+
+   With the keyboard up the visible strip is around 250px on a phone. The app
+   header was taking 80 of it and the chat's own contact bar another 56, leaving
+   roughly forty pixels of conversation — a sliver of one bubble, and at some
+   moments nothing at all. Reading what you just asked while you type the next
+   thing is the whole job of a chat screen, and it was the part being squeezed
+   out.
+
+   Neither piece earns its place at that moment: the header is navigation and
+   you are not navigating. Hidden, the same strip gives the conversation about
+   175px. Both return the instant the keyboard does.
+
+   Phone only. On a desktop focus does not cost half the screen.
+*/
+@media (max-width: 639.98px) {
+  html.chat-typing header {
+    display: none;
+  }
+  html.chat-typing {
+    --chat-chrome: 8px;
+  }
 }
 
 /*

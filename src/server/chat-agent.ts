@@ -362,7 +362,14 @@ function answerFor(id: string, ctx: CrmContext): string {
       // There is no separate lead record any more: a lead is a contact with a
       // deal still in play, so this answers from the people who have one.
       const clients = ctx.contacts.filter((c) => c.isClient).length;
-      if (!ctx.openLeads.length) return `No open leads. ${clients} contact${clients === 1 ? "" : "s"} have bought.`;
+      /* The verb agrees as well as the noun. Pluralising "contact" and leaving
+         "have" alone produced "1 contact have bought" on a real account —
+         caught in a screen recording, and exactly the kind of seam that makes
+         an assistant read as a template rather than as something that looked at
+         your data. */
+      if (!ctx.openLeads.length) {
+        return `No open leads. ${clients} contact${clients === 1 ? " has" : "s have"} bought.`;
+      }
       return [
         `You have **${ctx.openLeads.length}** ${ctx.openLeads.length === 1 ? "person" : "people"} with an open deal, and ${clients} who have bought.`,
         "",

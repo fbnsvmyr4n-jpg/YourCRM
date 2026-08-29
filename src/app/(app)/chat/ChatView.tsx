@@ -141,43 +141,56 @@ export function ChatView({
      visible. It is also why there is no `setState` here for the React compiler
      to object to.
   */
+  /*
+     While the composer has focus, the app chrome stands down.
+
+     With the keyboard up the visible strip is about 250px on this phone, and
+     the app header takes 80 of it and the contact bar another 56. That left
+     roughly forty pixels for the conversation — the screen recording shows a
+     single sliver of one bubble above the box, and at other moments nothing at
+     all. Reading what you just asked while you type the next thing is the
+     entire job of a chat screen, and it was the part being squeezed out.
+
+     Neither piece earns its place at that moment. The header is navigation, and
+     you are not navigating; the contact bar says who you are talking to, and
+     you know. Hidden, the same strip gives the conversation about 175px, which
+     is a real view rather than a hint of one. Both come back the instant the
+     keyboard does.
+
+     `focused` rather than the viewport: it is unambiguous, it cannot flicker,
+     and it is the signal the earlier arithmetic was trying and failing to
+     infer.
+  */
+  useEffect(() => {
+    const root = document.documentElement;
+    if (focused) root.classList.add("chat-typing");
+    else root.classList.remove("chat-typing");
+    return () => root.classList.remove("chat-typing");
+  }, [focused]);
+
   useEffect(() => {
     const root = document.documentElement;
     const viewport = window.visualViewport;
 
+    /*
+       One rule: the layout is exactly the visible viewport.
+
+       An earlier version tried to detect the keyboard by comparing
+       `window.innerHeight` against `visualViewport.height` and to hand the page
+       back to Safari when the gap was large. It did not work, and the screen
+       recording shows why: on this iPhone `innerHeight` shrinks WITH the
+       keyboard, so the difference stays near zero, the branch never fired, and
+       the layout went on shrinking while the reader watched the conversation
+       disappear.
+
+       Guessing at the keyboard from two numbers that both move was the mistake.
+       The room comes from hiding chrome while typing instead — see
+       `chat-typing` — which leaves the rule here simple enough to be right:
+       follow what is visible, always.
+    */
     const apply = () => {
-      const visible = viewport?.height ?? window.innerHeight;
-
-      /*
-         The keyboard is a different animal from the toolbar, and treating them
-         alike blanked the page.
-
-         A toolbar transition moves the viewport by a few dozen pixels and the
-         layout should follow it exactly — that is the gap fix. The keyboard
-         takes roughly half the screen, and Safari answers it by PANNING to
-         bring the focused field into view. Do both at once and they fight: the
-         layout shrinks, so the composer moves UP the document, while the
-         viewport pans DOWN to where the composer used to be. What is left in
-         between is empty background — reproduced on the simulator with the
-         software keyboard enabled, and it is exactly the blank screen in the
-         report.
-
-         So when the keyboard is up the page is handed back to Safari: the
-         layout keeps its full height and the scroll lock comes off, which is
-         what lets that pan land on the composer instead of on nothing. The
-         180px threshold is well above any toolbar transition and well below any
-         keyboard.
-      */
-      const keyboardUp = window.innerHeight - visible > 180;
-
-      if (keyboardUp) {
-        root.classList.remove("chat-open");
-        root.style.setProperty("--chat-vh", `${Math.round(window.innerHeight)}px`);
-        return;
-      }
-
       root.classList.add("chat-open");
-      root.style.setProperty("--chat-vh", `${Math.round(visible)}px`);
+      root.style.setProperty("--chat-vh", `${Math.round(viewport?.height ?? window.innerHeight)}px`);
     };
 
     apply();
@@ -350,7 +363,7 @@ export function ChatView({
        Both are reversed from `sm` up, where the page keeps its footer margin and
        the height it always had.
     */
-    <div className="mx-auto -mb-6 flex h-[calc(var(--chat-vh)-88px)] max-w-[900px] animate-fade-up flex-col sm:mb-0 sm:h-[calc(100dvh-112px)] lg:h-[calc(100vh-104px)]">
+    <div className="mx-auto -mb-6 flex h-[calc(var(--chat-vh)-var(--chat-chrome))] max-w-[900px] animate-fade-up flex-col sm:mb-0 sm:h-[calc(100dvh-112px)] lg:h-[calc(100vh-104px)]">
       {/*
           A contact bar, the way a messaging app does it.
 
@@ -367,7 +380,15 @@ export function ChatView({
           your live CRM data" says what DATA MODE said, in the place and voice a
           messaging app says "online".
       */}
-      <div className="mb-1 flex items-center gap-3 border-b border-[var(--border)] px-1 pb-3 sm:gap-3.5">
+      <div
+        className={clsx(
+          "mb-1 flex items-center gap-3 border-b border-[var(--border)] px-1 pb-3 sm:gap-3.5",
+          /* Stands down with the app header while the keyboard is up — see the
+             `chat-typing` effect. `sm:flex` puts it back on a desktop, where
+             focus does not cost half the screen. */
+          focused && "max-sm:hidden"
+        )}
+      >
         <span className="chat-orb shrink-0">
           <Sparkles className="h-[22px] w-[22px]" />
         </span>

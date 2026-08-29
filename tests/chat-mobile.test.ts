@@ -189,7 +189,7 @@ describe("the chat reaches the bottom of the phone", () => {
        page from the visible viewport" below for why. What this assertion is
        about is the `-mb-6`: main's 32px footer padding is right for a page you
        scroll and wrong for one that fills the screen. */
-    expect(view).toMatch(/-mb-6 flex h-\[calc\(var\(--chat-vh\)-88px\)\]/);
+    expect(view).toMatch(/-mb-6 flex h-\[calc\(var\(--chat-vh\)-var\(--chat-chrome\)\)\]/);
   });
 
   it("gives the desktop back its footer margin and its height", () => {
@@ -448,9 +448,8 @@ describe("the composer holds the bottom edge", () => {
      * 320x575 after the change: --chat-vh 575px, main scrollable by 0, an 8px
      * gap under the composer that does not move.
      */
-    expect(view).toMatch(/const visible = viewport\?\.height \?\? window\.innerHeight/);
-    expect(view).toMatch(/root\.style\.setProperty\("--chat-vh", `\$\{Math\.round\(visible\)\}px`\)/);
-    expect(view).toMatch(/h-\[calc\(var\(--chat-vh\)-88px\)\]/);
+    expect(view).toMatch(/setProperty\("--chat-vh", `\$\{Math\.round\(viewport\?\.height \?\? window\.innerHeight\)\}px`\)/);
+    expect(view).toMatch(/h-\[calc\(var\(--chat-vh\)-var\(--chat-chrome\)\)\]/);
     /* And a sane value before JS runs, so the first paint is not a calc()
        against an undefined variable. */
     expect(css).toMatch(/:root\s*\{[^}]*--chat-vh:\s*100dvh/);
@@ -554,44 +553,6 @@ describe("the prediction bar", () => {
   });
 });
 
-describe("the keyboard", () => {
-  it("is handled as a pan, not as a resize", () => {
-    /**
-     * Treating it like a toolbar transition blanked the page — reproduced on
-     * the simulator with the software keyboard enabled, and identical to the
-     * report: keyboard up, everything above it empty.
-     *
-     * The two are different events. A toolbar moves the viewport by a few
-     * dozen pixels and the layout should follow exactly, which is the gap fix.
-     * The keyboard takes about half the screen and Safari answers it by
-     * PANNING to the focused field. Doing both at once makes them fight: the
-     * layout shrinks so the composer moves UP the document, while the viewport
-     * pans DOWN to where the composer used to be, and what is left between
-     * them is empty background.
-     */
-    expect(view).toMatch(/const keyboardUp = window\.innerHeight - visible > 180/);
-  });
-
-  it("hands the page back to Safari while it is up", () => {
-    /* Full height and no scroll lock, which is what lets Safari's pan land on
-       the composer instead of on nothing. */
-    const branch = view.slice(view.indexOf("if (keyboardUp) {"));
-    expect(branch.slice(0, 300)).toMatch(/root\.classList\.remove\("chat-open"\)/);
-    expect(branch.slice(0, 300)).toMatch(/--chat-vh", `\$\{Math\.round\(window\.innerHeight\)\}px`/);
-  });
-
-  it("takes the lock back when the keyboard goes away", () => {
-    /* Otherwise the gap this whole mechanism exists to remove returns the
-       moment anyone types once. The class is re-added on every settled
-       viewport, not only on mount. */
-    const settled = view.slice(view.indexOf("root.classList.add(\"chat-open\")"));
-    expect(settled.slice(0, 200)).toMatch(/--chat-vh", `\$\{Math\.round\(visible\)\}px`/);
-    /* And it is inside `apply`, not a one-off beside it. */
-    const effect = view.slice(view.indexOf("const apply = () => {"), view.indexOf("window.addEventListener(\"resize\", apply)"));
-    expect(effect).toMatch(/root\.classList\.add\("chat-open"\)/);
-  });
-});
-
 describe("nothing moves the composer while typing", () => {
   it("floats the prediction instead of stacking it", () => {
     /**
@@ -619,5 +580,83 @@ describe("nothing moves the composer while typing", () => {
     const block = css.slice(css.indexOf("@media (max-width: 639.98px)", css.indexOf(".chat-chips")));
     expect(block).toMatch(/data-engaged/);
     expect(view).toMatch(/absolute bottom-full[^"]*sm:hidden/);
+  });
+});
+
+/**
+ * Typing owns the screen.
+ *
+ * From the screen recording: with the keyboard up, the visible strip is about
+ * 250px. The app header was taking 80 of it and the chat's own contact bar
+ * another 56, leaving the conversation roughly forty pixels — a sliver of one
+ * bubble above the box, and at some moments nothing at all.
+ *
+ * Reading what you just asked while you type the next thing is the whole job of
+ * a chat screen, and it was the part being squeezed out.
+ *
+ *   at 250px visible      before   after
+ *   app header              80px       0
+ *   contact bar             56px       0
+ *   transcript              38px    175px
+ *   composer on screen        no     yes
+ */
+describe("the chrome stands down while typing", () => {
+  it("hides the app header on a phone", () => {
+    /* The header is navigation, and someone with the keyboard up is not
+       navigating. It lives in the shell, so the chat reaches it with a class on
+       the root rather than by rendering it differently. */
+    expect(view).toMatch(/if \(focused\) root\.classList\.add\("chat-typing"\)/);
+    expect(view).toMatch(/else root\.classList\.remove\("chat-typing"\)/);
+    const block = css.slice(css.indexOf("html.chat-typing"));
+    expect(block).toMatch(/html\.chat-typing header\s*\{[^}]*display:\s*none/);
+  });
+
+  it("hides the contact bar with it", () => {
+    /* It says who you are talking to, and you know — you are mid-sentence. */
+    expect(view).toMatch(/focused && "max-sm:hidden"/);
+  });
+
+  it("stops reserving height for a header that is not there", () => {
+    /**
+     * The height is `--chat-vh` minus the chrome above and below. With the
+     * header hidden, a fixed 88px would leave 80px of empty space where it used
+     * to be — the gap this project has already fixed once, reappearing by a
+     * different route. A variable is the only way the layout can follow.
+     */
+    expect(view).toMatch(/h-\[calc\(var\(--chat-vh\)-var\(--chat-chrome\)\)\]/);
+    expect(css).toMatch(/--chat-chrome:\s*88px/);
+    const block = css.slice(css.indexOf("html.chat-typing"));
+    expect(block).toMatch(/--chat-chrome:\s*8px/);
+  });
+
+  it("gives it all back when the keyboard goes", () => {
+    /* Both are keyed on `focused`, which flips once in and once out, so there
+       is nothing to leave behind. Measured after blur: header 80, contact bar
+       53, chrome 88 — exactly as before. */
+    expect(view).toMatch(/return \(\) => root\.classList\.remove\("chat-typing"\)/);
+  });
+
+  it("leaves the desktop alone", () => {
+    /* Measured at 1280 with the composer focused: header 80, contact bar 59,
+       chrome 88. Focus does not cost half a desktop screen. */
+    const block = css.slice(css.indexOf("html.chat-typing"));
+    const guard = css.slice(0, css.indexOf("html.chat-typing"));
+    expect(guard.lastIndexOf("@media (max-width: 639.98px)")).toBeGreaterThan(
+      guard.lastIndexOf("@media (min-width")
+    );
+    expect(block).toBeTruthy();
+  });
+
+  it("no longer guesses the keyboard from two numbers that both move", () => {
+    /**
+     * The previous attempt compared `window.innerHeight` with
+     * `visualViewport.height` and branched when the gap was large. On this
+     * iPhone `innerHeight` shrinks WITH the keyboard, so the gap stayed near
+     * zero and the branch never fired — which is why the page kept blanking
+     * after it was supposedly fixed.
+     */
+    const code = view.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+    expect(code).not.toMatch(/keyboardUp/);
+    expect(code).not.toMatch(/window\.innerHeight - visible/);
   });
 });
