@@ -1061,7 +1061,8 @@ textarea.field-input {
    Phone only. On a desktop focus does not cost half the screen.
 */
 @media (max-width: 639.98px) {
-  html.chat-typing header {
+  html.chat-typing header,
+  html.chat-typing .chat-contact-bar {
     display: none;
   }
   html.chat-typing {

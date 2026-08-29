@@ -605,15 +605,49 @@ describe("the chrome stands down while typing", () => {
     /* The header is navigation, and someone with the keyboard up is not
        navigating. It lives in the shell, so the chat reaches it with a class on
        the root rather than by rendering it differently. */
-    expect(view).toMatch(/if \(focused\) root\.classList\.add\("chat-typing"\)/);
+    expect(view).toMatch(/if \(focused && roomIfChromeStays < MIN_TRANSCRIPT\) root\.classList\.add\("chat-typing"\)/);
     expect(view).toMatch(/else root\.classList\.remove\("chat-typing"\)/);
     const block = css.slice(css.indexOf("html.chat-typing"));
-    expect(block).toMatch(/html\.chat-typing header\s*\{[^}]*display:\s*none/);
+    expect(block).toMatch(/html\.chat-typing header,[\s\S]{0,120}?display:\s*none/);
   });
 
-  it("hides the contact bar with it", () => {
-    /* It says who you are talking to, and you know — you are mid-sentence. */
-    expect(view).toMatch(/focused && "max-sm:hidden"/);
+  it("hides the contact bar by the same rule, not a parallel one", () => {
+    /**
+     * It used to be keyed on `focused` in React while the header was keyed on
+     * the CSS class, and the two disagreed: at heights where the header had
+     * already come back the bar was still hidden, which is neither layout.
+     * One rule, one class.
+     */
+    expect(view).toMatch(/className="chat-contact-bar /);
+    const block = css.slice(css.indexOf("html.chat-typing"));
+    expect(block).toMatch(/html\.chat-typing \.chat-contact-bar/);
+    const code = view.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+    expect(code).not.toMatch(/focused && "max-sm:hidden"/);
+  });
+
+  it("keeps the chrome when there is room for it", () => {
+    /**
+     * The point the reference makes: with the keyboard up it still shows the
+     * contact bar, the conversation AND the composer. It can, because a native
+     * app has no browser chrome — Safari spends about 110pt on its own before
+     * this layout gets a say.
+     *
+     * So the test is what the conversation WOULD get if everything stayed, and
+     * the chrome is surrendered only when that is too little to read. Measured:
+     *
+     *   250px visible (Safari)    -> chrome goes, transcript 175
+     *   364px visible (installed) -> chrome stays, transcript 152
+     */
+    expect(view).toMatch(/const roomIfChromeStays = visible - APP_HEADER - CONTACT_BAR - COMPOSER - BREATH/);
+    expect(view).toMatch(/const MIN_TRANSCRIPT = 120/);
+  });
+
+  it("re-decides when the viewport moves, not only when focus does", () => {
+    /* The keyboard arriving is a viewport change, not a focus change. Deciding
+       once on focus would settle the question before the height that answers it
+       had moved. */
+    const effect = view.slice(view.indexOf("const decide = () =>"));
+    expect(effect.slice(0, 900)).toMatch(/viewport\?\.addEventListener\("resize", decide\)/);
   });
 
   it("stops reserving height for a header that is not there", () => {
@@ -633,7 +667,7 @@ describe("the chrome stands down while typing", () => {
     /* Both are keyed on `focused`, which flips once in and once out, so there
        is nothing to leave behind. Measured after blur: header 80, contact bar
        53, chrome 88 — exactly as before. */
-    expect(view).toMatch(/return \(\) => root\.classList\.remove\("chat-typing"\)/);
+    expect(view).toMatch(/root\.classList\.remove\("chat-typing"\);\s*\};/);
   });
 
   it("leaves the desktop alone", () => {
@@ -658,5 +692,45 @@ describe("the chrome stands down while typing", () => {
     const code = view.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
     expect(code).not.toMatch(/keyboardUp/);
     expect(code).not.toMatch(/window\.innerHeight - visible/);
+  });
+});
+
+describe("New chat means new", () => {
+  it("clears the half-typed question as well as the messages", () => {
+    /**
+     * Reported: with text still in the box, New chat cleared the conversation
+     * and the suggestions stayed hidden — the draft kept `engaged` true, so the
+     * reader was left looking at their own abandoned sentence over an empty
+     * screen, and had to delete it by hand before the page resembled a fresh
+     * chat.
+     *
+     * Measured after: draft empty, messages 0, suggestions back at their full
+     * 191px.
+     */
+    expect(view).toMatch(/setItems\(\[\]\);[\s\S]{0,900}?setDraft\(""\)/);
+  });
+
+  it("puts the keyboard away and says so outright", () => {
+    /**
+     * There is nothing left to type into, and dropping focus also brings the
+     * app chrome back, so the reset lands on exactly the screen a first visit
+     * shows.
+     *
+     * `setFocused(false)` as well as `blur()`, because `blur()` only fires
+     * `onBlur` if the element really held focus — and a reset that half-works,
+     * messages gone but suggestions still hidden, is the very state this is
+     * here to prevent.
+     */
+    /* Scoped to `reset`. Matched against the whole file, deleting this line
+       still passed — the regex was satisfied by the composer's own
+       `onBlur={() => setFocused(false)}`, which is a different thing entirely.
+       Caught by mutation. */
+    const at = view.indexOf("async function reset()");
+    /* To the end of the function, not a guessed number of characters — the
+       first attempt used 1400 and the body is 1807, so the assertion was
+       reading a window that stopped short of the line it was checking. */
+    const reset = view.slice(at, view.indexOf("\n  }", at));
+    expect(reset).toMatch(/inputRef\.current\?\.blur\(\)/);
+    expect(reset).toMatch(/setFocused\(false\)/);
   });
 });

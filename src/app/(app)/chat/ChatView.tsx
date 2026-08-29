@@ -31,6 +31,22 @@ function renderText(text: string) {
 
 type Knows = { contacts: number; deals: number; meetings: number };
 
+/*
+   The fixed furniture of the chat screen, measured rather than guessed, and
+   used to decide whether the app chrome can stay while the keyboard is up.
+
+   They only have to be close. The question they answer is "would there be a
+   readable conversation left", and a few pixels either way does not change it.
+*/
+const APP_HEADER = 80;
+const CONTACT_BAR = 53;
+const COMPOSER = 67;
+const BREATH = 8;
+/* Below this a transcript is a hint that messages exist rather than something
+   you can read — about two lines of one bubble. It is the point at which the
+   header and the contact bar stop being worth their height. */
+const MIN_TRANSCRIPT = 120;
+
 /**
  * "12 March 2026" from a `YYYY-MM-DD` key, for the day separator.
  *
@@ -157,15 +173,47 @@ export function ChatView({
      is a real view rather than a hint of one. Both come back the instant the
      keyboard does.
 
-     `focused` rather than the viewport: it is unambiguous, it cannot flicker,
-     and it is the signal the earlier arithmetic was trying and failing to
-     infer.
+     BUT ONLY WHEN IT IS ACTUALLY TIGHT. An earlier version dropped them
+     whenever anyone typed, which threw away the contact bar even where there
+     was plenty of room for it — and the reference this page is modelled on
+     keeps its contact bar with the keyboard up. It can, because a native app
+     has no browser chrome; Safari spends around 110pt on its URL bar and
+     accessory bar before our layout gets a say.
+
+     So the test is what the conversation WOULD get if everything stayed, and
+     the chrome is given up only when that is too little to read:
+
+       Safari, keyboard up     ~250px visible ->  42px -> chrome goes
+       Installed, keyboard up  ~364px visible -> 156px -> chrome stays
+
+     Which is why installing it matters: the installed app then behaves exactly
+     like the reference, and the browser tab degrades gracefully instead of
+     showing a sliver of one bubble.
   */
   useEffect(() => {
     const root = document.documentElement;
-    if (focused) root.classList.add("chat-typing");
-    else root.classList.remove("chat-typing");
-    return () => root.classList.remove("chat-typing");
+    const viewport = window.visualViewport;
+
+    const decide = () => {
+      const visible = viewport?.height ?? window.innerHeight;
+      /* What the conversation would be left with if nothing stood down. */
+      const roomIfChromeStays = visible - APP_HEADER - CONTACT_BAR - COMPOSER - BREATH;
+      if (focused && roomIfChromeStays < MIN_TRANSCRIPT) root.classList.add("chat-typing");
+      else root.classList.remove("chat-typing");
+    };
+
+    decide();
+    /* The keyboard arriving is a viewport change, not a focus change, so the
+       decision has to be re-taken when the height moves as well as when the
+       caret does. */
+    viewport?.addEventListener("resize", decide);
+    window.addEventListener("resize", decide);
+
+    return () => {
+      viewport?.removeEventListener("resize", decide);
+      window.removeEventListener("resize", decide);
+      root.classList.remove("chat-typing");
+    };
   }, [focused]);
 
   useEffect(() => {
@@ -322,6 +370,26 @@ export function ChatView({
          that matches the server after it.
       */
       setItems([]);
+      /*
+         The half-typed question goes too.
+
+         "New chat" has to mean new. With text still in the box the draft kept
+         `engaged` true, so the messages cleared and the suggestions stayed
+         hidden — the reader was left looking at their own abandoned sentence
+         over an empty screen, and had to delete it by hand before the page
+         resembled a fresh chat.
+
+         Blurred with it, because there is nothing left to type into. That also
+         brings the app chrome back, so the reset lands on exactly the screen a
+         first visit shows.
+      */
+      setDraft("");
+      inputRef.current?.blur();
+      /* Said outright rather than left to the blur event. `blur()` only fires
+         `onBlur` if the element really held focus, and a reset that half-works
+         — messages gone, suggestions still hidden — is precisely the state this
+         is here to prevent. */
+      setFocused(false);
     } finally {
       setBusy(false);
     }
@@ -380,15 +448,12 @@ export function ChatView({
           your live CRM data" says what DATA MODE said, in the place and voice a
           messaging app says "online".
       */}
-      <div
-        className={clsx(
-          "mb-1 flex items-center gap-3 border-b border-[var(--border)] px-1 pb-3 sm:gap-3.5",
-          /* Stands down with the app header while the keyboard is up — see the
-             `chat-typing` effect. `sm:flex` puts it back on a desktop, where
-             focus does not cost half the screen. */
-          focused && "max-sm:hidden"
-        )}
-      >
+      {/* Hidden by the same rule that hides the app header, and for the same
+          reason — see `chat-typing` in globals.css. Driven from CSS rather than
+          from `focused` here so the two cannot disagree: keyed on React state
+          the bar stayed hidden at heights where the header had already come
+          back, which is neither layout. */}
+      <div className="chat-contact-bar mb-1 flex items-center gap-3 border-b border-[var(--border)] px-1 pb-3 sm:gap-3.5">
         <span className="chat-orb shrink-0">
           <Sparkles className="h-[22px] w-[22px]" />
         </span>
