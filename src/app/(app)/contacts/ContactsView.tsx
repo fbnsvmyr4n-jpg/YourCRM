@@ -402,12 +402,20 @@ function InfoPanel({
 
       <Section title="Company">
         <InfoRow icon={Building2} label="Company" value={contact.company} />
-        {/* Was "Company Info", which asked for anything and so collected
-            nothing useful — the demo data has it repeating the company name.
-            "Location" asks a question with one answer. The stored field is
-            still `companyInfo`, so nothing already typed is lost; it is the
-            prompt that changed, not the column. */}
-        <InfoRow icon={MapPin} label="Location" value={contact.companyInfo} />
+        {/*
+            The real `location` column, not `companyInfo`.
+
+            This row used to read `companyInfo`, and `companyInfo` and `company`
+            both derive from the same `info` column — so the panel printed the
+            company name twice and labelled the second one "Company Info". Once
+            it was relabelled "Location" that became actively wrong: it showed
+            "Location: Dube Landscaping".
+
+            There was never anything to clean up. `contacts.location` exists,
+            is populated for every record, and holds exactly what it should —
+            Cape Town, Johannesburg, Durban, Pretoria. Nothing was reading it.
+        */}
+        <InfoRow icon={MapPin} label="Location" value={contact.location} />
       </Section>
 
       <Section title="Contact Information">
@@ -1338,7 +1346,22 @@ function ContactModal({
               options={["New", "Active", "Follow-up", "Inactive"]}
               defaultValue={contact?.status}
             />
-            <ModalField name="companyInfo" label="Location" className="sm:col-span-2" defaultValue={contact?.companyInfo} />
+            {/*
+                A real Location field, and it closes a data-loss bug.
+
+                `parseContact` has always read `formData.get("location")`, and
+                this form has never had a `location` input — so every save sent
+                `text(null)`, which is `""`, which is not `undefined`, so the
+                repo's `CASE WHEN ... THEN location` branch fired and wrote it
+                away. Proven against the dev database inside a rolled-back
+                transaction: a contact with "Cape Town" came back null after one
+                edit.
+
+                Editing somebody to fix a typo in their phone number silently
+                erased where they were. Now the field exists, so the form sends
+                back what is there.
+            */}
+            <ModalField name="location" label="Location" className="sm:col-span-2" defaultValue={contact?.location} />
           </div>
 
           <div className="mt-6 flex items-center justify-end gap-3">

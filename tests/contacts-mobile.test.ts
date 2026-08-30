@@ -118,19 +118,39 @@ describe("the fields say what they are", () => {
     expect(last).toBeGreaterThan(first);
   });
 
-  it("asks for a Location rather than 'Company Info'", () => {
+  it("shows the real location column, not the company name again", () => {
     /**
-     * "Company Info" asked for anything and so collected nothing useful — the
-     * demo record has it repeating the company name back. "Location" asks a
-     * question with one answer.
+     * This row read `companyInfo`, and `companyInfo` and `company` both derive
+     * from the same `info` column — so the panel printed the company name twice
+     * and labelled the second one "Company Info". Relabelling it "Location"
+     * made that actively wrong: "Location: Dube Landscaping".
      *
-     * The stored field is still `companyInfo`, so nothing already typed is
-     * lost: it is the prompt that changed, not the column.
+     * There was nothing to clean up. `contacts.location` exists, is populated
+     * for all 15 records, and holds Cape Town / Johannesburg / Durban /
+     * Pretoria. Nothing was reading it.
      */
-    expect(view).toMatch(/label="Location" value=\{contact\.companyInfo\}/);
-    expect(view).toMatch(/name="companyInfo" label="Location"/);
+    expect(view).toMatch(/label="Location" value=\{contact\.location\}/);
     const code = view.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
     expect(code).not.toMatch(/Company Info/);
+    /* And the company name is not printed twice. */
+    expect(code).not.toMatch(/value=\{contact\.companyInfo\}/);
+  });
+
+  it("gives the edit form a location field, which stops it wiping them", () => {
+    /**
+     * `parseContact` has always read `formData.get("location")`, and the form
+     * never had that input — so every save sent `text(null)`, which is `""`,
+     * which is not `undefined`, so the repo's
+     * `location = CASE WHEN $12 THEN $13 ELSE location END` branch fired and
+     * wrote it away.
+     *
+     * Proven against the dev database inside a rolled-back transaction: a
+     * contact holding "Cape Town" came back null after one edit. Fixing a typo
+     * in somebody's phone number silently erased where they were.
+     */
+    expect(view).toMatch(/name="location" label="Location"[\s\S]{0,80}?defaultValue=\{contact\?\.location\}/);
+    const code = view.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+    expect(code).not.toMatch(/name="companyInfo"/);
   });
 
   it("does not show revenue twice", () => {
