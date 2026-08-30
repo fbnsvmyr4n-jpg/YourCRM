@@ -99,6 +99,29 @@ export function getPool(): Pool {
       connectionTimeoutMillis: 10_000,
       statement_timeout: 15_000,
     });
+
+    /*
+       Without this listener, one dropped idle connection takes the process down.
+
+       `pg` emits `error` on the Pool when a client sitting idle in it fails —
+       and hosted Postgres drops idle connections as a matter of course. Neon
+       closes them after a few minutes; that is what "Connection terminated
+       unexpectedly" is, and it appeared in the browser console beside the
+       ECONNRESETs during testing.
+
+       An EventEmitter `error` with no listener does not warn, it THROWS: an
+       uncaught exception, which on a serverless host kills the instance mid
+       request and on a long-running one kills the server. The failure has
+       nothing to do with whoever happens to be making a request at the time.
+
+       Attaching a listener is the whole fix. `pg` has already discarded the
+       broken client by the time this runs, and the next query opens a fresh
+       one — so the right response is to record it and carry on. The message is
+       logged without the connection string, which carries the password.
+    */
+    pool.on("error", (err) => {
+      console.error("[db] idle client error, connection discarded:", err.message);
+    });
   }
   return pool;
 }

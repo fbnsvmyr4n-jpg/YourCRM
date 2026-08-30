@@ -8,6 +8,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   Copy,
   DollarSign,
   Filter,
@@ -910,6 +911,21 @@ function ActivityPanel({
      every contact.
   */
   const [open, toggle] = useRememberedToggle("contact-open:activity", false);
+  const headerRef = useRef<HTMLButtonElement>(null);
+
+  /*
+     Closing from the bottom puts focus back on the header.
+
+     The button that did it is the first thing to disappear, and a control that
+     vanishes under the pointer drops keyboard focus to the body — the reader
+     loses their place in the page entirely. Handing focus to the header leaves
+     them on the thing they just collapsed, which is both where they now are on
+     screen and the control that would open it again.
+  */
+  const collapse = useCallback(() => {
+    toggle();
+    headerRef.current?.focus();
+  }, [toggle]);
 
   return (
     <div className="mt-7 rounded-2xl border border-[var(--border)] p-5">
@@ -927,6 +943,7 @@ function ActivityPanel({
           `--raise` rather than a green wash.
       */}
       <button
+        ref={headerRef}
         type="button"
         onClick={toggle}
         disabled={!foldsActivity}
@@ -1049,6 +1066,30 @@ function ActivityPanel({
           })}
           </ol>
         </div>
+      )}
+
+      {/*
+          A way out at the end of the list.
+
+          Reported as extra work, and it is: opening the fold puts the control
+          that closes it at the top of everything it just revealed, so on a long
+          history you scroll back past the whole thing to put it away. A reader
+          who has reached the end of the list has finished with it — that is
+          exactly where the offer to close it belongs.
+
+          Only where the fold exists, only while it is open, and only when there
+          is a list to have reached the end of: under the empty state the header
+          is already in view and a second control would be noise.
+      */}
+      {foldsActivity && open && entries.length > 0 && (
+        <button
+          type="button"
+          onClick={collapse}
+          className="btn-soft focus-ring mt-3 flex w-full items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-medium text-muted"
+        >
+          <ChevronUp className="h-3.5 w-3.5" />
+          Hide activity
+        </button>
       )}
 
       {currentUserId && (

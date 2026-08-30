@@ -311,3 +311,74 @@ describe("the activity fold", () => {
     expect(view).toMatch(/id="contact-activity"/);
   });
 });
+
+describe("a way out at the end of the list", () => {
+  it("offers to close from the bottom", () => {
+    /**
+     * Reported as extra work, and it is: opening the fold puts the control that
+     * closes it at the top of everything it just revealed, so on a long history
+     * you scroll back past the whole thing to put it away.
+     *
+     * Measured at grid 1010 with one entry: the header sits at y=747 and the
+     * bottom control at y=931. On a real history that gap is the whole list.
+     */
+    expect(view).toMatch(/Hide activity/);
+    expect(view).toMatch(/<ChevronUp className="h-3\.5 w-3\.5" \/>/);
+  });
+
+  it("only appears where it is the shorter way out", () => {
+    /**
+     * Where the fold does not exist there is nothing to close; while it is
+     * closed there is nothing to close either; and under the empty state the
+     * header is already in view, so a second control would be noise rather
+     * than a shortcut.
+     */
+    expect(view).toMatch(/\{foldsActivity && open && entries\.length > 0 && \(/);
+  });
+
+  it("hands focus back to the header", () => {
+    /**
+     * The button that did it is the first thing to disappear, and a control
+     * that vanishes drops keyboard focus to the body — the reader loses their
+     * place in the page entirely. The header is both where they now are on
+     * screen and the control that would open it again.
+     *
+     * Verified live: after pressing it, the body is hidden, the button is gone,
+     * and `document.activeElement` is the header.
+     */
+    expect(view).toMatch(/const collapse = useCallback\(\(\) => \{\s*toggle\(\);\s*headerRef\.current\?\.focus\(\);/);
+    expect(view).toMatch(/onClick=\{collapse\}/);
+    expect(view).toMatch(/ref=\{headerRef\}/);
+  });
+});
+
+describe("the pool survives a dropped connection", () => {
+  const db = readFileSync(
+    fileURLToPath(new URL("../src/server/db.ts", import.meta.url)),
+    "utf8"
+  );
+
+  it("listens for idle client errors", () => {
+    /**
+     * Found in the browser console while testing: "Connection terminated
+     * unexpectedly", beside ECONNRESET.
+     *
+     * `pg` emits `error` on the Pool when a client sitting idle in it fails,
+     * and hosted Postgres drops idle connections as a matter of course — Neon
+     * closes them after a few minutes. An EventEmitter `error` with no listener
+     * does not warn, it THROWS: an uncaught exception that kills a serverless
+     * instance mid-request, for a reason unrelated to whoever was asking.
+     *
+     * Attaching a listener is the whole fix; `pg` has already discarded the
+     * broken client, and the next query opens a fresh one.
+     */
+    expect(db).toMatch(/pool\.on\("error"/);
+  });
+
+  it("does not log the connection string", () => {
+    /* It carries the password. Only the message goes to the log. */
+    const handler = db.slice(db.indexOf('pool.on("error"'), db.indexOf('pool.on("error"') + 260);
+    expect(handler).toMatch(/err\.message/);
+    expect(handler).not.toMatch(/connectionString|DATABASE_URL/);
+  });
+});
