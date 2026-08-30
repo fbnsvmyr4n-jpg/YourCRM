@@ -20,6 +20,10 @@ const view = readFileSync(
   fileURLToPath(new URL("../src/app/(app)/contacts/ContactsView.tsx", import.meta.url)),
   "utf8"
 );
+const hook = readFileSync(
+  fileURLToPath(new URL("../src/lib/remembered-toggle.ts", import.meta.url)),
+  "utf8"
+);
 
 describe("the contacts list on a stacked layout", () => {
   it("measures the grid's own width, not the viewport's", () => {
@@ -31,7 +35,12 @@ describe("the contacts list on a stacked layout", () => {
      * at one.
      */
     expect(view).toMatch(/ResizeObserver/);
-    expect(view).toMatch(/contentRect\.width < 700/);
+    /* The observer now reports the width and the thresholds are derived at the
+       call site, because two decisions key off it: stacking at 700 and the
+       activity fold at 1030. One observer, one source of truth about which
+       arrangement is on screen. */
+    expect(view).toMatch(/setWidth\(entry\.contentRect\.width\)/);
+    expect(view).toMatch(/const stacked = gridWidth < 700/);
     expect(view).not.toMatch(/matchMedia\(["'`]\(max-width/);
   });
 
@@ -231,5 +240,74 @@ describe("Contact Activity reads like a ledger", () => {
   it("still says nothing rather than inventing rows when empty", () => {
     /* The panel this replaces shipped three fabricated entries. */
     expect(view).toMatch(/Nothing logged yet\. Calls, texts, emails, notes, meetings and won deals/);
+  });
+});
+
+/**
+ * Contact Activity folds, the way the dashboard's sections do.
+ *
+ * Asked for because a contact with any history put its whole timeline between
+ * the reader and the Status panel underneath it — reaching Status meant
+ * scrolling past everything that had ever happened.
+ *
+ * Measured at a grid width of 1010: the panel is 264px open and 96px closed.
+ * The saving grows with the history; 264 is a contact with a single entry.
+ */
+describe("the activity fold", () => {
+  it("remembers, and shares that memory with the dashboard's folds", () => {
+    /**
+     * Extracted rather than copied. The markup around a fold is site-specific —
+     * the dashboard collapses at `sm`, this collapses where Status stops having
+     * its own column — but the remembering is the subtle part and there should
+     * be one of it.
+     */
+    expect(view).toMatch(/useRememberedToggle\("contact-open:activity", false\)/);
+    expect(hook).toMatch(/useSyncExternalStore/);
+    /* Its own namespace, so opening the history on a contact does not decide
+       anything about the dashboard. */
+    expect(view).not.toMatch(/dash-open:/);
+  });
+
+  it("starts closed", () => {
+    /* The summary line above already answers the common question — when this
+       person was last touched — so the detail is opt-in. */
+    expect(view).toMatch(/useRememberedToggle\("contact-open:activity", false\)/);
+  });
+
+  it("only exists where Status is not already beside it", () => {
+    /**
+     * Below the three-column width Status sits underneath this panel, so the
+     * fold saves a scroll. At 1030 and above they are side by side and it would
+     * be a control that tidies away something already in view.
+     *
+     * The threshold comes from the same observer the layout uses, so the fold
+     * and the columns cannot disagree about which arrangement is on screen.
+     */
+    expect(view).toMatch(/const foldsActivity = gridWidth < 1030/);
+    expect(view).toMatch(/const stacked = gridWidth < 700/);
+  });
+
+  it("tells the truth about its own state", () => {
+    /**
+     * Driven from CSS alone this announced `aria-expanded="false"` on a desktop
+     * where the content was plainly visible — telling a screen reader the
+     * section was collapsed while sighted users read the list. Measured at grid
+     * 1236 after the fix: no `aria-expanded` at all, the control disabled, no
+     * chevron, and the body shown even with a stored "closed" preference.
+     */
+    expect(view).toMatch(/aria-expanded=\{foldsActivity \? open : undefined\}/);
+    expect(view).toMatch(/disabled=\{!foldsActivity\}/);
+    /* The chevron is rendered only where pressing it does something. */
+    expect(view).toMatch(/\{foldsActivity && \(\s*<ChevronDown/);
+    /* And the body ignores the remembered state where the fold does not exist. */
+    expect(view).toMatch(/className=\{clsx\(foldsActivity && !open && "hidden"\)\}/);
+  });
+
+  it("makes the whole header the target", () => {
+    /* A small chevron is a small target on a phone, which is the device this is
+       for. The dashboard's folds take the same approach. */
+    expect(view).toMatch(/onClick=\{toggle\}/);
+    expect(view).toMatch(/aria-controls="contact-activity"/);
+    expect(view).toMatch(/id="contact-activity"/);
   });
 });

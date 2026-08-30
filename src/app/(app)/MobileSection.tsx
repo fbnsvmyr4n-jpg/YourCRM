@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useSyncExternalStore } from "react";
 import { ChevronDown } from "lucide-react";
 import { clsx } from "@/lib/clsx";
+import { useRememberedToggle } from "@/lib/remembered-toggle";
 
 /**
  * A dashboard section that is folded away on a phone and always open above it.
@@ -43,28 +43,10 @@ export function MobileSection({
   const id = `section-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
   const key = `dash-open:${id}`;
 
-  /*
-     It remembers, because otherwise a fold is a tax rather than a tidy-up.
-
-     Reported as tedious, and rightly: somebody who opens Revenue every morning
-     was re-opening it every morning. The choice belongs to the reader, and
-     making them repeat it daily is the app being tidy at their expense.
-
-     `useSyncExternalStore` rather than an effect writing state. Stored
-     preferences ARE an external mutable source, which is what the hook exists
-     for, and it keeps the server and client snapshots explicitly separate — the
-     server has no `localStorage`, so it renders the default and the client
-     reads the real value on hydration with no mismatch and no cascading
-     render. Setting state inside an effect to do the same thing is what the
-     React compiler rejects, and it is right to.
-  */
-  const open = useSyncExternalStore(
-    subscribe,
-    () => read(key, defaultOpen),
-    () => defaultOpen
-  );
-
-  const toggle = useCallback(() => write(key, !read(key, defaultOpen)), [key, defaultOpen]);
+  /* The memory lives in `useRememberedToggle`, shared with the contacts page's
+     Contact Activity fold — see that hook for why it is a store subscription
+     rather than state written from an effect. */
+  const [open, toggle] = useRememberedToggle(key, defaultOpen);
 
   return (
     /*
@@ -136,45 +118,4 @@ export function MobileSection({
       </div>
     </section>
   );
-}
-
-/*
-   A tiny store over `localStorage`, shared by every section on the page.
-
-   Every access is guarded. Private windows, cleared site data and browsers set
-   to block site data all THROW here rather than returning null, and a dashboard
-   must not fail to render because a preference could not be read. Losing the
-   memory is a small thing; losing the page is not.
-*/
-const listeners = new Set<() => void>();
-
-function subscribe(onChange: () => void): () => void {
-  listeners.add(onChange);
-  /* Another tab is a legitimate second writer, and `storage` only fires there —
-     never in the tab that made the change, which is why writes below notify
-     the local listeners by hand. */
-  const onStorage = () => onChange();
-  window.addEventListener("storage", onStorage);
-  return () => {
-    listeners.delete(onChange);
-    window.removeEventListener("storage", onStorage);
-  };
-}
-
-function read(key: string, fallback: boolean): boolean {
-  try {
-    const saved = window.localStorage.getItem(key);
-    return saved === null ? fallback : saved === "1";
-  } catch {
-    return fallback;
-  }
-}
-
-function write(key: string, value: boolean): void {
-  try {
-    window.localStorage.setItem(key, value ? "1" : "0");
-  } catch {
-    /* Not being able to remember is not a reason to refuse to open. */
-  }
-  for (const listener of listeners) listener();
 }

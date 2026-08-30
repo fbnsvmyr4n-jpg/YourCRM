@@ -31,6 +31,10 @@ const section = readFileSync(
   fileURLToPath(new URL("../src/app/(app)/MobileSection.tsx", import.meta.url)),
   "utf8"
 );
+const toggleHook = readFileSync(
+  fileURLToPath(new URL("../src/lib/remembered-toggle.ts", import.meta.url)),
+  "utf8"
+);
 
 describe("the dashboard on a phone", () => {
   it("dissolves the two columns so every card can be ordered", () => {
@@ -181,18 +185,23 @@ describe("the dashboard on a phone", () => {
      * snapshot is the default so there is no hydration mismatch, and setting
      * state inside an effect is what the React compiler rejects.
      */
-    expect(section).toMatch(/useSyncExternalStore\(\s*subscribe,/);
-    expect(section).toMatch(/\(\) => defaultOpen\s*\)/);
+    /* The store moved into `useRememberedToggle` so the contacts page's own
+       fold could share it rather than carry a second copy. The behaviour is
+       asserted where it now lives; what stays MobileSection's business is the
+       key it remembers under. */
+    expect(section).toMatch(/useRememberedToggle\(key, defaultOpen\)/);
     expect(section).toMatch(/const key = `dash-open:\$\{id\}`/);
+    expect(toggleHook).toMatch(/useSyncExternalStore\(\s*subscribe,/);
+    expect(toggleHook).toMatch(/\(\) => defaultOpen\s*\)/);
   });
 
   it("never lets a blocked storage break the page", () => {
     /* Private windows, cleared site data and browsers set to block site data
        all THROW on access rather than returning null. Losing the memory is a
        small thing; losing the dashboard is not. */
-    const guards = section.match(/try \{/g) ?? [];
+    const guards = toggleHook.match(/try \{/g) ?? [];
     expect(guards.length).toBeGreaterThanOrEqual(2);
-    expect(section).toMatch(/catch \{\s*return fallback;/);
+    expect(toggleHook).toMatch(/catch \{\s*return fallback;/);
   });
 
   it("leaves the essentials open", () => {

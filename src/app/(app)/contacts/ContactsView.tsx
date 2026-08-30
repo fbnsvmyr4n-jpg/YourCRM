@@ -43,6 +43,7 @@ import type { ContactSummary, TimelineEntry } from "@/server/contact-summaries";
 import type { Contact, ContactType } from "@/server/decorate-contact";
 export type { Contact, ContactType } from "@/server/decorate-contact";
 import { clsx } from "@/lib/clsx";
+import { useRememberedToggle } from "@/lib/remembered-toggle";
 import type { ImportPreview, ImportResult } from "@/server/import-contacts";
 import {
   addContactAction,
@@ -74,18 +75,29 @@ const money = (cents: number) => `$${Math.round(cents / 100).toLocaleString()}`;
  * where the sidebar is present but the content is still narrow — claiming two
  * columns while the user is looking at one.
  */
-function useStacked(ref: React.RefObject<HTMLElement | null>): boolean {
-  const [stacked, setStacked] = useState(false);
+function useGridWidth(ref: React.RefObject<HTMLElement | null>): number {
+  /*
+     Returns the width rather than one boolean, because two decisions key off
+     it now: whether the panels are stacked (700) and whether Contact Activity
+     folds (1030, where Status gets its own column and there is nothing to
+     scroll past). One observer, two thresholds derived at the call site.
+
+     0 until measured. Every threshold below is a `>=`, so an unmeasured grid
+     behaves as the narrow case — which is the safe way round: a fold that
+     appears for an instant is a smaller wrong than a desktop that renders
+     collapsed.
+  */
+  const [width, setWidth] = useState(0);
   useEffect(() => {
     const node = ref.current;
     if (!node || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(([entry]) => {
-      setStacked(entry.contentRect.width < 700);
+      setWidth(entry.contentRect.width);
     });
     observer.observe(node);
     return () => observer.disconnect();
   }, [ref]);
-  return stacked;
+  return width;
 }
 
 export function ContactsView({
@@ -114,7 +126,12 @@ export function ContactsView({
      side-by-side layout changes, because there the list is already in view.
   */
   const gridRef = useRef<HTMLDivElement>(null);
-  const stacked = useStacked(gridRef);
+  const gridWidth = useGridWidth(gridRef);
+  const stacked = gridWidth < 700;
+  /* Below the three-column width, Status sits underneath the profile panel and
+     a long history is a scroll between the reader and it. At 1030 and above
+     they are side by side and the fold has nothing to earn. */
+  const foldsActivity = gridWidth < 1030;
   const [showDetail, setShowDetail] = useState(false);
   const openContact = useCallback((id: string) => {
     setSelectedId(id);
@@ -309,6 +326,7 @@ export function ContactsView({
         panel={panel}
         setPanel={setPanel}
         busy={busy}
+        foldsActivity={foldsActivity}
       />
       <ContactsList
         className={clsx("@min-[700px]:[grid-area:list]", detailOnly && "hidden")}
@@ -465,6 +483,7 @@ function ProfilePanel({
   setPanel,
   busy,
   className,
+  foldsActivity,
 }: {
   contact: Contact;
   summary?: ContactSummary;
@@ -475,6 +494,8 @@ function ProfilePanel({
   setPanel: (p: Panel) => void;
   busy: boolean;
   className?: string;
+  /** Whether Contact Activity can fold — see `useGridWidth`. */
+  foldsActivity: boolean;
 }) {
   const [copied, setCopied] = useState<string | null>(null);
   const [more, setMore] = useState(false);
@@ -700,7 +721,7 @@ function ProfilePanel({
       {panel === "note" && <NotePanel contactId={contact.id} onDone={() => setPanel(null)} />}
       {panel === "revenue" && <RevenuePanel summary={summary} />}
 
-      <ActivityPanel contact={contact} entries={summary?.timeline ?? []} currentUserId={currentUserId} />
+      <ActivityPanel foldsActivity={foldsActivity} contact={contact} entries={summary?.timeline ?? []} currentUserId={currentUserId} />
     </section>
   );
 }
@@ -862,15 +883,33 @@ function ActivityPanel({
   contact,
   entries,
   currentUserId,
+  foldsActivity,
 }: {
   contact: Contact;
   entries: TimelineEntry[];
   currentUserId: string | null;
+  /** Whether the fold applies at the current width — see `useGridWidth`. */
+  foldsActivity: boolean;
 }) {
   /* The last thing that happened, which is the fact a contact panel is usually
      opened to find. Derived from the entries already loaded — the list is
      sorted newest first upstream — so it cannot disagree with the rows below. */
   const latest = entries[0];
+
+  /*
+     Folded away by default, and it remembers.
+
+     A contact with a long history put its whole timeline between the reader and
+     the Status panel underneath it, so reaching Status meant scrolling past
+     everything that had ever happened. Closed by default because the summary
+     line above already answers the common question — when this person was last
+     touched — and the detail is one tap away for the times it is not enough.
+
+     Same memory the dashboard folds use, under this page's own key: somebody
+     who wants the history open on every contact should not have to say so on
+     every contact.
+  */
+  const [open, toggle] = useRememberedToggle("contact-open:activity", false);
 
   return (
     <div className="mt-7 rounded-2xl border border-[var(--border)] p-5">
@@ -887,7 +926,33 @@ function ActivityPanel({
           only where there is actually money — and the inner surface is
           `--raise` rather than a green wash.
       */}
-      <div className="flex items-start justify-between gap-3">
+      <button
+        type="button"
+        onClick={toggle}
+        disabled={!foldsActivity}
+        /* Honest, and it has to be. Driven from CSS alone this said
+           `aria-expanded="false"` on a desktop where the content was plainly
+           visible — announcing collapsed to a screen reader while sighted users
+           read the list. `foldsActivity` comes from the same observer the
+           layout uses, so the markup and the pixels cannot disagree. */
+        aria-expanded={foldsActivity ? open : undefined}
+        aria-controls="contact-activity"
+        /*
+           The whole header is the control, so there is no small chevron to aim
+           at — the same shape the dashboard's folds use.
+
+           `@min-[1030px]` is where the fold stops existing, and it is the width
+           the surrounding grid gives Status its own column. Below that, Status
+           sits underneath this panel and a long history is a scroll between the
+           reader and it; at that width and above they are side by side and
+           there is nothing to scroll past. The dashboard's own folds key off
+           `sm` because its layout does; this one follows this page's layout.
+
+           `cursor-default` above the breakpoint because it is inert there — a
+           pointer on something that does not respond is a small lie.
+        */
+        className="focus-ring flex w-full items-start justify-between gap-3 rounded-lg text-left disabled:cursor-default"
+      >
         <div className="min-w-0">
           <h3 className="text-base font-semibold">Contact Activity</h3>
           {/* The Revenue fold states its scope under its title ("$314,400 won ·
@@ -905,11 +970,22 @@ function ActivityPanel({
           )}
           <span className="mt-2 block h-0.5 w-10 rounded-full accent-gradient" />
         </div>
-        <span className="shrink-0 text-xs text-faint">
+        <span className="flex shrink-0 items-center gap-2 pt-0.5 text-xs text-faint">
           {entries.length} {entries.length === 1 ? "entry" : "entries"}
+          {/* Hidden where the fold does not exist, so the desktop panel does not
+              carry a chevron that means nothing. */}
+          {foldsActivity && (
+            <ChevronDown
+              className={clsx("h-4 w-4 transition-transform", open && "rotate-180")}
+              aria-hidden
+            />
+          )}
         </span>
-      </div>
+      </button>
 
+      {/* The state is only consulted where the fold exists. Above it the panel
+          renders as it always did, whatever the remembered preference says. */}
+      <div id="contact-activity" className={clsx(foldsActivity && !open && "hidden")}>
       {entries.length === 0 ? (
         // The old panel showed three invented rows here. Nothing has happened
         // with this contact yet, and saying so is more useful than a fixture.
@@ -980,6 +1056,7 @@ function ActivityPanel({
           Owned by {contact.owner}
         </p>
       )}
+      </div>
     </div>
   );
 }
