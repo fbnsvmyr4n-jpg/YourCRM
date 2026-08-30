@@ -166,3 +166,70 @@ describe("the fields say what they are", () => {
     expect(view).toMatch(/function RevenuePanel/);
   });
 });
+
+/**
+ * Contact Activity, rebuilt to read like the Revenue fold on Home.
+ *
+ * Asked for explicitly, with the instruction not to copy the style verbatim but
+ * to make it suit the contacts page. What is borrowed is the STRUCTURE — a
+ * titled header with a real scope line under it, a bordered inner surface with
+ * column headings, and right-aligned values — because that is what turns a
+ * stack of rows into a ledger you can scan.
+ */
+describe("Contact Activity reads like a ledger", () => {
+  it("states when the contact was last touched", () => {
+    /**
+     * The Revenue fold puts its scope under its title — "$314,400 won · last 6
+     * weeks". The equivalent fact on a contact is when anything last happened
+     * with them, which is usually why the panel is being read at all.
+     *
+     * Derived from the entries already loaded, and they arrive newest-first, so
+     * it cannot disagree with the rows underneath it.
+     */
+    expect(view).toMatch(/const latest = entries\[0\]/);
+    expect(view).toMatch(/Last activity <TimeAgo at=\{latest\.at\} mode="relative"/);
+  });
+
+  it("uses the compact stamp in the summary and the full one in the rows", () => {
+    /* The summary wants to read like "last 6 weeks"; the exact instant belongs
+       in the ledger row, where it is the record rather than a headline. */
+    const panel = view.slice(view.indexOf("function ActivityPanel"));
+    expect(panel).toMatch(/mode="relative"/);
+    expect(panel).toMatch(/<TimeAgo at=\{e\.at\} className="shrink-0 pt-0\.5/);
+  });
+
+  it("gives the list an axis to read along", () => {
+    /* Column headings and a bordered surface — the two things that make the
+       Revenue table scannable, and the two the old loose list lacked. */
+    expect(view).toMatch(/overflow-hidden rounded-xl border border-\[var\(--border\)\]/);
+    expect(view).toMatch(/>Activity<\/span>/);
+    expect(view).toMatch(/>When<\/span>/);
+    expect(view).toMatch(/divide-y divide-\[var\(--border\)\]/);
+  });
+
+  it("shows money as a figure, not a caption", () => {
+    /* The one thing worth copying straight from the Revenue table: amounts read
+       as numbers you can compare, tabular so the digits line up. */
+    expect(view).toMatch(/mt-1 text-sm font-bold tabular-nums/);
+  });
+
+  it("keeps the contacts page's own colours rather than Home's green", () => {
+    /**
+     * Asked for directly. Home's fold is green throughout because it is only
+     * about money; this panel carries notes, calls, mail, meetings and deals,
+     * so it keeps the per-kind palette and a neutral surface. Green appears
+     * only where there is actually money.
+     */
+    expect(view).toMatch(/note: \{ icon: StickyNote, color: "var\(--purple\)"/);
+    expect(view).toMatch(/meeting: \{ icon: Calendar, color: "var\(--amber\)"/);
+    const panel = view.slice(view.indexOf("function ActivityPanel"), view.indexOf("/* ---------------- RIGHT"));
+    /* No green wash on the surface — the only green is the amount and the
+       money chip's own tone. */
+    expect(panel).not.toMatch(/green-soft/);
+  });
+
+  it("still says nothing rather than inventing rows when empty", () => {
+    /* The panel this replaces shipped three fabricated entries. */
+    expect(view).toMatch(/Nothing logged yet\. Calls, texts, emails, notes, meetings and won deals/);
+  });
+});

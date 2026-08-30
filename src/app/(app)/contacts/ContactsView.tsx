@@ -867,14 +867,45 @@ function ActivityPanel({
   entries: TimelineEntry[];
   currentUserId: string | null;
 }) {
+  /* The last thing that happened, which is the fact a contact panel is usually
+     opened to find. Derived from the entries already loaded — the list is
+     sorted newest first upstream — so it cannot disagree with the rows below. */
+  const latest = entries[0];
+
   return (
     <div className="mt-7 rounded-2xl border border-[var(--border)] p-5">
-      <div className="flex items-center justify-between">
-        <div>
+      {/*
+          Built to read like the Revenue fold on Home — a titled header with a
+          real summary line under it, then a bordered inner surface with column
+          headings and right-aligned values, so a list of things becomes a
+          ledger you can scan.
+
+          The structure is borrowed; the palette is not. Home's fold is green
+          throughout because it is about money. This panel carries several kinds
+          of event, so it keeps the contacts page's own per-kind colours —
+          purple for notes, accent for calls and mail, amber for meetings, green
+          only where there is actually money — and the inner surface is
+          `--raise` rather than a green wash.
+      */}
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
           <h3 className="text-base font-semibold">Contact Activity</h3>
-          <span className="mt-1.5 block h-0.5 w-10 rounded-full accent-gradient" />
+          {/* The Revenue fold states its scope under its title ("$314,400 won ·
+              last 6 weeks"). The equivalent fact here is when this person was
+              last touched, which is the question the panel exists to answer. */}
+          {latest ? (
+            <p className="mt-1 text-xs text-muted">
+              {/* `relative` here, `both` in the rows. This line is a summary and
+                  wants to read like the Revenue fold's "last 6 weeks"; the exact
+                  stamp belongs in the ledger below, where it is the record. */}
+              Last activity <TimeAgo at={latest.at} mode="relative" className="text-muted" />
+            </p>
+          ) : (
+            <p className="mt-1 text-xs text-faint">Nothing logged yet</p>
+          )}
+          <span className="mt-2 block h-0.5 w-10 rounded-full accent-gradient" />
         </div>
-        <span className="text-xs text-faint">
+        <span className="shrink-0 text-xs text-faint">
           {entries.length} {entries.length === 1 ? "entry" : "entries"}
         </span>
       </div>
@@ -887,12 +918,19 @@ function ActivityPanel({
           automatically.
         </p>
       ) : (
-        <ol className="mt-5 space-y-3">
+        <div className="mt-4 overflow-hidden rounded-xl border border-[var(--border)]">
+          {/* Column headings, as the Revenue table has. They are what turn a
+              stack of rows into something with an axis to read along. */}
+          <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] px-3.5 py-2">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-faint">Activity</span>
+            <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-faint">When</span>
+          </div>
+          <ol className="divide-y divide-[var(--border)]">
           {entries.map((e) => {
             const meta = KIND_META[e.kind] ?? KIND_META.updated;
             const Icon = meta.icon;
             return (
-              <li key={e.id} className="flex items-start gap-3">
+              <li key={e.id} className="flex items-start gap-3 px-3.5 py-3">
                 <span
                   className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg"
                   style={{ background: meta.soft, color: meta.color }}
@@ -900,20 +938,25 @@ function ActivityPanel({
                   <Icon className="h-4 w-4" />
                 </span>
                 <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
-                    <p className="text-sm font-medium">{e.title}</p>
-                    {/* Real stored instants, rendered live — the old panel had
-                        "23 May 2024, 9:41 AM" typed into the seed and a "Date +
-                        Time" button that did nothing. */}
-                    <TimeAgo at={e.at} className="shrink-0 text-[11px] text-faint" />
-                  </div>
+                  <p className="truncate text-sm font-medium">{e.title}</p>
                   {e.detail && <p className="mt-0.5 whitespace-pre-wrap text-xs text-muted">{e.detail}</p>}
                   {e.amountCents !== undefined && (
-                    <p className="mt-0.5 text-xs font-semibold" style={{ color: "var(--green)" }}>
+                    /* Money reads as a figure rather than a caption — the one
+                       thing worth copying straight from the Revenue table. */
+                    <p className="mt-1 text-sm font-bold tabular-nums" style={{ color: "var(--green)" }}>
                       {money(e.amountCents)}
                     </p>
                   )}
                 </div>
+                {/* The right-hand column, filled on every row. The Revenue table
+                    puts its amount here; on a timeline the value you scan down
+                    is the time, and amounts belong beside the thing they are
+                    the value of.
+
+                    Real stored instants, rendered live — the panel this
+                    replaces had "23 May 2024, 9:41 AM" typed into the seed and
+                    a "Date + Time" button that did nothing. */}
+                <TimeAgo at={e.at} className="shrink-0 pt-0.5 text-[11px] text-faint" />
                 {/* Entries used to be removable, and are not any more.
 
                     The reasoning that already applied to meetings and won deals
@@ -928,7 +971,8 @@ function ActivityPanel({
               </li>
             );
           })}
-        </ol>
+          </ol>
+        </div>
       )}
 
       {currentUserId && (
