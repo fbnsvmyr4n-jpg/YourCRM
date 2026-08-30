@@ -40,6 +40,33 @@ export type ContactSummary = {
 };
 
 const OPEN_STAGES = ["prospect", "discovery", "demo"];
+/** Stages that mean the sale happened. Mirrors `isWonStage` in data/pipeline. */
+const WON_STAGES = ["won", "delivery", "referral"];
+
+/**
+ * Which pot a deal's money belongs in: won, still open, or neither.
+ *
+ * Pure and exported because this is the arithmetic behind the two figures on a
+ * contact, and "is the revenue accurate" is not a question to answer by
+ * reading the code and hoping.
+ *
+ * THE BUG THIS FIXES. It used to be `won_at !== null` for won, else
+ * `OPEN_STAGES.includes(stage)` for open — and nothing else. A deal dragged
+ * straight from Demo to Delivery keeps a NULL `won_at` (`moveDeal` only stamps
+ * it on the way into Won, and preserves whatever is there for Delivery and
+ * Referral), and Delivery is in neither list. So its value was counted in
+ * NEITHER pot: money that existed on the board and simply did not appear on
+ * the contact. Same for Referral.
+ *
+ * A deal in a won stage IS won — that is what `isWonStage` says everywhere
+ * else in the app — so the stage now counts as well as the timestamp. `lost`
+ * belongs to neither pot, which is the one exclusion that is deliberate.
+ */
+export function dealMoneyBucket(stage: string, wonAt: Date | string | null): "won" | "open" | "none" {
+  if (wonAt !== null || WON_STAGES.includes(stage)) return "won";
+  if (OPEN_STAGES.includes(stage)) return "open";
+  return "none";
+}
 
 export async function contactSummaries(
   q: TenantQuery,
@@ -80,10 +107,9 @@ export async function contactSummaries(
     const won = d.won_at !== null;
 
     summary.deals.push({ id: d.id, title: d.title, valueCents: cents, stage: d.stage, won });
-    // Won-ness comes from `won_at`, so a deal stays counted through Delivery
-    // and Referral. Reading the stage would make revenue fall as work began.
-    if (won) summary.wonValueCents += cents;
-    else if (OPEN_STAGES.includes(d.stage)) summary.openValueCents += cents;
+    const bucket = dealMoneyBucket(d.stage, d.won_at);
+    if (bucket === "won") summary.wonValueCents += cents;
+    else if (bucket === "open") summary.openValueCents += cents;
 
     push(d.contact_id, {
       id: `deal-${d.id}`,

@@ -1,7 +1,30 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Building2, Calendar, Check, ChevronDown, ChevronLeft, ChevronRight, Copy, DollarSign, Filter, Landmark, Mail, MessageCircle, MoreHorizontal, Pencil, Phone, Plus, StickyNote, Trash2, Upload, User, UserRound, X } from "lucide-react";
+import {
+  Building2,
+  Calendar,
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Copy,
+  DollarSign,
+  Filter,
+  Mail,
+  MapPin,
+  MessageCircle,
+  MoreHorizontal,
+  Pencil,
+  Phone,
+  Plus,
+  StickyNote,
+  Trash2,
+  Upload,
+  User,
+  UserRound,
+  X,
+} from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Overlay } from "@/components/ui/Overlay";
 import { SortMenu } from "@/components/ui/SortMenu";
@@ -255,11 +278,29 @@ export function ContactsView({
       )}
       <InfoPanel
         contact={contact}
-        summary={summary}
-        className={clsx("@min-[700px]:[grid-area:info]", listOnly && "hidden")}
+        /*
+           The card comes first in one column; these fields follow it.
+
+           Stacked, the DOM order was fields-then-card, so opening somebody put
+           a Status heading and a column of labelled rows above the thing that
+           says who they are — the avatar, the name, and every action you might
+           take. You had to scroll past the record to reach the person.
+
+           `order` rather than moved markup, because from `@min-[700px]` up the
+           named grid areas already place these correctly and are written
+           against this source order. Both are reset there, so the two- and
+           three-column layouts are untouched.
+        */
+        className={clsx(
+          "order-2 @min-[700px]:order-none @min-[700px]:[grid-area:info]",
+          listOnly && "hidden"
+        )}
       />
       <ProfilePanel
-        className={clsx("@min-[700px]:[grid-area:profile]", listOnly && "hidden")}
+        className={clsx(
+          "order-1 @min-[700px]:order-none @min-[700px]:[grid-area:profile]",
+          listOnly && "hidden"
+        )}
         contact={contact}
         summary={summary}
         currentUserId={currentUserId}
@@ -310,11 +351,9 @@ export function ContactsView({
 
 function InfoPanel({
   contact,
-  summary,
   className,
 }: {
   contact: Contact;
-  summary?: ContactSummary;
   className?: string;
 }) {
   // Derived status, so the palette is chosen from what is true now.
@@ -341,26 +380,34 @@ function InfoPanel({
         </div>
       </div>
 
-      {summary && (
-        <div className="grid grid-cols-2 gap-2">
-          <MiniStat label="Won" value={money(summary.wonValueCents)} tone="var(--green)" />
-          <MiniStat label="Open" value={money(summary.openValueCents)} tone="var(--accent)" />
-        </div>
-      )}
+      {/*
+          The Won/Open pair used to sit here, and it was the same two figures the
+          Revenue panel opens with — one tap away on the card, with the deals
+          that make them up underneath. Asked whether it was needed here at all;
+          it is not. Two places showing one number is how they drift, and this
+          panel is the record, not the reporting.
+      */}
 
       <Section title="Personal Information">
-        <InfoRow icon={User} label="First Name" value={contact.firstName} />
-        <InfoRow icon={UserRound} label="Last Name" value={contact.lastName} />
+        {/* Whole name first: it is what you came to check, and the parts are the
+            detail under it rather than the other way round. */}
         <InfoRow
           icon={UserRound}
           label={contact.type === "lead" ? "Lead Name" : "Client Name"}
           value={`${contact.firstName} ${contact.lastName}`}
         />
+        <InfoRow icon={User} label="First Name" value={contact.firstName} />
+        <InfoRow icon={UserRound} label="Last Name" value={contact.lastName} />
       </Section>
 
       <Section title="Company">
         <InfoRow icon={Building2} label="Company" value={contact.company} />
-        <InfoRow icon={Landmark} label="Company Info" value={contact.companyInfo} />
+        {/* Was "Company Info", which asked for anything and so collected
+            nothing useful — the demo data has it repeating the company name.
+            "Location" asks a question with one answer. The stored field is
+            still `companyInfo`, so nothing already typed is lost; it is the
+            prompt that changed, not the column. */}
+        <InfoRow icon={MapPin} label="Location" value={contact.companyInfo} />
       </Section>
 
       <Section title="Contact Information">
@@ -372,16 +419,6 @@ function InfoPanel({
   );
 }
 
-function MiniStat({ label, value, tone }: { label: string; value: string; tone: string }) {
-  return (
-    <div className="rounded-xl border border-[var(--border)] px-3 py-2.5">
-      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-faint">{label}</p>
-      <p className="mt-0.5 text-sm font-bold" style={{ color: tone }}>
-        {value}
-      </p>
-    </div>
-  );
-}
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -581,7 +618,24 @@ function ProfilePanel({
           links — only an anchor can hand off to the device's dialler or mail
           app — and each records the outreach. Revenue and Note open panels
           below; More opens a menu. */}
-      <div className="relative mx-auto mt-6 grid w-full max-w-[440px] grid-cols-6 gap-2">
+      {/*
+          Three across until there is genuinely room for six.
+
+          Six columns needed 66px a cell at the 440px cap and got 48 on a phone
+          — exactly the width of the circle itself, leaving nothing for the
+          label under it. "Revenue" and "Email" then ran into their neighbours,
+          which is the overlapping row in the report.
+
+          Two rows of three is the honest shape at that width: every button gets
+          about 104px, the labels sit clear of each other, and the spacing is
+          even because the grid makes it so. Six returns at `@min-[1030px]`,
+          which is where the middle column is guaranteed 380px — the width the
+          surrounding grid already treats as the floor for this row.
+
+          `gap-y` is larger than `gap-x` while wrapped, so the two rows read as
+          two rows rather than a block of icons.
+      */}
+      <div className="relative mx-auto mt-6 grid w-full max-w-[440px] grid-cols-3 gap-x-2 gap-y-4 @min-[1030px]:grid-cols-6 @min-[1030px]:gap-y-2">
         {actions.map((a) => {
           const Icon = a.icon;
           const inner = (
@@ -1284,7 +1338,7 @@ function ContactModal({
               options={["New", "Active", "Follow-up", "Inactive"]}
               defaultValue={contact?.status}
             />
-            <ModalField name="companyInfo" label="Company Info" className="sm:col-span-2" defaultValue={contact?.companyInfo} />
+            <ModalField name="companyInfo" label="Location" className="sm:col-span-2" defaultValue={contact?.companyInfo} />
           </div>
 
           <div className="mt-6 flex items-center justify-end gap-3">
