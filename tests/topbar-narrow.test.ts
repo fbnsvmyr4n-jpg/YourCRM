@@ -196,3 +196,62 @@ describe("filter rows wrap tidily on a phone", () => {
     expect(css).toMatch(/@media \(max-width: 639\.98px\)/);
   });
 });
+
+/**
+ * Two buttons in one header must not read as the same button.
+ *
+ * Reported from a phone: the theme control and the assistant shortcut looked
+ * identical. In Night the theme icon was `Stars` — a four-pointed sparkle, the
+ * same shape as the assistant's `Sparkles` — and on a phone the theme label is
+ * hidden, so they were two unlabelled blue sparkles two buttons apart.
+ */
+describe("the assistant and the theme control are told apart", () => {
+  const themeToggle = readFileSync(
+    fileURLToPath(new URL("../src/components/theme/ThemeToggle.tsx", import.meta.url)),
+    "utf8"
+  );
+  /* The assistant link's className value, read the same way the block above
+     reads it — from the attribute, so prose about it cannot satisfy the
+     assertion. */
+  const assistantClasses = (() => {
+    const at = source.indexOf('href="/chat"');
+    const rest = source.slice(at);
+    const m = rest.match(/className="([^"]*)"/);
+    if (!m) throw new Error("could not find the assistant shortcut");
+    return m[1];
+  })();
+
+  it("keeps sparkles out of the theme set entirely", () => {
+    /* The whole set now reads as one family about the sky — sun, moon,
+       sun-and-moon, moon-and-star — and nothing in it looks like AI. */
+    const code = themeToggle.replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(code).not.toMatch(/\bStars\b/);
+    expect(code).not.toMatch(/\bSparkles\b/);
+    expect(code).toMatch(/midnight: MoonStar/);
+  });
+
+  it("makes the assistant the one filled control in the row", () => {
+    /**
+     * Changing the glyph was only half of it. The button sat in a row of
+     * identical neutral circles — menu, search, theme, bell — as one more of
+     * them, and on a phone none of them carry a label. Being the same SHAPE as
+     * its neighbours is what made it confusable, not just the same drawing.
+     *
+     * It is the shortcut to the product's headline feature, so it is the one
+     * control here that should look like a destination rather than a toggle.
+     */
+    expect(assistantClasses.split(/\s+/)).toContain("btn-accent");
+    expect(assistantClasses.split(/\s+/)).not.toContain("btn-soft");
+  });
+
+  it("drops the accent tint the filled treatment replaces", () => {
+    /* `text-accent` on a filled accent ground is an accent on an accent — it
+       reads as a smudge rather than an icon. */
+    /* Sliced to the closing tag rather than a guessed number of characters —
+       a fixed window is exactly how an earlier assertion in this project ended
+       up reading past the line it was checking. */
+    const at = source.indexOf('href="/chat"');
+    const link = source.slice(at, source.indexOf("</Link>", at));
+    expect(link).toMatch(/<Sparkles className="h-\[18px\] w-\[18px\]" \/>/);
+  });
+});

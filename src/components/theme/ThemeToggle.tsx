@@ -1,16 +1,26 @@
 "use client";
 
-import { Moon, Stars, Sun, SunMoon } from "lucide-react";
+import { Moon, MoonStar, Sun, SunMoon } from "lucide-react";
 import { useTheme } from "./ThemeProvider";
 import { THEME_LABELS, type ThemeMode } from "@/lib/theme";
 
 const ORDER: ThemeMode[] = ["auto", "light", "dark", "midnight"];
 
+/*
+   Midnight was `Stars`, which is a four-pointed sparkle — the same shape as the
+   assistant's `Sparkles`, sitting two buttons away in the same header. On a
+   phone the theme label is hidden, so both were unlabelled blue sparkles side
+   by side and there was nothing to tell them apart. Reported exactly that way.
+
+   `MoonStar` says late night without borrowing the assistant's mark, and the
+   whole set now reads as one family about the sky: sun, moon, sun-and-moon,
+   moon-and-star. Nothing in it looks like AI.
+*/
 const ICON = {
   auto: SunMoon,
   light: Sun,
   dark: Moon,
-  midnight: Stars,
+  midnight: MoonStar,
 } as const;
 
 export function ThemeToggle() {

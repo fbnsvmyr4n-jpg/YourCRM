@@ -1231,12 +1231,25 @@ function ContactsList({
 
   return (
     <aside className={clsx("card flex flex-col overflow-hidden p-5", className)}>
-      <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-lg font-semibold tracking-tight">
+      {/*
+          `gap-3` and a heading that can shrink.
+
+          `justify-between` alone puts no minimum between the two children, so
+          once the controls needed the width the heading ran straight into the
+          first of them — the group-by chevron sat on top of the count. The
+          controls are evenly spaced with each other by `gap-2`; the heading was
+          the one edge with nothing holding it apart.
+
+          `min-w-0` on the heading and `shrink-0` on the controls decide who
+          gives way when there is not enough room: the title truncates, the
+          buttons stay whole and stay the size of each other.
+      */}
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <h2 className="min-w-0 truncate text-lg font-semibold tracking-tight">
           Contacts
           <span className="ml-2 text-sm font-normal text-faint">{visible.length}</span>
         </h2>
-        <div className="relative flex items-center gap-2">
+        <div className="relative flex shrink-0 items-center gap-2">
           {/* Was a decorative chevron. Now collapses the list into its
               categories, which is what the arrow implied all along. */}
           <button

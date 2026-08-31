@@ -382,3 +382,26 @@ describe("the pool survives a dropped connection", () => {
     expect(handler).not.toMatch(/connectionString|DATABASE_URL/);
   });
 });
+
+describe("the contacts list header", () => {
+  it("holds the heading apart from the controls", () => {
+    /**
+     * `justify-between` alone puts no minimum between two children, so once the
+     * controls needed the width the heading ran straight into the first of them
+     * — the group-by chevron sat on top of the count. The buttons were evenly
+     * spaced with each other by `gap-2`; the heading was the one edge with
+     * nothing holding it apart.
+     *
+     * Measured at 420px after: heading ends at 138, controls start at 167 — a
+     * 29px gap, with 8px evenly between all five buttons.
+     */
+    expect(view).toMatch(/className="mb-4 flex items-center justify-between gap-3"/);
+  });
+
+  it("decides who gives way when the row is tight", () => {
+    /* The title truncates; the buttons stay whole and stay the size of each
+       other. Without this the heading refuses to shrink and pushes instead. */
+    expect(view).toMatch(/<h2 className="min-w-0 truncate text-lg font-semibold tracking-tight">/);
+    expect(view).toMatch(/<div className="relative flex shrink-0 items-center gap-2">/);
+  });
+});

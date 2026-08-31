@@ -224,9 +224,22 @@ export function Topbar({
            lost: it opens the same command palette, with a bigger tap target
            than the label it gave up.
         */
-        className="btn-soft focus-ring grid h-10 w-10 shrink-0 place-items-center rounded-full"
+        /*
+           Filled, not another soft grey circle.
+
+           The icon was changed away from a second sparkle, but likeness was
+           only half the problem: this sat in a row of identical neutral
+           buttons — menu, search, theme, bell — as one more of them, and on a
+           phone none of them carry a label. Being the same SHAPE as its
+           neighbours is what made it confusable, not just the same glyph.
+
+           It is the shortcut to the product's headline feature, so it is the
+           one control in this row that should look like a destination. Filled
+           accent does that at a glance and cannot be mistaken for a toggle.
+        */
+        className="btn-accent focus-ring grid h-10 w-10 shrink-0 place-items-center rounded-full"
       >
-        <Sparkles className="h-[18px] w-[18px] text-accent" />
+        <Sparkles className="h-[18px] w-[18px]" />
       </Link>
 
       {/* Notifications — everything that needs attention, nothing filtered. */}
