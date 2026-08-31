@@ -386,26 +386,45 @@ describe("the pool survives a dropped connection", () => {
 describe("the contacts list header", () => {
   it("gives the heading its own line", () => {
     /**
-     * Holding the heading and the controls apart stopped them colliding and
-     * moved the cost onto the title: five 36px controls plus their gaps need
-     * 212px, and this column is a fixed 326 on a desktop and narrower on a
-     * phone. "Contacts 15" truncated to "Conta…" — at every width, not only the
-     * small ones.
-     *
-     * No single row fits both, and a heading that cannot be read is a worse
-     * trade than one more line. Measured after, at 420px and at a 326px desktop
-     * column: the heading is not truncated at either.
+     * Five 36px controls plus their gaps need 212px, and this column is a fixed
+     * 326 on a desktop and narrower on a phone — so "Contacts 15" truncated to
+     * "Conta…" at every width, not only the small ones. No single row fits
+     * both, and a heading that cannot be read is a worse trade than one more
+     * line.
      */
-    expect(view).toMatch(/<div className="mb-4">\s*<h2 className="text-lg font-semibold tracking-tight">/);
+    expect(view).toMatch(/<h2 className="text-lg font-semibold tracking-tight">Contacts<\/h2>/);
     const code = view.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
-    /* Nothing left to truncate with — the title is not competing for width. */
     expect(code).not.toMatch(/<h2 className="min-w-0 truncate/);
   });
 
-  it("keeps the controls evenly spaced on their own row", () => {
-    /* The spacing was the part that was already right, so it is unchanged:
-       measured at both widths, four gaps of 8px and no overlap. Right-aligned
-       so the primary action stays where the thumb reaches for it. */
-    expect(view).toMatch(/<div className="relative mt-3 flex items-center justify-end gap-2">/);
+  it("puts something at each end of the title line", () => {
+    /* Title left, count right — the arrangement the Contact Activity panel
+       already uses, so the two titled blocks on this page read as one family,
+       and the right half of the line is not left empty. */
+    expect(view).toMatch(/<div className="flex items-baseline justify-between gap-3">/);
+    expect(view).toMatch(/<span className="text-sm text-faint tabular-nums">\{visible\.length\}<\/span>/);
+  });
+
+  it("wears the accent rule the app puts under a section title", () => {
+    /* Its absence is part of why this read as a loose label rather than the
+       head of a panel. The Contact Activity heading on the same page has one. */
+    /* Scoped to this header. The identical rule exists in the Contact Activity
+       panel — which is the point, they should match — so an unscoped assertion
+       passed with this one deleted. Caught by mutation. */
+    const header = view.slice(view.indexOf('>Contacts</h2>'), view.indexOf("Was a decorative chevron"));
+    expect(header).toMatch(/<span className="mt-2 block h-0\.5 w-10 rounded-full accent-gradient" \/>/);
+  });
+
+  it("spreads the controls instead of huddling them at one end", () => {
+    /**
+     * Right-aligning them left the whole left half of the row empty, so a
+     * balanced heading sat above an unbalanced strip — which is what read as
+     * unfinished.
+     *
+     * Measured after: at a 326px desktop column the four gaps are 26px each and
+     * at 430px they are 42px each — equal in both, with the first button's left
+     * edge on the heading's and the last button's right edge on the count's.
+     */
+    expect(view).toMatch(/<div className="relative mt-3 flex items-center justify-between gap-2">/);
   });
 });

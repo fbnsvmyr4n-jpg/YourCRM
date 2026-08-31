@@ -1247,13 +1247,31 @@ function ContactsList({
           any width.
       */}
       <div className="mb-4">
-        <h2 className="text-lg font-semibold tracking-tight">
-          Contacts
-          <span className="ml-2 text-sm font-normal text-faint">{visible.length}</span>
-        </h2>
-        {/* Right-aligned, so the primary action stays where the thumb already
-            reaches for it — the far end of the row. */}
-        <div className="relative mt-3 flex items-center justify-end gap-2">
+        {/* Title left, count right — the arrangement the Contact Activity panel
+            already uses for its own heading and entry count, so the two titled
+            blocks on this page read as one family. It also puts something at
+            each end of the line rather than leaving the right half empty. */}
+        <div className="flex items-baseline justify-between gap-3">
+          <h2 className="text-lg font-semibold tracking-tight">Contacts</h2>
+          <span className="text-sm text-faint tabular-nums">{visible.length}</span>
+        </div>
+        {/* The accent rule this app puts under a section title. Its absence is
+            part of why the heading read as a loose label rather than the head
+            of a panel. */}
+        <span className="mt-2 block h-0.5 w-10 rounded-full accent-gradient" />
+        {/*
+            Spread across the row rather than huddled at one end.
+
+            Right-aligning them left the entire left half of the row empty, so a
+            balanced heading sat above an unbalanced strip — which is what read
+            as unfinished. `justify-between` uses the width the row already
+            occupies and puts an equal gap between every pair: five 36px
+            controls in a 326px column leave 146px, or 36 between each.
+
+            Evenly spaced in the literal sense, and the two ends now line up
+            with the heading and the count above them.
+        */}
+        <div className="relative mt-3 flex items-center justify-between gap-2">
           {/* Was a decorative chevron. Now collapses the list into its
               categories, which is what the arrow implied all along. */}
           <button
