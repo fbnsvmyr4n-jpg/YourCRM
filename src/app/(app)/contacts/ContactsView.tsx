@@ -1232,24 +1232,28 @@ function ContactsList({
   return (
     <aside className={clsx("card flex flex-col overflow-hidden p-5", className)}>
       {/*
-          `gap-3` and a heading that can shrink.
+          The heading gets its own line, because the row was never wide enough
+          for both.
 
-          `justify-between` alone puts no minimum between the two children, so
-          once the controls needed the width the heading ran straight into the
-          first of them — the group-by chevron sat on top of the count. The
-          controls are evenly spaced with each other by `gap-2`; the heading was
-          the one edge with nothing holding it apart.
+          Holding the two apart stopped them colliding and moved the cost onto
+          the title: five 36px controls plus their gaps need 212px, and this
+          column is a fixed 326 on a desktop and narrower on a phone. So
+          "Contacts 15" truncated to "Conta…" — at every width, not just the
+          small ones. No single row fits both, and a heading that cannot be read
+          is a worse trade than one more line.
 
-          `min-w-0` on the heading and `shrink-0` on the controls decide who
-          gives way when there is not enough room: the title truncates, the
-          buttons stay whole and stay the size of each other.
+          The title is now stated in full above, and the controls keep the exact
+          spacing they already had. Nothing truncates and nothing overlaps at
+          any width.
       */}
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <h2 className="min-w-0 truncate text-lg font-semibold tracking-tight">
+      <div className="mb-4">
+        <h2 className="text-lg font-semibold tracking-tight">
           Contacts
           <span className="ml-2 text-sm font-normal text-faint">{visible.length}</span>
         </h2>
-        <div className="relative flex shrink-0 items-center gap-2">
+        {/* Right-aligned, so the primary action stays where the thumb already
+            reaches for it — the far end of the row. */}
+        <div className="relative mt-3 flex items-center justify-end gap-2">
           {/* Was a decorative chevron. Now collapses the list into its
               categories, which is what the arrow implied all along. */}
           <button

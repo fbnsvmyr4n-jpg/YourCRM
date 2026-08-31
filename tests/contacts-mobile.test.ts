@@ -384,24 +384,28 @@ describe("the pool survives a dropped connection", () => {
 });
 
 describe("the contacts list header", () => {
-  it("holds the heading apart from the controls", () => {
+  it("gives the heading its own line", () => {
     /**
-     * `justify-between` alone puts no minimum between two children, so once the
-     * controls needed the width the heading ran straight into the first of them
-     * — the group-by chevron sat on top of the count. The buttons were evenly
-     * spaced with each other by `gap-2`; the heading was the one edge with
-     * nothing holding it apart.
+     * Holding the heading and the controls apart stopped them colliding and
+     * moved the cost onto the title: five 36px controls plus their gaps need
+     * 212px, and this column is a fixed 326 on a desktop and narrower on a
+     * phone. "Contacts 15" truncated to "Conta…" — at every width, not only the
+     * small ones.
      *
-     * Measured at 420px after: heading ends at 138, controls start at 167 — a
-     * 29px gap, with 8px evenly between all five buttons.
+     * No single row fits both, and a heading that cannot be read is a worse
+     * trade than one more line. Measured after, at 420px and at a 326px desktop
+     * column: the heading is not truncated at either.
      */
-    expect(view).toMatch(/className="mb-4 flex items-center justify-between gap-3"/);
+    expect(view).toMatch(/<div className="mb-4">\s*<h2 className="text-lg font-semibold tracking-tight">/);
+    const code = view.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+    /* Nothing left to truncate with — the title is not competing for width. */
+    expect(code).not.toMatch(/<h2 className="min-w-0 truncate/);
   });
 
-  it("decides who gives way when the row is tight", () => {
-    /* The title truncates; the buttons stay whole and stay the size of each
-       other. Without this the heading refuses to shrink and pushes instead. */
-    expect(view).toMatch(/<h2 className="min-w-0 truncate text-lg font-semibold tracking-tight">/);
-    expect(view).toMatch(/<div className="relative flex shrink-0 items-center gap-2">/);
+  it("keeps the controls evenly spaced on their own row", () => {
+    /* The spacing was the part that was already right, so it is unchanged:
+       measured at both widths, four gaps of 8px and no overlap. Right-aligned
+       so the primary action stays where the thumb reaches for it. */
+    expect(view).toMatch(/<div className="relative mt-3 flex items-center justify-end gap-2">/);
   });
 });
