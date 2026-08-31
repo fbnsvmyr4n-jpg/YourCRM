@@ -1,12 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import {
   CalendarCheck,
   ClipboardList,
+  ChevronLeft,
   CornerUpLeft,
+  Filter,
   CornerUpRight,
   DollarSign,
   ExternalLink,
@@ -40,6 +42,7 @@ import {
   type MsgCategory,
 } from "@/data/inbox";
 import { clsx } from "@/lib/clsx";
+import { useElementWidth } from "@/lib/use-element-width";
 import { SortMenu } from "@/components/ui/SortMenu";
 import { useOpenFromQuery } from "@/lib/useOpenFromQuery";
 import {
@@ -105,6 +108,26 @@ export function InboxView({
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<InboxSort>("newest");
   const [selectedId, setSelectedId] = useState(messages[0]?.id ?? "");
+  /*
+     On a phone the reader is its own screen, not a card under the list.
+
+     Below `@min-[720px]` the three panels stack, so a selected message rendered
+     underneath the whole list: to read it you scrolled past every other message
+     first, and with nothing selected a "No message selected." card sat there
+     taking room and saying nothing. The list IS the page at that width, and
+     opening a message should open it — which is exactly what the contacts page
+     already does, down to the way back.
+  */
+  const gridRef = useRef<HTMLDivElement>(null);
+  const gridWidth = useElementWidth(gridRef);
+  const stacked = gridWidth < 720;
+  const [showReader, setShowReader] = useState(false);
+  /* Both derived and deliberately not synced: every decision below is gated on
+     `stacked`, so on a wide layout these are false whatever `showReader` holds.
+     There is no state to correct, only state to ignore. */
+  const listOnly = stacked && !showReader;
+  const readerOnly = stacked && showReader;
+
   const [composeOpen, setComposeOpen] = useState(false);
   useOpenFromQuery("compose", useCallback(() => setComposeOpen(true), []));
   const [busy, setBusy] = useState(false);
@@ -165,6 +188,7 @@ export function InboxView({
 
   function handleSelect(id: string) {
     setSelectedId(id);
+    setShowReader(true);
     const msg = messages.find((m) => m.id === id);
     if (msg?.unread) markReadAction(id);
   }
@@ -218,11 +242,34 @@ export function InboxView({
           there is decoration, and painted over `.app-aurora` it read as a slab
           across the top of the page. Below it the page really does scroll, and
           the frost is what the message list disappears behind. */}
-      <div className="sticky-head -mt-1 flex flex-col gap-4 pb-2 pt-1 @min-[1100px]:before:hidden">
+      {/* Hidden while a message is open on a phone. Folders are how you choose
+          what to read; once you are reading, they are 72px of navigation to
+          somewhere you have already been. The reader gets the screen, and the
+          way back is the button above it. */}
+      <div
+        className={clsx(
+          "sticky-head -mt-1 flex flex-col gap-4 pb-2 pt-1 @min-[1100px]:before:hidden",
+          readerOnly && "hidden"
+        )}
+      >
         {/* Category chips. These were decoration — a message had no category,
             so there was nothing for them to filter on. They now toggle a real
             filter and carry live counts. */}
-        <div className="tab-row flex flex-wrap items-center gap-2.5">
+        {/*
+            Desktop only, from `@min-[720px]` up.
+
+            Measured at 393px: this row is 134px of a 234px header, on a content
+            area of 770 — and on a quiet account every one of its five counts
+            reads 0. Two ways of slicing the inbox were stacked on top of each
+            other, folders above and categories below, so the reader passed
+            eleven filter controls before the first message.
+
+            Categories are a facet, not a place you live, so on a phone they
+            move behind one control in the list's own toolbar — beside the
+            search and sort that are already there, which is exactly where the
+            Contacts list puts its filter. Nothing is lost and 134px comes back.
+        */}
+        <div className="tab-row hidden flex-wrap items-center gap-2.5 @min-[720px]:flex">
         {MSG_CATEGORIES.map((c) => {
           const meta = CHIP_META[c];
           const Icon = meta.icon;
@@ -289,6 +336,7 @@ export function InboxView({
           before that the list and reader share the width and the sender card
           moves underneath, which beats crushing the message to 268px. */}
       <div
+        ref={gridRef}
         className={clsx(
           "grid min-h-0 flex-1 grid-cols-1 gap-4",
           "@min-[720px]:grid-cols-[minmax(0,300px)_minmax(0,1fr)]",
@@ -297,8 +345,24 @@ export function InboxView({
           "@min-[1100px]:[grid-template-areas:'list_reader_card']"
         )}
       >
+        {readerOnly && (
+          /* The way back, before the thing it returns from — the same control
+             the contacts detail uses, in the same place. */
+          <button
+            type="button"
+            onClick={() => setShowReader(false)}
+            className="btn-soft focus-ring flex items-center gap-2 self-start rounded-xl px-3 py-2 text-sm font-medium"
+          >
+            <ChevronLeft className="h-4 w-4" /> All messages
+          </button>
+        )}
         <MessageList
-          className="@min-[720px]:[grid-area:list]"
+          className={clsx("@min-[720px]:[grid-area:list]", readerOnly && "hidden")}
+          categories={MSG_CATEGORIES}
+          counts={counts}
+          category={category}
+          setCategory={setCategory}
+          onCompose={() => setComposeOpen(true)}
           list={list}
           selectedId={selected?.id ?? ""}
           onSelect={handleSelect}
@@ -310,7 +374,7 @@ export function InboxView({
         />
         {selected ? (
           <Reader
-            className="@min-[720px]:[grid-area:reader]"
+            className={clsx("@min-[720px]:[grid-area:reader]", listOnly && "hidden")}
             key={selected.id}
             message={selected}
             busy={busy}
@@ -323,19 +387,25 @@ export function InboxView({
             }}
           />
         ) : (
-          <div className="card grid min-h-0 place-items-center p-6 text-sm text-faint @min-[720px]:[grid-area:reader]">
+          /* Only where there are two columns to fill. Stacked, this card sat
+             under the list saying "No message selected." — an answer to a
+             question nobody had asked, in the room the messages should have
+             had. */
+          <div className="card hidden min-h-0 place-items-center p-6 text-sm text-faint @min-[720px]:grid @min-[720px]:[grid-area:reader]">
             No message selected.
           </div>
         )}
         {selected ? (
           <ContactCard
-            className="@min-[720px]:[grid-area:card]"
+            className={clsx("@min-[720px]:[grid-area:card]", listOnly && "hidden")}
             message={selected}
             messages={messages}
             contactId={contactFor[selected.id]}
           />
         ) : (
-          <div className="card @min-[720px]:[grid-area:card]" />
+          /* An empty card is a desktop grid cell holding its column open, and
+             nothing at all on a phone. */
+          <div className="card hidden @min-[720px]:block @min-[720px]:[grid-area:card]" />
         )}
       </div>
 
@@ -358,6 +428,11 @@ function MessageList({
   className,
   sort,
   setSort,
+  categories,
+  counts,
+  category,
+  setCategory,
+  onCompose,
 }: {
   list: Message[];
   selectedId: string;
@@ -368,7 +443,15 @@ function MessageList({
   className?: string;
   sort: InboxSort;
   setSort: (s: InboxSort) => void;
+  /* The category facet, which lives up here on a desktop and behind the filter
+     button below `@min-[720px]`. See the chip row in the sticky head. */
+  categories: readonly MsgCategory[];
+  counts: Record<MsgCategory, number>;
+  category: MsgCategory | null;
+  setCategory: (c: MsgCategory | null) => void;
+  onCompose: () => void;
 }) {
+  const [filterOpen, setFilterOpen] = useState(false);
   return (
     <div className={clsx("card flex min-h-0 flex-col overflow-hidden p-3", className)}>
       <div className="mb-2 flex items-center gap-2">
@@ -388,6 +471,83 @@ function MessageList({
         )}
         </div>
         <SortMenu options={INBOX_SORTS} value={sort} onChange={setSort} defaultId="newest" />
+
+        {/*
+            The category facet and Compose, on a phone only.
+
+            Both used to sit in a 134px block above the folder tabs. Here they
+            are two 36px controls in a toolbar that already existed, in the same
+            arrangement the Contacts list uses — search, sort, filter, then the
+            accent primary action.
+        */}
+        <div className="relative @min-[720px]:hidden">
+          <button
+            type="button"
+            onClick={() => setFilterOpen((v) => !v)}
+            aria-expanded={filterOpen}
+            title="Filter by type"
+            className={clsx(
+              "focus-ring grid h-9 w-9 shrink-0 place-items-center rounded-full transition-colors",
+              category ? "text-accent" : "btn-soft text-muted"
+            )}
+            style={category ? { background: "var(--accent-soft)" } : undefined}
+          >
+            <Filter className="h-4 w-4" />
+          </button>
+          {filterOpen && (
+            <>
+              {/* Click-away, so the sheet does not need a close button. */}
+              <button
+                className="fixed inset-0 z-20 cursor-default"
+                aria-label="Close filter"
+                onClick={() => setFilterOpen(false)}
+              />
+              <div className="popover absolute right-0 top-full z-30 mt-2 w-56 overflow-hidden p-1.5">
+                <button
+                  onClick={() => { setCategory(null); setFilterOpen(false); }}
+                  className={clsx(
+                    "focus-ring flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm",
+                    category === null ? "text-accent" : "text-muted hover:bg-[var(--raise)]"
+                  )}
+                >
+                  All types
+                </button>
+                {categories.map((c) => {
+                  const meta = CHIP_META[c];
+                  const Icon = meta.icon;
+                  const n = counts[c];
+                  return (
+                    <button
+                      key={c}
+                      onClick={() => { setCategory(category === c ? null : c); setFilterOpen(false); }}
+                      /* Nothing to show is not worth a tap, and saying so is
+                         better than a row that silently returns an empty list. */
+                      disabled={n === 0 && category !== c}
+                      className={clsx(
+                        "focus-ring flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm",
+                        category === c ? "bg-[var(--raise)]" : "hover:bg-[var(--raise)]",
+                        n === 0 && category !== c && "opacity-45"
+                      )}
+                    >
+                      <Icon className="h-4 w-4 shrink-0" style={{ color: meta.tone }} />
+                      <span className="min-w-0 flex-1 truncate text-left">{c}</span>
+                      <span className="text-xs text-faint">{n}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={onCompose}
+          aria-label="Create new email"
+          title="Create new email"
+          className="btn-accent focus-ring grid h-9 w-9 shrink-0 place-items-center rounded-full @min-[720px]:hidden"
+        >
+          <Plus className="h-4 w-4" />
+        </button>
       </div>
       <div className="-m-1 flex flex-1 scroll-p-1 flex-col gap-2 overflow-y-auto p-1">
         {list.length === 0 && <p className="mt-8 text-center text-sm text-faint">No messages here.</p>}

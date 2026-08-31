@@ -44,6 +44,7 @@ import type { ContactSummary, TimelineEntry } from "@/server/contact-summaries";
 import type { Contact, ContactType } from "@/server/decorate-contact";
 export type { Contact, ContactType } from "@/server/decorate-contact";
 import { clsx } from "@/lib/clsx";
+import { useElementWidth } from "@/lib/use-element-width";
 import { useRememberedToggle } from "@/lib/remembered-toggle";
 import type { ImportPreview, ImportResult } from "@/server/import-contacts";
 import {
@@ -66,40 +67,6 @@ type Panel = null | "note" | "revenue";
 /** Takes integer cents, because that is what the database stores. */
 const money = (cents: number) => `$${Math.round(cents / 100).toLocaleString()}`;
 
-/**
- * Whether the three panels are stacked into one column.
- *
- * Watches the GRID'S OWN WIDTH rather than the viewport's, because that is what
- * the layout actually keys off: the breakpoints here are container queries
- * (`@min-[700px]`), and the container is the viewport minus the sidebar. A
- * viewport media query would disagree with the layout through the whole range
- * where the sidebar is present but the content is still narrow — claiming two
- * columns while the user is looking at one.
- */
-function useGridWidth(ref: React.RefObject<HTMLElement | null>): number {
-  /*
-     Returns the width rather than one boolean, because two decisions key off
-     it now: whether the panels are stacked (700) and whether Contact Activity
-     folds (1030, where Status gets its own column and there is nothing to
-     scroll past). One observer, two thresholds derived at the call site.
-
-     0 until measured. Every threshold below is a `>=`, so an unmeasured grid
-     behaves as the narrow case — which is the safe way round: a fold that
-     appears for an instant is a smaller wrong than a desktop that renders
-     collapsed.
-  */
-  const [width, setWidth] = useState(0);
-  useEffect(() => {
-    const node = ref.current;
-    if (!node || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(([entry]) => {
-      setWidth(entry.contentRect.width);
-    });
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [ref]);
-  return width;
-}
 
 export function ContactsView({
   contacts,
@@ -127,7 +94,7 @@ export function ContactsView({
      side-by-side layout changes, because there the list is already in view.
   */
   const gridRef = useRef<HTMLDivElement>(null);
-  const gridWidth = useGridWidth(gridRef);
+  const gridWidth = useElementWidth(gridRef);
   const stacked = gridWidth < 700;
   /* Below the three-column width, Status sits underneath the profile panel and
      a long history is a scroll between the reader and it. At 1030 and above

@@ -20,6 +20,10 @@ const view = readFileSync(
   fileURLToPath(new URL("../src/app/(app)/contacts/ContactsView.tsx", import.meta.url)),
   "utf8"
 );
+const widthHook = readFileSync(
+  fileURLToPath(new URL("../src/lib/use-element-width.ts", import.meta.url)),
+  "utf8"
+);
 const hook = readFileSync(
   fileURLToPath(new URL("../src/lib/remembered-toggle.ts", import.meta.url)),
   "utf8"
@@ -34,12 +38,14 @@ describe("the contacts list on a stacked layout", () => {
      * the content is still narrow — claiming two columns while the user looks
      * at one.
      */
-    expect(view).toMatch(/ResizeObserver/);
-    /* The observer now reports the width and the thresholds are derived at the
-       call site, because two decisions key off it: stacking at 700 and the
-       activity fold at 1030. One observer, one source of truth about which
-       arrangement is on screen. */
-    expect(view).toMatch(/setWidth\(entry\.contentRect\.width\)/);
+    /* The observer moved into `useElementWidth` when the inbox needed the same
+       thing — a second copy is how two pages start disagreeing about what
+       "narrow" means. The thresholds stay at the call site, because two
+       decisions key off this one measurement: stacking at 700 and the activity
+       fold at 1030. */
+    expect(widthHook).toMatch(/ResizeObserver/);
+    expect(widthHook).toMatch(/setWidth\(entry\.contentRect\.width\)/);
+    expect(view).toMatch(/const gridWidth = useElementWidth\(gridRef\)/);
     expect(view).toMatch(/const stacked = gridWidth < 700/);
     expect(view).not.toMatch(/matchMedia\(["'`]\(max-width/);
   });
