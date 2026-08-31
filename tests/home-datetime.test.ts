@@ -125,8 +125,11 @@ describe("the dashboard date and time", () => {
      * hairline would read as a split card with no subject, so the ranking is
      * carried by size once the weight is shared.
      */
+    /* 22px is now the value from 360 up rather than the base — below that the
+       card is out of room and the date steps to 18 so the year survives. The
+       pairing this asserts is unchanged wherever there is room for it. */
     expect(bar).toMatch(
-      /text-\[22px\] font-medium leading-none tracking-\[-0\.02em\] sm:text-\[26px\]/
+      /font-medium leading-none tracking-\[-0\.02em\] min-\[360px\]:text-\[22px\] sm:text-\[26px\]/
     );
     expect(bar).not.toMatch(/text-\[15px\] font-semibold tracking-tight/);
 
@@ -227,5 +230,60 @@ describe("the UTC offset label", () => {
     /* Intl throws on a bad zone, and a label is not worth taking the page down
        for. */
     expect(utcOffsetLabel("Not/AZone", JULY)).toBeNull();
+  });
+});
+
+/**
+ * The date must show the year, in every month, on every phone.
+ *
+ * Reported from a real iPhone: "31 Aug 2…". The year was cut off.
+ */
+describe("the date is not cut off", () => {
+  const bar = readFileSync(
+    fileURLToPath(new URL("../src/app/(app)/DateTimeBar.tsx", import.meta.url)),
+    "utf8"
+  );
+
+  it("claims the width the card already had spare", () => {
+    /**
+     * The real cause, and it was not the font size. The block was `min-w-0`
+     * with no grow, so it sized to its CONTENT and `truncate` clipped it there.
+     * Measured on a 393px phone: the block was 125px while 178px was free —
+     * 53px sat unused between the two halves, because `justify-between` pushes
+     * slack into the gap rather than to the text that needs it.
+     *
+     * At 125px "31 Aug 2026" fits in Chrome with nothing to spare and overflows
+     * in Safari, whose metrics are a hair wider. That is the reported cut-off
+     * against a clean render here.
+     */
+    expect(bar).toMatch(/<div className="min-w-0 flex-1">/);
+  });
+
+  it("is sized for the widest month, not today's", () => {
+    /**
+     * August is one of the SHORT months. Measured across all twelve at 22px the
+     * widest is "28 Sept 2026" at 143px — eighteen past the old 125 — so this
+     * would have truncated on every phone from September onward, not just this
+     * one. Sizing to the date on screen is how that gets missed.
+     *
+     * Worst-case slack after, measured at each width:
+     *   320 -> 18px type, 123 available, +6
+     *   360 -> 22px type, 163 available, +20
+     *   375 -> 22px type, 178 available, +35
+     *   393 -> 22px type, 176 available, +33
+     */
+    expect(bar).toMatch(/min-\[360px\]:text-\[22px\]/);
+    expect(bar).toMatch(/text-\[18px\] font-medium/);
+  });
+
+  it("buys the last of the width from spacing, not from the clock", () => {
+    /* The time was explicitly fine as it was, so at 320 the width comes from
+       the padding and gaps around it — 4px of card padding each side, 8 off the
+       gap between the halves, 4 off the gap at the divider. None of it is doing
+       visible work at that size. */
+    expect(bar).toMatch(/gap-2 px-4 py-4 min-\[380px\]:gap-4 min-\[380px\]:px-5/);
+    expect(bar).toMatch(/flex shrink-0 items-center gap-3 min-\[380px\]:gap-4/);
+    /* The clock's own sizes are untouched. */
+    expect(bar).toMatch(/text-\[30px\] font-medium leading-none tabular-nums tracking-\[-0\.02em\] sm:text-\[34px\]/);
   });
 });

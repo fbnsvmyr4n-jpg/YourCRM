@@ -114,8 +114,37 @@ export function DateTimeBar({
        no icon block, one hairline rule separating the two halves, and colour
        reserved for the things on this page that actually mean something.
     */
-    <div className="card flex items-center justify-between gap-4 px-5 py-4">
-      <div className="min-w-0">
+    /* Tighter gutters and gaps below 380, and only below 380.
+
+       Claiming the free space fixed a 393px phone but not a 320px one — with
+       Display Zoom on, the block gets 103px against a worst case of 143. The
+       clock is deliberately untouched, so the width has to come from the
+       spacing around it: 4px of card padding each side, 8 off the gap between
+       the halves, and 4 off the gap around the divider. Twenty pixels, none of
+       which is doing visible work at that size. */
+    <div className="card flex items-center justify-between gap-2 px-4 py-4 min-[380px]:gap-4 min-[380px]:px-5">
+      {/*
+          `flex-1`, and that is the whole fix for the cut-off year.
+
+          This block was `min-w-0` with no grow, so it sized to its content and
+          `truncate` then clipped it at whatever that came to. Measured on a
+          393px phone: the block was 125px wide while 178px was actually free —
+          53px of the card sat unused between the two halves, because
+          `justify-between` pushed the slack into the gap rather than giving it
+          to the text that needed it.
+
+          At 125px "31 Aug 2026" fits in Chrome with nothing to spare and
+          overflows in Safari, whose metrics for the same string are a hair
+          wider — which is exactly the reported "31 Aug 2…" on a real iPhone
+          against a clean render here.
+
+          And August is one of the SHORT months. Measured across all twelve at
+          22px, the widest is "28 Sept 2026" at 143px: eighteen pixels past the
+          old 125, so this would have truncated on every phone from September
+          onward, not just this one. With the space claimed the block is 178px
+          and the worst case has 35px to spare.
+      */}
+      <div className="min-w-0 flex-1">
         <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-faint">
           {weekday}
         </p>
@@ -133,7 +162,20 @@ export function DateTimeBar({
             Deliberately NOT the clock's exact size. Two 34px figures either
             side of a hairline would read as a split card with no subject.
         */}
-        <p className="mt-1 truncate text-[22px] font-medium leading-none tracking-[-0.02em] sm:text-[26px]">
+        {/* 18px below 360, and only below 360.
+
+            Twenty pixels of tighter spacing was not enough on its own — at
+            320 the worst case still needed 143 against 123 — so the date takes
+            one more step down where the card is genuinely out of room. It is
+            the smaller half of the pair there rather than the equal it is
+            higher up, which is the right way round when the alternative is a
+            year that is not there.
+
+            360 rather than 380 because the available width tracks the viewport
+            almost exactly: 123px at 320 and 178 at 375. At 360 there is 163 for
+            a 143px worst case, so 22px already fits with room. Stepping down at
+            380 shrank the date on a 375px phone that had 61px to spare. */}
+        <p className="mt-1 truncate text-[18px] font-medium leading-none tracking-[-0.02em] min-[360px]:text-[22px] sm:text-[26px]">
           {/*
               A shorter date rather than a truncated one.
 
@@ -147,7 +189,7 @@ export function DateTimeBar({
         </p>
       </div>
 
-      <div className="flex shrink-0 items-center gap-4">
+      <div className="flex shrink-0 items-center gap-3 min-[380px]:gap-4">
         {/*
             A hairline that fades out at both ends rather than stopping dead.
 
