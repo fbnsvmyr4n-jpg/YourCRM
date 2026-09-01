@@ -186,14 +186,51 @@ describe("the suggestion list escapes what would slice it", () => {
     // Verified in the reader on a phone: with the field at y=685 the list
     // opened upward, ending 8px above it, entirely on screen.
     expect(hook).toMatch(/const flip = below < 160 && above > below/);
-    expect(hook).toMatch(/Math\.min\(left, window\.innerWidth - w - margin\)/);
-    expect(hook).toMatch(/Math\.max\(margin, left\)/);
+    /* Clamped to the VISIBLE viewport now, not the layout one — see the visual
+       viewport test above. Same guarantee, measured against the box the reader
+       can actually see. */
+    expect(hook).toMatch(/Math\.min\(left, viewRight - w - margin\)/);
+    expect(hook).toMatch(/Math\.max\(viewLeft \+ margin, left\)/);
   });
 
   it("matches the field it belongs to rather than a fixed width", () => {
     // Measured: same left edge, same width, to the pixel.
     expect(hook).toMatch(/const w = width \?\? r\.width/);
     expect(hook).toMatch(/left = align === "end" \? r\.right - w : r\.left/);
+  });
+
+  it("follows the keyboard, which moves nothing else it listens to", () => {
+    /**
+     * Opening the iOS keyboard pans the page to reveal the focused field and
+     * fires NEITHER `window.resize` NOR `window.scroll`. Only the visual
+     * viewport reports it.
+     *
+     * Without these two listeners the list was placed once — on focus, before
+     * the keyboard existed — and then left there. Photographed on an iPhone
+     * sitting about 96px clear of its own field, floating over the card above
+     * it, which is what "an awkward and unusual position" looked like.
+     */
+    expect(hook).toMatch(/vv\?\.addEventListener\("resize", place\)/);
+    expect(hook).toMatch(/vv\?\.addEventListener\("scroll", place\)/);
+    expect(hook).toMatch(/vv\?\.removeEventListener\("resize", place\)/);
+    expect(hook).toMatch(/vv\?\.removeEventListener\("scroll", place\)/);
+  });
+
+  it("measures the room the reader can actually see", () => {
+    /**
+     * `innerHeight` is the LAYOUT viewport, which still counts the strip the
+     * keyboard is covering — so "room below" included space behind the
+     * keyboard and the list opened downward into it. The visual viewport is
+     * what is genuinely visible; both are in layout coordinates, so they
+     * compare directly against `getBoundingClientRect`.
+     */
+    expect(hook).toMatch(/const viewBottom = vv \? vv\.offsetTop \+ vv\.height : window\.innerHeight/);
+    expect(hook).toMatch(/const below = viewBottom - r\.bottom - gap - margin/);
+    expect(hook).toMatch(/const above = r\.top - viewTop - gap - margin/);
+    /* And the horizontal clamp too, or a zoomed page pins it off-screen. */
+    expect(hook).toMatch(/Math\.min\(left, viewRight - w - margin\)/);
+    expect(hook).toMatch(/Math\.max\(viewLeft \+ margin, left\)/);
+    expect(hook).not.toMatch(/const below = window\.innerHeight - r\.bottom/);
   });
 
   it("follows its field on scroll instead of closing", () => {

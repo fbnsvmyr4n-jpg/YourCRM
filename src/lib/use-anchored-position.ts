@@ -56,16 +56,33 @@ export function useAnchoredPosition(
       const margin = 8;
       const w = width ?? r.width;
 
-      const below = window.innerHeight - r.bottom - gap - margin;
-      const above = r.top - gap - margin;
+      /**
+       * The band the reader can actually see.
+       *
+       * `innerHeight` is the LAYOUT viewport, which on iOS still counts the
+       * strip the keyboard is covering — so "room below" included space behind
+       * the keyboard. The visual viewport is what is genuinely visible, and its
+       * `offsetTop` is how far Safari has panned the page up to reveal the
+       * focused field. Both are in layout coordinates, which is what
+       * `getBoundingClientRect` and a `fixed` panel are positioned in, so they
+       * can be compared directly.
+       */
+      const vv = window.visualViewport;
+      const viewTop = vv ? vv.offsetTop : 0;
+      const viewBottom = vv ? vv.offsetTop + vv.height : window.innerHeight;
+      const viewLeft = vv ? vv.offsetLeft : 0;
+      const viewRight = vv ? vv.offsetLeft + vv.width : window.innerWidth;
+
+      const below = viewBottom - r.bottom - gap - margin;
+      const above = r.top - viewTop - gap - margin;
       /* Open downward unless there is meaningfully more room the other way — a
          panel that flips on a two-pixel difference feels unstable. */
       const flip = below < 160 && above > below;
       const maxHeight = Math.max(120, flip ? above : below);
 
       let left = align === "end" ? r.right - w : r.left;
-      left = Math.min(left, window.innerWidth - w - margin);
-      left = Math.max(margin, left);
+      left = Math.min(left, viewRight - w - margin);
+      left = Math.max(viewLeft + margin, left);
 
       setPos(
         flip
@@ -81,9 +98,24 @@ export function useAnchoredPosition(
        that matters happens inside the card, not on `window`. */
     window.addEventListener("resize", place);
     window.addEventListener("scroll", place, true);
+    /**
+     * And the visual viewport, which is the one that moves for a keyboard.
+     *
+     * Opening the keyboard pans the page to reveal the focused field and fires
+     * NEITHER `window.resize` nor `window.scroll`. The list was therefore
+     * placed once, on focus and before the keyboard existed, and then left
+     * where it was: photographed on an iPhone sitting about 96px clear of its
+     * own field, floating over the card above it. These two events are the only
+     * notice a page gets that the keyboard changed the visible area.
+     */
+    const vv = window.visualViewport;
+    vv?.addEventListener("resize", place);
+    vv?.addEventListener("scroll", place);
     return () => {
       window.removeEventListener("resize", place);
       window.removeEventListener("scroll", place, true);
+      vv?.removeEventListener("resize", place);
+      vv?.removeEventListener("scroll", place);
     };
   }, [open, anchor, width, align]);
 

@@ -145,8 +145,10 @@ describe("the shared control behaves", () => {
       join(__dirname, "..", "src", "lib", "use-anchored-position.ts"),
       "utf8"
     );
-    expect(POS).toMatch(/Math\.min\(left, window\.innerWidth - w - margin\)/);
-    expect(POS).toMatch(/Math\.max\(margin, left\)/);
+    /* Clamped to the VISIBLE viewport, not the layout one: with a keyboard open
+       those differ, and the layout box still counts the strip it covers. */
+    expect(POS).toMatch(/Math\.min\(left, viewRight - w - margin\)/);
+    expect(POS).toMatch(/Math\.max\(viewLeft \+ margin, left\)/);
     // And flips above the button when there is no room below it.
     expect(POS).toMatch(/const flip = below < 160 && above > below/);
   });
