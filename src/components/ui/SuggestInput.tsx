@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { clsx } from "@/lib/clsx";
 import { matchStrings } from "@/lib/person-search";
+import { HighlightedMatch } from "@/components/ui/HighlightedMatch";
 import { useAnchoredPosition } from "@/lib/use-anchored-position";
 
 /**
@@ -150,7 +151,7 @@ export function SuggestInput({
                     i === active && "bg-[var(--raise)]"
                   )}
                 >
-                  {m}
+                  <HighlightedMatch text={m} query={value} />
                 </button>
               </li>
             ))}

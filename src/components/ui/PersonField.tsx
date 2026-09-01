@@ -6,6 +6,7 @@ import { Search } from "lucide-react";
 import { clsx } from "@/lib/clsx";
 import { useAnchoredPosition } from "@/lib/use-anchored-position";
 import { matchPeople } from "@/lib/person-search";
+import { HighlightedMatch } from "@/components/ui/HighlightedMatch";
 
 /** Someone the CRM already knows — a contact or a lead. */
 export type Person = { name: string; company: string; email: string };
@@ -228,8 +229,14 @@ export function PersonField({
                   role="option"
                   aria-selected={i === active}
                 >
-                  <span className="font-medium">{p.name}</span>
-                  {sub && sub !== "—" && <span className="ml-2 text-xs text-faint">{sub}</span>}
+                  <span className="font-medium">
+                    <HighlightedMatch text={p.name} query={value} />
+                  </span>
+                  {sub && sub !== "—" && (
+                    <span className="ml-2 text-xs text-faint">
+                      <HighlightedMatch text={sub} query={value} />
+                    </span>
+                  )}
                 </button>
               </li>
             );
