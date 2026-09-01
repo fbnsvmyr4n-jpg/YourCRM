@@ -25,6 +25,7 @@ import { PersonField, type Person } from "@/components/ui/PersonField";
 import { clsx } from "@/lib/clsx";
 import { SortMenu } from "@/components/ui/SortMenu";
 import { shortDate } from "@/components/meetings/WorkloadCapacity";
+import { useTextDraft } from "@/lib/use-draft";
 import { minutesOfDay, parseTime, toDisplayTime } from "@/lib/time";
 import {
   LOSS_REASONS,
@@ -1549,7 +1550,22 @@ function MeetingNotes({ meetings }: { meetings: UpcomingMeeting[] }) {
 }
 
 function NotesEditor({ meeting }: { meeting: UpcomingMeeting }) {
-  const [notes, setNotes] = useState(meeting.notes ?? "");
+  /**
+   * Typed-but-unsaved notes outlive the box they were typed in.
+   *
+   * This component is keyed on the meeting, so picking another one from the
+   * dropdown unmounts it — and whatever had been typed went with it, silently.
+   * A reload lost it too. Nothing warned, and a warning would be the wrong
+   * answer: the work should simply still be there.
+   *
+   * Keyed per meeting, so one meeting's notes can never surface against
+   * another, and only stored while it differs from what the server holds.
+   */
+  const {
+    value: notes,
+    setValue: setNotes,
+    clear,
+  } = useTextDraft(`yourcrm:meeting-notes:${meeting.id}`, meeting.notes ?? "");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -1561,6 +1577,10 @@ function NotesEditor({ meeting }: { meeting: UpcomingMeeting }) {
       const fd = new FormData();
       fd.set("notes", notes);
       await setMeetingNotesAction(meeting.id, fd);
+      /* The draft has served its purpose the moment the server has the text.
+         Left behind it would shadow the saved copy forever, including any edit
+         made from another device. */
+      clear();
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     } finally {

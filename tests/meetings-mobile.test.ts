@@ -191,3 +191,52 @@ describe("upcoming meetings on a phone", () => {
     expect(code).not.toMatch(/mb-4 flex flex-wrap items-center justify-between gap-3/);
   });
 });
+
+describe("meeting notes keep what was typed", () => {
+  const draft = readFileSync(
+    fileURLToPath(new URL("../src/lib/use-draft.ts", import.meta.url)),
+    "utf8"
+  );
+
+  it("survives switching to another meeting and back", () => {
+    /**
+     * The editor is keyed on the meeting, so picking another one from the
+     * dropdown unmounts it — and whatever had been typed went with it,
+     * silently. A reload lost it too.
+     *
+     * Verified: typed an addition, switched to another meeting (whose box
+     * stayed empty), switched back, and the text was still there. Warning
+     * about unsaved work would have been the wrong answer; the work should
+     * simply still be there.
+     */
+    expect(code).toMatch(/useTextDraft\(`yourcrm:meeting-notes:\$\{meeting\.id\}`, meeting\.notes \?\? ""\)/);
+  });
+
+  it("keys the draft per meeting so notes cannot bleed across", () => {
+    /* One shared key would show the last meeting's notes against whichever is
+       selected — worse than losing them. */
+    expect(draft).toMatch(/export function useTextDraft\(key: string, saved: string\)/);
+  });
+
+  it("stores a draft only while it differs from what the server holds", () => {
+    /* Typing back to the saved wording clears the draft rather than pinning a
+       copy of it forever. */
+    expect(draft).toMatch(/if \(next === saved\) window\.localStorage\.removeItem\(key\)/);
+  });
+
+  it("drops the draft once the server has the text", () => {
+    /**
+     * Left behind, it would shadow the saved copy forever — including an edit
+     * made from another device. Verified: after saving, no
+     * `yourcrm:meeting-notes:` key remains and a reload shows the saved text
+     * with the status back to "Up to date".
+     */
+    expect(code).toMatch(/await setMeetingNotesAction\(meeting\.id, fd\);[\s\S]{0,260}?clear\(\);/);
+  });
+
+  it("renders the field from the draft, not from its own state", () => {
+    /* A second copy in `useState` is what made the text local to a component
+       that unmounts. */
+    expect(code).not.toMatch(/const \[notes, setNotes\] = useState/);
+  });
+});

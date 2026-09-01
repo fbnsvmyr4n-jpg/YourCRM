@@ -115,3 +115,61 @@ function write(key: string, next: Draft): void {
   }
   for (const listener of listeners) listener();
 }
+
+/**
+ * Unsaved text for one record, kept until it is saved or thrown away.
+ *
+ * The meeting notes box lost whatever had been typed the moment another
+ * meeting was picked from the dropdown, and again on a reload — the same way
+ * the email composer used to. Nothing warned about it, and a warning is the
+ * wrong answer: the work should simply still be there.
+ *
+ * Keyed per record, so notes for one meeting can never surface against
+ * another. `saved` is what the server holds; a draft is only stored while it
+ * DIFFERS from that, so going back to the saved wording clears the draft
+ * rather than pinning a copy of it forever.
+ */
+export function useTextDraft(key: string, saved: string) {
+  const stored = useSyncExternalStore(
+    subscribe,
+    () => readText(key),
+    () => null
+  );
+  const value = stored ?? saved;
+
+  const setValue = useCallback(
+    (next: string) => {
+      try {
+        if (next === saved) window.localStorage.removeItem(key);
+        else window.localStorage.setItem(key, next);
+      } catch {
+        /* Storage denied or full. The text stays in the field; only its
+           recovery is lost, which is where this started. */
+      }
+      for (const listener of listeners) listener();
+    },
+    [key, saved]
+  );
+
+  const clear = useCallback(() => {
+    try {
+      window.localStorage.removeItem(key);
+    } catch {
+      /* As above. */
+    }
+    for (const listener of listeners) listener();
+  }, [key]);
+
+  return { value, setValue, clear, isDraft: stored !== null && stored !== saved };
+}
+
+/* Same identity rule as the composer's snapshot: `useSyncExternalStore`
+   compares by identity, and a string read from storage is stable, so this one
+   needs no cache. */
+function readText(key: string): string | null {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
