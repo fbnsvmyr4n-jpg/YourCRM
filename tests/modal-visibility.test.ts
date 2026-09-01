@@ -41,31 +41,88 @@ function sourceFiles(dir: URL): string[] {
 const files = sourceFiles(new URL("../src/", import.meta.url));
 
 describe("modal panels on a phone", () => {
+  /**
+   * The declarations only — anchored to the rule's own closing brace rather
+   * than a guessed character count, and with the comments stripped so an
+   * assertion cannot be satisfied by prose that merely quotes the unit it is
+   * looking for. This block discusses `vh`, `dvh` and `svh` by name.
+   */
+  const modalRule = (() => {
+    const at = css.indexOf(".modal-surface {");
+    expect(at).toBeGreaterThanOrEqual(0);
+    return css.slice(at, css.indexOf("\n}", at)).replace(/\/\*[\s\S]*?\*\//g, "");
+  })();
+
   it("caps and scrolls every panel from one place", () => {
     /* On the class itself, so the next modal written cannot be written without
        it. `.modal-surface` is unlayered CSS and Tailwind's utilities are
        layered, so this also wins over any per-panel utility. */
-    const rule = css.slice(css.indexOf(".modal-surface {"));
-    expect(rule).toMatch(/max-height:\s*calc\(100dvh - 2rem\)/);
-    expect(rule).toMatch(/overflow-y:\s*auto/);
+    expect(modalRule).toMatch(/max-height:\s*calc\(100svh - 2rem\)/);
+    expect(modalRule).toMatch(/overflow-y:\s*auto/);
   });
 
-  it("measures the viewport as it actually is, not as it could be", () => {
+  it("measures the viewport at its smallest, not at its largest", () => {
     /**
-     * `dvh`, never `vh`. On iOS `vh` is the LARGE viewport — the height with
-     * the toolbar hidden — so a panel at `90vh` still runs under Safari's
-     * toolbar whenever the toolbar is showing, which is most of the time.
+     * On iOS `vh` is the LARGE viewport — the height with the toolbar hidden —
+     * so a panel at `90vh` runs under Safari's toolbar whenever the toolbar is
+     * showing, which is most of the time. `dvh` is the viewport as it currently
+     * is, which is no better for a CAP: it grows when the toolbar collapses, so
+     * a panel sized to it is too tall the moment the toolbar returns.
+     *
+     * `svh` is the viewport with the chrome showing — the smallest it ever is —
+     * so the cap holds whatever the toolbar is doing.
      */
-    const rule = css.slice(css.indexOf(".modal-surface {"), css.indexOf(".modal-surface {") + 1200);
-    expect(rule).not.toMatch(/max-height:\s*calc\(100vh/);
+    expect(modalRule).not.toMatch(/max-height:\s*calc\(100vh/);
+    expect(modalRule).not.toMatch(/max-height:\s*calc\(100dvh/);
   });
 
   it("stops the page behind scrolling when the panel runs out", () => {
     /* Without this, reaching the end of a dialog starts dragging the board it
        is covering — on iOS that is how a modal ends up scrolling the page
        underneath it. */
-    const rule = css.slice(css.indexOf(".modal-surface {"));
-    expect(rule).toMatch(/overscroll-behavior:\s*contain/);
+    expect(modalRule).toMatch(/overscroll-behavior:\s*contain/);
+  });
+
+  it("renders every dialog outside whatever is claiming to be the viewport", () => {
+    /**
+     * `position: fixed` is the viewport only while no ancestor has made itself
+     * the containing block, and a TRANSFORM does that — including an identity
+     * one. Every page root in this app carries `animate-fade-up`, whose final
+     * keyframe leaves `matrix(1, 0, 0, 1, 0, 0)` sitting on the computed style
+     * long after the animation is over. `.card` does the same thing with
+     * `backdrop-filter`, and `<main>` with `container-type`.
+     *
+     * Reported on the inbox composer, measured at 393x850 with the list empty:
+     * the page root was 224px tall starting at y=84, so `inset-0` resolved to
+     * that box and a 510px panel centred inside it landed at y=-59. The title
+     * and the To field were above the top of the screen with no way to reach
+     * them — "Subject" was the first thing visible. Portalled, the same panel
+     * measures y=170, which is (850 - 510) / 2.
+     *
+     * A sweep rather than a fix, because the trap is invisible at the call
+     * site: the markup is identical either way and the damage depends on how
+     * tall the page happens to be. Twelve of the thirteen dialogs already did
+     * this; the thirteenth was written the obvious way.
+     */
+    for (const file of files) {
+      const src = readFileSync(file, "utf8");
+      const lines = src.split("\n");
+      lines.forEach((line, i) => {
+        if (!line.includes('role="dialog"')) return;
+        /* The portal call sits above the JSX it returns, so look back over the
+           enclosing return rather than at this line. */
+        const above = lines.slice(Math.max(0, i - 14), i + 1).join("\n");
+        const portalled = /createPortal\(|<Overlay>/.test(above);
+        /* AppShell renders the command palette as a sibling of <main>, outside
+           every page root, so nothing upstream of it has a transform. Verified
+           in the browser: it measures 0,0,393x850 on a 393x850 viewport. */
+        const outsideMain = file.includes("components/shell/");
+        expect(
+          portalled || outsideMain,
+          `${file}:${i + 1} renders a dialog inline — wrap it in <Overlay>`
+        ).toBe(true);
+      });
+    }
   });
 
   it("leaves no panel with a competing cap of its own", () => {

@@ -1166,12 +1166,25 @@ textarea.field-input {
      four that did used `vh`. On iOS `vh` is the LARGE viewport — the height
      with the browser toolbar hidden — so a panel at 90vh still runs underneath
      Safari's toolbar whenever the toolbar is showing, which is most of the
-     time. `dvh` is the viewport as it currently is.
+     time.
+
+     `svh` rather than `dvh`: dvh is the viewport as it currently is, which
+     GROWS when the toolbar collapses, so a panel sized to it is taller than the
+     screen the moment the toolbar comes back. svh is the viewport with the
+     chrome SHOWING — the smallest it ever is — so a panel capped to it fits
+     whatever the toolbar is doing. It costs a little height while the toolbar
+     is hidden, which is the safe direction for a dialog.
+
+     This cap is only about a panel TALLER than the screen. It is not what put
+     the compose modal's title above the top of the screen — that was a
+     transformed ancestor capturing `position: fixed`, and the fix for it is in
+     InboxView. Sizing alone cannot rescue a panel that is being centred inside
+     the wrong box.
 
      It lives here rather than on each panel so the next modal cannot be
      written without it. The 2rem allows for the p-4 gutter its wrapper uses.
   */
-  max-height: calc(100dvh - 2rem);
+  max-height: calc(100svh - 2rem);
   overflow-y: auto;
   /* Scrolling to the end of a modal should not then start dragging the page
      behind it, which on iOS is how a dialog ends up scrolling the board it is

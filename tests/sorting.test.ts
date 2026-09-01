@@ -78,10 +78,31 @@ describe("the shared control behaves", () => {
     "utf8"
   );
 
+  /**
+   * Dismissal and positioning moved into AnchoredMenu, which SortMenu now
+   * renders through. They are asserted here rather than dropped: they are the
+   * same guarantees, and a test deleted because its code moved is how a
+   * behaviour quietly stops being covered.
+   */
+  const MENU = readFileSync(
+    join(__dirname, "..", "src", "components", "ui", "AnchoredMenu.tsx"),
+    "utf8"
+  );
+
+  it("hands its positioning to the shared anchored menu", () => {
+    // An `absolute` menu is sliced off by the `.card` that every one of these
+    // lists lives in — it sets `overflow: hidden` for its rounded corners.
+    // Four lists use this control, so all four were losing rows.
+    expect(SRC).toMatch(/<AnchoredMenu anchor=\{anchor\}/);
+    expect(SRC).not.toMatch(/absolute right-0/);
+    expect(MENU).toMatch(/createPortal\(/);
+    expect(MENU).toMatch(/className="popover fixed/);
+  });
+
   it("closes on Escape, not only on a click elsewhere", () => {
     // A menu dismissable only by clicking outside is one a keyboard user
     // cannot close at all.
-    expect(SRC).toMatch(/e\.key === "Escape"/);
+    expect(MENU).toMatch(/e\.key === "Escape"/);
   });
 
   it("marks which option is current", () => {
@@ -98,7 +119,23 @@ describe("the shared control behaves", () => {
   it("removes its listeners when it closes", () => {
     // Four lists mounting a document listener each and never removing it is a
     // leak that grows with every navigation.
-    expect(SRC).toMatch(/removeEventListener\("mousedown"/);
-    expect(SRC).toMatch(/removeEventListener\("keydown"/);
+    expect(MENU).toMatch(/removeEventListener\("keydown"/);
+    expect(MENU).toMatch(/removeEventListener\("scroll"/);
+  });
+
+  it("closes on scroll rather than drifting away from its button", () => {
+    // Fixed to the viewport, it no longer moves with a scrolling parent — so
+    // left open it would sit still while its button slid out from under it.
+    // Capture phase, because the scroll happens inside the card, not on window.
+    expect(MENU).toMatch(/addEventListener\("scroll", onScroll, true\)/);
+  });
+
+  it("stays on screen on a narrow phone", () => {
+    // Right-aligned to its button is what a control at the end of a toolbar
+    // wants, and on a 393px screen that alone hangs it off the edge.
+    expect(MENU).toMatch(/Math\.min\(left, window\.innerWidth - width - margin\)/);
+    expect(MENU).toMatch(/Math\.max\(margin, left\)/);
+    // And flips above the button when there is no room below it.
+    expect(MENU).toMatch(/const flip = below < 160 && above > below/);
   });
 });

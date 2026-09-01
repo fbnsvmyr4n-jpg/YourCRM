@@ -43,8 +43,39 @@ describe("one way of slicing the inbox, not two", () => {
     expect(view).toMatch(/aria-label="Create new email"/);
     expect(view).toMatch(/setCategory\(category === c \? null : c\)/);
     /* And both are phone-only — the desktop header still carries them. */
-    expect(view).toMatch(/className="relative @min-\[720px\]:hidden"/);
+    expect(view).toMatch(/className="@min-\[720px\]:hidden"/);
     expect(view).toMatch(/rounded-full @min-\[720px\]:hidden"/);
+  });
+
+  it("opens the filter menu outside the card that would slice it", () => {
+    /**
+     * It used to be `absolute` inside a wrapper marked `relative`, and the
+     * wrapper sits in the list `.card` — which sets `overflow: hidden` to keep
+     * rows inside its rounded corners. Measured at 393x850 with the list empty:
+     * the card was 128px tall and the menu 230, so "All types" and half of
+     * "Appointments" were visible and the other five rows did not exist.
+     *
+     * The taller the list, the less often anyone notices, which is why it
+     * survived on the pages with real data in them.
+     */
+    expect(code).toMatch(/<AnchoredMenu anchor=\{filterAnchor\}/);
+    /* The `relative` wrapper went with it. Left behind it would do nothing and
+       still read as though the menu were positioned against it. */
+    expect(code).not.toMatch(/relative @min-\[720px\]:hidden/);
+    expect(code).not.toMatch(/absolute right-0 top-full/);
+  });
+
+  it("does not ask for a placeholder the field is too narrow to show", () => {
+    /**
+     * Two controls were added to this toolbar, and on his iPhone the search
+     * field measured 145px — "Search messages" rendered as "Search me". A
+     * truncated placeholder reads as a broken field rather than a short one.
+     *
+     * Measured on the toolbar rather than the window: the field's width is what
+     * the toolbar leaves it, and the sidebar makes those two different.
+     */
+    expect(code).toMatch(/narrowToolbar \? "Search" : "Search messages"/);
+    expect(code).toMatch(/useElementWidth\(toolbarRef\) < 720/);
   });
 
   it("still says what a category would return before you pick it", () => {

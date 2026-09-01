@@ -43,6 +43,8 @@ import {
 } from "@/data/inbox";
 import { clsx } from "@/lib/clsx";
 import { useElementWidth } from "@/lib/use-element-width";
+import { AnchoredMenu } from "@/components/ui/AnchoredMenu";
+import { Overlay } from "@/components/ui/Overlay";
 import { SortMenu } from "@/components/ui/SortMenu";
 import { useOpenFromQuery } from "@/lib/useOpenFromQuery";
 import {
@@ -452,16 +454,30 @@ function MessageList({
   onCompose: () => void;
 }) {
   const [filterOpen, setFilterOpen] = useState(false);
+  const [filterAnchor, setFilterAnchor] = useState<HTMLButtonElement | null>(null);
+  /*
+     The toolbar carries two more controls on a phone — the category filter and
+     Compose — which left the search field 145px wide. "Search messages" then
+     rendered as "Search me" on a real iPhone, whose metrics run slightly wider
+     than the ones measured here.
+
+     A shorter label rather than a truncated one, the same trade the app header
+     already makes. Measured off the element rather than the viewport, because
+     the two extra controls only exist below `@min-[720px]` and it is their
+     presence, not the screen size, that makes the field tight.
+  */
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const narrowToolbar = useElementWidth(toolbarRef) < 720;
   return (
     <div className={clsx("card flex min-h-0 flex-col overflow-hidden p-3", className)}>
-      <div className="mb-2 flex items-center gap-2">
+      <div ref={toolbarRef} className="mb-2 flex items-center gap-2">
         <div className="flex flex-1 items-center gap-2 rounded-xl border border-[var(--border)] px-3 py-2">
         <Search className="h-4 w-4 shrink-0 text-faint" />
         {/* Was a decorative input wired to nothing. */}
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search messages"
+          placeholder={narrowToolbar ? "Search" : "Search messages"}
           className="field-bare"
         />
         {query && (
@@ -480,8 +496,9 @@ function MessageList({
             arrangement the Contacts list uses — search, sort, filter, then the
             accent primary action.
         */}
-        <div className="relative @min-[720px]:hidden">
+        <div className="@min-[720px]:hidden">
           <button
+            ref={setFilterAnchor}
             type="button"
             onClick={() => setFilterOpen((v) => !v)}
             aria-expanded={filterOpen}
@@ -494,50 +511,42 @@ function MessageList({
           >
             <Filter className="h-4 w-4" />
           </button>
-          {filterOpen && (
-            <>
-              {/* Click-away, so the sheet does not need a close button. */}
-              <button
-                className="fixed inset-0 z-20 cursor-default"
-                aria-label="Close filter"
-                onClick={() => setFilterOpen(false)}
-              />
-              <div className="popover absolute right-0 top-full z-30 mt-2 w-56 overflow-hidden p-1.5">
+          {/* Portalled, like the sort menu beside it — the list card clips
+              anything absolutely positioned inside it. */}
+          <AnchoredMenu anchor={filterAnchor} open={filterOpen} onClose={() => setFilterOpen(false)}>
+            <button
+              onClick={() => { setCategory(null); setFilterOpen(false); }}
+              className={clsx(
+                "focus-ring flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm",
+                category === null ? "text-accent" : "text-muted hover:bg-[var(--raise)]"
+              )}
+            >
+              All types
+            </button>
+            {categories.map((c) => {
+              const meta = CHIP_META[c];
+              const Icon = meta.icon;
+              const n = counts[c];
+              return (
                 <button
-                  onClick={() => { setCategory(null); setFilterOpen(false); }}
+                  key={c}
+                  onClick={() => { setCategory(category === c ? null : c); setFilterOpen(false); }}
+                  /* Nothing to show is not worth a tap, and saying so is better
+                     than a row that silently returns an empty list. */
+                  disabled={n === 0 && category !== c}
                   className={clsx(
-                    "focus-ring flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm",
-                    category === null ? "text-accent" : "text-muted hover:bg-[var(--raise)]"
+                    "focus-ring flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm",
+                    category === c ? "bg-[var(--raise)]" : "hover:bg-[var(--raise)]",
+                    n === 0 && category !== c && "opacity-45"
                   )}
                 >
-                  All types
+                  <Icon className="h-4 w-4 shrink-0" style={{ color: meta.tone }} />
+                  <span className="min-w-0 flex-1 truncate text-left">{c}</span>
+                  <span className="text-xs text-faint">{n}</span>
                 </button>
-                {categories.map((c) => {
-                  const meta = CHIP_META[c];
-                  const Icon = meta.icon;
-                  const n = counts[c];
-                  return (
-                    <button
-                      key={c}
-                      onClick={() => { setCategory(category === c ? null : c); setFilterOpen(false); }}
-                      /* Nothing to show is not worth a tap, and saying so is
-                         better than a row that silently returns an empty list. */
-                      disabled={n === 0 && category !== c}
-                      className={clsx(
-                        "focus-ring flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm",
-                        category === c ? "bg-[var(--raise)]" : "hover:bg-[var(--raise)]",
-                        n === 0 && category !== c && "opacity-45"
-                      )}
-                    >
-                      <Icon className="h-4 w-4 shrink-0" style={{ color: meta.tone }} />
-                      <span className="min-w-0 flex-1 truncate text-left">{c}</span>
-                      <span className="text-xs text-faint">{n}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </>
-          )}
+              );
+            })}
+          </AnchoredMenu>
         </div>
         <button
           type="button"
@@ -1101,7 +1110,17 @@ function ComposeModal({
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  /* Portalled, like every other overlay in this app. This composer is written
+     inside the page root, and that root carries `animate-fade-up` — whose final
+     keyframe leaves an identity `transform` on the computed style. An identity
+     transform still makes an element the containing block for `position: fixed`,
+     so `inset-0` resolved to the page root rather than to the window. Measured
+     at 393x850 with the list empty: the root was 224px tall starting at y=84, so
+     a 510px panel centred inside it landed at y=-59 — the title and the To field
+     above the top of the screen, "Subject" the first thing visible. Exactly what
+     the recording showed. */
   return (
+    <Overlay>
     <div className="fixed inset-0 z-50 grid place-items-center p-4" role="dialog" aria-modal="true">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       {/* Opaque — see the note on `.modal-surface`. */}
@@ -1162,5 +1181,6 @@ function ComposeModal({
         </div>
       </form>
     </div>
+    </Overlay>
   );
 }

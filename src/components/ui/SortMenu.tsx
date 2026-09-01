@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { ArrowUpDown, Check } from "lucide-react";
 import { clsx } from "@/lib/clsx";
+import { AnchoredMenu } from "./AnchoredMenu";
 
 /**
  * The sort control, once.
@@ -36,31 +37,16 @@ export function SortMenu<T extends string>({
   label?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    // Escape as well as a click outside. A menu that can only be dismissed by
-    // clicking elsewhere is one a keyboard user cannot close at all.
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
+  /* The button itself is the anchor, so the menu is positioned from where it
+     actually is rather than from a wrapper that may be laid out elsewhere. */
+  const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
 
   const active = value !== defaultId;
 
   return (
-    <div ref={ref} className="relative">
+    <>
       <button
+        ref={setAnchor}
         type="button"
         onClick={() => setOpen((o) => !o)}
         title={label}
@@ -78,32 +64,27 @@ export function SortMenu<T extends string>({
         <ArrowUpDown className="h-4 w-4" />
       </button>
 
-      {open && (
-        <div
-          role="menu"
-          className="absolute right-0 top-11 z-20 w-52 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--panel-solid)] py-1 shadow-lg"
-        >
-          {options.map((o) => (
-            <button
-              key={o.id}
-              type="button"
-              role="menuitemradio"
-              aria-checked={value === o.id}
-              onClick={() => {
-                onChange(o.id);
-                setOpen(false);
-              }}
-              className={clsx(
-                "flex w-full items-center justify-between px-3.5 py-2 text-left text-sm transition-colors hover:bg-[var(--surface-2)]",
-                value === o.id && "text-accent"
-              )}
-            >
-              {o.label}
-              {value === o.id && <Check className="h-3.5 w-3.5" />}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
+      <AnchoredMenu anchor={anchor} open={open} onClose={() => setOpen(false)} width={208}>
+        {options.map((o) => (
+          <button
+            key={o.id}
+            type="button"
+            role="menuitemradio"
+            aria-checked={value === o.id}
+            onClick={() => {
+              onChange(o.id);
+              setOpen(false);
+            }}
+            className={clsx(
+              "flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-[var(--raise)]",
+              value === o.id && "text-accent"
+            )}
+          >
+            {o.label}
+            {value === o.id && <Check className="h-3.5 w-3.5" />}
+          </button>
+        ))}
+      </AnchoredMenu>
+    </>
   );
 }
