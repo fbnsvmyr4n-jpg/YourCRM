@@ -97,6 +97,7 @@ export function InboxView({
   contactFor,
   channelFor,
   people,
+  recent,
 }: {
   messages: Message[];
   contactFor: Record<string, string>;
@@ -104,6 +105,8 @@ export function InboxView({
   channelFor: Record<string, ContactChannel>;
   /** Contacts and leads, so addressing a new email is recognition, not recall. */
   people: Person[];
+  /** Most recently corresponded with, newest first — offered before typing. */
+  recent: Person[];
 }) {
   const [filter, setFilter] = useState<InboxFilter>("All");
   const [category, setCategory] = useState<MsgCategory | null>(null);
@@ -380,6 +383,7 @@ export function InboxView({
             key={selected.id}
             message={selected}
             people={people}
+            recent={recent}
             busy={busy}
             onTrash={() => handleTrash(selected.id)}
             onRestore={() => handleRestore(selected.id)}
@@ -413,7 +417,7 @@ export function InboxView({
       </div>
 
       {composeOpen && (
-        <ComposeModal people={people} busy={busy} onClose={() => setComposeOpen(false)} onSubmit={handleCompose} />
+        <ComposeModal people={people} recent={recent} busy={busy} onClose={() => setComposeOpen(false)} onSubmit={handleCompose} />
       )}
     </div>
   );
@@ -611,6 +615,7 @@ function TimeAgoShort({ at }: { at: string }) {
 function Reader({
   message,
   people,
+  recent,
   busy,
   onTrash,
   onRestore,
@@ -619,6 +624,7 @@ function Reader({
 }: {
   message: Message;
   people: Person[];
+  recent: Person[];
   busy: boolean;
   onTrash: () => void;
   onRestore: () => void;
@@ -635,6 +641,7 @@ function Reader({
   const [forwardTo, setForwardTo] = useState("");
 
   const addressable = useMemo(() => addressablePeople(people), [people]);
+  const addressableRecent = useMemo(() => addressablePeople(recent), [recent]);
 
   async function submit(formData: FormData) {
     setSending(true);
@@ -770,6 +777,7 @@ function Reader({
                   onChange={setForwardTo}
                   onPick={(p) => setForwardTo(p.email)}
                   people={addressable}
+                  recent={addressableRecent}
                   placeholder="Name or email address"
                   autoFocus
                   describe={(p) => p.email}
@@ -1113,11 +1121,13 @@ function InteractionCard({ dotColor, title, at }: { dotColor: string; title: str
 
 function ComposeModal({
   people,
+  recent,
   busy,
   onClose,
   onSubmit,
 }: {
   people: Person[];
+  recent: Person[];
   busy: boolean;
   onClose: () => void;
   onSubmit: (formData: FormData) => void | Promise<void>;
@@ -1125,6 +1135,7 @@ function ComposeModal({
   const [to, setTo] = useState("");
 
   const addressable = useMemo(() => addressablePeople(people), [people]);
+  const addressableRecent = useMemo(() => addressablePeople(recent), [recent]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -1170,6 +1181,7 @@ function ComposeModal({
               onChange={setTo}
               onPick={(p) => setTo(p.email)}
               people={addressable}
+              recent={addressableRecent}
               placeholder="Name or email address"
               autoFocus
               describe={(p) => p.email}

@@ -17,7 +17,7 @@ const SOURCE_LABEL: Record<string, ContactChannel> = {
 };
 
 export default async function InboxPage() {
-  const { messages, contactFor, channelFor, people } = await withTenantPage(async (q) => {
+  const { messages, contactFor, channelFor, people, recent } = await withTenantPage(async (q) => {
     // Trash is a folder, so the page reads every message and lets the view
     // filter — the repo's folder predicates back the counts and the tabs.
     const [inbox, sent, trash] = [
@@ -70,15 +70,67 @@ export default async function InboxPage() {
       channelFor[m.id] = (source && SOURCE_LABEL[source]) || "Email";
     }
 
+    /**
+     * Who has been written to or heard from most recently.
+     *
+     * A real signal rather than a guess: the newest message carrying each
+     * contact's id, read from the mail already on this page. It orders the
+     * whole address book, so an ambiguous query lands on the person actually
+     * being corresponded with, and it supplies the short list the To field
+     * offers before anything has been typed.
+     *
+     * Contacts with no mail keep their existing order behind the ones that
+     * have it — they are still findable by typing, just not proposed as
+     * "recent", which for them would be false.
+     */
+    const lastMessageAt = new Map<string, number>();
+    for (const m of rows) {
+      if (!m.contactId || !m.sentAt) continue;
+      const at = new Date(m.sentAt).getTime();
+      if (Number.isNaN(at)) continue;
+      const seen = lastMessageAt.get(m.contactId);
+      if (seen === undefined || at > seen) lastMessageAt.set(m.contactId, at);
+    }
+
+    const ordered = [...senders]
+      .map((s, i) => ({ s, i, at: lastMessageAt.get(s.id) }))
+      .sort((a, b) => {
+        if (a.at !== undefined && b.at !== undefined) return b.at - a.at;
+        /* Anyone messaged outranks anyone not, whatever the list order. */
+        if (a.at !== undefined) return -1;
+        if (b.at !== undefined) return 1;
+        return a.i - b.i;
+      });
+
+    const asPerson = (s: (typeof senders)[number]) => ({
+      name: s.name,
+      company: s.info ?? "",
+      email: s.email ?? "",
+    });
+
+    const addressBook = ordered.map(({ s }) => asPerson(s));
+    /* Only people there is actually a message with, and only those reachable —
+       proposing someone with no address produces a mail that cannot be sent. */
+    const recentPeople = ordered
+      .filter(({ at, s }) => at !== undefined && s.email)
+      .map(({ s }) => asPerson(s));
+
     return {
       messages: rows.map((m) => decorateMessage(m, senders)),
       contactFor,
       channelFor,
-      people: senders.map((s) => ({ name: s.name, company: s.info ?? "", email: s.email ?? "" })),
+      people: addressBook,
+      recent: recentPeople,
     };
   });
 
   return (
-    <InboxView messages={messages} contactFor={contactFor} channelFor={channelFor} people={people} />
+    <InboxView
+      messages={messages}
+      contactFor={contactFor}
+      channelFor={channelFor}
+      people={people}
+      recent={recent}
+    />
   );
 }

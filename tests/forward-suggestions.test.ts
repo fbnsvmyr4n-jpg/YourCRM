@@ -119,17 +119,17 @@ describe("the forward field suggests people", () => {
 
 describe("the shared field it now uses", () => {
   it("matches on name, company and email", () => {
-    // Verified in the browser against real records: "steyn" found Kobus Steyn
-    // by surname, "landscap" found Amara Dube by her company, and "glass"
-    // found two people by theirs.
-    expect(field).toMatch(/p\.name\.toLowerCase\(\)\.includes\(q\)/);
-    expect(field).toMatch(/p\.company\.toLowerCase\(\)\.includes\(q\)/);
-    expect(field).toMatch(/p\.email\.toLowerCase\(\)\.includes\(q\)/);
-  });
-
-  it("caps the list so it cannot bury the form under itself", () => {
-    // Typing one common letter matches most of a real contact book.
-    expect(field).toMatch(/\.slice\(0, 6\)/);
+    /**
+     * Verified in the browser against real records: "steyn" found Kobus Steyn
+     * by surname, "landscap" found Amara Dube by her company, and "glass" found
+     * two people by theirs.
+     *
+     * The matching itself moved into `matchPeople`, which is pure and is tested
+     * on its behaviour in person-search.test.ts. Asserted here only that this
+     * field still goes through it — a field that stopped calling it would pass
+     * every check made against the matcher alone.
+     */
+    expect(field).toMatch(/matchPeople\(people, q\)/);
   });
 
   it("can be driven from the keyboard", () => {

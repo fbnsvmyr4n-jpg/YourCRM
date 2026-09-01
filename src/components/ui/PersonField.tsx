@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { Search } from "lucide-react";
 import { clsx } from "@/lib/clsx";
 import { useAnchoredPosition } from "@/lib/use-anchored-position";
+import { matchPeople } from "@/lib/person-search";
 
 /** Someone the CRM already knows — a contact or a lead. */
 export type Person = { name: string; company: string; email: string };
@@ -44,6 +45,7 @@ export function PersonField({
   onChange,
   onPick,
   people,
+  recent = [],
   placeholder = "Contact name or company…",
   autoFocus,
   describe,
@@ -52,12 +54,28 @@ export function PersonField({
   onChange: (v: string) => void;
   onPick: (p: Person) => void;
   people: Person[];
+  /**
+   * Who to offer before anything has been typed, best first. Optional: a caller
+   * with no real ordering to give passes nothing and the list stays closed
+   * until the reader types, which is what this field always did.
+   */
+  recent?: Person[];
   placeholder?: string;
   autoFocus?: boolean;
   /** Second line of each suggestion. Defaults to the person's company. */
   describe?: (p: Person) => string;
 }) {
-  const [open, setOpen] = useState(false);
+  /**
+   * Open from the start when this field takes focus on its own.
+   *
+   * `autoFocus` focuses the input during mount, which fires no focus event any
+   * handler here can see — so the one case that matters most looked broken:
+   * tapping New Email put the cursor in To with nothing offered, and the
+   * suggestions only appeared if the reader tapped the field they were already
+   * typing in. Measured with the recents working: list absent on open, present
+   * after a blur and a real re-focus.
+   */
+  const [open, setOpen] = useState(Boolean(autoFocus));
   const [highlight, setHighlight] = useState(0);
   const boxRef = useRef<HTMLDivElement | null>(null);
   /* The list is portalled out of the field, so it is no longer inside `boxRef`
@@ -70,17 +88,21 @@ export function PersonField({
   // the role without ever being able to reach the options.
   const listId = useId();
 
-  const q = value.trim().toLowerCase();
-  const matches = q
-    ? people
-        .filter(
-          (p) =>
-            p.name.toLowerCase().includes(q) ||
-            p.company.toLowerCase().includes(q) ||
-            p.email.toLowerCase().includes(q)
-        )
-        .slice(0, 6)
-    : [];
+  const q = value.trim();
+  /**
+   * Before anything is typed, the people most recently written to.
+   *
+   * The field used to show nothing until the first keystroke, so finding
+   * someone meant already knowing how they are spelled — the reader had to
+   * supply the answer before the field would help them look for it. Most mail
+   * goes to somebody recently corresponded with, and those are already known.
+   *
+   * Only when the caller has a real ordering to offer. An empty `recent` shows
+   * nothing rather than the first few contacts a query happened to return,
+   * which would be a "recent" list that was nothing of the kind.
+   */
+  const matches = q ? matchPeople(people, q) : recent.slice(0, 5);
+  const showingRecent = !q && matches.length > 0;
 
   // Click-away, so the list can't be left stranded over whatever is below it.
   useEffect(() => {
@@ -158,6 +180,16 @@ export function PersonField({
             style={{ top: pos.top, bottom: pos.bottom, left: pos.left, width: pos.width, maxHeight: pos.maxHeight }}
             role="listbox"
           >
+          {/* Said out loud, because an unlabelled list of names appearing under
+              an empty field reads as a search result for nothing typed. */}
+          {showingRecent && (
+            <li
+              aria-hidden
+              className="px-3 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wider text-faint"
+            >
+              Recent
+            </li>
+          )}
           {matches.map((p, i) => {
             const sub = secondary(p);
             return (
