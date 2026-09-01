@@ -115,6 +115,46 @@ describe("swiping a message away", () => {
     expect(swipe).not.toMatch(/const settled = dx <= -COMMIT/);
   });
 
+  it("keeps receiving the gesture as the row moves out from under the finger", () => {
+    /**
+     * Without pointer capture, pointer events go to whatever is under the
+     * finger at the time — and this row is MOVING under the finger, so
+     * `pointerup` can land on a different element and never arrive here. The
+     * drag then never ends: `dragging` stays true, which keeps the bin on
+     * screen, while `open` is never set.
+     *
+     * Seen on an iPhone recording. The row showed the bin and the next tap
+     * opened the message, with no confirmation in between — the row looked
+     * swiped and behaved as though it was not.
+     */
+    expect(swipe).toMatch(/setPointerCapture\?\.\(e\.pointerId\)/);
+    expect(swipe).toMatch(/releasePointerCapture\(e\.pointerId\)/);
+  });
+
+  it("never leaves a bin over a row that still opens the message", () => {
+    /**
+     * The second half of the same defect, and the one that made it harmful.
+     * Gating the row's guard on `open` alone meant a drag that never ended
+     * showed a delete button over a row whose tap still opened the message.
+     * Whenever the bin is visible for ANY reason, tapping the row closes it.
+     *
+     * Reproduced by dispatching a swipe with no `pointerup` at all: the bin
+     * appears and the guard now appears with it.
+     */
+    const bin = swipe.indexOf("{(dragging || open) && (");
+    const guard = swipe.indexOf("{(dragging || open) && (", bin + 1);
+    expect(bin).toBeGreaterThanOrEqual(0);
+    expect(guard).toBeGreaterThan(bin);
+    expect(swipe).not.toMatch(/\{open && \(\s*\n\s*<button\s*\n\s*type="button"\s*\n\s*aria-label="Close delete"/);
+  });
+
+  it("makes the whole red strip the target, not an icon floating in it", () => {
+    /* A tap that lands in the red area but beside the icon should still delete.
+       Verified 10px inside the strip, well off the icon: it hit the bin and
+       raised the confirmation rather than opening the message. */
+    expect(swipe).toMatch(/aria-label=\{`Delete \$\{label\}`\}[\s\S]{0,240}?absolute inset-y-0 right-0 grid w-\[84px\]/);
+  });
+
   it("shows the bin only on the row being swiped", () => {
     /**
      * Message rows have no background of their own, so a bin mounted behind

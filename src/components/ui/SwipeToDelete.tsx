@@ -57,6 +57,20 @@ export function SwipeToDelete({
 
   function onPointerDown(e: React.PointerEvent) {
     if (e.pointerType === "mouse") return;
+    /**
+     * Capture, or the release can be delivered somewhere else.
+     *
+     * Without this, pointer events go to whatever is under the finger at the
+     * time — and this row is MOVING under the finger, so `pointerup` can land
+     * on a different element and never reach this handler. The drag then never
+     * ends: `dragging` stays true, which keeps the bin on screen, while `open`
+     * is never set. The row looks swiped and behaves as though it is not, so
+     * the next tap opens the message instead of deleting it.
+     *
+     * Seen on an iPhone recording — the bin was showing and the tap opened the
+     * message, with no confirmation in between.
+     */
+    e.currentTarget.setPointerCapture?.(e.pointerId);
     start.current = { x: e.clientX, y: e.clientY };
     horizontal.current = null;
   }
@@ -85,7 +99,10 @@ export function SwipeToDelete({
     setDx(next);
   }
 
-  function onPointerUp() {
+  function onPointerUp(e: React.PointerEvent) {
+    if (e.currentTarget.hasPointerCapture?.(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
     if (start.current && horizontal.current) {
       const settled = dxRef.current <= -COMMIT;
       setOpen(settled);
@@ -113,21 +130,25 @@ export function SwipeToDelete({
           Only while the row is actually moving. Message rows have no background
           of their own, so a bin left mounted behind every row showed THROUGH
           all of them: the first swipe test put a red bin on every message in
-          the list, including the ones nobody had touched. */}
+          the list, including the ones nobody had touched.
+
+          The whole revealed strip is the button, not a 44px target floating in
+          it: a tap that lands in the red area but beside the icon should still
+          delete, and anything else is a control that looks bigger than it is. */}
       {(dragging || open) && (
-      <div className="absolute inset-y-0 right-0 flex w-[84px] items-center justify-center">
-        <button
-          type="button"
-          aria-label={`Delete ${label}`}
-          onClick={() => {
-            close();
-            onDelete();
-          }}
-          className="focus-ring grid h-11 w-11 place-items-center rounded-xl bg-[var(--red)] text-white"
-        >
+      <button
+        type="button"
+        aria-label={`Delete ${label}`}
+        onClick={() => {
+          close();
+          onDelete();
+        }}
+        className="focus-ring absolute inset-y-0 right-0 grid w-[84px] place-items-center"
+      >
+        <span className="grid h-11 w-11 place-items-center rounded-xl bg-[var(--red)] text-white">
           <Trash2 className="h-5 w-5" />
-        </button>
-      </div>
+        </span>
+      </button>
       )}
 
       <div
@@ -146,9 +167,11 @@ export function SwipeToDelete({
           !dragging && "transition-transform duration-200 ease-out"
         )}
       >
-        {/* A tap on an open row puts it back rather than opening the message —
-            the same thing every list with this gesture does. */}
-        {open && (
+        {/* A tap on the row puts it back rather than opening the message,
+            whenever the bin is showing for ANY reason — settled open, or still
+            mid-drag. Gating this on `open` alone is what let a stuck drag show
+            a bin over a row that still opened the message when tapped. */}
+        {(dragging || open) && (
           <button
             type="button"
             aria-label="Close delete"
