@@ -155,6 +155,23 @@ describe("swiping a message away", () => {
     expect(swipe).toMatch(/aria-label=\{`Delete \$\{label\}`\}[\s\S]{0,240}?absolute inset-y-0 right-0 grid w-\[84px\]/);
   });
 
+  it("does not shrink the row it wraps", () => {
+    /**
+     * The row is a <button>, which is inline-block and therefore sizes to its
+     * TEXT. As a direct child of the list's flex column it was stretched to
+     * full width for free; wrapping it took that away, and the bordered card
+     * came up short of the panel with a gap down its right-hand side.
+     *
+     * Reported from a phone recording as the borders being cut short. Measured
+     * at 393px after: the row runs 33→360, flush with the toolbar above it,
+     * where the panel's inner edge is.
+     *
+     * A grid parent stretches its child by default, and does it for whatever
+     * this wraps rather than relying on every caller to remember `w-full`.
+     */
+    expect(swipe).toMatch(/"relative grid"/);
+  });
+
   it("shows the bin only on the row being swiped", () => {
     /**
      * Message rows have no background of their own, so a bin mounted behind

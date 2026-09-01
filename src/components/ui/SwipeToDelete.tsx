@@ -160,7 +160,14 @@ export function SwipeToDelete({
            this the browser claims the gesture and the row never moves. */
         style={{ transform: `translateX(${offset}px)`, touchAction: "pan-y" }}
         className={clsx(
-          "relative",
+          /* `grid`, not `block`. The row it wraps is a <button>, which is
+             inline-block and therefore sizes to its TEXT. As a direct child of
+             the list's flex column it was stretched to full width for free;
+             wrapping it took that away, and the bordered card came up short of
+             the panel with a gap down its right-hand side. A grid parent
+             stretches its child by default, and does it for whatever this
+             wraps rather than relying on the caller to add `w-full`. */
+          "relative grid",
           /* Animated only when settling. Following a finger has to be exact,
              and a transition during the drag is what makes a swipe feel like it
              is lagging behind the hand. */
