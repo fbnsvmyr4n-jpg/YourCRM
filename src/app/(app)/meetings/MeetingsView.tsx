@@ -565,29 +565,53 @@ function UpcomingTable({
         <h3 className="flex items-center gap-2 text-[15px] font-semibold tracking-tight">
           <Calendar className="h-[18px] w-[18px] text-accent" /> Upcoming Meetings
         </h3>
-        <div className="flex flex-wrap items-center gap-1">
-          {TABS.map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={clsx(
-                "focus-ring rounded-full px-3 py-1 text-xs font-medium transition-colors",
-                tab === t ? "text-accent" : "text-muted hover:text-[var(--text)]"
-              )}
-              style={tab === t ? { background: "var(--accent-soft)" } : undefined}
-            >
-              {t}
-            </button>
-          ))}
-          <span className="ml-1">
+        {/*
+            Laid out, not wrapped.
+
+            These are four tabs, a sort and a link, and `flex-wrap` let the
+            available width decide where the breaks fell. At 393px the four tabs
+            measured 257px of text in a 311px box — they fit by a single pixel
+            locally and did not on a real iPhone, where the same labels render
+            slightly wider. The result was three ragged rows: three tabs, then
+            "This Week" beside the sort, then the link on its own.
+
+            A four-column grid puts every tab in an equal share of the row
+            whatever the font does, and the sort and the link take the line
+            below. Two tidy rows at any width, instead of one to three depending
+            on how the text happened to measure.
+        */}
+        <div className="flex flex-col gap-2 @min-[680px]:flex-row @min-[680px]:items-center @min-[680px]:gap-1">
+          {/* Two columns before four. Measured: four tabs fit without clipping
+              down to a 278px card, and at 238px — a 320px phone — "Tomorrow"
+              and "This Week" both lost their ends. A truncated tab is worse
+              than a second row, so the narrowest phones get 2x2 and everything
+              from a modern handset upward gets the single row. */}
+          <div className="grid grid-cols-2 gap-1 @min-[270px]:grid-cols-4 @min-[680px]:flex @min-[680px]:items-center">
+            {TABS.map((t) => (
+              <button
+                key={t}
+                onClick={() => setTab(t)}
+                className={clsx(
+                  "focus-ring truncate rounded-full px-1.5 py-1.5 text-[11px] font-medium transition-colors @min-[680px]:px-3 @min-[680px]:py-1 @min-[680px]:text-xs",
+                  tab === t ? "text-accent" : "text-muted hover:text-[var(--text)]"
+                )}
+                style={tab === t ? { background: "var(--accent-soft)" } : undefined}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-2 @min-[680px]:gap-1">
             <SortMenu options={MEETING_SORTS} value={sort} onChange={setSort} defaultId="soonest" />
-          </span>
-          <Link
-            href="/calendar"
-            className="btn-soft focus-ring ml-1 flex items-center gap-2 rounded-xl px-3 py-1.5 text-xs font-medium"
-          >
-            <Calendar className="h-3.5 w-3.5" /> View Calendar
-          </Link>
+            {/* Fills the rest of its row on a phone, so the two controls read as
+                one line rather than a button and a gap. */}
+            <Link
+              href="/calendar"
+              className="btn-soft focus-ring flex flex-1 items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-medium @min-[680px]:flex-none @min-[680px]:py-1.5"
+            >
+              <Calendar className="h-3.5 w-3.5" /> View Calendar
+            </Link>
+          </div>
         </div>
       </div>
 

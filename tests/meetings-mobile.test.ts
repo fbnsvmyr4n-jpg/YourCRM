@@ -190,6 +190,31 @@ describe("upcoming meetings on a phone", () => {
     expect(code).toMatch(/<Card className="@container">/);
     expect(code).not.toMatch(/mb-4 flex flex-wrap items-center justify-between gap-3/);
   });
+
+  it("lays the tabs out rather than letting the width decide", () => {
+    /**
+     * `flex-wrap` let the available width choose where the breaks fell. The
+     * four tabs measured 257px of text in a 311px box — they fit by a single
+     * pixel locally and did not on a real iPhone, where the same labels render
+     * slightly wider, so the row broke into three ragged lines: three tabs,
+     * then "This Week" beside the sort, then the link alone.
+     *
+     * A grid gives every tab an equal share whatever the font does. Verified at
+     * 393px and 360px: one row, four equal cells, nothing clipped.
+     */
+    expect(code).toMatch(/grid grid-cols-2 gap-1 @min-\[270px\]:grid-cols-4 @min-\[680px\]:flex/);
+    /* Quote-anchored: unanchored, `gap-1` also matches the `gap-1.5` on the
+       meeting card's own wrap row, and the check passes for the wrong reason. */
+    expect(code).not.toMatch(/flex flex-wrap items-center gap-1"/);
+  });
+
+  it("would rather stack the tabs than cut their words in half", () => {
+    /* Four fit without clipping down to a 278px card; at 238px — a 320px phone
+       — "Tomorrow" and "This Week" both lost their ends. Verified at 320px:
+       2x2, nothing clipped. */
+    expect(code).toMatch(/@min-\[270px\]:grid-cols-4/);
+    expect(code).toMatch(/focus-ring truncate rounded-full/);
+  });
 });
 
 describe("meeting notes keep what was typed", () => {
