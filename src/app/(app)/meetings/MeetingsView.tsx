@@ -21,11 +21,12 @@ import {
 import Link from "next/link";
 import { Avatar } from "@/components/ui/Avatar";
 import { Card } from "@/components/ui/Card";
-import { PersonField, type Person } from "@/components/ui/PersonField";
+import { PersonField, addressablePeople, type Person } from "@/components/ui/PersonField";
 import { clsx } from "@/lib/clsx";
 import { SortMenu } from "@/components/ui/SortMenu";
 import { shortDate } from "@/components/meetings/WorkloadCapacity";
 import { useTextDraft } from "@/lib/use-draft";
+import { SuggestInput } from "@/components/ui/SuggestInput";
 import { minutesOfDay, parseTime, toDisplayTime } from "@/lib/time";
 import {
   LOSS_REASONS,
@@ -1003,6 +1004,28 @@ function Scheduler({
   );
 
   const [online, setOnline] = useState(true);
+  /**
+   * What this account has actually used before.
+   *
+   * Read from the meetings already on the page — no new query, and nothing
+   * invented: an account with no history offers nothing rather than examples
+   * somebody might take for real records. Newest first, because the useful
+   * answer to "what do I put here" is almost always the last one.
+   */
+  const history = useMemo(() => {
+    const byNewest = [...meetings].sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
+    return {
+      topics: byNewest.map((m) => m.topic).filter((t): t is string => Boolean(t && t.trim())),
+      links: byNewest.map((m) => m.link).filter((l): l is string => Boolean(l && l.trim())),
+      /* Only addresses that could receive a change notice. */
+      emails: addressablePeople(people).map((pp) => pp.email),
+      /* Who was met most recently, offered before anything is typed. */
+      recent: byNewest
+        .map((m) => people.find((pp) => pp.name === m.name))
+        .filter((pp): pp is Person => Boolean(pp)),
+    };
+  }, [meetings, people]);
+
   const [connected, setConnected] = useState(true);
   const [view, setView] = useState({ year: today.year, month: today.month });
   const [selected, setSelected] = useState<DayRef>(today);
@@ -1105,26 +1128,31 @@ function Scheduler({
               if (p.email) setEmail(p.email);
             }}
             people={people}
+            recent={history.recent}
           />
-          <input
+          <SuggestInput
             value={topic}
-            onChange={(e) => setTopic(e.target.value)}
+            onChange={setTopic}
+            options={history.topics}
             placeholder="Meeting topic (optional)"
-            className="field-input"
+            ariaLabel="Meeting topic"
           />
-          <input
+          <SuggestInput
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={setEmail}
+            options={history.emails}
             type="email"
             placeholder="Participant email (for change notices)"
-            className="field-input"
+            ariaLabel="Participant email"
           />
           {online && (
-            <input
+            <SuggestInput
               value={link}
-              onChange={(e) => setLink(e.target.value)}
+              onChange={setLink}
+              options={history.links}
+              type="url"
               placeholder="Meeting link (opened from the table)"
-              className="field-input"
+              ariaLabel="Meeting link"
             />
           )}
         </div>

@@ -60,3 +60,43 @@ export function matchPeople(people: Person[], query: string, limit = 6): Person[
     .slice(0, limit)
     .map((x) => x.p);
 }
+
+/**
+ * The same idea for a plain list of strings.
+ *
+ * The meeting form has three free-text boxes — topic, participant email and
+ * meeting link — and every one of them is usually something typed before. A
+ * topic repeats across a week of follow-ups, a link is normally the one
+ * standing room, and an address belongs to somebody already on file.
+ *
+ * Case-insensitive, every typed word must appear, and a value that STARTS with
+ * what was typed ranks above one that merely contains it — so two letters reach
+ * the thing meant rather than the first match in insertion order. Duplicates
+ * are dropped: the same topic used ten times is one suggestion, not ten.
+ */
+export function matchStrings(options: readonly string[], query: string, limit = 6): string[] {
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const o of options) {
+    const key = o.trim().toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    unique.push(o.trim());
+  }
+
+  const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  /* An empty query offers the list as it stands — for these fields that is the
+     useful thing, since "what did I use last time" is the whole question. */
+  if (terms.length === 0) return unique.slice(0, limit);
+
+  const first = terms[0];
+  return unique
+    .filter((o) => {
+      const hay = o.toLowerCase();
+      return terms.every((t) => hay.includes(t));
+    })
+    .map((o, i) => ({ o, r: o.toLowerCase().startsWith(first) ? 0 : 1, i }))
+    .sort((a, b) => a.r - b.r || a.i - b.i)
+    .slice(0, limit)
+    .map((x) => x.o);
+}
