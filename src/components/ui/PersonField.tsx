@@ -1,11 +1,29 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Search } from "lucide-react";
 import { clsx } from "@/lib/clsx";
+import { useAnchoredPosition } from "@/lib/use-anchored-position";
 
 /** Someone the CRM already knows — a contact or a lead. */
 export type Person = { name: string; company: string; email: string };
+
+/**
+ * Only the people you can actually reach.
+ *
+ * A lead captured from a phone call often has no email address, and offering
+ * one as a suggestion where a message is being addressed produces something
+ * that cannot be sent — the reader picks a name, the field fills with nothing,
+ * and the failure arrives at submit with no explanation.
+ *
+ * Here rather than at each call site: the composer and the forward field both
+ * address a message, and two copies of this filter is how one of them starts
+ * suggesting people the other refuses to.
+ */
+export function addressablePeople(people: Person[]): Person[] {
+  return people.filter((p) => p.email && p.email.includes("@"));
+}
 
 /**
  * Contact / company field with suggestions.
@@ -42,6 +60,12 @@ export function PersonField({
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
   const boxRef = useRef<HTMLDivElement | null>(null);
+  /* The list is portalled out of the field, so it is no longer inside `boxRef`
+     — the click-away below has to be told about it separately or a click on a
+     suggestion counts as a click outside, closes the list, unmounts the button
+     and the pick never fires. */
+  const listRef = useRef<HTMLUListElement | null>(null);
+  const [anchor, setAnchor] = useState<HTMLDivElement | null>(null);
   // A combobox has to name the list it controls, or a screen reader announces
   // the role without ever being able to reach the options.
   const listId = useId();
@@ -62,7 +86,10 @@ export function PersonField({
   useEffect(() => {
     if (!open) return;
     const away = (e: MouseEvent) => {
-      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      const inField = boxRef.current?.contains(target);
+      const inList = listRef.current?.contains(target);
+      if (!inField && !inList) setOpen(false);
     };
     document.addEventListener("mousedown", away);
     return () => document.removeEventListener("mousedown", away);
@@ -75,9 +102,14 @@ export function PersonField({
 
   const secondary = describe ?? ((p: Person) => p.company);
 
+  const listOpen = open && matches.length > 0;
+  /* Matched to the field's own width and left-aligned with it, so it reads as
+     the field's list rather than a menu that happens to be near it. */
+  const pos = useAnchoredPosition(anchor, listOpen, { align: "start" });
+
   return (
     <div ref={boxRef} className="relative">
-      <div className="flex items-center gap-2 rounded-xl border border-[var(--border)] px-3 py-2.5">
+      <div ref={setAnchor} className="flex items-center gap-2 rounded-xl border border-[var(--border)] px-3 py-2.5">
         <Search className="h-4 w-4 shrink-0 text-faint" />
         <input
           value={value}
@@ -112,12 +144,20 @@ export function PersonField({
         />
       </div>
 
-      {open && matches.length > 0 && (
-        <ul
-          id={listId}
-          className="popover absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden py-1"
-          role="listbox"
-        >
+      {/* Portalled to <body>. Written `absolute`, it was sliced off by the first
+          ancestor with `overflow: hidden` — in the message reader that is the
+          body it scrolls, and the list measured at 393x850 ran to y=1001 on an
+          850px screen with two of its six rows reachable. There is no height
+          this can be given that survives being inside a box shorter than it. */}
+      {listOpen && pos && typeof document !== "undefined" &&
+        createPortal(
+          <ul
+            ref={listRef}
+            id={listId}
+            className="popover fixed z-[61] overflow-y-auto overscroll-contain py-1"
+            style={{ top: pos.top, bottom: pos.bottom, left: pos.left, width: pos.width, maxHeight: pos.maxHeight }}
+            role="listbox"
+          >
           {matches.map((p, i) => {
             const sub = secondary(p);
             return (
@@ -139,8 +179,9 @@ export function PersonField({
               </li>
             );
           })}
-        </ul>
-      )}
+          </ul>,
+          document.body
+        )}
     </div>
   );
 }

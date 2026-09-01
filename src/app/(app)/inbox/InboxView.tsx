@@ -31,7 +31,7 @@ import {
 import { Avatar } from "@/components/ui/Avatar";
 import { ChannelBadge, type ContactChannel } from "@/components/ui/ChannelBadge";
 import { ClientClock } from "@/components/ui/ClientClock";
-import { PersonField, type Person } from "@/components/ui/PersonField";
+import { PersonField, addressablePeople, type Person } from "@/components/ui/PersonField";
 import { TimeAgo } from "@/components/ui/TimeAgo";
 import {
   inboxFilters,
@@ -379,6 +379,7 @@ export function InboxView({
             className={clsx("@min-[720px]:[grid-area:reader]", listOnly && "hidden")}
             key={selected.id}
             message={selected}
+            people={people}
             busy={busy}
             onTrash={() => handleTrash(selected.id)}
             onRestore={() => handleRestore(selected.id)}
@@ -609,6 +610,7 @@ function TimeAgoShort({ at }: { at: string }) {
 
 function Reader({
   message,
+  people,
   busy,
   onTrash,
   onRestore,
@@ -616,6 +618,7 @@ function Reader({
   className,
 }: {
   message: Message;
+  people: Person[];
   busy: boolean;
   onTrash: () => void;
   onRestore: () => void;
@@ -629,6 +632,9 @@ function Reader({
   const [mode, setMode] = useState<null | "reply" | "forward">(null);
   const [viewing, setViewing] = useState<Attachment | null>(null);
   const [sending, setSending] = useState(false);
+  const [forwardTo, setForwardTo] = useState("");
+
+  const addressable = useMemo(() => addressablePeople(people), [people]);
 
   async function submit(formData: FormData) {
     setSending(true);
@@ -747,12 +753,29 @@ function Reader({
             </p>
 
             {mode === "forward" && (
-              <label className="mb-3 block">
+              <div className="mb-3 block">
                 <span className="mb-1.5 block text-xs font-medium text-muted">
                   To<span className="text-[var(--red)]"> *</span>
                 </span>
-                <input name="to" required autoFocus placeholder="Name or email address" className="field-input" />
-              </label>
+                {/* Suggests as you type, the same as the composer does. This
+                    was a bare text box: forwarding meant recalling an address
+                    from memory and typing it correctly, in a CRM that already
+                    holds every one of them. Getting it wrong is silent — the
+                    message sends, to nobody who exists.
+
+                    Still accepts a raw address, so forwarding to someone not on
+                    file is not blocked by the field that is meant to help. */}
+                <PersonField
+                  value={forwardTo}
+                  onChange={setForwardTo}
+                  onPick={(p) => setForwardTo(p.email)}
+                  people={addressable}
+                  placeholder="Name or email address"
+                  autoFocus
+                  describe={(p) => p.email}
+                />
+                <input type="hidden" name="to" value={forwardTo} />
+              </div>
             )}
 
             <textarea
@@ -768,7 +791,15 @@ function Reader({
               <button type="button" onClick={() => setMode(null)} className="btn-soft focus-ring rounded-xl px-4 py-2 text-sm font-medium">
                 Cancel
               </button>
-              <button type="submit" disabled={sending} className="btn-accent focus-ring flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold disabled:opacity-60">
+              {/* `required` cannot guard a hidden input, so the button does it —
+                  the same guard the composer uses. Without it a forward with an
+                  empty To would post and the action would file it under a
+                  recipient nobody typed. */}
+              <button
+                type="submit"
+                disabled={sending || (mode === "forward" && !forwardTo.trim())}
+                className="btn-accent focus-ring flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold disabled:opacity-60"
+              >
                 <Send className="h-4 w-4" />
                 {sending ? "Sending…" : mode === "reply" ? "Send reply" : "Forward"}
               </button>
@@ -1093,16 +1124,7 @@ function ComposeModal({
 }) {
   const [to, setTo] = useState("");
 
-  /**
-   * Only people you can actually reach.
-   *
-   * A lead captured from a phone call often has no email address, and offering
-   * one as a suggestion here would produce a message that cannot be sent.
-   */
-  const addressable = useMemo(
-    () => people.filter((p) => p.email && p.email.includes("@")),
-    [people]
-  );
+  const addressable = useMemo(() => addressablePeople(people), [people]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();

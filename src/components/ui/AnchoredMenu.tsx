@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useState } from "react";
+import { useEffect } from "react";
 import { createPortal } from "react-dom";
+import { useAnchoredPosition } from "@/lib/use-anchored-position";
 
 /**
  * A dropdown that escapes whatever is clipping it.
@@ -37,51 +38,10 @@ export function AnchoredMenu({
   children: React.ReactNode;
   role?: string;
 }) {
-  const [pos, setPos] = useState<{
-    /* One of these, never both: opening upward has to pin the menu's BOTTOM to
-       the button, and its height is not known until it has rendered. Setting
-       `top` for that case would hang the menu downward from the button's top
-       edge — over the button itself. */
-    top?: number;
-    bottom?: number;
-    left: number;
-    maxHeight: number;
-  } | null>(null);
-
-  /*
-     Measured before paint, so the menu never renders at the wrong place and
-     jumps. `useLayoutEffect` rather than `useEffect` for exactly that reason.
-  */
-  useLayoutEffect(() => {
-    if (!open || !anchor) return;
-    const place = () => {
-      const r = anchor.getBoundingClientRect();
-      const gap = 8;
-      const margin = 8;
-      const below = window.innerHeight - r.bottom - gap - margin;
-      const above = r.top - gap - margin;
-      /* Open downward unless there is meaningfully more room the other way —
-         a menu that flips on a two-pixel difference feels unstable. */
-      const flip = below < 160 && above > below;
-      const maxHeight = Math.max(120, flip ? above : below);
-
-      /* Right-aligned to the button, then pulled back inside the viewport.
-         Right alignment is what a control at the end of a toolbar wants; the
-         clamp is what stops it hanging off the screen on a narrow phone. */
-      let left = r.right - width;
-      left = Math.min(left, window.innerWidth - width - margin);
-      left = Math.max(margin, left);
-
-      setPos(
-        flip
-          ? { bottom: window.innerHeight - r.top + gap, left, maxHeight }
-          : { top: r.bottom + gap, left, maxHeight }
-      );
-    };
-    place();
-    window.addEventListener("resize", place);
-    return () => window.removeEventListener("resize", place);
-  }, [open, anchor, width]);
+  /* Right-aligned to the button — what a control at the end of a toolbar wants.
+     The clamping and the flip live in the hook, shared with the suggestion list
+     on the forward field, which needs exactly the same arithmetic. */
+  const pos = useAnchoredPosition(anchor, open, { width, align: "end" });
 
   useEffect(() => {
     if (!open) return;
@@ -113,7 +73,7 @@ export function AnchoredMenu({
       <div
         role={role}
         className="popover fixed z-[61] overflow-y-auto overscroll-contain p-1.5"
-        style={{ top: pos.top, bottom: pos.bottom, left: pos.left, width, maxHeight: pos.maxHeight }}
+        style={{ top: pos.top, bottom: pos.bottom, left: pos.left, width: pos.width, maxHeight: pos.maxHeight }}
       >
         {children}
       </div>

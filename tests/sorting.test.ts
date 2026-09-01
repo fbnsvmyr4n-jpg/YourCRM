@@ -131,11 +131,23 @@ describe("the shared control behaves", () => {
   });
 
   it("stays on screen on a narrow phone", () => {
-    // Right-aligned to its button is what a control at the end of a toolbar
-    // wants, and on a 393px screen that alone hangs it off the edge.
-    expect(MENU).toMatch(/Math\.min\(left, window\.innerWidth - width - margin\)/);
-    expect(MENU).toMatch(/Math\.max\(margin, left\)/);
+    /**
+     * Right-aligned to its button is what a control at the end of a toolbar
+     * wants, and on a 393px screen that alone hangs it off the edge.
+     *
+     * The arithmetic moved into `useAnchoredPosition` when the forward field's
+     * suggestion list needed the identical clamp and flip. Asserted there, and
+     * asserted here that this menu still goes through it — a menu that stopped
+     * calling the hook would pass every check made against the hook alone.
+     */
+    expect(MENU).toMatch(/useAnchoredPosition\(anchor, open, \{ width, align: "end" \}\)/);
+    const POS = readFileSync(
+      join(__dirname, "..", "src", "lib", "use-anchored-position.ts"),
+      "utf8"
+    );
+    expect(POS).toMatch(/Math\.min\(left, window\.innerWidth - w - margin\)/);
+    expect(POS).toMatch(/Math\.max\(margin, left\)/);
     // And flips above the button when there is no room below it.
-    expect(MENU).toMatch(/const flip = below < 160 && above > below/);
+    expect(POS).toMatch(/const flip = below < 160 && above > below/);
   });
 });
