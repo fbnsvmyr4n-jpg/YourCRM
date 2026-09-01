@@ -47,6 +47,8 @@ import { AnchoredMenu } from "@/components/ui/AnchoredMenu";
 import { Overlay } from "@/components/ui/Overlay";
 import { SortMenu } from "@/components/ui/SortMenu";
 import { useOpenFromQuery } from "@/lib/useOpenFromQuery";
+import { useDraft, hasContent, type Draft } from "@/lib/use-draft";
+import { SwipeToDelete } from "@/components/ui/SwipeToDelete";
 import {
   addMessageAction,
   forwardAction,
@@ -92,6 +94,14 @@ function sortMessages(rows: Message[], sort: InboxSort): Message[] {
   }
 }
 
+/**
+ * Where an unsent message is kept.
+ *
+ * One draft, because the composer is one box — a second New Email opens the
+ * same unfinished mail rather than silently replacing it.
+ */
+const DRAFT_KEY = "yourcrm:inbox:draft";
+
 export function InboxView({
   messages,
   contactFor,
@@ -108,6 +118,23 @@ export function InboxView({
   /** Most recently corresponded with, newest first — offered before typing. */
   recent: Person[];
 }) {
+  /**
+   * A message in progress survives the composer closing.
+   *
+   * Held here rather than inside the modal so the toolbar can say a draft
+   * exists — the modal unmounts when it closes, and state that unmounts with
+   * the box is exactly the state that was being lost.
+   */
+  const { draft, save, clear } = useDraft(DRAFT_KEY);
+  const draftWaiting = hasContent(draft);
+  /* Whether the composer OPENED onto existing text, which is the only moment
+     worth saying so. Captured when it opens rather than derived from the draft,
+     or the notice would still be there after the reader had typed a page. */
+  const [resumedDraft, setResumedDraft] = useState(false);
+  /* Asked before deleting, because a swipe is easy to make by accident and the
+     message names what is about to go. */
+  const [pendingDelete, setPendingDelete] = useState<Message | null>(null);
+
   const [filter, setFilter] = useState<InboxFilter>("All");
   const [category, setCategory] = useState<MsgCategory | null>(null);
   const [query, setQuery] = useState("");
@@ -305,11 +332,16 @@ export function InboxView({
           </button>
         )}
         <button
-          onClick={() => setComposeOpen(true)}
+          onClick={() => {
+            setResumedDraft(hasContent(draft));
+            setComposeOpen(true);
+          }}
           className="btn-accent focus-ring ml-auto flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold"
         >
           <Plus className="h-[16px] w-[16px]" />
-          Create New Email
+          {/* Named rather than badged, because there is room to. A button that
+              silently reopened someone's unfinished mail would be a surprise. */}
+          {draftWaiting ? "Continue Draft" : "Create New Email"}
         </button>
       </div>
 
@@ -367,7 +399,13 @@ export function InboxView({
           counts={counts}
           category={category}
           setCategory={setCategory}
-          onCompose={() => setComposeOpen(true)}
+          onCompose={() => {
+            setResumedDraft(hasContent(draft));
+            setComposeOpen(true);
+          }}
+          draftWaiting={draftWaiting}
+          onAskDelete={setPendingDelete}
+          filter={filter}
           list={list}
           selectedId={selected?.id ?? ""}
           onSelect={handleSelect}
@@ -416,8 +454,31 @@ export function InboxView({
         )}
       </div>
 
+      {pendingDelete && (
+        <ConfirmDelete
+          message={pendingDelete}
+          busy={busy}
+          onCancel={() => setPendingDelete(null)}
+          onConfirm={async () => {
+            const target = pendingDelete;
+            setPendingDelete(null);
+            await handleTrash(target.id);
+          }}
+        />
+      )}
+
       {composeOpen && (
-        <ComposeModal people={people} recent={recent} busy={busy} onClose={() => setComposeOpen(false)} onSubmit={handleCompose} />
+        <ComposeModal
+          people={people}
+          recent={recent}
+          busy={busy}
+          onClose={() => setComposeOpen(false)}
+          onSubmit={handleCompose}
+          draft={draft}
+          save={save}
+          clear={clear}
+          restored={resumedDraft}
+        />
       )}
     </div>
   );
@@ -440,6 +501,9 @@ function MessageList({
   category,
   setCategory,
   onCompose,
+  draftWaiting,
+  onAskDelete,
+  filter,
 }: {
   list: Message[];
   selectedId: string;
@@ -457,6 +521,11 @@ function MessageList({
   category: MsgCategory | null;
   setCategory: (c: MsgCategory | null) => void;
   onCompose: () => void;
+  /** A message is part-written, so the button offers to go back to it. */
+  draftWaiting: boolean;
+  onAskDelete: (m: Message) => void;
+  /** Which folder is showing — Trash says how long its contents survive. */
+  filter: InboxFilter;
 }) {
   const [filterOpen, setFilterOpen] = useState(false);
   const [filterAnchor, setFilterAnchor] = useState<HTMLButtonElement | null>(null);
@@ -556,20 +625,34 @@ function MessageList({
         <button
           type="button"
           onClick={onCompose}
-          aria-label="Create new email"
-          title="Create new email"
-          className="btn-accent focus-ring grid h-9 w-9 shrink-0 place-items-center rounded-full @min-[720px]:hidden"
+          aria-label={draftWaiting ? "Continue your draft email" : "Create new email"}
+          title={draftWaiting ? "Continue your draft" : "Create new email"}
+          className="btn-accent focus-ring relative grid h-9 w-9 shrink-0 place-items-center rounded-full @min-[720px]:hidden"
         >
           <Plus className="h-4 w-4" />
+          {/* No room for the word on a 36px button, so a dot — and the label
+              above says it for anyone who cannot see the dot. */}
+          {draftWaiting && (
+            <span
+              aria-hidden
+              className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border-2 border-[var(--bg)] bg-[var(--amber,#f59e0b)]"
+            />
+          )}
         </button>
       </div>
       <div className="-m-1 flex flex-1 scroll-p-1 flex-col gap-2 overflow-y-auto p-1">
+        {/* Said in the folder it applies to, so the 7 days in the delete
+            confirmation is a promise the app is seen to keep. */}
+        {filter === "Trash" && list.length > 0 && (
+          <p className="px-1 pb-1 text-center text-xs text-faint">
+            Deleted messages are removed for good after 7 days.
+          </p>
+        )}
         {list.length === 0 && <p className="mt-8 text-center text-sm text-faint">No messages here.</p>}
         {list.map((m) => {
           const active = m.id === selectedId;
-          return (
+          const row = (
             <button
-              key={m.id}
               onClick={() => onSelect(m.id)}
               className={clsx(
                 "focus-ring rounded-2xl border p-3 text-left transition-colors",
@@ -597,6 +680,14 @@ function MessageList({
               </div>
               <p className="mt-2 line-clamp-2 text-xs text-faint">{m.preview}</p>
             </button>
+          );
+          /* Already in the bin: swiping to delete something deleted is a
+             gesture with nothing behind it. Trash has Restore instead. */
+          if (m.trashed) return <div key={m.id}>{row}</div>;
+          return (
+            <SwipeToDelete key={m.id} label={`message from ${m.name}`} onDelete={() => onAskDelete(m)}>
+              {row}
+            </SwipeToDelete>
           );
         })}
       </div>
@@ -1119,9 +1210,70 @@ function InteractionCard({ dotColor, title, at }: { dotColor: string; title: str
 
 /* ---------------- Compose modal ---------------- */
 
+/**
+ * Confirming a delete that was started with a gesture.
+ *
+ * A swipe is easy to make by accident on a moving train, so the row asks. It
+ * names the sender and says where the message goes, because "Delete" alone
+ * reads as gone forever and this is not that.
+ */
+function ConfirmDelete({
+  message,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  message: Message;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onCancel();
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+
+  return (
+    <Overlay>
+      <div className="fixed inset-0 z-50 grid place-items-center p-4" role="dialog" aria-modal="true">
+        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onCancel} />
+        <div className="modal-surface relative z-10 w-full max-w-sm p-6">
+          <h2 className="text-lg font-semibold tracking-tight">Delete this message?</h2>
+          <p className="mt-2 text-sm text-muted">
+            <span className="font-medium text-[var(--text)]">{message.subject || "(no subject)"}</span> from{" "}
+            {message.name} moves to Trash, where it stays for 7 days before it is removed for good.
+          </p>
+          <div className="mt-6 flex items-center justify-end gap-3">
+            <button
+              type="button"
+              onClick={onCancel}
+              className="btn-soft focus-ring rounded-xl px-5 py-2.5 text-sm font-medium"
+            >
+              Keep it
+            </button>
+            <button
+              type="button"
+              onClick={onConfirm}
+              disabled={busy}
+              className="focus-ring flex items-center gap-2 rounded-xl bg-[var(--red)] px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+            >
+              <Trash2 className="h-4 w-4" /> Move to Trash
+            </button>
+          </div>
+        </div>
+      </div>
+    </Overlay>
+  );
+}
+
 function ComposeModal({
   people,
   recent,
+  draft,
+  save,
+  clear,
+  restored,
   busy,
   onClose,
   onSubmit,
@@ -1131,8 +1283,13 @@ function ComposeModal({
   busy: boolean;
   onClose: () => void;
   onSubmit: (formData: FormData) => void | Promise<void>;
+  draft: Draft;
+  save: (d: Draft) => void;
+  clear: () => void;
+  restored: boolean;
 }) {
-  const [to, setTo] = useState("");
+  const to = draft.to;
+  const setTo = (v: string) => save({ ...draft, to: v });
 
   const addressable = useMemo(() => addressablePeople(people), [people]);
   const addressableRecent = useMemo(() => addressablePeople(recent), [recent]);
@@ -1157,7 +1314,16 @@ function ComposeModal({
     <div className="fixed inset-0 z-50 grid place-items-center p-4" role="dialog" aria-modal="true">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       {/* Opaque — see the note on `.modal-surface`. */}
-      <form action={onSubmit} className="modal-surface relative z-10 w-full max-w-lg p-6">
+      <form
+        action={async (formData: FormData) => {
+          /* Cleared after, and only after. Clearing on submit would throw the
+             message away on the one occasion it matters most — a send that
+             failed. */
+          await onSubmit(formData);
+          clear();
+        }}
+        className="modal-surface relative z-10 w-full max-w-lg p-6"
+      >
         <div className="mb-5 flex items-center justify-between">
           <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight">
             <Send className="h-[18px] w-[18px] text-accent" /> New Email
@@ -1166,6 +1332,22 @@ function ComposeModal({
             <X className="h-5 w-5" />
           </button>
         </div>
+
+        {/* Said plainly, once. Fields that quietly refill themselves look like
+            a bug the first time; saying where the text came from, and offering
+            to throw it away, makes it a feature rather than a surprise. */}
+        {restored && (
+          <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-[var(--border)] px-3 py-2 text-xs text-muted">
+            <span>Picked up where you left off.</span>
+            <button
+              type="button"
+              onClick={clear}
+              className="focus-ring shrink-0 rounded-lg px-2 py-1 font-medium text-[var(--red)] hover:bg-[var(--raise)]"
+            >
+              Discard draft
+            </button>
+          </div>
+        )}
 
         <div className="space-y-4">
           <div className="block">
@@ -1190,17 +1372,32 @@ function ComposeModal({
           </div>
           <label className="block">
             <span className="mb-1.5 block text-xs font-medium text-muted">Subject</span>
-            <input name="subject" placeholder="Subject line" className="field-input" />
+            <input
+              name="subject"
+              value={draft.subject}
+              onChange={(e) => save({ ...draft, subject: e.target.value })}
+              placeholder="Subject line"
+              className="field-input"
+            />
           </label>
           <label className="block">
             <span className="mb-1.5 block text-xs font-medium text-muted">Message</span>
-            <textarea name="body" rows={5} placeholder="Write your message..." className="field-input resize-y" />
+            <textarea
+              name="body"
+              rows={5}
+              value={draft.body}
+              onChange={(e) => save({ ...draft, body: e.target.value })}
+              placeholder="Write your message..."
+              className="field-input resize-y"
+            />
           </label>
         </div>
 
         <div className="mt-6 flex items-center justify-end gap-3">
+          {/* Closing keeps what was written — that is the whole point. The
+              word says so, because "Cancel" reads as "throw this away". */}
           <button type="button" onClick={onClose} className="btn-soft focus-ring rounded-xl px-5 py-2.5 text-sm font-medium">
-            Cancel
+            {hasContent(draft) ? "Save & Close" : "Cancel"}
           </button>
           {/* `required` cannot guard a hidden input, so the button does it. Without
               this an empty To would post and the action would file the message

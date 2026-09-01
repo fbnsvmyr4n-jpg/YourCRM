@@ -168,8 +168,10 @@ describe("the suggestion list escapes what would slice it", () => {
      * written a second time.
      */
     expect(field).toMatch(/createPortal\(/);
-    expect(field).toMatch(/className="popover fixed z-\[61\]/);
-    expect(field).not.toMatch(/className="popover absolute/);
+    /* The class is built with `clsx` now, so the animation can differ by which
+       way the list opened — matched on the fixed positioning it must keep. */
+    expect(field).toMatch(/"popover fixed z-\[61\]/);
+    expect(field).not.toMatch(/popover absolute/);
   });
 
   it("sizes and places itself from the one shared calculation", () => {

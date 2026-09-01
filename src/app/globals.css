@@ -262,6 +262,47 @@ body {
 }
 
 /*
+   Suggestions arriving, rather than appearing.
+
+   The list mounted at full opacity in its final place, so it snapped into
+   existence over the message being written. A short rise reads as the list
+   coming FROM the field it belongs to, and tells the eye where it came from
+   when it opens upward on a phone.
+
+   80ms and 4px: long enough to be seen, short enough that a fast typist
+   narrowing a list never waits for it. Anything slower reads as latency.
+*/
+@keyframes popoverIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+@keyframes popoverInUp {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+.popover-in {
+  animation: popoverIn 80ms ease-out;
+}
+
+/* Opening upward, it should rise from below rather than drop from above. */
+.popover-in-up {
+  animation: popoverInUp 80ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .popover-in,
+  .popover-in-up {
+    animation: none;
+  }
+}
+
+/*
  * A sticky page header that belongs to the page rather than sitting on it.
  *
  * The inbox header used `background: var(--bg)` — a flat, fully opaque slab. The

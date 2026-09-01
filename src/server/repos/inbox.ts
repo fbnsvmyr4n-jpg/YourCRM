@@ -223,6 +223,37 @@ export async function trashMessage(q: TenantQuery, id: string): Promise<boolean>
   return row !== null;
 }
 
+/** How long a deleted message stays recoverable. */
+export const TRASH_DAYS = 7;
+
+/**
+ * Empties the bin of anything deleted longer ago than that.
+ *
+ * A trash that only grows is not a trash, and "deleted" has to eventually mean
+ * deleted — someone who asks for a message to be gone is owed that rather than
+ * a hidden row that outlives them.
+ *
+ * Narrow on purpose. Scoped to the tenant like every query here, and to rows
+ * that are ALREADY deleted, so the only thing it can reach is something this
+ * account put in the bin itself more than a week ago. The interval is computed
+ * by the database against `now()`, so it does not depend on what the web server
+ * believes the time is, and the cutoff is a bound parameter rather than
+ * interpolated text.
+ *
+ * Returns how many went, so a caller can say so rather than guess.
+ */
+export async function purgeExpiredMessages(q: TenantQuery): Promise<number> {
+  const rows = await q.rows<{ id: string }>(
+    `DELETE FROM messages
+     WHERE sub_account_id = $1
+       AND deleted_at IS NOT NULL
+       AND deleted_at < now() - ($2::int * INTERVAL '1 day')
+     RETURNING id`,
+    [q.ctx.subAccountId, TRASH_DAYS]
+  );
+  return rows.length;
+}
+
 export async function restoreMessage(q: TenantQuery, id: string): Promise<boolean> {
   const row = await q.one<{ id: string }>(
     `UPDATE messages SET deleted_at = NULL

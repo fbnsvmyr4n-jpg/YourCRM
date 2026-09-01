@@ -104,6 +104,10 @@ export function PersonField({
   const matches = q ? matchPeople(people, q) : recent.slice(0, 5);
   const showingRecent = !q && matches.length > 0;
 
+  /* Clamped rather than trusted. The list narrows as more is typed, and a
+     highlight left pointing past the end would hand `undefined` to `choose`. */
+  const active = Math.min(highlight, Math.max(0, matches.length - 1));
+
   // Click-away, so the list can't be left stranded over whatever is below it.
   useEffect(() => {
     if (!open) return;
@@ -116,6 +120,15 @@ export function PersonField({
     document.addEventListener("mousedown", away);
     return () => document.removeEventListener("mousedown", away);
   }, [open]);
+
+  /* The list has a max height and can scroll, so arrowing past its bottom edge
+     would otherwise move a selection nobody can see. */
+  useEffect(() => {
+    if (!open) return;
+    listRef.current
+      ?.querySelector<HTMLElement>(`[data-idx="${active}"]`)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [active, open]);
 
   function choose(p: Person) {
     onPick(p);
@@ -152,7 +165,7 @@ export function PersonField({
               setHighlight((h) => (h - 1 + matches.length) % matches.length);
             } else if (e.key === "Enter") {
               e.preventDefault();
-              choose(matches[highlight]);
+              choose(matches[active]);
             } else if (e.key === "Escape") {
               setOpen(false);
             }
@@ -176,7 +189,10 @@ export function PersonField({
           <ul
             ref={listRef}
             id={listId}
-            className="popover fixed z-[61] overflow-y-auto overscroll-contain py-1"
+            className={clsx(
+              "popover fixed z-[61] overflow-y-auto overscroll-contain py-1",
+              pos.bottom !== undefined ? "popover-in-up" : "popover-in"
+            )}
             style={{ top: pos.top, bottom: pos.bottom, left: pos.left, width: pos.width, maxHeight: pos.maxHeight }}
             role="listbox"
           >
@@ -196,14 +212,21 @@ export function PersonField({
               <li key={p.email || p.name}>
                 <button
                   type="button"
+                  data-idx={i}
                   onMouseEnter={() => setHighlight(i)}
+                  /* Keeps the caret in the field. Without it, pressing on a
+                     suggestion blurs the input first: on iOS the keyboard
+                     starts closing, the page reflows under the finger, and the
+                     list moves out from under the tap that was aimed at it.
+                     The pick still happens on click. */
+                  onMouseDown={(e) => e.preventDefault()}
                   onClick={() => choose(p)}
                   className={clsx(
                     "block w-full px-3 py-2 text-left text-sm transition-colors",
-                    i === highlight && "bg-[var(--raise)]"
+                    i === active && "bg-[var(--raise)]"
                   )}
                   role="option"
-                  aria-selected={i === highlight}
+                  aria-selected={i === active}
                 >
                   <span className="font-medium">{p.name}</span>
                   {sub && sub !== "—" && <span className="ml-2 text-xs text-faint">{sub}</span>}

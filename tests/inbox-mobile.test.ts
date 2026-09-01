@@ -40,7 +40,10 @@ describe("one way of slicing the inbox, not two", () => {
      * colours inside the menu.
      */
     expect(view).toMatch(/title="Filter by type"/);
-    expect(view).toMatch(/aria-label="Create new email"/);
+    /* Conditional since drafts: the button offers to resume a part-written
+       message rather than starting a new one. Both labels asserted so neither
+       can quietly disappear. */
+    expect(view).toMatch(/aria-label=\{draftWaiting \? "Continue your draft email" : "Create new email"\}/);
     expect(view).toMatch(/setCategory\(category === c \? null : c\)/);
     /* And both are phone-only — the desktop header still carries them. */
     expect(view).toMatch(/className="@min-\[720px\]:hidden"/);

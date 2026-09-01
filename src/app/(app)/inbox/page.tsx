@@ -1,4 +1,4 @@
-import { listMessages } from "@/server/repos/inbox";
+import { listMessages, purgeExpiredMessages } from "@/server/repos/inbox";
 import { listContacts } from "@/server/repos/contacts";
 import { listDeals } from "@/server/repos/deals";
 import { decorateMessage } from "@/server/decorate-message";
@@ -18,6 +18,12 @@ const SOURCE_LABEL: Record<string, ContactChannel> = {
 
 export default async function InboxPage() {
   const { messages, contactFor, channelFor, people, recent } = await withTenantPage(async (q) => {
+    /* Before reading, so nothing expired is listed and then vanishes on the
+       next load. There is no scheduler in this app; the bin is emptied by
+       whoever opens the inbox next, which for an account in use is often
+       enough, and for one that is not, harms nobody. */
+    await purgeExpiredMessages(q);
+
     // Trash is a folder, so the page reads every message and lets the view
     // filter — the repo's folder predicates back the counts and the tabs.
     const [inbox, sent, trash] = [
