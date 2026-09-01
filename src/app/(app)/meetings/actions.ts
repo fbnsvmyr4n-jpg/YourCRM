@@ -9,7 +9,7 @@ import {
   recordOutcome,
   restoreMeeting,
   updateMeeting,
-  KINDS,
+  kindFromLabel,
   OUTCOMES,
 } from "@/server/repos/meetings";
 import { getSettings } from "@/server/repos/settings";
@@ -46,7 +46,7 @@ export async function addMeetingAction(formData: FormData) {
   return withCurrentTenant(async (q) => {
     const name = text(formData.get("name"), 80);
     const date = formData.get("date");
-    const kind = pick(formData.get("type"), KINDS);
+    const kind = kindFromLabel(formData.get("type"));
     const time = text(formData.get("time"), 20) || "09:00";
 
     // A bad date or format would drop the meeting out of the calendar and the
@@ -125,7 +125,7 @@ export async function updateMeetingAction(id: string, formData: FormData) {
 
     const name = text(formData.get("name"), 80);
     const date = formData.get("date");
-    const kind = pick(formData.get("type"), KINDS);
+    const kind = kindFromLabel(formData.get("type"));
     const time = text(formData.get("time"), 20) || "09:00";
     if (!name || !isDateKey(date) || !kind) return { error: "Check the name, date and format." };
 

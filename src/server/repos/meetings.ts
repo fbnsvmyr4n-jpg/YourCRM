@@ -24,6 +24,27 @@ export const OUTCOMES = ["scheduled", "no_show", "showed", "advanced", "won", "l
 export type Outcome = (typeof OUTCOMES)[number];
 
 export const KINDS = ["online", "in_person"] as const;
+
+/**
+ * The stored kind for a label the UI shows.
+ *
+ * The database stores `online` / `in_person`; every screen says "Online" and
+ * "In-Person". Both meeting forms posted the LABEL into a field validated
+ * against the stored values, so `pick` returned null and the action bailed —
+ * booking a meeting through the scheduler silently created nothing, and
+ * rescheduling failed with "Check the name, date and format." on a form where
+ * the name, the date and the format were all plainly fine.
+ *
+ * Translating here, next to the values themselves, so a caller cannot post one
+ * vocabulary at a field that speaks the other. Stored values are still accepted
+ * unchanged, which is what lets the same field take either.
+ */
+export function kindFromLabel(value: unknown): (typeof KINDS)[number] | null {
+  const v = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (v === "online") return "online";
+  if (v === "in-person" || v === "in_person" || v === "in person") return "in_person";
+  return null;
+}
 export type Kind = (typeof KINDS)[number];
 
 /** Outcomes that mean the meeting happened, whatever came of it afterwards. */
