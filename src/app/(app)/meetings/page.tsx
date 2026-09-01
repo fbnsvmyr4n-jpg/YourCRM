@@ -10,7 +10,7 @@ import MeetingsView from "./MeetingsView";
 export const dynamic = "force-dynamic";
 
 export default async function MeetingsPage() {
-  const { meetings, analytics, today } = await withTenantPage(async (q) => {
+  const { meetings, analytics, today, addressBook } = await withTenantPage(async (q) => {
     const settings = await getSettings(q);
     const rows = await listMeetings(q);
     const contacts = await listContacts(q);
@@ -33,6 +33,23 @@ export default async function MeetingsPage() {
       meetings: rows.map((m) => decorateMeeting(m, people, settings.timeZone, nowKey)),
       analytics: await meetingAnalytics(q),
       today: { year: y, month: mo - 1, day: d },
+      /**
+       * Everyone this account could book, which is the CONTACT BOOK.
+       *
+       * This used to be derived from the meetings themselves, so the scheduler
+       * only ever knew people who had already been met — the one set of people
+       * you are least likely to be booking for the first time. On an account
+       * with no meetings yet it was empty, which made every suggestion on the
+       * form silently offer nothing: no contact, no address, no history. That
+       * reads exactly like a feature that was never shipped.
+       *
+       * `info` is what a contact stores as its company.
+       */
+      addressBook: contacts.map((c) => ({
+        name: `${c.firstName} ${c.lastName}`.trim(),
+        company: c.info ?? "",
+        email: c.email ?? "",
+      })),
     };
   });
 
@@ -41,7 +58,7 @@ export default async function MeetingsPage() {
       meetings={meetings}
       analytics={analytics}
       today={today}
-      people={meetings.map((m) => ({ name: m.name, company: m.company, email: m.email ?? "" }))}
+      people={addressBook}
     />
   );
 }

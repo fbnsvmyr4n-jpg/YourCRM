@@ -141,3 +141,37 @@ describe("what the meeting form suggests from", () => {
     expect(code).not.toMatch(/placeholder="Meeting topic \(optional\)"\s*\n\s*className="field-input"/);
   });
 });
+
+describe("who the scheduler is allowed to know about", () => {
+  const page = readFileSync(
+    fileURLToPath(new URL("../src/app/(app)/meetings/page.tsx", import.meta.url)),
+    "utf8"
+  );
+
+  it("suggests from the contact book, not from past meetings", () => {
+    /**
+     * The people list was derived from the meetings themselves, so the
+     * scheduler only ever knew people who had ALREADY been met — the one set
+     * you are least likely to be booking for the first time. On an account with
+     * no meetings it was empty, and every suggestion on the form silently
+     * offered nothing: no contact, no address, no history. That reads exactly
+     * like a feature that was never shipped, which is how it was reported.
+     *
+     * My own testing missed it because the database I tested against had
+     * meetings in it, which is precisely the case where the bug is invisible.
+     *
+     * Verified after: typing "a" reaches Amara Dube, Gina Abrahams and Ruth
+     * Adeyemi — none of whom has ever had a meeting — and the address list went
+     * from 4 to 16.
+     */
+    expect(page).toMatch(/addressBook: contacts\.map\(/);
+    expect(page).toMatch(/people=\{addressBook\}/);
+    expect(page).not.toMatch(/people=\{meetings\.map/);
+  });
+
+  it("carries the company a contact actually stores", () => {
+    /* Contacts keep it under `info`; the suggestion list reads `company`, and a
+       mismatch would show every contact with a blank second line. */
+    expect(page).toMatch(/company: c\.info \?\? ""/);
+  });
+});
