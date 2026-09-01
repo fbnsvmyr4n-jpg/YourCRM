@@ -15,7 +15,6 @@ import {
   Trash2,
   TrendingUp,
   UserRound,
-  Users,
   Video,
   X,
 } from "lucide-react";
@@ -25,6 +24,7 @@ import { Card } from "@/components/ui/Card";
 import { PersonField, type Person } from "@/components/ui/PersonField";
 import { clsx } from "@/lib/clsx";
 import { SortMenu } from "@/components/ui/SortMenu";
+import { shortDate } from "@/components/meetings/WorkloadCapacity";
 import { minutesOfDay, parseTime, toDisplayTime } from "@/lib/time";
 import {
   LOSS_REASONS,
@@ -56,14 +56,11 @@ function rate(v: number | null) {
 export default function MeetingsView({
   meetings,
   analytics,
-  capacity,
   today,
   people,
 }: {
   meetings: UpcomingMeeting[];
   analytics: MeetingAnalytics;
-  /** Weekly meeting capacity, configured in Settings. */
-  capacity: number;
   today: DayRef;
   /** Contacts and leads, for the scheduler's autocomplete. */
   people: Person[];
@@ -125,11 +122,8 @@ export default function MeetingsView({
             <MeetingsBreakdown analytics={analytics} meetings={meetings} />
             <PipelineConversion analytics={analytics} />
           </div>
-          <div className="contents @min-[820px]:grid @min-[820px]:grid-cols-1 @min-[916px]:grid-cols-2 @min-[820px]:gap-5">
-            <div className="hidden @min-[820px]:block">
-              <LossInsights analytics={analytics} meetings={meetings} />
-            </div>
-            <WorkloadCapacity analytics={analytics} capacity={capacity} meetings={meetings} />
+          <div className="hidden @min-[820px]:block">
+            <LossInsights analytics={analytics} meetings={meetings} />
           </div>
         </div>
 
@@ -471,153 +465,6 @@ function LossInsights({
   );
 }
 
-/* ---------------- Workload & Capacity ---------------- */
-
-/** "Mon 11 Aug" from a stored `YYYY-MM-DD`, parsed as UTC so it can't slip a day. */
-function shortDate(iso?: string) {
-  if (!iso) return "—";
-  const [y, m, d] = iso.split("-").map(Number);
-  if (!y || !m || !d) return "—";
-  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-GB", {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    timeZone: "UTC",
-  });
-}
-
-function WorkloadCapacity({
-  analytics,
-  capacity,
-  meetings,
-}: {
-  analytics: MeetingAnalytics;
-  capacity: number;
-  meetings: UpcomingMeeting[];
-}) {
-  const { total, pending, decided, won } = analytics;
-
-  /**
-   * How the load actually falls across days.
-   *
-   * "9 of 20 scheduled" says the week is comfortable; it does not say three of
-   * them are on one afternoon. Built from the days that genuinely have meetings
-   * rather than a fixed window, so the strip is never a row of empty bars.
-   */
-  const perDay = (() => {
-    const counts = new Map<string, number>();
-    for (const m of meetings) {
-      if (m.date) counts.set(m.date, (counts.get(m.date) ?? 0) + 1);
-    }
-    const rows = [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-    return rows.slice(-5).map(([date, count]) => ({ date, count }));
-  })();
-  const busiest = Math.max(1, ...perDay.map((d) => d.count));
-  const usedPct = Math.min(100, Math.round((total / capacity) * 100));
-  const load = usedPct >= 90 ? "At Capacity" : usedPct >= 60 ? "Busy" : "Good Load";
-  const loadColor = usedPct >= 90 ? "var(--red)" : usedPct >= 60 ? "var(--amber)" : "var(--green)";
-  const loadSoft = usedPct >= 90 ? "var(--red-soft)" : usedPct >= 60 ? "var(--amber-soft)" : "var(--green-soft)";
-
-  // Ordered as the work actually happens: booked → still to mark up → marked
-  // up → won. The previous order put Decided before Awaiting, which reads
-  // backwards against the sequence it describes.
-  const stats = [
-    { label: "Scheduled", value: total, sub: "Total booked", color: "var(--purple)" },
-    { label: "Awaiting", value: pending, sub: "Needs marking up", color: "var(--amber)" },
-    { label: "Decided", value: decided, sub: "Outcome recorded", color: "var(--accent)" },
-    { label: "Closed won", value: won, sub: "From meetings", color: "var(--green)" },
-  ];
-
-  return (
-    <Card className="card-q">
-      <div className="mb-4 flex items-center justify-between">
-        <h3 className="flex items-center gap-2 text-[15px] font-semibold tracking-tight">
-          <Users className="h-[18px] w-[18px] text-accent" /> Workload &amp; Capacity
-        </h3>
-        <span
-          className="rounded-lg px-2.5 py-1 text-xs font-semibold"
-          style={{ background: loadSoft, color: loadColor }}
-        >
-          {load}
-        </span>
-      </div>
-
-      {/*
-          The online / in-person split, on the screen where the card it used to
-          live in is gone.
-
-          "Meetings" was counting the same meetings this card is about, so on a
-          phone it was the same subject twice before the reader reached anything
-          they could book with. Shown only here, so the desktop keeps both cards
-          exactly as they were.
-      */}
-      <div className="mb-4 grid grid-cols-2 gap-3 @min-[820px]:hidden">
-        <div className="rounded-xl border border-[var(--border)] p-3">
-          <p className="text-[11px] text-faint">Online</p>
-          <p className="mt-0.5 text-lg font-bold tabular-nums text-accent">{analytics.byType.online}</p>
-        </div>
-        <div className="rounded-xl border border-[var(--border)] p-3">
-          <p className="text-[11px] text-faint">In-person</p>
-          <p className="mt-0.5 text-lg font-bold tabular-nums text-purple">{analytics.byType.inPerson}</p>
-        </div>
-      </div>
-
-      <div className="h-2.5 w-full overflow-hidden rounded-full bg-[var(--border)]">
-        <div className="h-full rounded-full accent-gradient" style={{ width: `${usedPct}%` }} />
-      </div>
-      <div className="mt-2 flex justify-between text-xs text-faint">
-        <span>
-          {total} of {capacity} meetings scheduled
-        </span>
-        <span className="tabular-nums">{usedPct}%</span>
-      </div>
-
-      <div className="mt-4 grid grid-cols-2 gap-3 @min-[520px]:grid-cols-4">
-        {stats.map((s) => (
-          <div key={s.label} className="rounded-xl border border-[var(--border)] p-3 text-center">
-            <p className="text-lg font-bold tabular-nums" style={{ color: s.color }}>
-              {s.value}
-            </p>
-            <p className="mt-0.5 text-[11px] font-medium">{s.label}</p>
-            <p className="text-[10px] text-faint">{s.sub}</p>
-          </div>
-        ))}
-      </div>
-
-      {perDay.length > 0 && (
-        <div className="mt-5 border-t border-[var(--border)] pt-4">
-          <div className="mb-3 flex items-baseline justify-between gap-2">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-faint">
-              Load by day
-            </p>
-            <p className="text-[11px] text-faint">
-              Busiest: {busiest} meeting{busiest === 1 ? "" : "s"}
-            </p>
-          </div>
-          <div className="space-y-2">
-            {perDay.map((d) => (
-              <div key={d.date} className="flex items-center gap-3">
-                <span className="w-24 shrink-0 truncate text-[11px] text-muted">
-                  {shortDate(d.date)}
-                </span>
-                <div className="h-2 flex-1 overflow-hidden rounded-full bg-[var(--border)]">
-                  <div
-                    className="accent-gradient h-full rounded-full"
-                    style={{ width: `${(d.count / busiest) * 100}%` }}
-                  />
-                </div>
-                <span className="w-4 shrink-0 text-right text-[11px] font-semibold tabular-nums">
-                  {d.count}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </Card>
-  );
-}
-
 /* ---------------- Upcoming Meetings table ---------------- */
 
 const TABS = ["All", "Today", "Tomorrow", "This Week"] as const;
@@ -709,12 +556,15 @@ function UpcomingTable({
   }
 
   return (
-    <Card>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+    <Card className="@container">
+      {/* The heading gets its own line, and the controls wrap under it. Packed
+          onto one row at 393px the tabs, the sort and "View Calendar" ran off
+          the right of the card — the last control read "View Cale". */}
+      <div className="mb-4 flex flex-col gap-3 @min-[680px]:flex-row @min-[680px]:items-center @min-[680px]:justify-between">
         <h3 className="flex items-center gap-2 text-[15px] font-semibold tracking-tight">
           <Calendar className="h-[18px] w-[18px] text-accent" /> Upcoming Meetings
         </h3>
-        <div className="flex items-center gap-1">
+        <div className="flex flex-wrap items-center gap-1">
           {TABS.map((t) => (
             <button
               key={t}
@@ -740,7 +590,12 @@ function UpcomingTable({
         </div>
       </div>
 
-      <div className="-m-1 scroll-p-2 overflow-x-auto p-1">
+      {/* A seven-column table needs 680px and the phone has 353. It used to
+          scroll sideways inside the card, which hides most of every row behind
+          a gesture nobody is told about — the reader saw Time and half of the
+          contact name. Below 680px each meeting is a card instead, carrying the
+          same facts stacked. */}
+      <div className="hidden @min-[680px]:-m-1 @min-[680px]:block @min-[680px]:scroll-p-2 @min-[680px]:overflow-x-auto @min-[680px]:p-1">
         <table className="w-full min-w-[680px] border-collapse">
           <thead>
             <tr className="text-left text-[11px] uppercase tracking-wide text-faint">
@@ -765,8 +620,21 @@ function UpcomingTable({
             ))}
           </tbody>
         </table>
-        {rows.length === 0 && <p className="py-6 text-center text-sm text-faint">Nothing scheduled.</p>}
       </div>
+
+      <div className="flex flex-col gap-2.5 @min-[680px]:hidden">
+        {rows.map((m) => (
+          <MeetingCard
+            key={m.id}
+            m={m}
+            busy={busyId === m.id}
+            onEdit={() => setEditing(m)}
+            onDelete={() => handleDelete(m.id, m.name)}
+          />
+        ))}
+      </div>
+
+      {rows.length === 0 && <p className="py-6 text-center text-sm text-faint">Nothing scheduled.</p>}
 
       {notice && (
         <p className="mt-3 rounded-xl px-3 py-2 text-xs" style={{ background: "var(--raise)" }}>
@@ -786,6 +654,144 @@ function UpcomingTable({
         />
       )}
     </Card>
+  );
+}
+
+/**
+ * One upcoming meeting, on a phone.
+ *
+ * The table this replaces needs 680px for its seven columns and scrolled
+ * sideways inside a 353px card, so the reader saw Time and half a name and had
+ * to discover a horizontal gesture to reach the rest. The same facts stack
+ * here: when it is, who with, what about, and what came of it.
+ *
+ * Reschedule is the button rather than a pencil, because rebooking is what
+ * actually happens to a meeting in this list — someone cannot make it and the
+ * time moves. It opens the same editor the desktop pencil does.
+ */
+function MeetingCard({
+  m,
+  busy,
+  onEdit,
+  onDelete,
+}: {
+  m: UpcomingMeeting;
+  busy: boolean;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const outcome: MeetingOutcome = m.outcome ?? "scheduled";
+  const tone = OUTCOME_COLORS[outcome];
+  const [saving, setSaving] = useState(false);
+
+  async function change(next: string) {
+    if (next === outcome) return;
+    setSaving(true);
+    try {
+      let reason: string | undefined;
+      if (next === "lost") {
+        const picked = prompt(
+          `Why was this lost?\n\n${LOSS_REASONS.map((r, i) => `${i + 1}. ${r}`).join("\n")}\n\nEnter a number:`,
+          "4"
+        );
+        const idx = Number(picked) - 1;
+        reason = LOSS_REASONS[idx] ?? "Other";
+      }
+      await setMeetingOutcomeAction(m.id, next, reason);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="rounded-2xl border border-[var(--border)] p-3">
+      <div className="flex items-start gap-3">
+        <Avatar initials={m.initials} color={m.color} size="sm" />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline justify-between gap-2">
+            <p className="truncate text-sm font-semibold">{m.name}</p>
+            {/* Nowrap and shrink-0: the time is the one thing on this card that
+                must never be the part that gets truncated. */}
+            <span className="shrink-0 whitespace-nowrap text-xs font-medium tabular-nums text-muted">
+              {toDisplayTime(m.time)}
+            </span>
+          </div>
+          {(m.company || m.topic) && (
+            <p className="truncate text-xs text-muted">
+              {[m.company, m.topic].filter(Boolean).join(" · ")}
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+        <span
+          className="rounded-md px-2 py-0.5 text-[10px] font-semibold"
+          style={{
+            background: m.when === "Today" ? "var(--accent-soft)" : "var(--amber-soft)",
+            color: m.when === "Today" ? "var(--accent)" : "var(--amber)",
+          }}
+        >
+          {m.when}
+        </span>
+        <span className="flex items-center gap-1 text-[11px] text-muted">
+          {m.type === "Online" ? (
+            <Video className="h-3.5 w-3.5 text-accent" />
+          ) : (
+            <UserRound className="h-3.5 w-3.5 text-purple" />
+          )}
+          {m.type}
+        </span>
+        <select
+          value={outcome}
+          disabled={saving || busy}
+          onChange={(e) => change(e.target.value)}
+          aria-label={`Outcome for the meeting with ${m.name}`}
+          className="focus-ring ml-auto cursor-pointer rounded-md border-0 px-2 py-1 text-[11px] font-semibold outline-none disabled:opacity-50"
+          style={{ background: tone.bg, color: tone.fg }}
+        >
+          {MEETING_OUTCOMES.map((o) => (
+            <option key={o} value={o}>
+              {OUTCOME_LABELS[o]}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {outcome === "lost" && m.lossReason && (
+        <p className="mt-1 text-[10px] text-faint">{m.lossReason}</p>
+      )}
+
+      <div className="mt-3 flex items-center gap-2">
+        <button
+          onClick={onEdit}
+          disabled={busy}
+          className="btn-soft focus-ring flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2 text-xs font-semibold disabled:opacity-40"
+        >
+          <Pencil className="h-3.5 w-3.5" /> Reschedule
+        </button>
+        {/* Only a real stored link becomes a Join button — otherwise it would
+            look actionable and do nothing. */}
+        {m.link && (
+          <a
+            href={m.link}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn-accent focus-ring flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2 text-xs font-semibold"
+          >
+            <ExternalLink className="h-3.5 w-3.5" /> Join
+          </a>
+        )}
+        <button
+          onClick={onDelete}
+          disabled={busy}
+          aria-label={`Delete the meeting with ${m.name}`}
+          className="focus-ring grid h-9 w-9 shrink-0 place-items-center rounded-xl text-faint transition-colors hover:text-[var(--red)] disabled:opacity-40"
+        >
+          <Trash2 className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
   );
 }
 

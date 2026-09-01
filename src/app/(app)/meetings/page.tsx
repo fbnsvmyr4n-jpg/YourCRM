@@ -10,7 +10,7 @@ import MeetingsView from "./MeetingsView";
 export const dynamic = "force-dynamic";
 
 export default async function MeetingsPage() {
-  const { meetings, analytics, capacity, today } = await withTenantPage(async (q) => {
+  const { meetings, analytics, today } = await withTenantPage(async (q) => {
     const settings = await getSettings(q);
     const rows = await listMeetings(q);
     const contacts = await listContacts(q);
@@ -32,7 +32,6 @@ export default async function MeetingsPage() {
     return {
       meetings: rows.map((m) => decorateMeeting(m, people, settings.timeZone, nowKey)),
       analytics: await meetingAnalytics(q),
-      capacity: settings.weeklyCapacity,
       today: { year: y, month: mo - 1, day: d },
     };
   });
@@ -41,7 +40,6 @@ export default async function MeetingsPage() {
     <MeetingsView
       meetings={meetings}
       analytics={analytics}
-      capacity={capacity}
       today={today}
       people={meetings.map((m) => ({ name: m.name, company: m.company, email: m.email ?? "" }))}
     />

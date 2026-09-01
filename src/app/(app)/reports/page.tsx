@@ -23,6 +23,12 @@ import { reportData } from "@/server/analytics";
 import { reportView } from "@/server/reports-view";
 import { SalesTargetCard } from "./SalesTargetCard";
 import { withTenantPage } from "@/server/tenant-session";
+import { listMeetings } from "@/server/repos/meetings";
+import { listContacts } from "@/server/repos/contacts";
+import { meetingAnalytics } from "@/server/meeting-analytics";
+import { decorateMeeting } from "@/server/decorate-meeting";
+import { instantToWallClock } from "@/lib/zoned";
+import { WorkloadCapacity } from "@/components/meetings/WorkloadCapacity";
 import { ExportButton } from "./ExportButton";
 
 export const dynamic = "force-dynamic";
@@ -60,7 +66,8 @@ export default async function ReportsPage({
   const periodId: PeriodId = isPeriod(requested) ? requested : "all-time";
   // Both in one tenant transaction — a referrer's credit cannot describe deals
   // a different read would not return.
-  const { r, referrers, accounts, monthlyTarget, wonThisMonth } = await withTenantPage(async (q) => {
+  const { r, referrers, accounts, monthlyTarget, wonThisMonth, meetings, meetingStats, weeklyCapacity } =
+    await withTenantPage(async (q) => {
     // The business's own time zone, so "July" is July where they are — read in
     // the same transaction as the figures it defines.
     const settings = await getSettings(q);
@@ -83,12 +90,34 @@ export default async function ReportsPage({
       .filter((w) => Date.parse(w.weekStart) >= monthStart.getTime())
       .reduce((sum, w) => sum + w.wonCents, 0);
 
+    /* Workload & Capacity moved here from the meetings page, which is for
+       booking rather than for reporting on how booked you already are. Same
+       inputs it always had: the meeting list, the analytics over it, and the
+       weekly capacity set in Settings. */
+    const meetingRows = await listMeetings(q);
+    const contacts = await listContacts(q);
+    const meetingPeople = contacts.map((c) => ({
+      id: c.id,
+      name: `${c.firstName} ${c.lastName}`.trim(),
+      email: c.email,
+      info: c.info,
+    }));
+    /* "Today" in the BUSINESS's zone, as the meetings page does it — otherwise
+       a meeting booked this evening reads as tomorrow's to anyone east of the
+       machine that rendered the page. */
+    const nowKey =
+      instantToWallClock(new Date().toISOString(), settings.timeZone)?.date ??
+      new Date().toISOString().slice(0, 10);
+
     return {
       r: await reportView(q, period),
       referrers: await referralCredits(q),
       accounts: await companyRollups(q),
       monthlyTarget: Math.round(settings.monthlyTargetCents / 100),
       wonThisMonth: Math.round(wonThisMonth / 100),
+      meetings: meetingRows.map((m) => decorateMeeting(m, meetingPeople, settings.timeZone, nowKey)),
+      meetingStats: await meetingAnalytics(q),
+      weeklyCapacity: settings.weeklyCapacity,
     };
   });
 
@@ -659,6 +688,18 @@ export default async function ReportsPage({
             )}
           </Card>
         </div>
+      </div>
+
+      {/* Moved off the meetings page, which is for booking and rebooking rather
+          than for reporting on how booked you already are. It sits with the
+          meeting outcomes above it, so how loaded the diary is and what came of
+          it are read together. */}
+      <div className="mt-5">
+        <WorkloadCapacity
+          analytics={meetingStats}
+          capacity={weeklyCapacity}
+          meetings={meetings}
+        />
       </div>
 
       {/* Full width: a seven-row list has nothing to sit beside. */}
