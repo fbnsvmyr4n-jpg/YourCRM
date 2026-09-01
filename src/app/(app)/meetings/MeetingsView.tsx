@@ -91,22 +91,56 @@ export default function MeetingsView({
       </div>
 
       <div className="grid grid-cols-1 gap-5 @min-[820px]:grid-cols-[minmax(0,1fr)_336px]">
-        {/* LEFT dashboard. Its own container: what these two rows can fit depends
-            on whether the 336px side column is sitting next to them, not on how
-            wide the window is. */}
-        <div className="@container flex flex-col gap-5">
-          <div className="grid grid-cols-1 gap-5 @min-[620px]:grid-cols-[minmax(0,0.82fr)_minmax(0,1.18fr)]">
+        {/*
+            LEFT dashboard, on a screen wide enough to have two columns.
+
+            Every threshold in this subtree is a PAGE-width one. The wrapper
+            deliberately does not declare its own container: when it did, these
+            rows measured themselves against the left COLUMN, which at a 1440px
+            window is 774px — under 820 — so all three cards vanished on the
+            desktop while the page around them was plainly wide enough. 976 and
+            916 are the old 620 and 560 column thresholds expressed against the
+            page, which is the same box the two-column split is decided in.
+
+            `display: contents` below that, so these cards stop being a block
+            that has to sit somewhere and become direct children of the page
+            grid — which is what lets the scheduler be ordered above them
+            without moving anything on the desktop. Its own container query only
+            applies where the box exists to be measured; below 820px the rows
+            are single-column regardless, because the page itself is.
+        */}
+        <div className="contents @min-[820px]:flex @min-[820px]:flex-col @min-[820px]:gap-5">
+          {/*
+              Off the phone entirely.
+
+              "Meetings" counted the same meetings Workload & Capacity is
+              already about, and its online/in-person split now sits there
+              instead. Pipeline Conversion and Loss Insights are reporting, and
+              Reports already carries both — the funnel with its show rate and
+              conversion, and "Why deals were lost". Nothing is lost by taking
+              them off this page; what is gained is that booking a meeting is
+              the first thing on it rather than the fourth.
+          */}
+          <div className="hidden gap-5 @min-[820px]:grid @min-[820px]:grid-cols-1 @min-[976px]:grid-cols-[minmax(0,0.82fr)_minmax(0,1.18fr)]">
             <MeetingsBreakdown analytics={analytics} meetings={meetings} />
             <PipelineConversion analytics={analytics} />
           </div>
-          <div className="grid grid-cols-1 gap-5 @min-[560px]:grid-cols-2">
-            <LossInsights analytics={analytics} meetings={meetings} />
+          <div className="contents @min-[820px]:grid @min-[820px]:grid-cols-1 @min-[916px]:grid-cols-2 @min-[820px]:gap-5">
+            <div className="hidden @min-[820px]:block">
+              <LossInsights analytics={analytics} meetings={meetings} />
+            </div>
             <WorkloadCapacity analytics={analytics} capacity={capacity} meetings={meetings} />
           </div>
         </div>
 
-        {/* RIGHT scheduler rail */}
-        <Scheduler today={today} people={people} meetings={meetings} />
+        {/* RIGHT scheduler rail — and the FIRST thing on a phone, because
+            booking is why anyone opens this page. */}
+        <Scheduler
+          className="order-first @min-[820px]:order-none"
+          today={today}
+          people={people}
+          meetings={meetings}
+        />
       </div>
 
       {/* The table runs the full width, below the rail rather than beside it.
@@ -508,6 +542,26 @@ function WorkloadCapacity({
         </span>
       </div>
 
+      {/*
+          The online / in-person split, on the screen where the card it used to
+          live in is gone.
+
+          "Meetings" was counting the same meetings this card is about, so on a
+          phone it was the same subject twice before the reader reached anything
+          they could book with. Shown only here, so the desktop keeps both cards
+          exactly as they were.
+      */}
+      <div className="mb-4 grid grid-cols-2 gap-3 @min-[820px]:hidden">
+        <div className="rounded-xl border border-[var(--border)] p-3">
+          <p className="text-[11px] text-faint">Online</p>
+          <p className="mt-0.5 text-lg font-bold tabular-nums text-accent">{analytics.byType.online}</p>
+        </div>
+        <div className="rounded-xl border border-[var(--border)] p-3">
+          <p className="text-[11px] text-faint">In-person</p>
+          <p className="mt-0.5 text-lg font-bold tabular-nums text-purple">{analytics.byType.inPerson}</p>
+        </div>
+      </div>
+
       <div className="h-2.5 w-full overflow-hidden rounded-full bg-[var(--border)]">
         <div className="h-full rounded-full accent-gradient" style={{ width: `${usedPct}%` }} />
       </div>
@@ -891,7 +945,17 @@ function dateKey(sel: DayRef): string {
   return `${sel.year}-${m}-${d}`;
 }
 
-function Scheduler({ today, people, meetings }: { today: DayRef; people: Person[]; meetings: UpcomingMeeting[] }) {
+function Scheduler({
+  today,
+  people,
+  meetings,
+  className,
+}: {
+  today: DayRef;
+  people: Person[];
+  meetings: UpcomingMeeting[];
+  className?: string;
+}) {
   const panelRef = useRef<HTMLDivElement | null>(null);
 
   // Arriving from the dashboard Quick Action: bring the scheduler into view
@@ -961,7 +1025,7 @@ function Scheduler({ today, people, meetings }: { today: DayRef; people: Person[
   }
 
   return (
-    <div ref={panelRef} className="flex flex-col gap-4">
+    <div ref={panelRef} className={clsx("flex flex-col gap-4", className)}>
       {/* connect calendar */}
       <Card className="!p-4">
         <div className="flex items-center justify-between">
@@ -996,7 +1060,7 @@ function Scheduler({ today, people, meetings }: { today: DayRef; people: Person[
       </Card>
 
       {/* schedule a meeting */}
-      <Card className="!p-4">
+      <Card className="@container !p-4">
         <p className="mb-3 text-sm font-semibold">Schedule a Meeting</p>
 
         {/* contact + topic */}
@@ -1034,26 +1098,40 @@ function Scheduler({ today, people, meetings }: { today: DayRef; people: Person[
           )}
         </div>
 
-        <div className="grid grid-cols-[minmax(0,1fr)_140px] gap-3">
+        {/* The time column stacks under the calendar until there is room for
+            both. Measured at 393px with them side by side: 169px left for seven
+            day columns, so each cell was 23.9px and they sat edge to edge with
+            no gap at all. Full width the calendar gets 321px, which is a day
+            cell you can actually hit. */}
+        <div className="grid grid-cols-1 gap-3 @min-[420px]:grid-cols-[minmax(0,1fr)_140px]">
           {/* calendar */}
           <div>
-            <div className="mb-2 flex items-center justify-between">
+            {/* A three-track grid, not `justify-between`. Between two 28px
+                buttons the label was mathematically centred and still touched
+                both of them — measured 0px of clearance either side, because
+                "September 2026" filled every pixel it was given. The middle
+                track centres the label in whatever is left, and the padding
+                keeps it off the arrows however long the month name is. */}
+            <div className="mb-2 grid grid-cols-[28px_minmax(0,1fr)_28px] items-center">
               <button onClick={() => shiftMonth(-1)} className="btn-soft focus-ring grid h-7 w-7 place-items-center rounded-lg" aria-label="Previous month">
                 <ChevronLeft className="h-4 w-4" />
               </button>
-              <span className="text-sm font-medium">
+              <span className="truncate px-2 text-center text-sm font-medium">
                 {MONTH_NAMES[view.month]} {view.year}
               </span>
               <button onClick={() => shiftMonth(1)} className="btn-soft focus-ring grid h-7 w-7 place-items-center rounded-lg" aria-label="Next month">
                 <ChevronRight className="h-4 w-4" />
               </button>
             </div>
-            <div className="grid grid-cols-7 gap-y-1 text-center text-[11px] text-faint">
+            <div className="grid grid-cols-7 gap-x-1 gap-y-1 text-center text-[11px] text-faint">
               {["M", "T", "W", "T", "F", "S", "S"].map((d, i) => (
                 <span key={i}>{d}</span>
               ))}
             </div>
-            <div className="mt-1 grid grid-cols-7 gap-y-1 text-center text-xs">
+            {/* `gap-x` as well as `gap-y`. Without it the cells filled their
+                tracks completely and every number sat flush against the next,
+                which reads as overlapping even where the boxes only touch. */}
+            <div className="mt-1 grid grid-cols-7 gap-x-1 gap-y-1 text-center text-xs">
               {cells.map((c, i) => {
                 const isSel =
                   c.inMonth &&
@@ -1069,7 +1147,7 @@ function Scheduler({ today, people, meetings }: { today: DayRef; people: Person[
                       // column only 21.4px wide, so every day overlapped the
                       // next one by ~7px and the last column spilled past the
                       // card. Filling the cell can't outgrow it.
-                      "focus-ring mx-auto grid aspect-square w-full max-w-7 place-items-center rounded-lg transition-colors",
+                      "focus-ring mx-auto grid aspect-square w-full max-w-9 place-items-center rounded-lg transition-colors",
                       !c.inMonth && "text-faint opacity-50",
                       isSel ? "font-semibold text-white" : c.inMonth ? "hover:bg-[var(--raise)]" : ""
                     )}
