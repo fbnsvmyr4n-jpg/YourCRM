@@ -1,17 +1,52 @@
-import { PhoneCall, Users } from "lucide-react";
+import { CircleDashed, Globe, PhoneCall, PhoneOutgoing, Users } from "lucide-react";
 import type { LeadSource } from "@/data/leads";
 
+/**
+ * A tinted disc for the sources that do not have a brand mark of their own.
+ *
+ * Google and Facebook keep their real logos below; everything else gets one of
+ * these. Written as a table rather than the trailing `return` this used to end
+ * with: that fell through to the referral icon, so once Website, Outbound and
+ * Other existed, a lead captured from the website wore a "referral" badge on
+ * its card — the same lie the source panel was telling in numbers.
+ */
+const DISC: Record<
+  Exclude<LeadSource, "Google Ads" | "Facebook">,
+  { tint: string; color: string; Glyph: () => React.ReactNode }
+> = {
+  "Phone Call": {
+    tint: "var(--green-soft)",
+    color: "var(--green)",
+    Glyph: () => <PhoneCall className="h-2.5 w-2.5" style={{ color: "var(--green)" }} />,
+  },
+  Referral: {
+    tint: "var(--accent-soft)",
+    color: "var(--accent)",
+    Glyph: () => <Users className="h-2.5 w-2.5 text-accent" />,
+  },
+  Website: {
+    tint: "rgba(14,165,233,0.16)",
+    color: "#0EA5E9",
+    Glyph: () => <Globe className="h-2.5 w-2.5" style={{ color: "#0EA5E9" }} />,
+  },
+  /* The arrow points away — the one thing that separates this from Phone Call
+     is who rang whom. */
+  Outbound: {
+    tint: "rgba(245,158,11,0.16)",
+    color: "#F59E0B",
+    Glyph: () => <PhoneOutgoing className="h-2.5 w-2.5" style={{ color: "#F59E0B" }} />,
+  },
+  /* Grey and dashed on purpose. "Other" is a missing answer, and giving it a
+     confident colour is how a source nobody recorded starts looking like one
+     somebody did. */
+  Other: {
+    tint: "rgba(100,116,139,0.18)",
+    color: "#64748B",
+    Glyph: () => <CircleDashed className="h-2.5 w-2.5" style={{ color: "#64748B" }} />,
+  },
+};
+
 export function SourceIcon({ source }: { source: LeadSource }) {
-  if (source === "Phone Call") {
-    return (
-      <span
-        className="grid h-4 w-4 place-items-center rounded-full"
-        style={{ background: "var(--green-soft)" }}
-      >
-        <PhoneCall className="h-2.5 w-2.5" style={{ color: "var(--green)" }} />
-      </span>
-    );
-  }
   if (source === "Google Ads") {
     return (
       <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden>
@@ -32,12 +67,18 @@ export function SourceIcon({ source }: { source: LeadSource }) {
       </svg>
     );
   }
+  /* After the two brand marks, so what is left is exactly the set `DISC`
+     covers and TypeScript can check it. The old tail rendered the referral disc
+     for anything that reached it, which is how a website lead came to wear a
+     referral badge. */
+  const disc = DISC[source];
+
   return (
     <span
       className="grid h-4 w-4 place-items-center rounded-full"
-      style={{ background: "var(--accent-soft)" }}
+      style={{ background: disc.tint }}
     >
-      <Users className="h-2.5 w-2.5 text-accent" />
+      <disc.Glyph />
     </span>
   );
 }

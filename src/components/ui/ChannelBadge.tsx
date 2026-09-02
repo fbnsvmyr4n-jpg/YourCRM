@@ -1,4 +1,4 @@
-import { Mail, PhoneCall, Users } from "lucide-react";
+import { CircleDashed, Globe, Mail, PhoneCall, PhoneOutgoing, Users } from "lucide-react";
 import type { LeadSource } from "@/data/leads";
 
 /**
@@ -21,8 +21,21 @@ import type { LeadSource } from "@/data/leads";
 
 export type ContactChannel = LeadSource | "Email";
 
-const STYLE: Record<ContactChannel, { bg: string; fg: string; label: string; edge?: string }> = {
-  Facebook: { bg: "#1877F2", fg: "#ffffff", label: "Came from Facebook" },
+/**
+ * Every channel's colour, wording AND glyph, in one exhaustive table.
+ *
+ * The glyph used to be picked by a chain of ternaries ending in an envelope,
+ * which meant a channel nobody had thought about drew "email" — the same shape
+ * of bug as the colour-named `channel` this component was built to replace, and
+ * it happened again the moment three sources were added: Website, Outbound and
+ * Other all resolved to a mail icon. Declared here, `Record<ContactChannel, …>`
+ * makes leaving one out a compile error instead of a wrong picture.
+ */
+const STYLE: Record<
+  ContactChannel,
+  { bg: string; fg: string; label: string; edge?: string; Glyph: () => React.ReactNode }
+> = {
+  Facebook: { bg: "#1877F2", fg: "#ffffff", label: "Came from Facebook", Glyph: FacebookGlyph },
   // Google's badge is white, and in the light theme so is `--panel-solid` — a
   // white disc inside a white ring on a white panel is nothing at all. The
   // hairline gives it an edge in both themes.
@@ -31,10 +44,50 @@ const STYLE: Record<ContactChannel, { bg: string; fg: string; label: string; edg
     fg: "#4285F4",
     label: "Came from Google Ads",
     edge: "inset 0 0 0 1px rgba(15,23,42,0.16)",
+    Glyph: GoogleGlyph,
   },
-  Referral: { bg: "var(--purple)", fg: "#ffffff", label: "Came from a referral" },
-  "Phone Call": { bg: "var(--green)", fg: "#ffffff", label: "Came from a phone call" },
-  Email: { bg: "var(--accent)", fg: "#ffffff", label: "Arrived by email" },
+  Referral: {
+    bg: "var(--purple)",
+    fg: "#ffffff",
+    label: "Came from a referral",
+    Glyph: () => <Users className="h-2.5 w-2.5" />,
+  },
+  "Phone Call": {
+    bg: "var(--green)",
+    fg: "#ffffff",
+    label: "Came from a phone call",
+    Glyph: () => <PhoneCall className="h-2.5 w-2.5" />,
+  },
+  /* A globe rather than a cursor or a screen: this is where they came FROM,
+     and the site is the only one of these that is a place. */
+  Website: {
+    bg: "#0EA5E9",
+    fg: "#ffffff",
+    label: "Came from the website",
+    Glyph: () => <Globe className="h-2.5 w-2.5" />,
+  },
+  /* The arrow points away, which is the whole distinction from Phone Call:
+     one of them rang us, we rang the other. */
+  Outbound: {
+    bg: "#F59E0B",
+    fg: "#ffffff",
+    label: "Came from outbound calling",
+    Glyph: () => <PhoneOutgoing className="h-2.5 w-2.5" />,
+  },
+  /* Deliberately plain and deliberately grey. "Other" is the absence of an
+     answer, and dressing it up as a channel is how a real one gets invented. */
+  Other: {
+    bg: "#64748B",
+    fg: "#ffffff",
+    label: "Source not recorded",
+    Glyph: () => <CircleDashed className="h-2.5 w-2.5" />,
+  },
+  Email: {
+    bg: "var(--accent)",
+    fg: "#ffffff",
+    label: "Arrived by email",
+    Glyph: () => <Mail className="h-2.5 w-2.5" />,
+  },
 };
 
 /** Google's own mark, so the one white badge is still unmistakably Google. */
@@ -92,17 +145,7 @@ export function ChannelBadge({ channel }: { channel: ContactChannel }) {
           .join(", "),
       }}
     >
-      {channel === "Google Ads" ? (
-        <GoogleGlyph />
-      ) : channel === "Facebook" ? (
-        <FacebookGlyph />
-      ) : channel === "Referral" ? (
-        <Users className="h-2.5 w-2.5" />
-      ) : channel === "Phone Call" ? (
-        <PhoneCall className="h-2.5 w-2.5" />
-      ) : (
-        <Mail className="h-2.5 w-2.5" />
-      )}
+      <s.Glyph />
     </span>
   );
 }

@@ -1,6 +1,7 @@
 import type { LeadCard, LeadSource, LeadStatus } from "@/data/leads";
 import type { AvatarColor } from "@/components/ui/Avatar";
 import type { TenantQuery } from "./tenant";
+import type { Source } from "./repos/deals";
 
 /**
  * The Leads page, without a leads table.
@@ -33,12 +34,39 @@ export type LeadAnalytics = {
   bySource: { label: LeadSource; count: number; pct: number }[];
 };
 
-const SOURCE_LABEL: Record<string, LeadSource> = {
+/**
+ * A deal's stored source, in the words this page speaks.
+ *
+ * `satisfies Record<Source, LeadSource>` is the point of it. This map used to
+ * be `Record<string, LeadSource>`, which accepts any subset — so it covered
+ * four of the seven sources a deal can carry and nothing complained. The three
+ * it missed (website, outbound, other) hit the `?? "Referral"` below and were
+ * counted as referrals: on a test account with two real referrals the panel
+ * read "Referral 5 · 63%" and named it the top source.
+ *
+ * Typed against `Source`, an eighth source added to the deals repository fails
+ * to compile until it is given a label here.
+ */
+export const SOURCE_LABEL = {
   google_ads: "Google Ads",
   facebook: "Facebook",
   referral: "Referral",
   phone_call: "Phone Call",
-};
+  website: "Website",
+  outbound: "Outbound",
+  other: "Other",
+} satisfies Record<Source, LeadSource>;
+
+/**
+ * The same table read backwards, for the Add Lead form.
+ *
+ * Derived rather than written out again. The inverse used to be a second
+ * hand-kept map in `leads/actions.ts`, and two hand-kept maps pointing opposite
+ * ways is two things to forget instead of one.
+ */
+export const SOURCE_VALUE = Object.fromEntries(
+  Object.entries(SOURCE_LABEL).map(([value, label]) => [label, value])
+) as Record<LeadSource, Source>;
 
 const AVATAR_COLORS: AvatarColor[] = ["blue", "green", "amber", "purple", "pink", "teal"];
 
@@ -107,7 +135,12 @@ export async function listLeadsWithStatus(q: TenantQuery): Promise<LeadCard[]> {
       // A source the page has no label for is shown as a referral only if it
       // really is one; anything else falls to the closest honest bucket rather
       // than being invented.
-      source: SOURCE_LABEL[r.source] ?? "Referral",
+      /* The fallback is now "Other", and it is unreachable for any value the
+         application writes — every one of those is in the table above, checked
+         by the compiler. It catches only a row whose source predates a rename
+         or was written straight to the database, and such a row is honestly
+         unknown rather than quietly a referral. */
+      source: SOURCE_LABEL[r.source as Source] ?? "Other",
       createdAt: r.created_at.toISOString(),
     }))
     .sort((a, b) => Date.parse(b.createdAt ?? "") - Date.parse(a.createdAt ?? ""));

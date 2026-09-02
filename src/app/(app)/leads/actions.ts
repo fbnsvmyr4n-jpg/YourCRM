@@ -4,6 +4,7 @@ import { revalidateApp } from "@/server/revalidate";
 import { LEAD_SOURCES } from "@/data/leads";
 import { createContact, deleteContact, updateContact } from "@/server/repos/contacts";
 import { createDeal, listDealsForContact, updateDeal, type Source } from "@/server/repos/deals";
+import { SOURCE_VALUE } from "@/server/leads-view";
 import { withCurrentTenant } from "@/server/tenant-session";
 import { email as validEmail, id as validId, pick, text } from "@/server/validate";
 import { logWrite } from "@/server/log";
@@ -20,13 +21,6 @@ import { logWrite } from "@/server/log";
  * the deal's stage, so accepting one here would let a posted value contradict
  * what actually happened.
  */
-
-const SOURCE_VALUE: Record<string, Source> = {
-  "Google Ads": "google_ads",
-  Facebook: "facebook",
-  Referral: "referral",
-  "Phone Call": "phone_call",
-};
 
 type Parsed = {
   firstName: string;
@@ -56,7 +50,11 @@ function parseLead(formData: FormData): Parsed | null {
     phone: text(formData.get("phone"), 40),
     location: text(formData.get("location"), 80),
     company: text(formData.get("company"), 80),
-    source: SOURCE_VALUE[source] ?? "other",
+    /* Imported rather than declared here. This was a second hand-kept map
+       pointing the other way, and it covered the same four of seven sources —
+       so "Website" chosen in the form was stored as `other`. It is now the
+       inverse of the single table the page reads. */
+    source: SOURCE_VALUE[source],
   };
 }
 

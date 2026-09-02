@@ -1,8 +1,29 @@
 import type { AvatarColor } from "@/components/ui/Avatar";
 
 
-/** Allowed values first, types derived — see the note in `data/contacts.ts`. */
-export const LEAD_SOURCES = ["Google Ads", "Facebook", "Referral", "Phone Call"] as const;
+/**
+ * Allowed values first, types derived — see the note in `data/contacts.ts`.
+ *
+ * These are the display names for the seven sources a deal can carry, and all
+ * seven have to be here. Four of them were, and the three that were not —
+ * website, outbound, other — fell through a `?? "Referral"` on the way to this
+ * page: a lead captured from the website was counted, named and charted as a
+ * REFERRAL. On eight leads that turned two real referrals into five and put
+ * "Top source: Referral · 63%" on the panel, which is the kind of number a
+ * business spends money on.
+ *
+ * `SOURCE_LABEL` in `leads-view.ts` is now typed against the deal's own list,
+ * so an eighth source cannot be added without a label being added with it.
+ */
+export const LEAD_SOURCES = [
+  "Google Ads",
+  "Facebook",
+  "Referral",
+  "Phone Call",
+  "Website",
+  "Outbound",
+  "Other",
+] as const;
 export type LeadSource = (typeof LEAD_SOURCES)[number];
 
 /**

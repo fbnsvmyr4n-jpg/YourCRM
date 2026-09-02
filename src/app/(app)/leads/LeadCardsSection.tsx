@@ -9,7 +9,7 @@ import { ChevronDown, Mail, MapPin, MoreHorizontal, Pencil, Phone, Plus, Trash2,
 import { Avatar } from "@/components/ui/Avatar";
 import { Overlay } from "@/components/ui/Overlay";
 import { SourceIcon } from "@/components/ui/SourceIcon";
-import { LEAD_STATUSES, STATUS_TONE, type LeadCard, type LeadStatus } from "@/data/leads";
+import { LEAD_SOURCES, LEAD_STATUSES, STATUS_TONE, type LeadCard, type LeadStatus } from "@/data/leads";
 import { clsx } from "@/lib/clsx";
 import { addLeadAction, deleteLeadAction, updateLeadAction } from "./actions";
 
@@ -525,7 +525,11 @@ function LeadModal({
             <ModalField name="phone" label="Phone" defaultValue={lead?.phone} />
             <ModalField name="location" label="Location" defaultValue={lead?.location} />
             <ModalField name="company" label="Company (Project Info)" className="sm:col-span-2" defaultValue={lead?.company} />
-            <ModalSelect name="source" label="Source" options={["Google Ads", "Facebook", "Referral", "Phone Call"]} defaultValue={lead?.source} />
+            {/* From the shared list, not a copy of it. Written out here, this
+                offered four of the seven sources a deal can carry — so a lead
+                that genuinely came from the website could not be recorded as
+                one, and the panel above had no way to ever be right. */}
+            <ModalSelect name="source" label="Source" options={[...LEAD_SOURCES]} defaultValue={lead?.source} />
           </div>
 
           {/* No status field. It used to be chosen here, which meant declaring an
