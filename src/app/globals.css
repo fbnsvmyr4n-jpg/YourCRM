@@ -279,10 +279,18 @@ body {
   }
 }
 
+/*
+   Opacity only, deliberately.
+
+   A panel opening upward is positioned with `translateY(-100%)` — the browser
+   resolving the percentage against its own rendered height is what lets it hang
+   above an anchor without anyone measuring it first. An animation that also
+   sets `transform` overwrites that for the length of the animation, and the
+   panel jumps from the wrong place to the right one.
+*/
 @keyframes popoverInUp {
   from {
     opacity: 0;
-    transform: translateY(4px);
   }
 }
 

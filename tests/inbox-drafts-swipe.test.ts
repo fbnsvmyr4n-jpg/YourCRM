@@ -250,9 +250,11 @@ describe("the suggestion list settles rather than snaps", () => {
     expect(css.slice(at, at + 160)).toMatch(/animation: none/);
   });
 
-  it("rises from the field whichever way it opened", () => {
-    // Opening upward, dropping from above would point at nothing.
-    expect(field).toMatch(/pos\.bottom !== undefined \? "popover-in-up" : "popover-in"/);
+  it("announces itself differently depending which way it opened", () => {
+    /* The upward variant fades only. It is positioned with a transform now, and
+       an animation that also set `transform` would overwrite it — the panel
+       would jump from the wrong place to the right one. */
+    expect(field).toMatch(/pos\.placement === "above" \? "popover-in-up" : "popover-in"/);
   });
 
   it("keeps the caret in the field when a suggestion is pressed", () => {

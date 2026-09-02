@@ -3,15 +3,27 @@
 import { useLayoutEffect, useState } from "react";
 
 export type AnchoredPosition = {
-  /* One of these, never both: opening upward has to pin the panel's BOTTOM to
-     the anchor, and its height is not known until it has rendered. Setting
-     `top` for that case would hang it downward from the anchor's top edge —
-     over the anchor itself. */
-  top?: number;
-  bottom?: number;
+  /**
+   * Always `top`, measured from the anchor and nothing else.
+   *
+   * Opening upward used to pin the panel's BOTTOM with `bottom: innerHeight -
+   * anchor.top`, because the panel's height is not known before it renders.
+   * That works only while `innerHeight` means the same thing to this code and
+   * to the browser laying the panel out — and on iOS it stops meaning the same
+   * thing the moment the keyboard appears. The panel was left stranded about
+   * 100px above its field, over the card above it, twice.
+   *
+   * `translateY(-100%)` solves the unknown height without asking the viewport
+   * anything: the browser resolves the percentage against the panel's own
+   * rendered box. So placement now depends on the anchor's rectangle alone,
+   * which is the one measurement that cannot disagree with itself.
+   */
+  top: number;
   left: number;
   width: number;
   maxHeight: number;
+  /** `above` needs the caller to shift the panel up by its own height. */
+  placement: "above" | "below";
 };
 
 /**
@@ -98,8 +110,8 @@ export function useAnchoredPosition(
 
       setPos(
         flip
-          ? { bottom: window.innerHeight - r.top + gap, left, width: w, maxHeight }
-          : { top: r.bottom + gap, left, width: w, maxHeight }
+          ? { top: r.top, left, width: w, maxHeight, placement: "above" }
+          : { top: r.bottom + gap, left, width: w, maxHeight, placement: "below" }
       );
     };
     place();

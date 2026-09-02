@@ -73,7 +73,16 @@ export function AnchoredMenu({
       <div
         role={role}
         className="popover fixed z-[61] overflow-y-auto overscroll-contain p-1.5"
-        style={{ top: pos.top, bottom: pos.bottom, left: pos.left, width: pos.width, maxHeight: pos.maxHeight }}
+        style={{
+          top: pos.top,
+          left: pos.left,
+          width: pos.width,
+          maxHeight: pos.maxHeight,
+          /* Opening upward, the panel is shifted up by its own height —
+             resolved by the browser against the rendered box, so nothing
+             here has to know how tall it turned out. */
+          transform: pos.placement === "above" ? "translateY(calc(-100% - 4px))" : undefined,
+        }}
       >
         {children}
       </div>

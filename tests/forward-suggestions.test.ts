@@ -199,6 +199,57 @@ describe("the suggestion list escapes what would slice it", () => {
     expect(hook).toMatch(/left = align === "end" \? r\.right - w : r\.left/);
   });
 
+  it("places itself from the anchor alone, never from the viewport height", () => {
+    /**
+     * Opening upward used to pin the panel's BOTTOM with
+     * `bottom: innerHeight - anchor.top`, because a panel's height is not known
+     * before it renders. That is only correct while `innerHeight` means the
+     * same thing to this code and to the browser laying the panel out — and on
+     * iOS it stops meaning the same thing the moment the keyboard appears. The
+     * list was left stranded about 100px above its field, over the card above
+     * it, in two separate recordings.
+     *
+     * `translateY(-100%)` solves the unknown height without asking the viewport
+     * anything: the browser resolves the percentage against the panel's own
+     * rendered box. Placement now depends on the anchor's rectangle, which is
+     * the one measurement that cannot disagree with itself.
+     */
+    expect(hook).toMatch(/\{ top: r\.top, left, width: w, maxHeight, placement: "above" \}/);
+    expect(hook).toMatch(/\{ top: r\.bottom \+ gap, left, width: w, maxHeight, placement: "below" \}/);
+    /* The general guard: no placement coordinate may be derived from the
+       viewport's height. Checking only for the old `bottom:` spelling let a
+       mutation that put the same arithmetic behind `top:` slip through. */
+    expect(hook).not.toMatch(/(top|bottom): window\.innerHeight - r\./);
+    const list = readFileSync(
+      fileURLToPath(new URL("../src/components/ui/SuggestInput.tsx", import.meta.url)),
+      "utf8"
+    );
+    const menu = readFileSync(
+      fileURLToPath(new URL("../src/components/ui/AnchoredMenu.tsx", import.meta.url)),
+      "utf8"
+    );
+    for (const src of [list, field, menu]) {
+      expect(src).toMatch(
+        /transform: pos\.placement === "above" \? "translateY\(calc\(-100% - 4px\)\)" : undefined/
+      );
+      expect(src).not.toMatch(/bottom: pos\.bottom/);
+    }
+  });
+
+  it("does not let the opening animation fight that transform", () => {
+    /* An animation that also sets `transform` overwrites the positioning one
+       for its duration, and the panel jumps from the wrong place to the right
+       one. The upward keyframe fades and nothing else. */
+    const css = readFileSync(
+      fileURLToPath(new URL("../src/app/globals.css", import.meta.url)),
+      "utf8"
+    );
+    const at = css.indexOf("@keyframes popoverInUp");
+    expect(at).toBeGreaterThanOrEqual(0);
+    const frame = css.slice(at, css.indexOf("}\n}", at));
+    expect(frame).not.toMatch(/transform/);
+  });
+
   it("sits close enough to read as part of the field", () => {
     /**
      * Measured off an iPhone recording: from the last suggestion's text to the

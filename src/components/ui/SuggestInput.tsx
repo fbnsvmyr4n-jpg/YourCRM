@@ -123,14 +123,16 @@ export function SuggestInput({
             role="listbox"
             className={clsx(
               "popover fixed z-[61] overflow-y-auto overscroll-contain py-0.5",
-              pos.bottom !== undefined ? "popover-in-up" : "popover-in"
+              pos.placement === "above" ? "popover-in-up" : "popover-in"
             )}
             style={{
               top: pos.top,
-              bottom: pos.bottom,
               left: pos.left,
               width: pos.width,
               maxHeight: pos.maxHeight,
+              /* Shifted up by its own height when it opens upward, which the
+                 browser resolves against the rendered box. */
+              transform: pos.placement === "above" ? "translateY(calc(-100% - 4px))" : undefined,
             }}
           >
             {matches.map((m, i) => (
