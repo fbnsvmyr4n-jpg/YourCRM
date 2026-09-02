@@ -29,7 +29,16 @@ const walk = (dir: string): string[] =>
       });
 
 /** Fields whose value is rendered with a "%" sign somewhere. */
-const RATE_FIELDS = ["winRate", "showRate", "conversion", "leadConversion"];
+const RATE_FIELDS = ["winRate", "showRate", "conversion", "leadConversion", "lossRate"];
+
+/**
+ * Names that end in "Rate" but are not percentages.
+ *
+ * Empty, and expected to stay that way. It exists so that the discovery test
+ * below has an honest way to say "this one really is exempt" rather than being
+ * weakened when something legitimate turns up.
+ */
+const NOT_PERCENTAGES = new Set<string>([]);
 
 describe("a rate is a percentage everywhere it is produced", () => {
   const files = walk(join(SRC, "server"));
@@ -69,6 +78,51 @@ describe("a rate is a percentage everywhere it is produced", () => {
       offenders,
       `these produce a ratio where a percentage is printed:\n${offenders.join("\n")}`
     ).toEqual([]);
+  });
+
+  it("knows about every field that is named like a rate", () => {
+    /**
+     * The list above is hand-written, and that is how this bug came back.
+     *
+     * `lossRate` was added to the meeting analytics after this guard was
+     * written, was never added to `RATE_FIELDS`, and duly shipped as
+     * `lossTotal / decided` — sitting directly beneath a comment reading
+     * "Percentages, 0-100" and directly beside two neighbours that both scale
+     * correctly. It rendered "0.5% Loss Rate" above the sentence "1 of 2
+     * decided opportunities were lost".
+     *
+     * A guard that only checks what somebody remembered to enrol is a guard
+     * against the bugs already found. So the enrolment is checked too: anything
+     * named `somethingRate` must be in the list, and the next one fails here
+     * until it is.
+     */
+    const named = new Set<string>();
+    for (const path of files) {
+      const code = readFileSync(path, "utf8")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^\s*\/\/.*$/gm, "");
+      for (const m of code.matchAll(/\b(\w+Rate)\s*:/g)) named.add(m[1]);
+    }
+
+    const missing = [...named].filter(
+      (f) => !RATE_FIELDS.includes(f) && !NOT_PERCENTAGES.has(f)
+    );
+
+    expect(
+      missing,
+      `these are named like rates but are not checked above — add them to ` +
+        `RATE_FIELDS, or to NOT_PERCENTAGES if they genuinely are not percentages:\n${missing.join("\n")}`
+    ).toEqual([]);
+
+    // And the discovery itself has to be finding things, or it proves nothing.
+    expect(named.size, "the scan found no rate fields at all").toBeGreaterThan(2);
+
+    /* An exemption cannot cover something that is also enrolled. Without this,
+       the whole check above is switched off by moving names into the exemption
+       list — which is the one edit that makes a failing guard go quiet while
+       looking like maintenance. */
+    const both = RATE_FIELDS.filter((f) => NOT_PERCENTAGES.has(f));
+    expect(both, "these are listed as rates AND as exempt from being rates").toEqual([]);
   });
 });
 

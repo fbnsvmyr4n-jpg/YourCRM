@@ -102,7 +102,21 @@ export async function meetingAnalytics(q: TenantQuery): Promise<MeetingAnalytics
     showRate: decided > 0 ? Math.round((attended / decided) * 100) : null,
     // Out of decided meetings, not out of everything ever booked.
     conversion: decided > 0 ? Math.round((won / decided) * 100) : null,
-    lossRate: decided > 0 ? lossTotal / decided : null,
+    /**
+     * A percentage, like the two above it — which it was not.
+     *
+     * This returned the raw fraction while its two neighbours, under the same
+     * comment declaring "Percentages, 0-100", multiplied by a hundred. The view
+     * renders it as `{lossRate}% Loss Rate`, so a board with one loss out of two
+     * decided meetings displayed "0.5% Loss Rate" directly above the sentence
+     * "1 of 2 decided opportunities were lost". Fifty percent, shown as a half
+     * of one percent — the difference between a business that is fine and one
+     * that is losing half of what it decides.
+     *
+     * Rounding is not cosmetic here either: unrounded, one loss in three
+     * rendered as "0.3333333333333333% Loss Rate".
+     */
+    lossRate: decided > 0 ? Math.round((lossTotal / decided) * 100) : null,
 
     // The funnel is in process order: booked → showed → advanced → won. Each
     // step is a count of meetings that reached at least that far, so it can
