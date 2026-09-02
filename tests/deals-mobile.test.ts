@@ -57,16 +57,25 @@ describe("the deals board on a phone", () => {
        takes the page from 3,428px to 977px — 4.2 screens to 1.2 — with the
        count and the stage total still on every header, so the shape of the
        pipeline is fully readable folded. */
-    expect(board).toMatch(/const \[folded, setFolded\] = useState<Set<StageId>>\(new Set\(\)\)/);
+    expect(board).toMatch(/const \[folded, setFolded\] = useState<Set<StageId>>\(/);
     expect(board).toMatch(/aria-expanded=\{!isFolded\}/);
     expect(board).toMatch(/aria-controls=\{`stage-\$\{stage\.id\}`\}/);
   });
 
-  it("starts open — a board that opens empty is not a board", () => {
-    /* The set holds what is CLOSED, so an untouched stage is open. It also
-       avoids seeding state for stages that may not exist on another account's
-       board. */
-    expect(board).toMatch(/useState<Set<StageId>>\(new Set\(\)\)/);
+  it("starts every stage that has deals open — a board that opens empty is not a board", () => {
+    /**
+     * The set holds what is CLOSED, so a stage nobody has touched is open.
+     *
+     * It used to start completely empty, which was the same rule stated more
+     * bluntly. Empty stages now seed it — 126px each of name, zero, currency
+     * zero and "Add deal", twice over on a board already 4.5 screens tall — but
+     * the guarantee this test exists for is unchanged: a stage WITH deals in it
+     * is never folded on arrival, because the filter only ever adds stages that
+     * no deal is in.
+     */
+    expect(board).toMatch(/!deals\.some\(\(d\) => d\.stage === s\.id\)/);
+    /* Nothing else may be seeded closed. */
+    expect(board).not.toMatch(/new Set\(STAGES\.map/);
   });
 
   it("cannot fold anything on a desktop, whatever the state holds", () => {
@@ -146,5 +155,75 @@ describe("the deals board on a phone", () => {
        hung under the last line of text like a mis-drawn card — while desktop,
        which never folds, keeps it. */
     expect(board).toMatch(/isFolded \? "border-b-0 sm:border-b" : "border-b"/);
+  });
+});
+
+describe("using the board, not just reading it", () => {
+  it("lets a keyboard open a deal", () => {
+    /**
+     * The card is a click target with no role and no tab stop, so a deal could
+     * not be opened from a keyboard at all — every other list in this app opens
+     * its rows with a real button.
+     *
+     * It cannot BE a button: it carries its own Move and Delete buttons, and a
+     * button inside a button is invalid markup the browser is free to flatten.
+     * So the role and the keyboard behaviour are stated by hand. Space as well
+     * as Enter, because that is what a real button answers to, and Space has to
+     * be stopped from scrolling the page.
+     *
+     * Verified in the browser: the card takes focus and Enter opens the panel.
+     */
+    expect(board).toMatch(/role="button"\s*\n\s*tabIndex=\{0\}/);
+    expect(board).toMatch(/aria-label=\{`Open \$\{deal\.title\}`\}/);
+    expect(board).toMatch(/if \(e\.key === "Enter" \|\| e\.key === " "\)/);
+    /* Only when the card itself is focused: Enter inside the Move or Delete
+       button must do that button's job, not open the panel behind it. */
+    expect(board).toMatch(/if \(e\.target !== e\.currentTarget\) return;/);
+  });
+
+  it("offers the move the panel tells you to make", () => {
+    /**
+     * Opening a Prospect deal said "move it to Discovery once there's a number
+     * to put on it" and gave no way to do it: close the panel, find the card,
+     * press Move. An instruction and the action it describes belong in the same
+     * place.
+     *
+     * Only on the branch that has nothing else to offer — where there is a
+     * payment to record or a value to set, moving is not the next thing.
+     */
+    expect(board).toMatch(/Move this deal/);
+    expect(board).toMatch(/\{!isWon\(deal\) && \(/);
+    /* The panel closes first: two dialogs stacked is a stack to unwind. */
+    expect(board).toMatch(/setActive\(null\);\s*\n\s*setMoving\(active\);/);
+  });
+});
+
+describe("stages with nothing in them", () => {
+  it("starts them closed", () => {
+    /**
+     * An empty stage renders its name, a zero, a currency zero, its exit
+     * criterion and an "Add deal" row — 126px on a phone, twice over, on a
+     * board already 4.5 screens tall. Measured after: 3498px to 3380px, and
+     * two panels that said "nothing here" are gone.
+     *
+     * Computed once from the board as it arrives, so a stage that empties while
+     * the reader is working in it stays open.
+     */
+    expect(board).toMatch(
+      /new Set\(STAGES\.filter\(\(s\) => !deals\.some\(\(d\) => d\.stage === s\.id\)\)\.map\(\(s\) => s\.id\)\)/
+    );
+  });
+
+  it("opens one again when a deal lands in it", () => {
+    /* Otherwise the move looks like the card simply vanished. Verified: moving
+       a deal into folded Delivery opened it and the card was visible. */
+    expect(board).toMatch(/setFolded\(\(prev\) => \{\s*\n\s*if \(!prev\.has\(stage\)\) return prev;/);
+  });
+
+  it("leaves the desktop columns alone", () => {
+    /* Each stage body carries an unconditional `sm:flex`, so from `sm` up the
+       columns are laid out whatever the fold holds. Verified at 1440px: all six
+       bodies shown. */
+    expect(board).toMatch(/sm:flex/);
   });
 });

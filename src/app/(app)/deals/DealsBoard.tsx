@@ -66,7 +66,23 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
      Desktop never reads this. Each stage body carries an unconditional
      `sm:flex`, so from `sm` up the columns are laid out whatever this holds.
   */
-  const [folded, setFolded] = useState<Set<StageId>>(new Set());
+  const [folded, setFolded] = useState<Set<StageId>>(
+    /*
+       Empty stages start closed.
+
+       An empty stage renders its name, a zero, a currency zero, its exit
+       criterion and an "Add deal" row: 126px on a phone, twice over on this
+       board, on a page already 4.5 screens tall. That is a third of a screen
+       spent saying "nothing here" while the reader scrolls to something that
+       has deals in it.
+
+       Computed once, from the board as it arrives. A stage that empties out
+       while the reader is looking at it stays open — they were just working in
+       it — and one that RECEIVES a deal is opened again by `moveDeal` below,
+       or the deal would land somewhere folded away.
+    */
+    () => new Set(STAGES.filter((s) => !deals.some((d) => d.stage === s.id)).map((s) => s.id))
+  );
   /** The deal whose stage the phone is choosing. Never set above `sm`. */
   const [moving, setMoving] = useState<Deal | null>(null);
 
@@ -226,6 +242,15 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
      * summed from these same cards, so a refused move quietly shifted money
      * between "Open pipeline" and "Closed won" on screen and nowhere else.
      */
+    /* A deal must never land in a stage that is folded shut — the move would
+       look like the card had simply vanished. */
+    setFolded((prev) => {
+      if (!prev.has(stage)) return prev;
+      const next = new Set(prev);
+      next.delete(stage);
+      return next;
+    });
+
     const result = await moveDealAction(id, stage);
     if (result?.error) {
       setItems(before);
@@ -635,6 +660,12 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
           deal={items.find((d) => d.id === active.id) ?? active}
           busy={busy}
           onClose={() => setActive(null)}
+          onMove={() => {
+            /* Closed first: the move sheet is a second dialog, and two stacked
+               over each other is a stack the reader has to unwind. */
+            setActive(null);
+            setMoving(active);
+          }}
           onPay={(fd) => handlePayment(active, fd)}
           onSetValue={(fd) => handleSetValue(active, fd)}
           onPainPoints={(painPoints) =>
@@ -826,7 +857,21 @@ function DealCard({
   const needsValue = showsMoney && deal.value === 0;
 
   return (
+    /*
+       A div that behaves as a button, because it cannot be one.
+
+       The card carries its own Move and Delete buttons, and a button inside a
+       button is invalid — the browser is free to drop the inner ones. So the
+       role and the keyboard behaviour are stated by hand: without them the card
+       was a click target with no tab stop and no role, and a deal simply could
+       not be opened from a keyboard at all. Every other list in this app opens
+       its rows with a real button; this is the one place that has to say so
+       explicitly.
+    */
     <div
+      role="button"
+      tabIndex={0}
+      aria-label={`Open ${deal.title}`}
       draggable
       onDragStart={(e) => {
         e.dataTransfer.effectAllowed = "move";
@@ -835,6 +880,15 @@ function DealCard({
       }}
       onDragEnd={onDragEnd}
       onClick={onOpen}
+      onKeyDown={(e) => {
+        /* Space as well as Enter, which is what a real button answers to. The
+           default for Space is to scroll the page, so it has to be stopped. */
+        if (e.key === "Enter" || e.key === " ") {
+          if (e.target !== e.currentTarget) return;
+          e.preventDefault();
+          onOpen();
+        }
+      }}
       className={clsx(
         "group cursor-grab rounded-xl border bg-[var(--panel-solid)] p-3 transition-all active:cursor-grabbing",
         partial ? "border-[color:var(--partial)]" : "border-[var(--border)] hover:border-[var(--border-strong)]",
@@ -961,6 +1015,7 @@ function DealModal({
   deal,
   busy,
   onClose,
+  onMove,
   onPay,
   onSetValue,
   onPainPoints,
@@ -968,6 +1023,7 @@ function DealModal({
   deal: Deal;
   busy: boolean;
   onClose: () => void;
+  onMove: () => void;
   onPay: (formData: FormData) => Promise<string | null>;
   onSetValue: (formData: FormData) => void | Promise<void>;
   onPainPoints: (points: string[]) => void;
@@ -1166,15 +1222,36 @@ function DealModal({
              * Referral are won stages; they came after this message was
              * written and inherited the wrong half of it.
              */
-            <p className="rounded-xl border border-[var(--border)] p-4 text-sm text-muted">
-              {deal.stage === "won"
-                ? "This deal is settled in full."
-                : deal.stage === "delivery"
-                  ? "Won and being delivered. This is where the referral comes from."
-                  : deal.stage === "referral"
-                    ? "Won, delivered, and asked. Anyone they name starts again at Prospect."
-                    : "Deals in this stage don't carry a value yet — move it to Discovery once there's a number to put on it."}
-            </p>
+            <div className="rounded-xl border border-[var(--border)] p-4">
+              <p className="text-sm text-muted">
+                {deal.stage === "won"
+                  ? "This deal is settled in full."
+                  : deal.stage === "delivery"
+                    ? "Won and being delivered. This is where the referral comes from."
+                    : deal.stage === "referral"
+                      ? "Won, delivered, and asked. Anyone they name starts again at Prospect."
+                      : "Deals in this stage don't carry a value yet — move it to Discovery once there's a number to put on it."}
+              </p>
+              {/*
+                  The move the sentence above just asked for.
+
+                  It told the reader to move the deal on and then offered no way
+                  to do it: close the panel, find the card again, press Move.
+                  An instruction and the action it describes belong in the same
+                  place. Only where the panel has nothing else to offer — where
+                  there is a payment or a value to set, moving is not the next
+                  thing and the card's own Move control is a tap away.
+              */}
+              {!isWon(deal) && (
+                <button
+                  type="button"
+                  onClick={onMove}
+                  className="btn-soft focus-ring mt-3 flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold"
+                >
+                  <ArrowRightLeft className="h-4 w-4" /> Move this deal
+                </button>
+              )}
+            </div>
           )}
             </div>
           </div>
