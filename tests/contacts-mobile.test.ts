@@ -200,9 +200,15 @@ describe("Contact Activity reads like a ledger", () => {
      *
      * Derived from the entries already loaded, and they arrive newest-first, so
      * it cannot disagree with the rows underneath it.
+     *
+     * It used to take `entries[0]` outright, which is the same rule stated
+     * carelessly: the timeline holds SCHEDULED meetings too, so a booking for
+     * Friday made the line read "Last activity in 2 days". The guarantee this
+     * test exists for is unchanged — the line names when the contact was last
+     * touched — but it now names the newest entry that has actually happened.
      */
-    expect(view).toMatch(/const latest = entries\[0\]/);
-    expect(view).toMatch(/Last activity <TimeAgo at=\{latest\.at\} mode="relative"/);
+    expect(view).toMatch(/Last activity\{" "\}/);
+    expect(view).toMatch(/<TimeAgo at=\{lastPast\.at\} mode="relative"/);
   });
 
   it("uses the compact stamp in the summary and the full one in the rows", () => {
@@ -432,5 +438,51 @@ describe("the contacts list header", () => {
      * edge on the heading's and the last button's right edge on the count's.
      */
     expect(view).toMatch(/<div className="relative mt-3 flex items-center justify-between gap-2">/);
+  });
+});
+
+describe("the activity summary tells the truth about time", () => {
+  /**
+   * The line under "Contact Activity" read **"Last activity in 2 days"**.
+   *
+   * The timeline carries scheduled meetings alongside history and is sorted
+   * newest first, so `entries[0]` was a meeting booked for Friday — a thing
+   * that had not happened, announced as the last thing that had. The contact's
+   * real last contact had been two hours earlier, and it said so in the row
+   * directly beneath.
+   *
+   * A summary contradicting its own rows is the worst kind of wrong here: it is
+   * the one part of the panel a reader trusts without scrolling.
+   */
+  it("separates what happened from what is booked", () => {
+    expect(view).toMatch(/const \{ lastPast, nextUp \} = splitTimeline\(entries, now \?\? 0\);/);
+    /* The old single pick, which is the bug itself. */
+    expect(view).not.toMatch(/const latest = entries\[0\];/);
+  });
+
+  it("says both, because they are one situation", () => {
+    /* "You spoke two hours ago, you are due to meet on Friday" is what the
+       panel exists to answer — filtering the future out would have fixed the
+       lie by deleting half the answer. */
+    expect(view).toMatch(/Last activity\{" "\}/);
+    expect(view).toMatch(/\{" · next "\}/);
+    expect(view).toMatch(/\{nextUp && \(/);
+    /* And it still admits when nothing has happened yet. */
+    expect(view).toMatch(/"Nothing logged yet"/);
+  });
+
+  it("waits for the clock rather than guessing which side of now things fall", () => {
+    /**
+     * `Date.now()` read during render is impure, and answers differently on the
+     * server than in the browser — the summary would claim a meeting was past
+     * during SSR and future a moment later. The shared clock every timestamp on
+     * the page already uses is null until hydration, so the line holds its
+     * height and says nothing until it can say something true.
+     */
+    expect(view).toMatch(/const now = useNow\(\);/);
+    expect(view).toMatch(/now !== null \?/);
+    expect(view).toMatch(/style=\{\{ visibility: "hidden" \}\} aria-hidden/);
+    /* Nothing may read the wall clock directly in here. */
+    expect(view).not.toMatch(/Date\.now\(\)/);
   });
 });

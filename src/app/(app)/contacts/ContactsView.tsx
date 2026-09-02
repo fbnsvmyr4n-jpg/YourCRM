@@ -29,7 +29,8 @@ import {
 import { Avatar } from "@/components/ui/Avatar";
 import { Overlay } from "@/components/ui/Overlay";
 import { SortMenu } from "@/components/ui/SortMenu";
-import { TimeAgo } from "@/components/ui/TimeAgo";
+import { TimeAgo, useNow } from "@/components/ui/TimeAgo";
+import { splitTimeline } from "@/lib/split-timeline";
 
 /**
  * A contact, decorated with what the screen needs and the record no longer stores.
@@ -859,10 +860,28 @@ function ActivityPanel({
   /** Whether the fold applies at the current width — see `useGridWidth`. */
   foldsActivity: boolean;
 }) {
-  /* The last thing that happened, which is the fact a contact panel is usually
-     opened to find. Derived from the entries already loaded — the list is
-     sorted newest first upstream — so it cannot disagree with the rows below. */
-  const latest = entries[0];
+  /*
+     The last thing that happened, and the next thing due.
+
+     `entries[0]` alone was wrong, and said so out loud. The timeline carries
+     SCHEDULED meetings as well as history, sorted newest first, so a contact
+     with a meeting booked for Friday had that meeting at the top — and the
+     summary line read "Last activity in 2 days". The last activity cannot be in
+     the future; it was the line's own words contradicting the row beneath it.
+     Seen on a contact whose real last contact had been two hours earlier.
+
+     Split rather than filtered, because the future entry is not noise — "you
+     spoke two hours ago, you are due to meet on Friday" is two useful facts,
+     and the panel exists to answer exactly that. Sorted newest first upstream,
+     so the newest PAST entry is the first one not in the future, and the
+     soonest future entry is the last one that is.
+  */
+  const now = useNow();
+  /* Before hydration the clock is unknowable, so nothing is claimed about which
+     side of "now" anything falls on — the summary waits, the same way every
+     timestamp on the page does. The arithmetic itself lives in `splitTimeline`,
+     where the boundary cases are tested. */
+  const { lastPast, nextUp } = splitTimeline(entries, now ?? 0);
 
   /*
      Folded away by default, and it remembers.
@@ -942,15 +961,36 @@ function ActivityPanel({
           {/* The Revenue fold states its scope under its title ("$314,400 won ·
               last 6 weeks"). The equivalent fact here is when this person was
               last touched, which is the question the panel exists to answer. */}
-          {latest ? (
+          {entries.length > 0 && now !== null ? (
             <p className="mt-1 text-xs text-muted">
               {/* `relative` here, `both` in the rows. This line is a summary and
                   wants to read like the Revenue fold's "last 6 weeks"; the exact
                   stamp belongs in the ledger below, where it is the record. */}
-              Last activity <TimeAgo at={latest.at} mode="relative" className="text-muted" />
+              {lastPast ? (
+                <>
+                  Last activity{" "}
+                  <TimeAgo at={lastPast.at} mode="relative" className="text-muted" />
+                </>
+              ) : (
+                "Nothing logged yet"
+              )}
+              {/* Said in the same breath, because a person you spoke to this
+                  morning and are meeting on Friday is one situation, not two. */}
+              {nextUp && (
+                <>
+                  {" · next "}
+                  <TimeAgo at={nextUp.at} mode="relative" className="text-muted" />
+                </>
+              )}
             </p>
-          ) : (
+          ) : entries.length === 0 ? (
             <p className="mt-1 text-xs text-faint">Nothing logged yet</p>
+          ) : (
+            /* Holds the line's height until the clock is known, so the panel
+               does not jump on hydration. */
+            <p className="mt-1 text-xs text-muted" style={{ visibility: "hidden" }} aria-hidden>
+              Last activity just now
+            </p>
           )}
           <span className="mt-2 block h-0.5 w-10 rounded-full accent-gradient" />
         </div>

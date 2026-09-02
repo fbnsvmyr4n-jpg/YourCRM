@@ -47,6 +47,19 @@ function getServerSnapshot(): number | null {
   return null;
 }
 
+/**
+ * The same shared clock every timestamp on this page measures against.
+ *
+ * Exported so a caller can ask "has this happened yet?" without reading
+ * `Date.now()` during its own render — which is impure, and would answer
+ * differently on the server than in the browser. Null until hydration, exactly
+ * like the component below, so a caller has to decide what to show before the
+ * answer is knowable rather than guessing.
+ */
+export function useNow(): number | null {
+  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+}
+
 export function relativeLabel(at: string, nowMs: number): string {
   const then = Date.parse(at);
   if (!Number.isFinite(then)) return "";
@@ -93,7 +106,7 @@ export function TimeAgo({
   className?: string;
   mode?: "relative" | "both";
 }) {
-  const nowMs = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const nowMs = useNow();
 
   // Nothing real before hydration. `toLocaleString` resolves against the
   // *server's* time zone during SSR, so rendering it would show a time that is
