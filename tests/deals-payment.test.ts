@@ -210,6 +210,29 @@ describe("the way back", () => {
     expect(src).toMatch(/if \(!res\?\.error\) setItems\(revert\);/);
   });
 
+  it("puts the card back in its own slot, not at the top", () => {
+    /**
+     * Reported after the first version shipped. Undo restored the deal, the
+     * money and the stage correctly — and dropped the card at the top of its
+     * column. On a phone, with two or three cards on screen at a time, a card
+     * that reappears somewhere else does not read as restored; it reads as
+     * lost, and the reader scrolls the column hunting for it.
+     *
+     * Anchored to the card it followed rather than to an index, because an
+     * index goes stale the moment anything else on the board moves. The
+     * arithmetic itself is proved in `restore-position.test.ts`; what this
+     * checks is that the board remembers the right thing and hands it over.
+     */
+    expect(src).toMatch(/const at = items\.findIndex\(\(d\) => d\.id === deal\.id\);/);
+    expect(src).toMatch(/const followedId = at > 0 \? items\[at - 1\]\.id : null;/);
+    expect(src).toMatch(/return restoreAt\(withoutMoney, deal, \(d\) => d\.id, followedId, at\);/);
+    /* A part payment never removed the card, so there is no position to put
+       back — only the figure on it. */
+    expect(src).toMatch(
+      /if \(withoutMoney\.some\(\(d\) => d\.id === deal\.id\)\) \{\s*\n\s*return withoutMoney\.map/
+    );
+  });
+
   it("reverses only what the payment touched", () => {
     /**
      * Not a snapshot of the board taken before the payment. A snapshot would

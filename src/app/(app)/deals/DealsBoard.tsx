@@ -11,6 +11,7 @@ import type { Deal } from "@/server/decorate-deal";
 export type { Deal } from "@/server/decorate-deal";
 
 import { clsx } from "@/lib/clsx";
+import { restoreAt } from "@/lib/restore-position";
 import {
   addDealAction,
   addPainPointsAction,
@@ -359,6 +360,17 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
          card was created for this money or an existing one grew. */
       const existingWon = items.find((d) => d.splitId === splitId && isWon(d));
       const wonLocalId = existingWon ? existingWon.id : `${deal.id}-paid-local`;
+      /*
+         Where the card was sitting, so undoing puts it back there.
+
+         Remembered as the card it FOLLOWED rather than as a number. A position
+         on this board only means anything relative to its neighbours, and an
+         index goes stale the moment anything else moves — add a deal while the
+         undo bar is up and every index below it is wrong. The number is kept
+         only as a fallback for when that neighbour has itself gone.
+      */
+      const at = items.findIndex((d) => d.id === deal.id);
+      const followedId = at > 0 ? items[at - 1].id : null;
 
       setItems((prev) => {
         let next = prev.map((d) =>
@@ -403,9 +415,16 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
             const withoutMoney = existingWon
               ? prev.map((d) => (d.id === wonLocalId ? { ...d, value: d.value - paid } : d))
               : prev.filter((d) => d.id !== wonLocalId);
-            return withoutMoney.some((d) => d.id === deal.id)
-              ? withoutMoney.map((d) => (d.id === deal.id ? deal : d))
-              : [deal, ...withoutMoney];
+            /* A part payment never removed the card, so there is no position
+               to restore — only the figure on it. */
+            if (withoutMoney.some((d) => d.id === deal.id)) {
+              return withoutMoney.map((d) => (d.id === deal.id ? deal : d));
+            }
+
+            /* Paid in full, so the card was taken off the board and has to go
+               back exactly where it was — not to the top, which is what a
+               reader tapping Undo reads as the card having gone missing. */
+            return restoreAt(withoutMoney, deal, (d) => d.id, followedId, at);
           },
         });
       }
