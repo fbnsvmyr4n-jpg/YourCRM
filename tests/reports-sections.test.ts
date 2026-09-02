@@ -17,6 +17,7 @@ import { describe, expect, it } from "vitest";
 const src = (p: string) => readFileSync(fileURLToPath(new URL(p, import.meta.url)), "utf8");
 const sections = src("../src/app/(app)/reports/ReportSections.tsx");
 const page = src("../src/app/(app)/reports/page.tsx");
+const periods = src("../src/app/(app)/reports/PeriodTabs.tsx");
 /* Comments here quote the layout they replaced, so absence checks must run
    against the code rather than the prose about it. */
 const pageCode = page.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
@@ -122,5 +123,58 @@ describe("a phone folds, a desktop does not", () => {
        that already have one. */
     expect(sections).toMatch(/rounded-2xl border border-\[var\(--border\)\] @min-\[880px\]:border-0/);
     expect(sections).toMatch(/folded && showBody && "p-3 @min-\[880px\]:p-0"/);
+  });
+});
+
+describe("choosing a period", () => {
+  it("shows the choice before the server has answered", () => {
+    /**
+     * These were plain links. Every tap was a full navigation, and this page is
+     * `force-dynamic` with six queries behind it, so the whole report was
+     * rebuilt before anything on screen acknowledged the tap — including the
+     * highlight moving. On a phone that is a second or more of a button that
+     * appears not to have worked, which is how it was reported.
+     *
+     * Measured after: pressed and busy both true within 50ms of the tap, where
+     * before nothing changed until the render returned.
+     */
+    expect(periods).toMatch(/useOptimistic\(current\)/);
+    expect(periods).toMatch(/startTransition\(\(\) => \{/);
+    expect(periods).toMatch(/aria-busy=\{pending\}/);
+    /* And no longer a Link, which is what made the wait unavoidable. */
+    expect(periods).not.toMatch(/<Link/);
+  });
+
+  it("keeps the period in the URL", () => {
+    /* A period worth looking at is worth sending to somebody — "look at July"
+       should be a link, not a description of which buttons to press. Verified
+       by loading ?period=this-month directly: the right tab is active. */
+    expect(periods).toMatch(/router\.push\(id === "all-time" \? "\/reports" : `\/reports\?period=\$\{id\}`/);
+  });
+
+  it("does nothing when the period is already showing", () => {
+    /* Otherwise tapping the active tab spends a full server render arriving at
+       the page it is already on. */
+    expect(periods).toMatch(/if \(id === shown\) return;/);
+  });
+
+  it("lays the periods out rather than letting the width decide", () => {
+    /* Six labels of different lengths under `flex-wrap` put "All time" on a
+       line of its own. Verified at 393px: a 3x2 grid, six equal cells, nothing
+       clipped; at 1440px, one row. */
+    expect(periods).toMatch(/grid grid-cols-3 gap-1\.5 @min-\[560px\]:grid-cols-6/);
+  });
+});
+
+describe("the page gets to the numbers faster", () => {
+  it("drops the standing subtitle", () => {
+    /**
+     * It explained that the figures come from real records — true of every page
+     * here, and not worth three lines above the fold on a phone. It pushed the
+     * period row and the headline numbers down for something nobody needed to
+     * read twice.
+     */
+    expect(pageCode).not.toMatch(/counted from your own records/);
+    expect(page).toMatch(/No standing subtitle/);
   });
 });

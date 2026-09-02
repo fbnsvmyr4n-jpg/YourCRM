@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { clsx } from "@/lib/clsx";
 import {
   Building2,
   CalendarCheck,
@@ -17,7 +16,7 @@ import { AreaChart } from "@/components/ui/AreaChart";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { companyRollups } from "@/server/repos/companies";
 import { getSettings } from "@/server/repos/settings";
-import { PERIODS, PERIOD_LABELS, isPeriod, resolvePeriod, type PeriodId } from "@/server/report-period";
+import { isPeriod, resolvePeriod, type PeriodId } from "@/server/report-period";
 import { referralCredits } from "@/server/referrals";
 import { reportData } from "@/server/analytics";
 import { reportView } from "@/server/reports-view";
@@ -31,6 +30,7 @@ import { instantToWallClock } from "@/lib/zoned";
 import { WorkloadCapacity } from "@/components/meetings/WorkloadCapacity";
 import { ExportButton } from "./ExportButton";
 import { ReportSections } from "./ReportSections";
+import { PeriodTabs } from "./PeriodTabs";
 
 export const dynamic = "force-dynamic";
 
@@ -218,35 +218,13 @@ export default async function ReportsPage({
     <div className="mx-auto max-w-[1500px] animate-fade-up">
       <div className="flex flex-wrap items-start justify-between gap-4 pb-5 pt-1">
         <div>
+          {/* No standing subtitle. It explained that the figures come from real
+              records, which is true of every page here and is not worth three
+              lines above the fold on a phone — it pushed the period row and the
+              headline numbers down for something nobody needed to read twice. */}
           <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Reports &amp; Analytics</h1>
-          <p className="mt-1 text-sm text-muted">
-            Every figure below is counted from your own records — deals, leads and meetings. Nothing
-            is estimated.
-          </p>
 
-          {/**
-            * Period links, not a dropdown.
-            *
-            * Each is a real URL, so a period can be linked to and survives a
-            * refresh — "look at July" becomes something to send rather than a
-            * sequence of clicks to describe.
-            */}
-          <div className="tab-row mt-3 flex flex-wrap items-center gap-1">
-            {PERIODS.map((id) => (
-              <Link
-                key={id}
-                href={id === "all-time" ? "/reports" : `/reports?period=${id}`}
-                scroll={false}
-                className={clsx(
-                  "focus-ring rounded-full px-3 py-1 text-xs font-medium transition-colors",
-                  periodId === id ? "text-accent" : "text-muted hover:text-[var(--text)]"
-                )}
-                style={periodId === id ? { background: "var(--accent-soft)" } : undefined}
-              >
-                {PERIOD_LABELS[id]}
-              </Link>
-            ))}
-          </div>
+          <PeriodTabs current={periodId} />
 
           {r.period?.previousLabel && (
             /* What changed, in words as well as a number. A rise from nothing
