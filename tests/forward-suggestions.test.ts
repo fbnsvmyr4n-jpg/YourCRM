@@ -147,6 +147,10 @@ describe("the shared field it now uses", () => {
 });
 
 describe("the suggestion list escapes what would slice it", () => {
+  const listSrc = readFileSync(
+    fileURLToPath(new URL("../src/components/ui/SuggestInput.tsx", import.meta.url)),
+    "utf8"
+  );
   const hook = readFileSync(
     fileURLToPath(new URL("../src/lib/use-anchored-position.ts", import.meta.url)),
     "utf8"
@@ -156,30 +160,47 @@ describe("the suggestion list escapes what would slice it", () => {
     "utf8"
   );
 
-  it("renders at <body> rather than inside the scrolling reader", () => {
+  it("is a child of the field, so it cannot drift from it", () => {
     /**
-     * Written `absolute`, the list was clipped by the reader's own scrolling
-     * body. Measured at 393x850 with six matches: the list ran from y=735 to
-     * y=1001 against a clipper ending at 962 and a screen ending at 850 — two
-     * rows reachable out of six.
+     * It used to be portalled to <body> and positioned `fixed` from JavaScript,
+     * to escape a `.card` that clips. Three attempts at that arithmetic each
+     * fixed one device and failed on another — on a real iPhone the list ended
+     * up 118px from the box it belonged to, and once about 100px above it.
      *
-     * This is the same defect as the sort and filter menus, in the feature
-     * built to fix them, which is why the arithmetic is now shared rather than
-     * written a second time.
+     * The card these fields live in does not clip, so the JavaScript was
+     * re-deriving a relationship the browser already keeps: `absolute` against
+     * the field moves with the field, through scrolls and keyboards alike.
+     * Verified on an iPhone 17 Pro with the real keyboard, and again after
+     * scrolling the page with the list open.
+     *
+     * The toolbar menus DO sit inside a clipping card, so they keep the portal.
      */
-    expect(field).toMatch(/createPortal\(/);
-    /* The class is built with `clsx` now, so the animation can differ by which
-       way the list opened — matched on the fixed positioning it must keep. */
-    expect(field).toMatch(/"popover fixed z-\[61\]/);
-    expect(field).not.toMatch(/popover absolute/);
+    for (const src of [field, listSrc]) {
+      expect(src).not.toMatch(/createPortal/);
+      expect(src).toMatch(/popover absolute left-0 right-0 z-\[61\]/);
+      expect(src).toMatch(/up \? "bottom-full mb-1 popover-in-up" : "top-full mt-1 popover-in"/);
+    }
   });
 
-  it("sizes and places itself from the one shared calculation", () => {
-    expect(field).toMatch(/useAnchoredPosition\(anchor, listOpen, \{ align: "start" \}\)/);
+  it("asks the shared hook only which way to open", () => {
+    /* Direction and a height cap, never a position — a wrong answer can only
+       open it the less convenient way round, still attached. */
+    for (const src of [field, listSrc]) {
+      expect(src).toMatch(/useDropDirection\(anchor, listOpen\)/);
+    }
+    expect(hook).toMatch(/export function useDropDirection/);
+    /* And it decides against the VISIBLE viewport. `innerHeight` still counts
+       the strip the keyboard covers, so a field with a keyboard under it would
+       be told it has room below and open downward into it. */
+    const at = hook.indexOf("export function useDropDirection");
+    const body = hook.slice(at);
+    expect(body).toMatch(/const viewBottom = vv \? vv\.offsetTop \+ vv\.height : window\.innerHeight/);
+    expect(body).toMatch(/const below = viewBottom - r\.bottom - 12/);
+    expect(body).toMatch(/vv\?\.addEventListener\("resize", measure\)/);
+    expect(body).toMatch(/vv\?\.addEventListener\("scroll", measure\)/);
+    /* The toolbar menus still need real coordinates: they hang off a button
+       inside a card that clips. */
     expect(menu).toMatch(/useAnchoredPosition\(anchor, open, \{ width, align: "end" \}\)/);
-    /* And neither component keeps its own copy of the clamp. */
-    expect(field).not.toMatch(/window\.innerWidth - /);
-    expect(menu).not.toMatch(/window\.innerWidth - /);
   });
 
   it("stays inside the screen and flips up when there is no room below", () => {
@@ -199,41 +220,18 @@ describe("the suggestion list escapes what would slice it", () => {
     expect(hook).toMatch(/left = align === "end" \? r\.right - w : r\.left/);
   });
 
-  it("places itself from the anchor alone, never from the viewport height", () => {
+  it("places the toolbar menus from the anchor alone, never from viewport height", () => {
     /**
-     * Opening upward used to pin the panel's BOTTOM with
-     * `bottom: innerHeight - anchor.top`, because a panel's height is not known
-     * before it renders. That is only correct while `innerHeight` means the
-     * same thing to this code and to the browser laying the panel out — and on
-     * iOS it stops meaning the same thing the moment the keyboard appears. The
-     * list was left stranded about 100px above its field, over the card above
-     * it, in two separate recordings.
-     *
-     * `translateY(-100%)` solves the unknown height without asking the viewport
-     * anything: the browser resolves the percentage against the panel's own
-     * rendered box. Placement now depends on the anchor's rectangle, which is
-     * the one measurement that cannot disagree with itself.
+     * The menus still position in JavaScript, because they hang off a button
+     * inside a card that clips and must escape it. Pinning their BOTTOM with
+     * `innerHeight - anchor.top` is what stranded the field lists before they
+     * stopped positioning at all, and the same trap is here.
      */
     expect(hook).toMatch(/\{ top: r\.top, left, width: w, maxHeight, placement: "above" \}/);
-    expect(hook).toMatch(/\{ top: r\.bottom \+ gap, left, width: w, maxHeight, placement: "below" \}/);
-    /* The general guard: no placement coordinate may be derived from the
-       viewport's height. Checking only for the old `bottom:` spelling let a
-       mutation that put the same arithmetic behind `top:` slip through. */
     expect(hook).not.toMatch(/(top|bottom): window\.innerHeight - r\./);
-    const list = readFileSync(
-      fileURLToPath(new URL("../src/components/ui/SuggestInput.tsx", import.meta.url)),
-      "utf8"
+    expect(menu).toMatch(
+      /transform: pos\.placement === "above" \? "translateY\(calc\(-100% - 4px\)\)" : undefined/
     );
-    const menu = readFileSync(
-      fileURLToPath(new URL("../src/components/ui/AnchoredMenu.tsx", import.meta.url)),
-      "utf8"
-    );
-    for (const src of [list, field, menu]) {
-      expect(src).toMatch(
-        /transform: pos\.placement === "above" \? "translateY\(calc\(-100% - 4px\)\)" : undefined/
-      );
-      expect(src).not.toMatch(/bottom: pos\.bottom/);
-    }
   });
 
   it("does not let the opening animation fight that transform", () => {
@@ -262,12 +260,12 @@ describe("the suggestion list escapes what would slice it", () => {
      * measured in both directions and on the toolbar menus too.
      */
     expect(hook).toMatch(/const gap = 4;/);
-    const list = readFileSync(
-      fileURLToPath(new URL("../src/components/ui/SuggestInput.tsx", import.meta.url)),
-      "utf8"
-    );
-    expect(list).toMatch(/overscroll-contain py-0\.5/);
-    expect(field).toMatch(/overscroll-contain py-0\.5/);
+    /* The field lists space themselves with a margin now, since CSS places
+       them: `mt-1` / `mb-1` is the same 4px. */
+    for (const src of [field, listSrc]) {
+      expect(src).toMatch(/overscroll-contain py-0\.5/);
+      expect(src).toMatch(/(bottom-full mb-1|top-full mt-1)/);
+    }
   });
 
   it("follows the keyboard, which moves nothing else it listens to", () => {

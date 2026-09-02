@@ -251,10 +251,9 @@ describe("the suggestion list settles rather than snaps", () => {
   });
 
   it("announces itself differently depending which way it opened", () => {
-    /* The upward variant fades only. It is positioned with a transform now, and
-       an animation that also set `transform` would overwrite it — the panel
-       would jump from the wrong place to the right one. */
-    expect(field).toMatch(/pos\.placement === "above" \? "popover-in-up" : "popover-in"/);
+    /* Placed by CSS now — `bottom-full` above, `top-full` below — with the
+       matching entrance on each. */
+    expect(field).toMatch(/up \? "bottom-full mb-1 popover-in-up" : "top-full mt-1 popover-in"/);
   });
 
   it("keeps the caret in the field when a suggestion is pressed", () => {

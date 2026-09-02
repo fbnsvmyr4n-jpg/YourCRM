@@ -1,10 +1,9 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { Search } from "lucide-react";
 import { clsx } from "@/lib/clsx";
-import { useAnchoredPosition } from "@/lib/use-anchored-position";
+import { useDropDirection } from "@/lib/use-anchored-position";
 import { matchPeople } from "@/lib/person-search";
 import { HighlightedMatch } from "@/components/ui/HighlightedMatch";
 
@@ -141,7 +140,9 @@ export function PersonField({
   const listOpen = open && matches.length > 0;
   /* Matched to the field's own width and left-aligned with it, so it reads as
      the field's list rather than a menu that happens to be near it. */
-  const pos = useAnchoredPosition(anchor, listOpen, { align: "start" });
+  /* Direction only. The list is a child of the field, so where it sits is
+     the browser's job — see the note on `useDropDirection`. */
+  const { up, maxHeight } = useDropDirection(anchor, listOpen);
 
   return (
     <div ref={boxRef} className="relative">
@@ -185,73 +186,68 @@ export function PersonField({
           body it scrolls, and the list measured at 393x850 ran to y=1001 on an
           850px screen with two of its six rows reachable. There is no height
           this can be given that survives being inside a box shorter than it. */}
-      {listOpen && pos && typeof document !== "undefined" &&
-        createPortal(
-          <ul
-            ref={listRef}
-            id={listId}
-            className={clsx(
-              "popover fixed z-[61] overflow-y-auto overscroll-contain py-0.5",
-              pos.placement === "above" ? "popover-in-up" : "popover-in"
-            )}
-            style={{
-              top: pos.top,
-              left: pos.left,
-              width: pos.width,
-              maxHeight: pos.maxHeight,
-              /* Shifted up by its own height when it opens upward, which the
-                 browser resolves against the rendered box. */
-              transform: pos.placement === "above" ? "translateY(calc(-100% - 4px))" : undefined,
-            }}
-            role="listbox"
-          >
-          {/* Said out loud, because an unlabelled list of names appearing under
-              an empty field reads as a search result for nothing typed. */}
-          {showingRecent && (
-            <li
-              aria-hidden
-              className="px-3 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wider text-faint"
-            >
-              Recent
-            </li>
+      {/* A child of the field, placed by CSS. Positioning it in JavaScript
+          against the viewport failed three times on a real iPhone — the list
+          ended up as much as 118px from the box it belonged to — because every
+          version re-derived a relationship the browser already keeps for free.
+          `absolute` against the field cannot drift from it. */}
+      {listOpen && (
+        <ul
+          ref={listRef}
+          id={listId}
+          role="listbox"
+          className={clsx(
+            "popover absolute left-0 right-0 z-[61] overflow-y-auto overscroll-contain py-0.5",
+            up ? "bottom-full mb-1 popover-in-up" : "top-full mt-1 popover-in"
           )}
-          {matches.map((p, i) => {
-            const sub = secondary(p);
-            return (
-              <li key={p.email || p.name}>
-                <button
-                  type="button"
-                  data-idx={i}
-                  onMouseEnter={() => setHighlight(i)}
-                  /* Keeps the caret in the field. Without it, pressing on a
-                     suggestion blurs the input first: on iOS the keyboard
-                     starts closing, the page reflows under the finger, and the
-                     list moves out from under the tap that was aimed at it.
-                     The pick still happens on click. */
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => choose(p)}
-                  className={clsx(
-                    "block w-full px-3 py-2 text-left text-sm transition-colors",
-                    i === active && "bg-[var(--raise)]"
-                  )}
-                  role="option"
-                  aria-selected={i === active}
-                >
-                  <span className="font-medium">
-                    <HighlightedMatch text={p.name} query={value} />
-                  </span>
-                  {sub && sub !== "—" && (
-                    <span className="ml-2 text-xs text-faint">
-                      <HighlightedMatch text={sub} query={value} />
-                    </span>
-                  )}
-                </button>
-              </li>
-            );
-          })}
-          </ul>,
-          document.body
+          style={{ maxHeight }}
+        >
+        {/* Said out loud, because an unlabelled list of names appearing under
+            an empty field reads as a search result for nothing typed. */}
+        {showingRecent && (
+          <li
+            aria-hidden
+            className="px-3 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wider text-faint"
+          >
+            Recent
+          </li>
         )}
+        {matches.map((p, i) => {
+          const sub = secondary(p);
+          return (
+            <li key={p.email || p.name}>
+              <button
+                type="button"
+                data-idx={i}
+                onMouseEnter={() => setHighlight(i)}
+                /* Keeps the caret in the field. Without it, pressing on a
+                   suggestion blurs the input first: on iOS the keyboard
+                   starts closing, the page reflows under the finger, and the
+                   list moves out from under the tap that was aimed at it.
+                   The pick still happens on click. */
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => choose(p)}
+                className={clsx(
+                  "block w-full px-3 py-2 text-left text-sm transition-colors",
+                  i === active && "bg-[var(--raise)]"
+                )}
+                role="option"
+                aria-selected={i === active}
+              >
+                <span className="font-medium">
+                  <HighlightedMatch text={p.name} query={value} />
+                </span>
+                {sub && sub !== "—" && (
+                  <span className="ml-2 text-xs text-faint">
+                    <HighlightedMatch text={sub} query={value} />
+                  </span>
+                )}
+              </button>
+            </li>
+          );
+        })}
+        </ul>
+      )}
     </div>
   );
 }

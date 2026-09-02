@@ -145,3 +145,60 @@ export function useAnchoredPosition(
 
   return pos;
 }
+
+/**
+ * Which way a field's own suggestion list should open, and how tall it may be.
+ *
+ * Deliberately NOT a position. Three separate attempts to compute where a
+ * suggestion list belongs — pinning its bottom, tracking the visual viewport,
+ * shifting it by its own height — each fixed one device and failed on another,
+ * because every one of them re-derives in JavaScript a relationship the browser
+ * already maintains for free: a child positioned against its parent.
+ *
+ * The list is now a child of the field, `absolute` above or below it, so it
+ * moves with the field by construction. Nothing here can strand it: the worst a
+ * wrong answer can do is open it the less convenient way round, still attached.
+ * That is the difference between a bug and a preference.
+ *
+ * Measured against the VISIBLE viewport, so the space a keyboard is covering is
+ * not mistaken for room.
+ */
+export function useDropDirection(anchor: HTMLElement | null, open: boolean) {
+  const [state, setState] = useState<{ up: boolean; maxHeight: number }>({
+    up: false,
+    maxHeight: 280,
+  });
+
+  useLayoutEffect(() => {
+    if (!open || !anchor) return;
+    const measure = () => {
+      const r = anchor.getBoundingClientRect();
+      const vv = window.visualViewport;
+      const viewTop = vv ? vv.offsetTop : 0;
+      const viewBottom = vv ? vv.offsetTop + vv.height : window.innerHeight;
+
+      const below = viewBottom - r.bottom - 12;
+      const above = r.top - viewTop - 12;
+      /* Downward unless there is meaningfully more room the other way — a list
+         that flips on a two-pixel difference feels unstable. */
+      const up = below < 160 && above > below;
+      /* Capped so a long list never fills the screen, floored so it is always
+         worth opening. */
+      setState({ up, maxHeight: Math.max(120, Math.min(320, up ? above : below)) });
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    window.addEventListener("scroll", measure, true);
+    const vv = window.visualViewport;
+    vv?.addEventListener("resize", measure);
+    vv?.addEventListener("scroll", measure);
+    return () => {
+      window.removeEventListener("resize", measure);
+      window.removeEventListener("scroll", measure, true);
+      vv?.removeEventListener("resize", measure);
+      vv?.removeEventListener("scroll", measure);
+    };
+  }, [open, anchor]);
+
+  return state;
+}

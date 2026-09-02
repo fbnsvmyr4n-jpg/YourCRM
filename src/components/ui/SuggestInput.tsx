@@ -1,11 +1,10 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { clsx } from "@/lib/clsx";
 import { matchStrings } from "@/lib/person-search";
 import { HighlightedMatch } from "@/components/ui/HighlightedMatch";
-import { useAnchoredPosition } from "@/lib/use-anchored-position";
+import { useDropDirection } from "@/lib/use-anchored-position";
 
 /**
  * A text box that offers what has been typed into it before.
@@ -57,7 +56,9 @@ export function SuggestInput({
   const matches = matchStrings(options, value);
   const active = Math.min(highlight, Math.max(0, matches.length - 1));
   const listOpen = open && matches.length > 0;
-  const pos = useAnchoredPosition(anchor, listOpen, { align: "start" });
+  /* Direction only. The list is a child of the field, so where it sits is
+     the browser's job — see the note on `useDropDirection`. */
+  const { up, maxHeight } = useDropDirection(anchor, listOpen);
 
   useEffect(() => {
     if (!open) return;
@@ -113,53 +114,46 @@ export function SuggestInput({
         }}
       />
 
-      {listOpen &&
-        pos &&
-        typeof document !== "undefined" &&
-        createPortal(
-          <ul
-            ref={listRef}
-            id={listId}
-            role="listbox"
-            className={clsx(
-              "popover fixed z-[61] overflow-y-auto overscroll-contain py-0.5",
-              pos.placement === "above" ? "popover-in-up" : "popover-in"
-            )}
-            style={{
-              top: pos.top,
-              left: pos.left,
-              width: pos.width,
-              maxHeight: pos.maxHeight,
-              /* Shifted up by its own height when it opens upward, which the
-                 browser resolves against the rendered box. */
-              transform: pos.placement === "above" ? "translateY(calc(-100% - 4px))" : undefined,
-            }}
-          >
-            {matches.map((m, i) => (
-              <li key={m}>
-                <button
-                  type="button"
-                  role="option"
-                  aria-selected={i === active}
-                  data-idx={i}
-                  onMouseEnter={() => setHighlight(i)}
-                  /* Keeps the caret in the field: without it the press blurs
-                     the input first, iOS starts closing the keyboard, and the
-                     page reflows out from under the tap. */
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => choose(m)}
-                  className={clsx(
-                    "block w-full truncate px-3 py-2 text-left text-sm transition-colors",
-                    i === active && "bg-[var(--raise)]"
-                  )}
-                >
-                  <HighlightedMatch text={m} query={value} />
-                </button>
-              </li>
-            ))}
-          </ul>,
-          document.body
-        )}
+      {/* A child of the field, placed by CSS. Positioning it in JavaScript
+          against the viewport failed three times on a real iPhone — the list
+          ended up as much as 118px from the box it belonged to — because every
+          version re-derived a relationship the browser already keeps for free.
+          `absolute` against the field cannot drift from it. */}
+      {listOpen && (
+        <ul
+          ref={listRef}
+          id={listId}
+          role="listbox"
+          className={clsx(
+            "popover absolute left-0 right-0 z-[61] overflow-y-auto overscroll-contain py-0.5",
+            up ? "bottom-full mb-1 popover-in-up" : "top-full mt-1 popover-in"
+          )}
+          style={{ maxHeight }}
+        >
+          {matches.map((m, i) => (
+            <li key={m}>
+              <button
+                type="button"
+                role="option"
+                aria-selected={i === active}
+                data-idx={i}
+                onMouseEnter={() => setHighlight(i)}
+                /* Keeps the caret in the field: without it the press blurs
+                   the input first, iOS starts closing the keyboard, and the
+                   page reflows out from under the tap. */
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => choose(m)}
+                className={clsx(
+                  "block w-full truncate px-3 py-2 text-left text-sm transition-colors",
+                  i === active && "bg-[var(--raise)]"
+                )}
+              >
+                <HighlightedMatch text={m} query={value} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

@@ -105,9 +105,16 @@ describe("the field it feeds", () => {
     expect(input).toMatch(/onMouseDown=\{\(e\) => e\.preventDefault\(\)\}/);
   });
 
-  it("escapes the card that would clip it, like every other popover here", () => {
-    expect(input).toMatch(/createPortal\(/);
-    expect(input).toMatch(/useAnchoredPosition\(anchor, listOpen, \{ align: "start" \}\)/);
+  it("belongs to the field rather than floating near it", () => {
+    /**
+     * Positioned by CSS against the field, not by JavaScript against the
+     * viewport. Three JS attempts each fixed one device and failed on another;
+     * on a real iPhone the list ended up 118px from its own box. The card these
+     * fields live in does not clip, so nothing was gained by portalling them.
+     */
+    expect(input).not.toMatch(/createPortal/);
+    expect(input).toMatch(/popover absolute left-0 right-0/);
+    expect(input).toMatch(/useDropDirection\(anchor, listOpen\)/);
   });
 
   it("cannot select past the end of a list that just narrowed", () => {
