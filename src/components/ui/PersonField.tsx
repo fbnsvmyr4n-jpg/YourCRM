@@ -191,7 +191,7 @@ export function PersonField({
             ref={listRef}
             id={listId}
             className={clsx(
-              "popover fixed z-[61] overflow-y-auto overscroll-contain py-1",
+              "popover fixed z-[61] overflow-y-auto overscroll-contain py-0.5",
               pos.bottom !== undefined ? "popover-in-up" : "popover-in"
             )}
             style={{ top: pos.top, bottom: pos.bottom, left: pos.left, width: pos.width, maxHeight: pos.maxHeight }}

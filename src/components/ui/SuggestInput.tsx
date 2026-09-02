@@ -122,7 +122,7 @@ export function SuggestInput({
             id={listId}
             role="listbox"
             className={clsx(
-              "popover fixed z-[61] overflow-y-auto overscroll-contain py-1",
+              "popover fixed z-[61] overflow-y-auto overscroll-contain py-0.5",
               pos.bottom !== undefined ? "popover-in-up" : "popover-in"
             )}
             style={{

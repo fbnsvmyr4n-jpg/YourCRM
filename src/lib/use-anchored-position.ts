@@ -52,7 +52,19 @@ export function useAnchoredPosition(
     if (!open || !anchor) return;
     const place = () => {
       const r = anchor.getBoundingClientRect();
-      const gap = 8;
+      /**
+       * Close enough to read as part of the field.
+       *
+       * Measured off an iPhone recording: from the last suggestion's text to
+       * the top of the input was about 24px of nothing — the row's own padding,
+       * then the list's, then this gap, stacked. Individually each was
+       * defensible; together they detached the list from the field it belongs
+       * to, and it read as floating over the card above rather than hanging off
+       * the input.
+       *
+       * 4px still separates the two surfaces; 8 was reading as a margin.
+       */
+      const gap = 4;
       const margin = 8;
       const w = width ?? r.width;
 

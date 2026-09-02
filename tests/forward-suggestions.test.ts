@@ -199,6 +199,26 @@ describe("the suggestion list escapes what would slice it", () => {
     expect(hook).toMatch(/left = align === "end" \? r\.right - w : r\.left/);
   });
 
+  it("sits close enough to read as part of the field", () => {
+    /**
+     * Measured off an iPhone recording: from the last suggestion's text to the
+     * top of the input was about 24px of nothing — the row's own padding, then
+     * the list's, then the gap, stacked. Each was defensible alone; together
+     * they detached the list from the field it belongs to, and it read as
+     * floating over the card above rather than hanging off the input.
+     *
+     * After: 4px between the two surfaces and 7px from the last row's box,
+     * measured in both directions and on the toolbar menus too.
+     */
+    expect(hook).toMatch(/const gap = 4;/);
+    const list = readFileSync(
+      fileURLToPath(new URL("../src/components/ui/SuggestInput.tsx", import.meta.url)),
+      "utf8"
+    );
+    expect(list).toMatch(/overscroll-contain py-0\.5/);
+    expect(field).toMatch(/overscroll-contain py-0\.5/);
+  });
+
   it("follows the keyboard, which moves nothing else it listens to", () => {
     /**
      * Opening the iOS keyboard pans the page to reveal the focused field and
