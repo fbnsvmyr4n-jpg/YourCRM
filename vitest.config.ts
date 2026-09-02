@@ -19,6 +19,34 @@ export default defineConfig({
     // A guard test that silently matches nothing is worse than no test at all,
     // so a run that finds no files is a failure.
     passWithNoTests: false,
+
+    /**
+     * Room for a database that has to boot before it can answer.
+     *
+     * The defaults — 5s a test, 10s a hook — are sized for unit tests that do
+     * arithmetic. Most of this suite is not that: twenty-eight files each start
+     * their own Postgres, compiled to WebAssembly, and run the whole schema
+     * against it in `beforeAll`. On an idle machine that takes a second or two
+     * and the defaults are invisible.
+     *
+     * On a busy one they are not. A run made while a dev server, a browser and
+     * an iOS simulator were live produced twelve red tests in a file about
+     * ownership; the cause was `Hook timed out in 10000ms` — the harness had
+     * not finished booting, and nothing in the output said so. It then passed
+     * eight consecutive runs, which is how a real limit gets filed as "flaky"
+     * and re-run instead of read.
+     *
+     * Reproduced deliberately, with thirty spinning processes and a few hundred
+     * sockets churning, and it is these two numbers that fix it — not the port
+     * range, which was a genuine defect but not this one.
+     *
+     * A ceiling is not a delay. Nothing here waits longer than the work takes;
+     * this only changes the point at which the runner gives up on a machine
+     * that is busy, and a test suite that reports the machine's load as a
+     * product defect is worse than useless — it teaches you to distrust it.
+     */
+    testTimeout: 30_000,
+    hookTimeout: 60_000,
   },
   resolve: {
     alias: {

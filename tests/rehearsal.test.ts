@@ -79,7 +79,7 @@ describe.skipIf(!copyPath)("migrating a copy of production", () => {
   });
 
   afterAll(async () => {
-    await closePool();
+    await closePool?.();
     await db.stop();
   });
 

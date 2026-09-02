@@ -98,7 +98,7 @@ describe("the check actually reports a stale database", () => {
   });
 
   afterAll(async () => {
-    await closePool();
+    await closePool?.();
     await db.stop();
   });
 

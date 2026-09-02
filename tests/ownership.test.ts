@@ -66,7 +66,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await closePool();
+  await closePool?.();
   await db.stop();
 });
 
