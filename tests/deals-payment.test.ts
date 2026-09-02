@@ -252,7 +252,75 @@ describe("the way back", () => {
 
   it("says so and changes nothing when the server refuses", () => {
     /* No undo offered for something that did not happen. */
-    expect(src).toMatch(/if \(err\) setFlash\(\{ wonDealId: null,.*failed: true \}\);/);
+    expect(src).toMatch(/if \(err\) showFlash\(\{ wonDealId: null,.*failed: true \}\);/);
     expect(src).toMatch(/\{flash\.wonDealId \? \(/);
+  });
+});
+
+describe("the bar takes itself away", () => {
+  /**
+   * Reported: it sat there. A confirmation that never leaves stops being a
+   * confirmation and becomes furniture — and this one is fixed over the bottom
+   * of a board people scroll, so on a phone it is furniture in the way.
+   */
+  it("goes after eight seconds", () => {
+    /**
+     * The convention for a transient message carrying an ACTION is four to ten
+     * seconds. This sits at the top of that band rather than the middle for two
+     * reasons particular to what it says: it is money, so the amount has to be
+     * read and checked against what actually arrived, and when the bar goes the
+     * undo goes with it — there is no second chance further down the page.
+     * Four seconds is right for "message archived". It is not right for
+     * "$36,000 recorded".
+     *
+     * Measured in the browser at 8014ms from the bar appearing to it leaving.
+     */
+    expect(src).toMatch(/const FLASH_MS = 8000;/);
+    expect(src).toMatch(/setTimeout\(\(\) => setFlash\(null\), FLASH_MS\)/);
+    /* Cleared on the way out, or a bar dismissed early leaves a timer that
+       fires into the next one and cuts it short. */
+    expect(src).toMatch(/return \(\) => clearTimeout\(t\);/);
+  });
+
+  it("does not vanish out from under someone reaching for it", () => {
+    /**
+     * A fixed timer will remove the bar from beneath a thumb travelling toward
+     * Undo, and from beneath a keyboard that has tabbed onto it. Both are the
+     * moment the reader has decided they want it — the worst possible moment to
+     * take it away, and the one that turns a recoverable mistake into a
+     * permanent one.
+     *
+     * Pointer and focus are two different people, so both are held. Verified in
+     * the browser: still on screen after 11s while pointed at, and after 11s
+     * while focused.
+     */
+    expect(src).toMatch(/if \(!flash \|\| holding\) return;/);
+    expect(src).toMatch(/\}, \[flash, holding\]\);/);
+    expect(src).toMatch(/onPointerEnter=\{\(\) => setHolding\(true\)\}/);
+    expect(src).toMatch(/onPointerLeave=\{\(\) => setHolding\(false\)\}/);
+    expect(src).toMatch(/onFocus=\{\(\) => setHolding\(true\)\}/);
+    expect(src).toMatch(/onBlur=\{\(\) => setHolding\(false\)\}/);
+  });
+
+  it("cannot open a new bar that is already held", () => {
+    /**
+     * A bar dismissed while the pointer was still on it never fires a leave
+     * event, so `holding` would still be true when the next one opens — and
+     * that one would sit there forever, which is the bug this whole change
+     * exists to remove.
+     *
+     * Every route that raises the bar goes through the one function, so the
+     * reset cannot be forgotten at a call site.
+     */
+    expect(src).toMatch(/const showFlash = useCallback\(\(next: NonNullable<typeof flash>\) => \{\s*\n\s*setHolding\(false\);\s*\n\s*setFlash\(next\);/);
+    expect(src).toMatch(/showFlash\(\{\s*\n\s*wonDealId: res\.wonDealId/);
+    expect(src).toMatch(/if \(err\) showFlash\(\{ wonDealId: null,/);
+    /* Nothing may raise the bar behind that function's back. */
+    expect(src).not.toMatch(/setFlash\(\{/);
+  });
+
+  it("still closes on demand for anyone who will not wait", () => {
+    expect(src).toMatch(/aria-label="Dismiss"/);
+    expect(src).toMatch(/onClick=\{\(\) => setFlash\(null\)\}/);
   });
 });

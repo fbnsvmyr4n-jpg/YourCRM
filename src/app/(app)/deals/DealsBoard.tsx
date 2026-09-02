@@ -48,6 +48,22 @@ const PARTIAL = "#f97316"; // orange — money in, but not all of it
  * post-close stages. Reading the stage instead would make revenue fall the
  * moment work began — success looking like a loss.
  */
+/**
+ * How long the payment bar stays before it takes itself away.
+ *
+ * The convention for a transient message carrying an ACTION is four to ten
+ * seconds. This sits at the top of that band rather than the middle, for two
+ * reasons specific to what it says: it is money, so the amount has to be read
+ * and checked against what actually arrived, and when the bar goes the undo
+ * goes with it — there is no second chance further down the page. Four seconds
+ * is right for "message archived"; it is not right for "$36,000 recorded".
+ *
+ * The far end is bounded by what the bar costs while it is there. It is fixed
+ * over the bottom of a board people scroll, so it cannot simply live on, and
+ * anyone who wants it gone sooner has the X.
+ */
+const FLASH_MS = 8000;
+
 const isWon = (d: Deal) => d.wonAt !== null;
 
 /**
@@ -121,6 +137,32 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
     /** Colours the bar as a refusal rather than a confirmation. */
     failed?: boolean;
   } | null>(null);
+  /*
+     Holds the countdown while somebody is actually at the bar.
+
+     A message that removes itself on a fixed timer will remove itself out from
+     under the pointer heading for its button, and under a keyboard that has
+     tabbed onto Undo. Both are the moment the reader has decided they want it —
+     the worst possible moment to take it away.
+  */
+  const [holding, setHolding] = useState(false);
+
+  useEffect(() => {
+    if (!flash || holding) return;
+    const t = setTimeout(() => setFlash(null), FLASH_MS);
+    return () => clearTimeout(t);
+    /* `holding` is a dependency, so letting go starts the full count again
+       rather than resuming a stub of it. Being generous here costs nothing:
+       the reader has already shown they were reaching for it. */
+  }, [flash, holding]);
+
+  /* Every route that raises the bar goes through here, so the countdown cannot
+     start already held — a bar dismissed while the pointer was still on it
+     never fires a leave event, and the next one would then sit there forever. */
+  const showFlash = useCallback((next: NonNullable<typeof flash>) => {
+    setHolding(false);
+    setFlash(next);
+  }, []);
 
   /*
      Scrolling the board while a card is being dragged over its edge.
@@ -398,7 +440,7 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
       });
 
       if (res?.wonDealId) {
-        setFlash({
+        showFlash({
           wonDealId: res.wonDealId,
           /* Cents, because that is what the money is actually stored in and
              what the server checks the amount against. */
@@ -455,7 +497,7 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
     const err = await handlePayment(deal, formData);
     /* Nothing is invented on failure — the server refused, so the board says
        so rather than showing a card that moved. */
-    if (err) setFlash({ wonDealId: null, amountCents: 0, label: err, revert: (prev) => prev, failed: true });
+    if (err) showFlash({ wonDealId: null, amountCents: 0, label: err, revert: (prev) => prev, failed: true });
   }
 
   async function handleUndoPayment() {
@@ -771,6 +813,14 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
             style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}
           >
             <div
+              /* Pointer AND focus, because they are two different people: one
+                 is reaching for Undo with a thumb, the other has tabbed onto
+                 it. `onFocus`/`onBlur` bubble in React, so this covers focus
+                 landing on either button inside. */
+              onPointerEnter={() => setHolding(true)}
+              onPointerLeave={() => setHolding(false)}
+              onFocus={() => setHolding(true)}
+              onBlur={() => setHolding(false)}
               className="modal-surface pointer-events-auto flex w-full max-w-sm items-center gap-3 rounded-2xl px-4 py-3"
               style={flash.failed ? { borderColor: "var(--red)" } : undefined}
             >
