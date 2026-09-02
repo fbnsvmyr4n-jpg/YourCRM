@@ -178,3 +178,39 @@ describe("the page gets to the numbers faster", () => {
     expect(page).toMatch(/No standing subtitle/);
   });
 });
+
+describe("a way out of an open section", () => {
+  it("puts a hide control at the end of it", () => {
+    /**
+     * An open area is several full-height cards on a phone, so closing it again
+     * meant scrolling back past all of them to reach the header that opened it.
+     * The reader is already at the end of the section — the control belongs
+     * where they are. The same answer Contact Activity got.
+     */
+    expect(sections).toMatch(/Hide \{section\.label\.toLowerCase\(\)\}/);
+    expect(sections).toMatch(/onClick=\{collapse\}/);
+  });
+
+  it("offers it only where there is a fold, and only while it is open", () => {
+    /* On a desktop there is no fold to close, and a button offering to hide
+       something that stays visible either way would be noise. Verified at
+       1440px: no hide buttons, nine cards open. */
+    expect(sections).toMatch(/\{folded && showBody && \(/);
+    expect(sections).toMatch(/text-muted @min-\[880px\]:hidden/);
+  });
+
+  it("lands the reader back on the section they closed", () => {
+    /**
+     * The content above the button disappears as it collapses, so the scroll
+     * position it leaves points at whatever moved up into that space. Measured
+     * on the first version: the section's own header ended up 817px above the
+     * viewport — the reader was dropped somewhere arbitrary, which is the
+     * problem the button existed to solve.
+     *
+     * Focusing the header scrolls it back into view and puts keyboard focus
+     * where it belongs. After: header at 512px, in view, focused.
+     */
+    expect(sections).toMatch(/const collapse = useCallback\(\(\) => \{\s*\n\s*setExpanded\(false\);\s*\n\s*headerRef\.current\?\.focus\(\);/);
+    expect(sections).toMatch(/ref=\{headerRef\}/);
+  });
+});

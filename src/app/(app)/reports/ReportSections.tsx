@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { useCallback, useRef, useState } from "react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import { clsx } from "@/lib/clsx";
 
 export type ReportSection = {
@@ -117,8 +117,23 @@ function Section({
   hidden: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const headerRef = useRef<HTMLButtonElement | null>(null);
   const bodyId = `report-${section.id}`;
   const showBody = folded ? expanded : open;
+
+  /**
+   * Closing from the bottom should land the reader on the thing they closed.
+   *
+   * The content above the button disappears as it collapses, so the scroll
+   * position it leaves behind points at whatever has moved up into that space —
+   * measured after the first version: the section's own header was off screen.
+   * Focusing the header both scrolls it back into view and puts keyboard focus
+   * where it belongs, which is the same thing Contact Activity does.
+   */
+  const collapse = useCallback(() => {
+    setExpanded(false);
+    headerRef.current?.focus();
+  }, []);
 
   if (hidden) return null;
 
@@ -147,6 +162,7 @@ function Section({
 
       {folded && (
         <button
+          ref={headerRef}
           type="button"
           onClick={() => setExpanded((v) => !v)}
           aria-expanded={expanded}
@@ -197,6 +213,29 @@ function Section({
         }
       >
         {section.content}
+
+        {/*
+            A way out at the bottom, matching the one on Contact Activity.
+
+            An open area is several full-height cards on a phone, so closing it
+            again meant scrolling back past everything to reach the header that
+            opened it. The reader is already at the end of the section — the
+            control belongs where they are.
+
+            Only where the fold exists and only while it is open: on a desktop
+            there is no fold to close, and a button offering to hide something
+            that is not hidden either way would be noise.
+        */}
+        {folded && showBody && (
+          <button
+            type="button"
+            onClick={collapse}
+            className="btn-soft focus-ring flex w-full items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-medium text-muted @min-[880px]:hidden"
+          >
+            <ChevronUp className="h-3.5 w-3.5" />
+            Hide {section.label.toLowerCase()}
+          </button>
+        )}
       </div>
     </section>
   );
