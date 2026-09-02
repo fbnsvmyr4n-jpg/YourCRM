@@ -1,6 +1,7 @@
 "use client";
 
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, ChevronUp } from "lucide-react";
+import { useCallback, useRef } from "react";
 import { clsx } from "@/lib/clsx";
 import { useRememberedToggle } from "@/lib/remembered-toggle";
 
@@ -48,6 +49,22 @@ export function MobileSection({
      rather than state written from an effect. */
   const [open, toggle] = useRememberedToggle(key, defaultOpen);
 
+  const headerRef = useRef<HTMLButtonElement | null>(null);
+  /**
+   * Closing from the bottom should land the reader on the thing they closed.
+   *
+   * The content above the button disappears as it collapses, so the scroll
+   * position it leaves behind points at whatever has moved up into that space.
+   * Measured on the reports page, which got this first: the section's own
+   * header ended up 817px above the viewport — dropping the reader somewhere
+   * arbitrary, which is the problem the button exists to solve. Focusing the
+   * header scrolls it back into view and puts keyboard focus where it belongs.
+   */
+  const collapse = useCallback(() => {
+    toggle();
+    headerRef.current?.focus();
+  }, [toggle]);
+
   return (
     /*
        Open, this is ONE card — not a header floating above a separate one.
@@ -68,6 +85,7 @@ export function MobileSection({
       {/* The header exists only on a phone. On a desktop these cards carry
           their own headings and a second one would be a duplicate. */}
       <button
+        ref={headerRef}
         type="button"
         onClick={toggle}
         aria-expanded={open}
@@ -115,6 +133,29 @@ export function MobileSection({
         style={open ? { background: `linear-gradient(180deg, ${tone.soft}, transparent 60%)` } : undefined}
       >
         {children}
+
+        {/*
+            A way out at the bottom, as Contact Activity and the report sections
+            have.
+
+            An open section is several full-height cards on a phone, so closing
+            it again meant scrolling back past all of them to the header that
+            opened it. The reader is already at the end — the control belongs
+            where they are.
+
+            `sm:hidden` like the header above it: from `sm` up the body is
+            always open and there is no fold to close.
+        */}
+        {open && (
+          <button
+            type="button"
+            onClick={collapse}
+            className="btn-soft focus-ring flex w-full items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-medium text-muted sm:hidden"
+          >
+            <ChevronUp className="h-3.5 w-3.5" />
+            Hide {title.toLowerCase()}
+          </button>
+        )}
       </div>
     </section>
   );

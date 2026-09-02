@@ -260,3 +260,45 @@ describe("how a fold looks", () => {
     expect(section).toMatch(/text-left transition-colors sm:hidden/);
   });
 });
+
+describe("a way out of an open section", () => {
+  const section = readFileSync(
+    fileURLToPath(new URL("../src/app/(app)/MobileSection.tsx", import.meta.url)),
+    "utf8"
+  );
+
+  it("puts a hide control at the end of it", () => {
+    /**
+     * An open section is several full-height cards on a phone, so closing it
+     * again meant scrolling back past all of them to the header that opened it.
+     * The reader is already at the end — the control belongs where they are.
+     *
+     * Shared by both folds on this page, Revenue and Activity, because they are
+     * one component: two folds side by side where only one can be closed from
+     * the bottom would read as a bug rather than a decision.
+     */
+    expect(section).toMatch(/Hide \{title\.toLowerCase\(\)\}/);
+    expect(section).toMatch(/onClick=\{collapse\}/);
+    expect(section).toMatch(/\{open && \(/);
+  });
+
+  it("keeps it to the phone, where the fold exists", () => {
+    /* From `sm` up the body is always open and there is nothing to close.
+       Verified at 1440px: no hide buttons on the page. */
+    expect(section).toMatch(/text-muted sm:hidden/);
+  });
+
+  it("lands the reader back on the section they closed", () => {
+    /**
+     * The content above the button disappears as it collapses, so the scroll
+     * position it leaves points at whatever moved up into that space. Measured
+     * on Activity: the header ended up 443px above the viewport — the reader
+     * dropped somewhere arbitrary, which is the problem the button exists to
+     * solve. After: header at 753px, in view, and focused.
+     */
+    expect(section).toMatch(
+      /const collapse = useCallback\(\(\) => \{\s*\n\s*toggle\(\);\s*\n\s*headerRef\.current\?\.focus\(\);/
+    );
+    expect(section).toMatch(/ref=\{headerRef\}/);
+  });
+});
