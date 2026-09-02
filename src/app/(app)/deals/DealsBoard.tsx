@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { edgeScrollStep, edgeScrollVelocity } from "@/lib/edge-scroll";
-import { ArrowRightLeft, ChevronDown, Coins, Flame, GripVertical, HandCoins, Plus, Trash2, Wallet, X } from "lucide-react";
+import { ArrowRightLeft, Check, ChevronDown, Coins, Flame, GripVertical, HandCoins, Plus, Trash2, Undo2, Wallet, X } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Overlay } from "@/components/ui/Overlay";
 import { BOARD_STAGES as STAGES, carriesMoney } from "@/data/pipeline";
@@ -17,6 +17,7 @@ import {
   deleteDealAction,
   moveDealAction,
   recordPaymentAction,
+  undoPaymentAction,
   recordReferralAction,
   removePainPointAction,
   setDealValueAction,
@@ -47,6 +48,17 @@ const PARTIAL = "#f97316"; // orange — money in, but not all of it
  * moment work began — success looking like a loss.
  */
 const isWon = (d: Deal) => d.wonAt !== null;
+
+/**
+ * Whether money can be taken against this deal.
+ *
+ * The same rule the server enforces in `recordPayment`: a payment belongs to a
+ * deal that has actually been presented, and it is the act that CLOSES one, so
+ * a deal already in Won has nothing left to pay. Stated here once because two
+ * places now ask — the card's one-tap button and the detail form behind it —
+ * and two copies of a rule about money is one copy too many.
+ */
+const canPay = (d: Deal) => (d.stage === "demo" || d.stage === "discovery") && d.value > 0;
 
 export function DealsBoard({ deals }: { deals: Deal[] }) {
   const [items, setItems] = useState<Deal[]>(deals);
@@ -85,6 +97,29 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
   );
   /** The deal whose stage the phone is choosing. Never set above `sm`. */
   const [moving, setMoving] = useState<Deal | null>(null);
+  /*
+     The payment just recorded, and everything needed to take it back out.
+
+     Recording money is the one action here that closes a deal, moves it between
+     columns and changes what Reports says the business earned. It is now a
+     single tap, and a single tap that does all that is only reasonable if it is
+     reversible — so this is what buys the right to have no confirmation dialog
+     in front of it.
+
+     `wonDealId` is the id the SERVER made, not the local stand-in below: the
+     undo has to name a real record.
+  */
+  const [flash, setFlash] = useState<{
+    /** Null when this is only a message — a refusal from the server, with
+        nothing to take back because nothing happened. */
+    wonDealId: string | null;
+    amountCents: number;
+    label: string;
+    /** Restores the board exactly, without re-reading it. */
+    revert: (prev: Deal[]) => Deal[];
+    /** Colours the bar as a refusal rather than a confirmation. */
+    failed?: boolean;
+  } | null>(null);
 
   /*
      Scrolling the board while a card is being dragged over its edge.
@@ -319,21 +354,24 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
       const remaining = deal.value - paid;
       const splitId = deal.splitId ?? `local-${deal.id}`;
       const splitTotal = deal.splitTotal ?? deal.value;
+      /* Resolved out here rather than inside the updater, because the undo
+         below has to know which of the two branches was taken — whether a won
+         card was created for this money or an existing one grew. */
+      const existingWon = items.find((d) => d.splitId === splitId && isWon(d));
+      const wonLocalId = existingWon ? existingWon.id : `${deal.id}-paid-local`;
 
       setItems((prev) => {
-        const existingWon = prev.find((d) => d.splitId === splitId && isWon(d));
-
         let next = prev.map((d) =>
           d.id === deal.id ? { ...d, value: remaining, splitId, splitTotal } : d
         );
 
         if (existingWon) {
-          next = next.map((d) => (d.id === existingWon.id ? { ...d, value: d.value + paid } : d));
+          next = next.map((d) => (d.id === wonLocalId ? { ...d, value: d.value + paid } : d));
         } else {
           next = [
             {
               ...deal,
-              id: `${deal.id}-paid-local`,
+              id: wonLocalId,
               value: paid,
               stage: "won" as StageId,
               splitId,
@@ -347,8 +385,71 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
         return remaining === 0 ? next.filter((d) => d.id !== deal.id) : next;
       });
 
+      if (res?.wonDealId) {
+        setFlash({
+          wonDealId: res.wonDealId,
+          /* Cents, because that is what the money is actually stored in and
+             what the server checks the amount against. */
+          amountCents: Math.round(paid * 100),
+          label: `${fullMoney(paid)} recorded against ${deal.title}`,
+          /*
+             The exact inverse, rather than a snapshot of the board taken before
+             the payment. A snapshot would also undo anything else done while
+             the bar was on screen — drag a card in those few seconds and it
+             would silently jump back. This touches only the two records the
+             payment touched.
+          */
+          revert: (prev) => {
+            const withoutMoney = existingWon
+              ? prev.map((d) => (d.id === wonLocalId ? { ...d, value: d.value - paid } : d))
+              : prev.filter((d) => d.id !== wonLocalId);
+            return withoutMoney.some((d) => d.id === deal.id)
+              ? withoutMoney.map((d) => (d.id === deal.id ? deal : d))
+              : [deal, ...withoutMoney];
+          },
+        });
+      }
+
       setActive(null);
       return null;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * Paid in full, in one tap.
+   *
+   * The whole reason this exists. "They paid the invoice" is the commonest
+   * thing that happens to a deal, and it was asking a new user to open a card,
+   * read a form, understand that a number in a box decided whether the deal
+   * closed, and press a button — for the one case where the amount was never in
+   * doubt. It is the same server action with the same validation; what is gone
+   * is the reading.
+   *
+   * A part payment still goes through the form, because a part payment is the
+   * case where the amount genuinely is a decision.
+   */
+  async function handlePaidInFull(deal: Deal) {
+    const formData = new FormData();
+    formData.set("amount", String(deal.value));
+    const err = await handlePayment(deal, formData);
+    /* Nothing is invented on failure — the server refused, so the board says
+       so rather than showing a card that moved. */
+    if (err) setFlash({ wonDealId: null, amountCents: 0, label: err, revert: (prev) => prev, failed: true });
+  }
+
+  async function handleUndoPayment() {
+    if (!flash?.wonDealId) return;
+    const { wonDealId, amountCents, revert } = flash;
+    setFlash(null);
+    setBusy(true);
+    try {
+      const res = await undoPaymentAction(wonDealId, amountCents);
+      /* Only once the server has actually put it back. Reverting the board
+         first and finding out afterwards is how a board ends up describing
+         something that never happened. */
+      if (!res?.error) setItems(revert);
     } finally {
       setBusy(false);
     }
@@ -613,6 +714,7 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
                     onOpen={() => setActive(deal)}
                     onMove={() => setMoving(deal)}
                     onDelete={() => handleDelete(deal.id)}
+                    onPaidInFull={() => handlePaidInFull(deal)}
                   />
                 ))}
                 <button
@@ -629,6 +731,57 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
 
       {addOpen !== null && (
         <AddDealModal busy={busy} defaultStage={defaultStage} onClose={() => setAddOpen(null)} onSubmit={handleAdd} />
+      )}
+
+      {/*
+          What just happened to the money, and the way back.
+
+          A bar rather than a dialog: the payment has already gone through, and
+          a question after the fact is the confirmation step this design exists
+          to remove. It states the amount and the deal by name, so the tap is
+          confirmed by reading rather than by watching a card disappear from one
+          column and reappear in another.
+
+          Portalled and fixed, because the board scrolls and this must not.
+      */}
+      {flash && (
+        <Overlay>
+          <div
+            role="status"
+            className="fixed inset-x-0 bottom-0 z-[70] flex justify-center p-4"
+            style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}
+          >
+            <div
+              className="modal-surface pointer-events-auto flex w-full max-w-sm items-center gap-3 rounded-2xl px-4 py-3"
+              style={flash.failed ? { borderColor: "var(--red)" } : undefined}
+            >
+              <p
+                className="min-w-0 flex-1 text-xs font-medium"
+                style={flash.failed ? { color: "var(--red)" } : undefined}
+              >
+                {flash.label}
+              </p>
+              {flash.wonDealId ? (
+                <button
+                  type="button"
+                  onClick={handleUndoPayment}
+                  disabled={busy}
+                  className="btn-soft focus-ring flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-accent disabled:opacity-60"
+                >
+                  <Undo2 className="h-3.5 w-3.5" /> Undo
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => setFlash(null)}
+                aria-label="Dismiss"
+                className="focus-ring shrink-0 rounded text-faint hover:text-[var(--text)]"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        </Overlay>
       )}
 
       {moving && (
@@ -843,6 +996,7 @@ function DealCard({
   onOpen,
   onMove,
   onDelete,
+  onPaidInFull,
 }: {
   deal: Deal;
   dragging: boolean;
@@ -851,6 +1005,7 @@ function DealCard({
   onOpen: () => void;
   onMove: () => void;
   onDelete: () => void;
+  onPaidInFull: () => void;
 }) {
   const showsMoney = carriesMoney(deal.stage);
   const partial = isPartiallyPaid(deal);
@@ -1005,6 +1160,35 @@ function DealCard({
           {fullMoney(deal.value)} of {fullMoney(deal.splitTotal)} received
         </p>
       )}
+
+      {/*
+          The invoice was paid, in one tap.
+
+          This is the commonest thing that happens to a deal, and reaching it
+          used to mean opening the card, reading a paragraph, understanding that
+          a number in a box decided whether the deal closed, and pressing a
+          button — for the one case where the amount was never in question. New
+          users read that form as a decision they had to get right, which is
+          exactly the report that prompted this.
+
+          It names the figure, so the tap is confirmed by what it says rather
+          than by a dialog after it. `stopPropagation`, because the card itself
+          opens the detail sheet — and the detail sheet is still where a PART
+          payment goes, because a part payment is a real decision about an
+          amount and deserves the form.
+      */}
+      {canPay(deal) && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onPaidInFull();
+          }}
+          className="btn-soft focus-ring mt-2.5 flex w-full items-center justify-center gap-1.5 rounded-lg py-2 text-[11px] font-semibold text-accent"
+        >
+          <Check className="h-3.5 w-3.5" /> Paid {money(deal.value)}
+        </button>
+      )}
     </div>
   );
 }
@@ -1032,7 +1216,7 @@ function DealModal({
   // Payment is recorded against a deal that has been presented — Discovery or
   // Demo. Recording one is what CLOSES it: the won record is created and
   // `won_at` stamped, so a deal already in Won has nothing left to pay.
-  const canPay = (deal.stage === "demo" || deal.stage === "discovery") && deal.value > 0;
+  const payable = canPay(deal);
   const canValue = carriesMoney(deal.stage) && !isWon(deal);
 
   /*
@@ -1099,7 +1283,7 @@ function DealModal({
             </div>
           )}
 
-          {canPay && (
+          {payable && (
             <form
               action={async (formData: FormData) => {
                 setError(null);
@@ -1182,7 +1366,7 @@ function DealModal({
           )}
 
           {canValue && (
-            <form action={onSetValue} className={clsx("rounded-xl border border-[var(--border)] p-4", canPay && "mt-3")}>
+            <form action={onSetValue} className={clsx("rounded-xl border border-[var(--border)] p-4", payable && "mt-3")}>
               <p className="text-sm font-semibold">{deal.value === 0 ? "Set deal value" : "Update deal value"}</p>
               <p className="mt-0.5 text-xs text-muted">
                 The quoted amount for this deal.
@@ -1194,7 +1378,7 @@ function DealModal({
                   type="number"
                   min={0}
                   required
-                  autoFocus={!canPay}
+                  autoFocus={!payable}
                   defaultValue={deal.value || undefined}
                   placeholder="10000"
                   className="field-input"
@@ -1212,7 +1396,7 @@ function DealModal({
             </form>
           )}
 
-          {!canPay && !canValue && (
+          {!payable && !canValue && (
             /**
              * Every post-close stage, not just Won.
              *

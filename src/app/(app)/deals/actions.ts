@@ -10,6 +10,7 @@ import {
   getDeal,
   moveStage,
   recordPayment,
+  undoPayment,
   restoreDeal,
   updateDeal,
   SOURCES,
@@ -266,6 +267,42 @@ export async function recordPaymentAction(id: string, formData: FormData) {
         kind: "won",
         title: "Payment recorded",
         amountCents: toCents(amount),
+        actorUserId: q.ctx.userId,
+      });
+    }
+    revalidateApp();
+    return result;
+  });
+}
+
+/**
+ * Undo the payment that was just recorded.
+ *
+ * Paired with the one-tap "Mark paid" on the card. That button exists because
+ * "they paid the invoice" is the commonest thing that happens to a deal and it
+ * should not cost a form; this is what makes removing the form safe rather than
+ * reckless, and it is why there is no confirmation step in front of the tap.
+ *
+ * The activity entry is not deleted. The money moving and moving back are two
+ * things that happened, and a log that quietly forgets one of them is a log
+ * that cannot be trusted for the others.
+ */
+export async function undoPaymentAction(wonDealId: string, amountCents: number) {
+  return withCurrentTenant(async (q) => {
+    const wonId = validId(wonDealId);
+    if (!wonId) return { error: "That payment no longer exists." };
+    if (!Number.isInteger(amountCents) || amountCents <= 0) {
+      return { error: "That is not an amount that can be taken back." };
+    }
+
+    const result = await undoPayment(q, wonId, amountCents);
+    if (result.ok && result.dealId) {
+      await logActivity(q, {
+        entityType: "deal",
+        entityId: result.dealId,
+        kind: "note",
+        title: "Payment undone",
+        amountCents,
         actorUserId: q.ctx.userId,
       });
     }

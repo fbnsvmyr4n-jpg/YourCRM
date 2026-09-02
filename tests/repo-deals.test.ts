@@ -355,6 +355,116 @@ describe("part-payments split a deal without losing the remainder", () => {
     expect(won[0].valueCents).toBe(1_000_000);
   });
 
+  /**
+   * Taking a payment back out.
+   *
+   * The board records money in one tap now, with no confirmation in front of
+   * it. That is only defensible because it is reversible, so these are the
+   * tests that hold the tap up — an undo that half-works would leave the
+   * business's own revenue figure wrong.
+   *
+   * Both branches of `recordPayment` need an inverse, so both get a case.
+   */
+  describe("undoing one", () => {
+    it("puts a fully paid deal back exactly as it was", async () => {
+      const d = await presented();
+      const paid = await inA((q) => repo.recordPayment(q, d.id, 1_000_000));
+      expect(await inA((q) => repo.getDeal(q, d.id)), "setup: it should be closed").toBeNull();
+
+      const undone = await inA((q) => repo.undoPayment(q, paid.wonDealId!, 1_000_000));
+      expect(undone.ok).toBe(true);
+
+      const back = await inA((q) => repo.getDeal(q, d.id));
+      expect(back, "the deal was not restored").not.toBeNull();
+      expect(back!.valueCents, "it came back for the wrong money").toBe(1_000_000);
+      expect(back!.stage).toBe("demo");
+      expect(back!.wonAt, "it came back already won").toBeNull();
+
+      /* And the money is gone from the won column, not merely hidden. This is
+         what Reports counts as revenue. */
+      const won = (await inA((q) => repo.listDeals(q))).filter((x) => x.wonAt !== null);
+      expect(won, "the won record survived the undo").toHaveLength(0);
+    });
+
+    it("takes only that payment off a part-paid deal", async () => {
+      /* Two payments against one job, undoing the second. The won record must
+         come DOWN by the second amount rather than disappearing and taking the
+         first payment with it. */
+      const d = await presented();
+      await inA((q) => repo.recordPayment(q, d.id, 400_000));
+      const second = await inA((q) => repo.recordPayment(q, d.id, 100_000));
+
+      const undone = await inA((q) => repo.undoPayment(q, second.wonDealId!, 100_000));
+      expect(undone.ok).toBe(true);
+
+      const all = await inA((q) => repo.listDeals(q));
+      const won = all.filter((x) => x.wonAt !== null && x.splitId !== null);
+      expect(won, "the first payment was destroyed too").toHaveLength(1);
+      expect(won[0].valueCents, "the wrong amount came off").toBe(400_000);
+      expect(all.find((x) => x.id === d.id)?.valueCents, "the balance is wrong").toBe(600_000);
+    });
+
+    it("cannot be run twice", async () => {
+      // The bar can be tapped again before it clears, and a second undo would
+      // otherwise take the money off a deal that never received it.
+      const d = await presented();
+      const paid = await inA((q) => repo.recordPayment(q, d.id, 1_000_000));
+      await inA((q) => repo.undoPayment(q, paid.wonDealId!, 1_000_000));
+
+      const again = await inA((q) => repo.undoPayment(q, paid.wonDealId!, 1_000_000));
+      expect(again.error, "the undo ran a second time").toBeTruthy();
+      expect(await inA((q) => repo.getDeal(q, d.id))).not.toBeNull();
+      expect((await inA((q) => repo.listDeals(q))).filter((x) => x.wonAt !== null)).toHaveLength(0);
+    });
+
+    it("refuses to take out more than went in", async () => {
+      const d = await presented();
+      const paid = await inA((q) => repo.recordPayment(q, d.id, 400_000));
+      const r = await inA((q) => repo.undoPayment(q, paid.wonDealId!, 900_000));
+      expect(r.error, "an inflated undo was accepted").toBeTruthy();
+      expect(
+        (await inA((q) => repo.listDeals(q))).find((x) => x.id === d.id)?.valueCents,
+        "the deal was changed by a refused undo"
+      ).toBe(600_000);
+    });
+
+    it("refuses the id of a deal that is not a payment", async () => {
+      /**
+       * The open half of a part-paid deal carries the same split id as the won
+       * half, so it is the one wrong id that gets far enough to do damage:
+       * without the `won_at` check this function would find it, treat it as the
+       * record the money went into, and then look up the deal it was paid
+       * against — finding ITSELF. It would take the amount off that row and add
+       * it straight back, leaving a payment that reports as undone and money
+       * still counted as revenue.
+       *
+       * A mutation removing that check survived every other case here.
+       */
+      const d = await presented();
+      await inA((q) => repo.recordPayment(q, d.id, 400_000));
+
+      const r = await inA((q) => repo.undoPayment(q, d.id, 400_000));
+      expect(r.error, "an open deal was accepted as a payment").toBeTruthy();
+
+      const all = await inA((q) => repo.listDeals(q));
+      expect(all.find((x) => x.id === d.id)?.valueCents, "the open half was changed").toBe(600_000);
+      const won = all.filter((x) => x.wonAt !== null && x.splitId !== null);
+      expect(won, "the payment was destroyed").toHaveLength(1);
+      expect(won[0].valueCents, "the recorded payment changed").toBe(400_000);
+    });
+
+    it("belongs to the tenant that made the payment", async () => {
+      /* The id travels to the browser and comes back, so it is exactly the
+         thing another account would try to name. */
+      const d = await presented();
+      const paid = await inA((q) => repo.recordPayment(q, d.id, 1_000_000));
+
+      const r = await inB((q) => repo.undoPayment(q, paid.wonDealId!, 1_000_000));
+      expect(r.error, "another tenant undid this payment").toBeTruthy();
+      expect(await inA((q) => repo.getDeal(q, d.id)), "tenant A's deal was restored by tenant B").toBeNull();
+    });
+  });
+
   it("refuses more than is outstanding", async () => {
     const d = await presented();
     const r = await inA((q) => repo.recordPayment(q, d.id, 1_500_000));

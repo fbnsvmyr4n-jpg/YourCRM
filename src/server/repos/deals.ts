@@ -422,7 +422,14 @@ export async function listByOwner(
   return rows.map(toRecord);
 }
 
-export type PaymentResult = { ok?: true; error?: string; wonDealId?: string };
+export type PaymentResult = {
+  ok?: true;
+  error?: string;
+  /** The won record the money landed in — the handle an undo needs. */
+  wonDealId?: string;
+  /** The deal it was paid against. */
+  dealId?: string;
+};
 
 /**
  * Record money received against a deal that has been presented but not paid.
@@ -476,20 +483,24 @@ export async function recordPayment(
     [q.ctx.subAccountId, splitId]
   );
 
+  let wonDealId: string;
+
   if (existingWon) {
+    wonDealId = existingWon.id;
     await q.rows(
       `UPDATE deals SET value_cents = value_cents + $3, split_total_cents = $4, updated_at = now()
        WHERE id = $2 AND sub_account_id = $1 AND deleted_at IS NULL`,
       [q.ctx.subAccountId, existingWon.id, amountCents, splitTotal]
     );
   } else {
+    wonDealId = `${deal.id}-paid-${Math.random().toString(36).slice(2, 6)}`;
     await q.rows(
       `INSERT INTO deals (id, sub_account_id, contact_id, owner_user_id, title, value_cents,
                           stage, source, won_at, split_id, split_total_cents, pain_points)
        VALUES ($2, $1, $3, $4, $5, $6, 'won', $7, now(), $8, $9, $10::jsonb)`,
       [
         q.ctx.subAccountId,
-        `${deal.id}-paid-${Math.random().toString(36).slice(2, 6)}`,
+        wonDealId,
         deal.contactId,
         deal.ownerUserId,
         deal.title,
@@ -505,10 +516,19 @@ export async function recordPayment(
   if (remaining === 0) {
     // Paid in full: nothing is outstanding, so the original is not left behind
     // as an open deal inflating the pipeline.
+    //
+    // It is stamped with the split even though it is being removed. The two
+    // rows ARE two halves of one payment, and the id is the only thing that
+    // records it — without it the deleted original and the won record it paid
+    // for have nothing tying them together, and there is no way back from here.
+    // This branch quietly omitted it, so `undoPayment` could not find the deal
+    // to restore and the undo silently did nothing. Caught by reading the table
+    // after pressing it.
     await q.rows(
-      `UPDATE deals SET deleted_at = now(), updated_at = now()
+      `UPDATE deals SET deleted_at = now(), split_id = $3, split_total_cents = $4,
+                        updated_at = now()
        WHERE id = $2 AND sub_account_id = $1`,
-      [q.ctx.subAccountId, deal.id]
+      [q.ctx.subAccountId, deal.id, splitId, splitTotal]
     );
   } else {
     await q.rows(
@@ -518,6 +538,93 @@ export async function recordPayment(
     );
   }
 
-  return { ok: true };
+  return { ok: true, wonDealId, dealId: deal.id };
+}
+
+/**
+ * Take a payment back out again.
+ *
+ * The reason one-tap "Mark paid" is allowed to exist. Recording money is the
+ * one action on this board that closes a deal, moves it between columns and
+ * changes what Reports says the business earned — so making it a single tap is
+ * only defensible if the tap is reversible. Without this the button would have
+ * to ask a question first, which is the confirmation dialog it exists to remove.
+ *
+ * Written as the exact inverse of `recordPayment` rather than as a general
+ * "edit the numbers back" — it walks the same two branches, so anything that
+ * function does has something here that undoes it:
+ *
+ *  - the won record was CREATED for this payment, or an existing one was
+ *    incremented. Whole amount back means the record goes; part of it means the
+ *    figure comes down.
+ *  - the original was soft-deleted (paid in full — note it keeps its value,
+ *    which is why restoring it needs no arithmetic) or had its value reduced to
+ *    what was left. Deleted means restore; open means add the amount back.
+ *
+ * Everything is tenant-scoped and re-read from the database. The caller hands
+ * over an id and an amount; it is not trusted for anything else, and it cannot
+ * name a record belonging to somebody else or take out more than went in.
+ */
+export async function undoPayment(
+  q: TenantQuery,
+  wonDealId: string,
+  amountCents: number
+): Promise<PaymentResult> {
+  if (!Number.isInteger(amountCents) || amountCents <= 0) {
+    return { error: "That is not an amount that can be taken back." };
+  }
+
+  const won = await q.one<Row>(`${SELECT} AND d.id = $2 AND d.won_at IS NOT NULL`, [
+    q.ctx.subAccountId,
+    wonDealId,
+  ]);
+  if (!won) return { error: "That payment has already been undone." };
+  if (Number(won.value_cents) < amountCents) {
+    return { error: "That payment has already been changed." };
+  }
+  if (!won.split_id) return { error: "That payment has already been undone." };
+
+  // The deal the money came off. Deliberately includes soft-deleted rows: paid
+  // in full is exactly the case where the original was removed from the board,
+  // and it is the row this has to bring back.
+  const original = await q.one<{ id: string; deleted_at: Date | null }>(
+    /* Not `SELECT` — that constant filters out deleted rows, and a deleted row
+       is precisely what this is looking for. */
+    `SELECT d.id, d.deleted_at FROM deals d
+     WHERE d.sub_account_id = $1 AND d.split_id = $2 AND d.won_at IS NULL
+     LIMIT 1`,
+    [q.ctx.subAccountId, won.split_id]
+  );
+  if (!original) return { error: "The deal this was paid against no longer exists." };
+
+  if (Number(won.value_cents) === amountCents) {
+    await q.rows(
+      `UPDATE deals SET deleted_at = now(), updated_at = now()
+       WHERE id = $2 AND sub_account_id = $1`,
+      [q.ctx.subAccountId, won.id]
+    );
+  } else {
+    await q.rows(
+      `UPDATE deals SET value_cents = value_cents - $3, updated_at = now()
+       WHERE id = $2 AND sub_account_id = $1 AND deleted_at IS NULL`,
+      [q.ctx.subAccountId, won.id, amountCents]
+    );
+  }
+
+  if (original.deleted_at) {
+    await q.rows(
+      `UPDATE deals SET deleted_at = NULL, updated_at = now()
+       WHERE id = $2 AND sub_account_id = $1`,
+      [q.ctx.subAccountId, original.id]
+    );
+  } else {
+    await q.rows(
+      `UPDATE deals SET value_cents = value_cents + $3, updated_at = now()
+       WHERE id = $2 AND sub_account_id = $1 AND deleted_at IS NULL`,
+      [q.ctx.subAccountId, original.id, amountCents]
+    );
+  }
+
+  return { ok: true, wonDealId: won.id, dealId: original.id };
 }
 

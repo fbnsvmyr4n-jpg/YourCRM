@@ -67,7 +67,7 @@ describe("the amount field", () => {
     expect(field).not.toMatch(/autoFocus/);
     /* The value form below it keeps its own conditional focus, which is a
        different field and still the right behaviour when it is the only one. */
-    expect(code).toMatch(/autoFocus=\{!canPay\}/);
+    expect(code).toMatch(/autoFocus=\{!payable\}/);
   });
 
   it("selects the figure on focus, so a part payment is one gesture too", () => {
@@ -140,5 +140,96 @@ describe("the order of the modal", () => {
     expect(modal).toMatch(/max-sm:-mb-3/);
     const painRoot = src.slice(src.indexOf("function PainPoints"));
     expect(painRoot).toMatch(/<section className="mb-3 rounded-xl/);
+  });
+});
+
+describe("paid in full, without opening anything", () => {
+  /**
+   * Reported after the two-tap version shipped: still confusing to new users.
+   *
+   * Two taps was the right count for the wrong flow. Tapping the card opens a
+   * PANEL — a paragraph about what happens to the money, a number in a box, a
+   * line about what the amount will do, a button. A new user reads that as a
+   * decision they have to get right, and it is not a decision at all: the
+   * commonest thing that happens to a deal is that the invoice was paid, in
+   * full, for the figure already printed on the card.
+   *
+   * So the whole panel is gone from that path. The card carries the amount and
+   * a button naming it, and the panel stays where it belongs — the part payment,
+   * which genuinely is a decision about an amount.
+   */
+  it("puts the amount on the card as the action", () => {
+    expect(src).toMatch(/Paid \{money\(deal\.value\)\}/);
+    /* Named, so the tap is confirmed by reading rather than by a dialog after
+       the fact — and by watching the card cross the board. */
+    expect(src).toMatch(/onPaidInFull\(\);/);
+    /* The card itself opens the panel; this must not. */
+    expect(src).toMatch(/e\.stopPropagation\(\);\s*\n\s*onPaidInFull\(\);/);
+  });
+
+  it("shows it only where money can actually be taken", () => {
+    /* The same rule the server enforces — Discovery or Demo, and a figure to
+       pay. A button offering to close a deal the server will refuse is worse
+       than no button. */
+    expect(src).toMatch(/\{canPay\(deal\) && \(/);
+    expect(src).toMatch(
+      /const canPay = \(d: Deal\) => \(d\.stage === "demo" \|\| d\.stage === "discovery"\) && d\.value > 0;/
+    );
+    /* Stated once. The panel asks the same question, and two copies of a rule
+       about money is one copy too many. */
+    expect(src).toMatch(/const payable = canPay\(deal\);/);
+  });
+
+  it("sends the whole outstanding figure, not a typed one", () => {
+    expect(src).toMatch(/formData\.set\("amount", String\(deal\.value\)\)/);
+  });
+});
+
+describe("the way back", () => {
+  /**
+   * What makes the tap above defensible.
+   *
+   * Recording money closes a deal, moves it between columns and changes what
+   * Reports says the business earned. Doing all that on one unconfirmed tap is
+   * only reasonable if it can be taken back — otherwise the honest design is a
+   * confirmation dialog, which is the thing being removed.
+   */
+  it("offers an undo naming the amount and the deal", () => {
+    expect(src).toMatch(/label: `\$\{fullMoney\(paid\)\} recorded against \$\{deal\.title\}`/);
+    expect(src).toMatch(/<Undo2 className="h-3\.5 w-3\.5" \/> Undo/);
+    /* The server's id, not the local stand-in the board draws with — the undo
+       has to name a real record. */
+    expect(src).toMatch(/wonDealId: res\.wonDealId/);
+    /* Cents, which is what the money is stored in and what the server checks. */
+    expect(src).toMatch(/amountCents: Math\.round\(paid \* 100\)/);
+  });
+
+  it("waits for the server before putting the board back", () => {
+    /* Reverting first and finding out afterwards is how a board ends up
+       describing something that never happened. */
+    expect(src).toMatch(/if \(!res\?\.error\) setItems\(revert\);/);
+  });
+
+  it("reverses only what the payment touched", () => {
+    /**
+     * Not a snapshot of the board taken before the payment. A snapshot would
+     * also undo anything done while the bar was on screen — drag a card in
+     * those few seconds and it would silently jump back.
+     *
+     * Which of the two branches ran decides the inverse: money that CREATED a
+     * won card means the card goes; money that topped up an existing one means
+     * the figure comes down.
+     */
+    expect(src).toMatch(/const existingWon = items\.find\(\(d\) => d\.splitId === splitId && isWon\(d\)\);/);
+    expect(src).toMatch(
+      /revert: \(prev\) => \{\s*\n\s*const withoutMoney = existingWon\s*\n\s*\? prev\.map/
+    );
+    expect(src).toMatch(/: prev\.filter\(\(d\) => d\.id !== wonLocalId\);/);
+  });
+
+  it("says so and changes nothing when the server refuses", () => {
+    /* No undo offered for something that did not happen. */
+    expect(src).toMatch(/if \(err\) setFlash\(\{ wonDealId: null,.*failed: true \}\);/);
+    expect(src).toMatch(/\{flash\.wonDealId \? \(/);
   });
 });
