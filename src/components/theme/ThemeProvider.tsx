@@ -10,6 +10,8 @@ import {
   useSyncExternalStore,
 } from "react";
 import {
+  COMPACT_QUERY,
+  levelForViewport,
   resolveLevel,
   THEME_STORAGE_KEY,
   type ThemeLevel,
@@ -20,6 +22,8 @@ type ThemeContextValue = {
   mode: ThemeMode;
   level: ThemeLevel;
   setMode: (mode: ThemeMode) => void;
+  /** True on a phone, where the palette set is Day and Night only. */
+  compact: boolean;
 };
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
@@ -34,6 +38,31 @@ function subscribeMode(onChange: () => void) {
     window.removeEventListener("storage", onChange);
     window.removeEventListener(MODE_EVENT, onChange);
   };
+}
+
+/**
+ * Whether this is a phone-width screen.
+ *
+ * A media query is an external store, so it is subscribed to rather than read
+ * during render — the same treatment `localStorage` gets above, and for the
+ * same reason: reading it mid-render is impure and would not update on a
+ * rotate or a resize.
+ */
+function subscribeCompact(onChange: () => void) {
+  const mq = window.matchMedia(COMPACT_QUERY);
+  mq.addEventListener("change", onChange);
+  return () => mq.removeEventListener("change", onChange);
+}
+
+function readCompact(): boolean {
+  return window.matchMedia(COMPACT_QUERY).matches;
+}
+
+/* The server has no viewport. False keeps the server's markup identical to the
+   desktop case; the pre-paint script in the root layout sets the real attribute
+   before anything is drawn, so nothing flashes either way. */
+function readServerCompact(): boolean {
+  return false;
 }
 
 function readMode(): ThemeMode {
@@ -57,10 +86,14 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     return () => window.clearInterval(id);
   }, [mode]);
 
+  const compact = useSyncExternalStore(subscribeCompact, readCompact, readServerCompact);
+
   const level = useMemo<ThemeLevel>(() => {
     void minuteTick; // re-resolve when the clock ticks
-    return resolveLevel(mode);
-  }, [mode, minuteTick]);
+    /* Collapsed for a phone, where Evening is not one of the two palettes on
+       offer — see `levelForViewport`. */
+    return levelForViewport(resolveLevel(mode), compact);
+  }, [mode, minuteTick, compact]);
 
   // Sync the resolved palette to the DOM (external system, no state involved).
   useEffect(() => {
@@ -72,7 +105,10 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     window.dispatchEvent(new Event(MODE_EVENT));
   }, []);
 
-  const value = useMemo(() => ({ mode, level, setMode }), [mode, level, setMode]);
+  const value = useMemo(
+    () => ({ mode, level, setMode, compact }),
+    [mode, level, setMode, compact]
+  );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }

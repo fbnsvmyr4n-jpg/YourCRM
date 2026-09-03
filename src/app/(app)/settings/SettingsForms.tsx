@@ -5,6 +5,7 @@ import { Building2, KeyRound, LogOut, Plus, Target, UserRound } from "lucide-rea
 import { signOutAction } from "@/app/(auth)/actions";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
+import { useTheme } from "@/components/theme/ThemeProvider";
 import { Banner } from "@/components/ui/Banner";
 import type { Settings } from "@/server/repos/settings";
 import type { SafeUser } from "@/server/repos/users";
@@ -166,14 +167,22 @@ export function PasswordForm() {
 }
 
 export function AppearanceCard() {
+  const { compact } = useTheme();
+
   return (
     <Card>
       <CardHeader title="Appearance" />
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="min-w-0">
           <p className="text-sm font-medium">Theme</p>
+          {/* True on the screen it is being read on. This said "Day, Evening,
+              then Night" everywhere, which stopped being true on a phone the
+              moment Evening became a desktop-only palette — a sentence
+              describing behaviour the reader's own device does not have. */}
           <p className="mt-0.5 text-xs text-faint">
-            Auto follows the time of day — Day, Evening, then Night.
+            {compact
+              ? "Auto follows the time of day — Day, then Night."
+              : "Auto follows the time of day — Day, Evening, then Night."}
           </p>
         </div>
         <ThemeToggle />

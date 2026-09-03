@@ -52,6 +52,10 @@ const noFlashScript = `(function(){try{
   var lvl = m;
   if(m === 'auto'){ var h = new Date().getHours();
     lvl = (h>=6 && h<18) ? 'light' : (h>=18 && h<21) ? 'dark' : 'midnight'; }
+  // A phone has two palettes, so Evening collapses into Night. Mirrors
+  // levelForViewport in lib/theme.ts — if that rule changes, change it here
+  // too, or the first paint disagrees with every paint after it.
+  if(lvl === 'dark' && window.matchMedia('(max-width: 639px)').matches){ lvl = 'midnight'; }
   document.documentElement.setAttribute('data-theme', lvl);
 }catch(e){ document.documentElement.setAttribute('data-theme','light'); }})();`;
 

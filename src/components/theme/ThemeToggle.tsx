@@ -2,9 +2,7 @@
 
 import { Moon, MoonStar, Sun, SunMoon } from "lucide-react";
 import { useTheme } from "./ThemeProvider";
-import { THEME_LABELS, type ThemeMode } from "@/lib/theme";
-
-const ORDER: ThemeMode[] = ["auto", "light", "dark", "midnight"];
+import { MODE_ORDER, MODE_ORDER_COMPACT, THEME_LABELS } from "@/lib/theme";
 
 /*
    Midnight was `Stars`, which is a four-pointed sparkle — the same shape as the
@@ -24,12 +22,27 @@ const ICON = {
 } as const;
 
 export function ThemeToggle() {
-  const { mode, level, setMode } = useTheme();
+  const { mode, level, setMode, compact } = useTheme();
   const Icon = ICON[mode];
 
+  /*
+     A phone offers Day, Night and Auto — three taps round the loop instead of
+     four, and no stop on a palette it does not paint. Evening is a desktop
+     refinement; see `levelForViewport`.
+  */
+  const order = compact ? MODE_ORDER_COMPACT : MODE_ORDER;
+
   const cycle = () => {
-    const idx = ORDER.indexOf(mode);
-    setMode(ORDER[(idx + 1) % ORDER.length]);
+    /*
+       `indexOf` can miss, and that is the case worth handling rather than
+       ignoring: a phone syncing a desktop that chose Evening has a mode which
+       is not in its own order, and `(-1 + 1) % 3` would land back on Auto —
+       silently discarding a choice the moment the loop is touched. Falling
+       through to the next palette the phone DOES offer keeps the tap
+       predictable.
+    */
+    const idx = order.indexOf(mode);
+    setMode(idx === -1 ? "midnight" : order[(idx + 1) % order.length]);
   };
 
   const title =
