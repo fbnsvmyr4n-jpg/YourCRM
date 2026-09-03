@@ -389,27 +389,27 @@ export default async function ReportsPage({
                               size="sm"
                             />
                             {/*
-                                The name gets the room, and the badge gets out of
-                                its way on a phone.
+                                The long string gets the full-width line.
 
-                                This row was avatar | name+title | stage badge |
-                                value, all on one line. The badge is about 78px
-                                and the value is a fixed 80, so on a 393px screen
-                                the only flexible column — the one with the words
-                                in it — was crushed to roughly 30px. `truncate`
-                                then rendered a SLIVER OF A GLYPH: the reported
-                                "strange lines" were clipped fragments of a dash
-                                and a title, which is why they looked like marks
-                                rather than text.
+                                This row is avatar | two lines of text | value,
+                                and on a phone the text column is about 190px.
+                                It used to lead with the CONTACT and put the deal
+                                title on the second line beside the stage badge —
+                                so a first name like "Jenny" had a whole line to
+                                itself while the title had to share ~95px with the
+                                badge and truncated to "J…". One letter and an
+                                ellipsis is not a label.
 
-                                Below `sm` the badge moves onto the second line
-                                beside the title, so the words have the whole row
-                                less the avatar and the figure. From `sm` up
-                                nothing moves — the desktop row is exactly as it
-                                was.
+                                Titles are long and names are short, so they are
+                                the other way round: the title takes the full
+                                line, and the name sits with the badge where a
+                                short string fits comfortably. It also matches
+                                what the panel is about — these are the largest
+                                DEALS, so the deal is what each row should name
+                                first.
                             */}
                             <div className="min-w-0 flex-1 leading-tight">
-                              <p className="truncate text-sm font-medium">{d.contact ?? d.title}</p>
+                              <p className="truncate text-sm font-medium">{d.title}</p>
                               <p className="mt-0.5 flex items-center gap-1.5 overflow-hidden text-xs text-faint">
                                 <span
                                   className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold sm:hidden"
@@ -418,21 +418,16 @@ export default async function ReportsPage({
                                   {stage?.label ?? d.stage}
                                 </span>
                                 {/*
-                                    `min-w-0` is what makes `truncate` work here.
+                                    `min-w-0` is what lets this truncate at all.
 
                                     `truncate` sets `white-space: nowrap`, and a
                                     FLEX ITEM's `min-width` defaults to `auto`,
                                     which for nowrap text resolves to the width of
-                                    the whole string. So the span refused to
-                                    shrink, the ellipsis never engaged, and a long
-                                    title spilled out of the column and ran on past
-                                    the badge instead of ending cleanly — letters
-                                    appearing after "Closed Won" with nothing to
-                                    stop them.
-
-                                    Only when it is not already the line above.
+                                    the whole string — so without this the span
+                                    refuses to shrink, the ellipsis never engages,
+                                    and the text runs on out of its column.
                                 */}
-                                {d.contact && <span className="min-w-0 truncate">{d.title}</span>}
+                                {d.contact && <span className="min-w-0 truncate">{d.contact}</span>}
                               </p>
                             </div>
                             <span
@@ -441,7 +436,13 @@ export default async function ReportsPage({
                             >
                               {stage?.label ?? d.stage}
                             </span>
-                            <span className="w-20 shrink-0 text-right text-sm font-semibold tabular-nums">
+                            {/* Sized to its own digits on a phone, where every
+                                pixel of that fixed 80px was coming out of the
+                                title beside it — "$300" needs about 34. The
+                                right edges still line up because each row ends
+                                flush; only the left edges go ragged, and the
+                                desktop column keeps its fixed width. */}
+                            <span className="shrink-0 text-right text-sm font-semibold tabular-nums sm:w-20">
                               {money(d.value)}
                             </span>
                           </div>

@@ -123,13 +123,32 @@ describe("Largest deals gives the words somewhere to go", () => {
     expect(view).toMatch(/contact: d\.contact_name,/);
     expect(view).not.toMatch(/contact: d\.contact_name \?\? "—"/);
     expect(view).toMatch(/contact: string \| null;/);
-    expect(page).toMatch(/\{d\.contact \?\? d\.title\}/);
+    /* Nothing renders it unconditionally any more — it appears only inside the
+       guard below, so a deal with nobody linked simply shows no name. */
+    expect(page).not.toMatch(/\{d\.contact \?\? "—"\}/);
   });
 
-  it("does not repeat the title when it is already the heading", () => {
-    /* With no contact the title is promoted to the first line, so printing it
-       again underneath would be the same words twice. */
-    expect(page).toMatch(/\{d\.contact && <span className="min-w-0 truncate">\{d\.title\}<\/span>\}/);
+  it("gives the long string the full-width line", () => {
+    /**
+     * The row is avatar | two lines | value, and on a phone the text column is
+     * about 190px. It led with the CONTACT and put the deal title on the second
+     * line beside the stage badge — so a first name like "Jenny" had a whole
+     * line to itself while the title shared ~95px with the badge and truncated
+     * to "J…". One letter and an ellipsis is not a label.
+     *
+     * Titles are long and names are short, so they swapped. It also matches
+     * what the panel is about: these are the largest DEALS.
+     */
+    expect(page).toMatch(/<p className="truncate text-sm font-medium">\{d\.title\}<\/p>/);
+    expect(page).toMatch(/\{d\.contact && <span className="min-w-0 truncate">\{d\.contact\}<\/span>\}/);
+  });
+
+  it("stops the figure reserving width the title needs", () => {
+    /* A fixed 80px column for "$300", which needs about 34, came straight out
+       of the title beside it. Rows end flush right either way, so only the
+       numbers' left edges go ragged — and only on a phone. */
+    expect(page).toMatch(/shrink-0 text-right text-sm font-semibold tabular-nums sm:w-20/);
+    expect(page).not.toMatch(/className="w-20 shrink-0 text-right/);
   });
 
   it("lets the title actually truncate inside the flex row", () => {
@@ -147,15 +166,17 @@ describe("Largest deals gives the words somewhere to go", () => {
      * it, so even a future child without `min-w-0` is clipped rather than
      * spilling into the figure.
      */
-    expect(page).toMatch(/<span className="min-w-0 truncate">\{d\.title\}<\/span>/);
+    expect(page).toMatch(/<span className="min-w-0 truncate">\{d\.contact\}<\/span>/);
     expect(page).toMatch(/mt-0\.5 flex items-center gap-1\.5 overflow-hidden text-xs text-faint/);
-    /* The bare version is what shipped and what broke. */
-    expect(page).not.toMatch(/<span className="truncate">\{d\.title\}<\/span>/);
+    /* The bare version is what shipped and what broke: without `min-w-0` the
+       span refuses to shrink and the text runs out of its column. */
+    expect(page).not.toMatch(/<span className="truncate">\{d\.contact\}<\/span>/);
   });
 
-  it("builds the avatar from whatever is actually shown", () => {
+  it("builds the avatar from whatever the row is about", () => {
     /* It took initials from `d.contact`, which for an unlinked deal was the
-       dash — so the avatar read "—" too. */
+       dash — so the avatar read "—" too. The person when there is one, the
+       deal's own name when there is not. */
     expect(page).toMatch(/\(d\.contact \?\? d\.title\)\s*\n?\s*\.split/);
   });
 });
