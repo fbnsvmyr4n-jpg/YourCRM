@@ -71,8 +71,8 @@ describe("the conversion card shows its own working", () => {
     /* Matched on the word rather than the element, so restyling the header
        does not break a test about what the number MEANS. It was pinned to
        `</span>` and duly failed the moment the chip arrived. */
-    expect(page).toMatch(/\{totalLeads\} deals/);
-    expect(page).not.toMatch(/\{totalLeads\} leads/);
+    expect(page).toMatch(/value=\{totalLeads\}>deals</);
+    expect(page).not.toMatch(/>leads</);
   });
 });
 
@@ -216,7 +216,37 @@ describe("a fact in a card header looks placed, not left over", () => {
 
   it("gives header facts a chip of their own", () => {
     expect(card).toMatch(/export function CardMeta/);
-    expect(card).toMatch(/shrink-0 whitespace-nowrap rounded-full px-2\.5 py-1/);
+    expect(card).toMatch(/shrink-0 whitespace-nowrap rounded-full border border-\[var\(--border-strong\)\]/);
+  });
+
+  it("gives the chip an edge rather than relying on its fill", () => {
+    /**
+     * The first version sat on `--raise`, which in the night theme is 2% alpha
+     * — a shape with no presence, still scrolled straight past. A
+     * `--border-strong` edge (13-16%) is what makes it read as a discrete
+     * object instead of a slightly lighter smudge.
+     */
+    expect(card).toMatch(/border border-\[var\(--border-strong\)\]/);
+  });
+
+  it("puts the weight on the number, not the chip", () => {
+    /* The figure is the thing worth noticing. Full text colour and semibold
+       against a muted unit lands the eye on "6" rather than on "deals" —
+       presence from contrast, not from shouting. */
+    expect(card).toMatch(
+      /<span className="mr-1 font-semibold tabular-nums text-\[var\(--text\)\]">\{value\}<\/span>/
+    );
+    expect(card).toMatch(/value \?\?= undefined|value !== undefined/);
+  });
+
+  it("does not use the accent, which would read as clickable", () => {
+    /* `ViewAll` beside it is accent text. A chip in the same colour would look
+       like a control; presence here comes from contrast and an edge, not hue. */
+    const meta = card.slice(
+      card.indexOf("export function CardMeta"),
+      card.indexOf('export function ViewAll')
+    );
+    expect(meta).not.toMatch(/text-accent|--accent/);
   });
 
   it("never lets the fact be the thing that wraps", () => {
@@ -233,8 +263,8 @@ describe("a fact in a card header looks placed, not left over", () => {
        be the same afterthought on another card. */
     expect(page).not.toMatch(/action=\{<span className="text-xs text-faint">/);
     expect(page).toMatch(/action=\{<CardMeta>Last 6 weeks<\/CardMeta>\}/);
-    expect(page).toMatch(/action=\{<CardMeta>\{totalLeads\} deals<\/CardMeta>\}/);
-    expect(page).toMatch(/action=\{<CardMeta>\{r\.meetings\.total\} booked<\/CardMeta>\}/);
+    expect(page).toMatch(/action=\{<CardMeta value=\{totalLeads\}>deals<\/CardMeta>\}/);
+    expect(page).toMatch(/action=\{<CardMeta value=\{r\.meetings\.total\}>booked<\/CardMeta>\}/);
 
     const target = strip(
       readFileSync(

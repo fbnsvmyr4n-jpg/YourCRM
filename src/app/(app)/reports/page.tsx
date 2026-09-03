@@ -509,7 +509,7 @@ export default async function ReportsPage({
                        them leads made this card say "11 leads" while the Leads
                        page said 6 — the same word for two different things on
                        two screens. */
-                    action={<CardMeta>{totalLeads} deals</CardMeta>}
+                    action={<CardMeta value={totalLeads}>deals</CardMeta>}
                   />
                   {totalLeads === 0 ? (
                     <p className="py-6 text-sm text-faint">No leads captured yet.</p>
@@ -685,7 +685,7 @@ export default async function ReportsPage({
                   <CardHeader
                     title="Meeting outcomes"
                     icon={<CalendarCheck className="h-[18px] w-[18px] text-accent" />}
-                    action={<CardMeta>{r.meetings.total} booked</CardMeta>}
+                    action={<CardMeta value={r.meetings.total}>booked</CardMeta>}
                   />
                   {r.meetings.decided === 0 ? (
                     <div className="flex flex-1 flex-col pt-2">

@@ -48,19 +48,35 @@ export function CardHeader({
  * there, and it wrapped: at 393px "6 deals" broke across two lines beside a
  * title that was also wrapping.
  *
- * On a chip it has a shape of its own, and `shrink-0` with `whitespace-nowrap`
- * means the title gives way first — a two-word count should never be the thing
- * that breaks.
+ * The first pass gave it a pill on `--raise`, which in the night theme is 2%
+ * alpha — a shape with no presence, still scrolled straight past. Two changes
+ * fix that without turning it into noise:
  *
- * Not for anything clickable. `ViewAll` below is the affordance for that, and a
- * chip that looks like a control but is not would be the worse mistake.
+ *  - a `--border-strong` edge (13-16%) rather than relying on the fill, so it
+ *    reads as a discrete object instead of a slightly lighter smudge;
+ *  - and the NUMBER carries the emphasis, not the chip. "6" is set in the full
+ *    text colour and semibold against a muted "deals", so the eye lands on the
+ *    figure — which is the thing worth noticing — while the unit stays quiet.
+ *
+ * Deliberately not accent-coloured. `ViewAll` beside it is accent text, and a
+ * chip in the same colour would read as clickable; presence here comes from
+ * contrast and an edge, not from hue.
+ *
+ * Not for anything clickable, for the same reason.
  */
-export function CardMeta({ children }: { children: React.ReactNode }) {
+export function CardMeta({
+  /** The figure, when the fact has one. Set apart so it can carry the weight. */
+  value,
+  children,
+}: {
+  value?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
-    <span
-      className="shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-medium text-muted"
-      style={{ background: "var(--raise)" }}
-    >
+    <span className="shrink-0 whitespace-nowrap rounded-full border border-[var(--border-strong)] px-2.5 py-1 text-xs font-medium text-muted" style={{ background: "var(--raise)" }}>
+      {value !== undefined && (
+        <span className="mr-1 font-semibold tabular-nums text-[var(--text)]">{value}</span>
+      )}
       {children}
     </span>
   );
