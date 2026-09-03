@@ -410,15 +410,29 @@ export default async function ReportsPage({
                             */}
                             <div className="min-w-0 flex-1 leading-tight">
                               <p className="truncate text-sm font-medium">{d.contact ?? d.title}</p>
-                              <p className="mt-0.5 flex items-center gap-1.5 text-xs text-faint">
+                              <p className="mt-0.5 flex items-center gap-1.5 overflow-hidden text-xs text-faint">
                                 <span
                                   className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold sm:hidden"
                                   style={{ color: stage?.color, background: "var(--raise)" }}
                                 >
                                   {stage?.label ?? d.stage}
                                 </span>
-                                {/* Only when it is not already the line above. */}
-                                {d.contact && <span className="truncate">{d.title}</span>}
+                                {/*
+                                    `min-w-0` is what makes `truncate` work here.
+
+                                    `truncate` sets `white-space: nowrap`, and a
+                                    FLEX ITEM's `min-width` defaults to `auto`,
+                                    which for nowrap text resolves to the width of
+                                    the whole string. So the span refused to
+                                    shrink, the ellipsis never engaged, and a long
+                                    title spilled out of the column and ran on past
+                                    the badge instead of ending cleanly — letters
+                                    appearing after "Closed Won" with nothing to
+                                    stop them.
+
+                                    Only when it is not already the line above.
+                                */}
+                                {d.contact && <span className="min-w-0 truncate">{d.title}</span>}
                               </p>
                             </div>
                             <span

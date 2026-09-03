@@ -129,7 +129,28 @@ describe("Largest deals gives the words somewhere to go", () => {
   it("does not repeat the title when it is already the heading", () => {
     /* With no contact the title is promoted to the first line, so printing it
        again underneath would be the same words twice. */
-    expect(page).toMatch(/\{d\.contact && <span className="truncate">\{d\.title\}<\/span>\}/);
+    expect(page).toMatch(/\{d\.contact && <span className="min-w-0 truncate">\{d\.title\}<\/span>\}/);
+  });
+
+  it("lets the title actually truncate inside the flex row", () => {
+    /**
+     * The second half of the reported problem, and a classic.
+     *
+     * `truncate` sets `white-space: nowrap`. A FLEX ITEM's `min-width` defaults
+     * to `auto`, which for nowrap text resolves to the width of the whole
+     * string — so the span refused to shrink, the ellipsis never engaged, and a
+     * long title ran on out of its column past the badge. On a phone that reads
+     * as letters appearing after "Closed Won" with nothing stopping them, which
+     * is exactly how it was reported the second time.
+     *
+     * `min-w-0` is the fix; `overflow-hidden` on the line is the guard behind
+     * it, so even a future child without `min-w-0` is clipped rather than
+     * spilling into the figure.
+     */
+    expect(page).toMatch(/<span className="min-w-0 truncate">\{d\.title\}<\/span>/);
+    expect(page).toMatch(/mt-0\.5 flex items-center gap-1\.5 overflow-hidden text-xs text-faint/);
+    /* The bare version is what shipped and what broke. */
+    expect(page).not.toMatch(/<span className="truncate">\{d\.title\}<\/span>/);
   });
 
   it("builds the avatar from whatever is actually shown", () => {
