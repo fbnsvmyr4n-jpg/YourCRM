@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { AreaChart } from "@/components/ui/AreaChart";
-import { Card, CardHeader } from "@/components/ui/Card";
+import { Card, CardHeader, CardMeta } from "@/components/ui/Card";
 import { companyRollups } from "@/server/repos/companies";
 import { getSettings } from "@/server/repos/settings";
 import { isPeriod, resolvePeriod, type PeriodId } from "@/server/report-period";
@@ -308,7 +308,7 @@ export default async function ReportsPage({
                     <CardHeader
                       title="Revenue won"
                       icon={<TrendingUp className="h-[18px] w-[18px] text-accent" />}
-                      action={<span className="text-xs text-faint">Last 6 weeks</span>}
+                      action={<CardMeta>Last 6 weeks</CardMeta>}
                     />
                     <p className="text-3xl font-bold tracking-tight tabular-nums">
                       {money(r.weekly.reduce((sum, w) => sum + w.value, 0))}
@@ -509,7 +509,7 @@ export default async function ReportsPage({
                        them leads made this card say "11 leads" while the Leads
                        page said 6 — the same word for two different things on
                        two screens. */
-                    action={<span className="text-xs text-faint">{totalLeads} deals</span>}
+                    action={<CardMeta>{totalLeads} deals</CardMeta>}
                   />
                   {totalLeads === 0 ? (
                     <p className="py-6 text-sm text-faint">No leads captured yet.</p>
@@ -685,7 +685,7 @@ export default async function ReportsPage({
                   <CardHeader
                     title="Meeting outcomes"
                     icon={<CalendarCheck className="h-[18px] w-[18px] text-accent" />}
-                    action={<span className="text-xs text-faint">{r.meetings.total} booked</span>}
+                    action={<CardMeta>{r.meetings.total} booked</CardMeta>}
                   />
                   {r.meetings.decided === 0 ? (
                     <div className="flex flex-1 flex-col pt-2">

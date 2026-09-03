@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Settings2, Target } from "lucide-react";
-import { Card, CardHeader } from "@/components/ui/Card";
+import { Card, CardHeader, CardMeta } from "@/components/ui/Card";
 
 /**
  * Progress against the monthly target.
@@ -40,7 +40,7 @@ export function SalesTargetCard({
       <CardHeader
         title="Sales Target"
         icon={<Target className="h-[18px] w-[18px] text-accent" />}
-        action={<span className="text-xs text-faint">This month</span>}
+        action={<CardMeta>This month</CardMeta>}
       />
 
       {/*

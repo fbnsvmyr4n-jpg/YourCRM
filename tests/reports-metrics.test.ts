@@ -68,8 +68,11 @@ describe("the conversion card shows its own working", () => {
     /* Sources live on deals, and one person can bring several, so this card
        counted 11 while the Leads page counted 6 people — the same word meaning
        two things on two screens. */
-    expect(page).toMatch(/\{totalLeads\} deals<\/span>/);
-    expect(page).not.toMatch(/\{totalLeads\} leads<\/span>/);
+    /* Matched on the word rather than the element, so restyling the header
+       does not break a test about what the number MEANS. It was pinned to
+       `</span>` and duly failed the moment the chip arrived. */
+    expect(page).toMatch(/\{totalLeads\} deals/);
+    expect(page).not.toMatch(/\{totalLeads\} leads/);
   });
 });
 
@@ -193,5 +196,60 @@ describe("Largest deals gives the words somewhere to go", () => {
        dash — so the avatar read "—" too. The person when there is one, the
        deal's own name when there is not. */
     expect(page).toMatch(/\(d\.contact \?\? d\.title\)\s*\n?\s*\.split/);
+  });
+});
+
+describe("a fact in a card header looks placed, not left over", () => {
+  /**
+   * Reported with the "6 deals" beside "Where leads come from" circled: it
+   * looked like an afterthought sitting at the edge.
+   *
+   * It was a bare `<span className="text-xs text-faint">` dropped into the
+   * action slot. Unbounded text with no ground under it reads as something left
+   * there rather than put there — and at 393px it wrapped, breaking "6 deals"
+   * across two lines beside a title that was also wrapping, because neither
+   * side of the header would give way.
+   */
+  const card = strip(
+    readFileSync(fileURLToPath(new URL("../src/components/ui/Card.tsx", import.meta.url)), "utf8")
+  );
+
+  it("gives header facts a chip of their own", () => {
+    expect(card).toMatch(/export function CardMeta/);
+    expect(card).toMatch(/shrink-0 whitespace-nowrap rounded-full px-2\.5 py-1/);
+  });
+
+  it("never lets the fact be the thing that wraps", () => {
+    /* `shrink-0` and `whitespace-nowrap` together mean the TITLE gives way
+       first. A two-word count breaking in half is never the right answer. */
+    expect(card).toMatch(/shrink-0 whitespace-nowrap/);
+    /* And the title side has to be shrinkable, or both get squeezed at once —
+       which is what produced "6" over "deals". */
+    expect(card).toMatch(/<div className="flex min-w-0 items-center gap-2\.5">/);
+  });
+
+  it("uses it everywhere a header states a fact", () => {
+    /* Four of these existed, all the same bare span. Leaving any behind would
+       be the same afterthought on another card. */
+    expect(page).not.toMatch(/action=\{<span className="text-xs text-faint">/);
+    expect(page).toMatch(/action=\{<CardMeta>Last 6 weeks<\/CardMeta>\}/);
+    expect(page).toMatch(/action=\{<CardMeta>\{totalLeads\} deals<\/CardMeta>\}/);
+    expect(page).toMatch(/action=\{<CardMeta>\{r\.meetings\.total\} booked<\/CardMeta>\}/);
+
+    const target = strip(
+      readFileSync(
+        fileURLToPath(new URL("../src/app/(app)/reports/SalesTargetCard.tsx", import.meta.url)),
+        "utf8"
+      )
+    );
+    expect(target).toMatch(/action=\{<CardMeta>This month<\/CardMeta>\}/);
+  });
+
+  it("stays a label, not a control", () => {
+    /* `ViewAll` is the affordance for anything clickable. A chip that looks
+       like a button and does nothing is the worse mistake, and this card file
+       already says so about `ViewAll`. */
+    const meta = card.slice(card.indexOf("export function CardMeta"), card.indexOf("export function ViewAll"));
+    expect(meta).not.toMatch(/onClick|href|<Link|<button/);
   });
 });
