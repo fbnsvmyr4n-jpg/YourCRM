@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { placeValueLabels } from "@/lib/place-labels";
 
 type Point = { label: string; value: number };
 
@@ -42,21 +43,38 @@ function niceScale(max: number, targetTicks: number): { niceMax: number; step: n
  * Width of a label, without putting it in the document first.
  *
  * A single characters-times-a-constant estimate is wrong here, because these
- * labels mix two very different alphabets: measured against the real font at
- * 12px, "$100K" runs 7.2px per character while "14 Jul" runs 5.3px. Averaging
- * them under-measures the money labels and over-measures the dates. Charging
- * each class its own rate tracks the truth within about 15%, and the error
- * leans wide — which for deciding whether two labels collide is the safe side.
+ * labels mix two very different alphabets: money and dates. Charging each class
+ * its own rate tracks the truth closely enough to decide whether two labels
+ * collide.
+ *
+ * The rates are MEASURED, not guessed. An earlier set was, and it charged
+ * digits 0.6 and capitals 0.62 — against Geist at weight 700 a digit is 0.69
+ * and a "K" is 0.69, so every money label came out about 7% narrow. That is the
+ * dangerous direction: the placement logic thought it had left a 10px gap
+ * between two figures and had actually left 6.3px. Taken from
+ * `canvas.measureText` against the real font, and rounded UP where they were
+ * ambiguous, so the error now leans wide — which for a collision test is the
+ * side that costs nothing but a little extra air.
+ *
+ * These are bold advances. The axis labels are lighter and therefore narrower
+ * still, so they are over-measured slightly, which only makes the x-axis a
+ * fraction more willing to drop a date rather than crowd one.
  */
 function textWidth(s: string, fontSize: number): number {
   let w = 0;
   for (const ch of s) {
-    if (ch === " ") w += 0.28;
-    else if (ch >= "0" && ch <= "9") w += 0.6;
-    else if (ch === "$" || ch === "%") w += 0.6;
-    else if (ch === "." || ch === ",") w += 0.28;
-    else if (ch >= "A" && ch <= "Z") w += 0.62;
-    else w += 0.52;
+    if (ch === " ") w += 0.23;
+    // "1" really is half the width of every other digit in this face.
+    else if (ch === "1") w += 0.46;
+    else if (ch >= "0" && ch <= "9") w += 0.7;
+    else if (ch === "$" || ch === "%") w += 0.7;
+    else if (ch === "." || ch === ",") w += 0.24;
+    // "M" is the outlier that "$1.25M" depends on; the rest of the capitals
+    // used here (A, J, K, S) sit between 0.63 and 0.73.
+    else if (ch === "M" || ch === "W") w += 0.92;
+    else if (ch >= "A" && ch <= "Z") w += 0.73;
+    else if ("ilt".includes(ch)) w += 0.33;
+    else w += 0.62;
   }
   return w * fontSize;
 }
@@ -221,6 +239,8 @@ export function AreaChart({
 }
 
 const AXIS_FONT = 12;
+/** The bold figures on the peak and the newest point. */
+const VALUE_FONT = 13;
 
 function Plot({
   data,
@@ -323,15 +343,37 @@ function Plot({
         </g>
       ))}
 
-      {[...labelled].map((i) => {
+      {/*
+          Laid out against each other, not just against the edges.
+          Each of these used to be clamped only to the chart's edges, so nothing
+          stopped the peak's figure from running into the newest one when the
+          two points are neighbours. At 393px with a $364.4K peak beside a $30K
+          latest week they overlapped by 6.6px — the narrower the screen, the
+          more often it happens, because the gap between points shrinks while
+          the text does not.
+      */}
+      {placeValueLabels(
+        [...labelled].map((i) => ({
+          i,
+          x: pts[i].x,
+          width: textWidth(format(pts[i].value), VALUE_FONT),
+        })),
+        // Left is the plot edge — beyond it is the gutter holding the tick
+        // figures. Right is the chart edge, because that padding is empty.
+        { left: padL, right: W - 4 }
+      ).map(({ i, x }) => {
         const p = pts[i];
         return (
           <text
             key={`v${i}`}
-            x={clampX(p.x, format(p.value), 13)}
-            y={Math.max(padT - 8, p.y - 14)}
+            x={x}
+            /* Clear of the marker beneath it. The newest point wears an 11px
+               halo, so the old 14px lift left three pixels between the text and
+               the glow — close enough to read as a collision even though the
+               boxes did not touch. */
+            y={Math.max(padT - 8, p.y - 20)}
             textAnchor="middle"
-            fontSize="13"
+            fontSize={VALUE_FONT}
             fontWeight="700"
             fill="var(--text)"
           >
