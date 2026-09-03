@@ -465,6 +465,66 @@ describe("part-payments split a deal without losing the remainder", () => {
     });
   });
 
+  describe("a loss is dated, the way a win is", () => {
+    /**
+     * Win Rate is `won / (won + lost)`. Both halves have to be dateable or a
+     * rate over a period cannot be computed: with only `won_at`, Reports
+     * filtered the numerator to the window and measured it against every loss
+     * the account had ever recorded.
+     *
+     * These read the column directly. The report-level tests pass without the
+     * stamping working at all, because `lost_count` also filters on
+     * `stage = 'lost'` — so the stage alone carries them, and a mutation that
+     * never stamped `lost_at` survived the whole suite.
+     */
+    const lostAt = async (id: string) =>
+      (
+        await inA((q) =>
+          q.one<{ lost_at: Date | null }>(
+            `SELECT lost_at FROM deals WHERE id = $2 AND sub_account_id = $1`,
+            [q.ctx.subAccountId, id]
+          )
+        )
+      )?.lost_at ?? null;
+
+    it("stamps the moment a deal is marked lost", async () => {
+      const d = await presented();
+      expect(await lostAt(d.id), "setup: it should not be dated yet").toBeNull();
+
+      const before = Date.now();
+      await inA((q) => repo.moveStage(q, d.id, "lost", { lostReason: "Price" }));
+      const at = await lostAt(d.id);
+
+      expect(at, "a lost deal was left without a date").not.toBeNull();
+      // Generous either side: this is proving it is real, not measuring a clock.
+      expect(at!.getTime()).toBeGreaterThanOrEqual(before - 60_000);
+      expect(at!.getTime()).toBeLessThanOrEqual(Date.now() + 60_000);
+    });
+
+    it("clears it when the deal comes back out of Lost", async () => {
+      /* Otherwise a revived deal carries a loss date forever, and any later
+         report that counts by date rather than by stage counts it twice — once
+         as a loss and once as whatever it became. */
+      const d = await presented();
+      await inA((q) => repo.moveStage(q, d.id, "lost", { lostReason: "Price" }));
+      expect(await lostAt(d.id)).not.toBeNull();
+
+      await inA((q) => repo.moveStage(q, d.id, "demo"));
+      expect(await lostAt(d.id), "a revived deal kept its loss date").toBeNull();
+    });
+
+    it("keeps the original date when a lost deal is re-saved as lost", async () => {
+      // The date belongs to the event, not to the last time somebody touched
+      // the row — the same rule `won_at` follows.
+      const d = await presented();
+      await inA((q) => repo.moveStage(q, d.id, "lost", { lostReason: "Price" }));
+      const first = await lostAt(d.id);
+
+      await inA((q) => repo.moveStage(q, d.id, "lost", { lostReason: "Competitor chosen" }));
+      expect((await lostAt(d.id))?.getTime(), "the loss date moved").toBe(first?.getTime());
+    });
+  });
+
   it("refuses more than is outstanding", async () => {
     const d = await presented();
     const r = await inA((q) => repo.recordPayment(q, d.id, 1_500_000));

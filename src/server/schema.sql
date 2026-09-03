@@ -702,6 +702,32 @@ CREATE INDEX IF NOT EXISTS stripe_events_agency_idx ON stripe_events (agency_id,
 ALTER TABLE agencies ADD COLUMN IF NOT EXISTS billing_synced_at TIMESTAMPTZ;
 
 -- ---------------------------------------------------------------------------
+-- When a deal was lost
+--
+-- A win has always been stamped with `won_at`; a loss was stamped with nothing.
+-- That made Win Rate wrong for every period except All time, because the
+-- numerator could be filtered to the window and the denominator could not:
+-- Reports computed this month's wins against EVERY loss ever recorded. On a
+-- fixture with three wins and one loss this month it showed 50% where the truth
+-- was 75%, and the error grows with the age of the account — the longer you
+-- have been selling, the worse this month looks.
+--
+-- Backfilled from `updated_at`, which for a deal sitting in `lost` is when it
+-- was last changed and therefore, for almost all of them, when it was marked
+-- lost. That is an approximation and is only applied to rows that predate this
+-- column; everything from here on is stamped at the moment of the transition.
+-- The WHERE clause stops matching once it has run, so the migration is
+-- re-runnable like the rest of this file.
+-- ---------------------------------------------------------------------------
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS lost_at TIMESTAMPTZ;
+
+UPDATE deals SET lost_at = updated_at
+WHERE stage = 'lost' AND lost_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS deals_lost_at_idx
+  ON deals (sub_account_id, lost_at) WHERE lost_at IS NOT NULL;
+
+-- ---------------------------------------------------------------------------
 -- Referral rewards
 --
 -- An agency that sends another agency to YourCRM earns credit against their own

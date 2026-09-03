@@ -281,6 +281,17 @@ export async function moveStage(
            ELSE NULL
          END,
          lost_reason = CASE WHEN $3 = 'lost' THEN $4 ELSE NULL END,
+         -- Stamped for the same reason won_at is: a rate over a period needs
+         -- both halves to be dateable. Without it the denominator of Win Rate
+         -- could not be filtered, so this month's wins were measured against
+         -- every loss ever recorded. Cleared on the way back out, so a deal
+         -- revived from Lost stops counting as a loss.
+         -- (No backticks in here: this SQL lives inside a template literal.)
+         lost_at = CASE
+           WHEN $3 = 'lost' AND lost_at IS NULL THEN now()
+           WHEN $3 = 'lost' THEN lost_at
+           ELSE NULL
+         END,
          updated_at = now()
        WHERE id = $2 AND sub_account_id = $1 AND deleted_at IS NULL
        RETURNING *

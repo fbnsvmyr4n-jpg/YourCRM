@@ -52,6 +52,13 @@ export const EXPECTED_COLUMNS: ReadonlyArray<[string, string]> = [
   ["agencies", "billing_synced_at"],
   ["agencies", "referral_code"],
   ["agencies", "referred_by_agency_id"],
+  /* Win Rate is computed from it, and the failure is worse than a wrong
+     number: the column is named inside the period filter, so on a database
+     that has not been migrated every Reports view EXCEPT All time fails
+     outright with "column lost_at does not exist". All time omits the filter
+     and keeps working, which is the cruel part — the page looks healthy until
+     somebody picks a month. */
+  ["deals", "lost_at"],
 ];
 
 export type SchemaCheck = {

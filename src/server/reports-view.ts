@@ -59,12 +59,17 @@ export type ReportView = {
   openPipeline: number;
   openCount: number;
   winRate: number | null;
+  /** What the win rate is out of — won plus lost, never open. */
+  decidedCount: number;
   avgDealSize: number | null;
   outstanding: number;
   weekly: { label: string; value: number }[];
   stages: { id: string; label: string; color: string; count: number; value: number }[];
   sources: { source: string; leads: number; revenue: number; color: string }[];
   leadStatus: { label: string; count: number; color: string }[];
+  /** People on file, and how many of them have bought — the two halves of `leadConversion`. */
+  contactsTotal: number;
+  clientsCount: number;
   leadConversion: number | null;
   followUps: {
     id: string;
@@ -225,6 +230,7 @@ export async function reportView(q: TenantQuery, period?: Period): Promise<Repor
     openPipeline: toUnits(r.revenue.openPipelineCents),
     openCount: r.revenue.openCount,
     winRate: r.winRate,
+    decidedCount: r.decidedCount,
     avgDealSize: r.revenue.avgWonDealCents === null ? null : toUnits(r.revenue.avgWonDealCents),
     outstanding: toUnits(n(outstandingRow?.total)),
 
@@ -266,6 +272,13 @@ export async function reportView(q: TenantQuery, period?: Period): Promise<Repor
         color: "var(--border-strong)",
       },
     ].filter((s) => s.count > 0),
+
+    /* Stated outright so the screen can show the working. The line under the
+       conversion figure used to look for a `leadStatus` entry labelled "Closed
+       Won" — there is no such label here, so the lookup never matched and the
+       sentence read "0 of N" on every account that has ever existed. */
+    contactsTotal: totalPeople,
+    clientsCount: r.contacts.clients,
 
     // Null rather than zero with nobody on file: a 0% conversion on an empty
     // account is a number that looks like a verdict.

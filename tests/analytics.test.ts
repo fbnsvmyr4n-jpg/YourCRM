@@ -322,3 +322,100 @@ describe("every figure is one tenant's", () => {
     expect(r.byStage).toHaveLength(7);
   });
 });
+
+describe("a rate over a period needs both halves inside the period", () => {
+  /**
+   * Win Rate was wrong for every period except All time.
+   *
+   * A win has always carried `won_at`; a loss carried nothing. So the numerator
+   * could be filtered to the window and the denominator could not, and Reports
+   * measured this month's wins against EVERY loss the account had ever
+   * recorded. The comment above the query said "won and lost respect the
+   * window" the whole time it was only doing one of them.
+   *
+   * The error runs in the worst possible direction: it grows with the age of
+   * the account, so the longer somebody has been selling, the worse this month
+   * looks. On a fixture of three wins and one loss this month it reported 50%
+   * where the truth was 75%.
+   */
+  const AUG = "2026-08-15T12:00:00Z";
+  const SEP = "2026-09-15T12:00:00Z";
+  const september = { from: new Date("2026-09-01T00:00:00Z"), to: new Date("2026-10-01T00:00:00Z") };
+
+  const windowed = (w: { from: Date; to: Date }) =>
+    withTenant(ctxFor(TENANT_A), (q) => analytics.reportData(q, w));
+
+  /** Three wins and one loss in September; one win and two losses in August. */
+  const seedTwoMonths = async () => {
+    await seedDeals(`
+      ('w1','${TENANT_A}',NULL,NULL,'Sep win 1',100000,'won','other','${SEP}',NULL),
+      ('w2','${TENANT_A}',NULL,NULL,'Sep win 2',200000,'won','other','${SEP}',NULL),
+      ('w3','${TENANT_A}',NULL,NULL,'Sep win 3',300000,'won','other','${SEP}',NULL),
+      ('w4','${TENANT_A}',NULL,NULL,'Aug win',  500000,'won','other','${AUG}',NULL),
+      ('l1','${TENANT_A}',NULL,NULL,'Sep loss', 900000,'lost','other',NULL,'Price'),
+      ('l2','${TENANT_A}',NULL,NULL,'Aug loss 1',700000,'lost','other',NULL,'Price'),
+      ('l3','${TENANT_A}',NULL,NULL,'Aug loss 2',600000,'lost','other',NULL,'Price')`);
+    // Losses need a date of their own, exactly as wins do.
+    await db.seed(`UPDATE deals SET lost_at = '${SEP}' WHERE id = 'l1';
+                   UPDATE deals SET lost_at = '${AUG}' WHERE id IN ('l2','l3');`);
+  };
+
+  it("counts only the losses that happened in the window", async () => {
+    await seedTwoMonths();
+    const r = await windowed(september);
+
+    // Three wins, one loss, in September. Not three wins against all three
+    // losses, which is what it used to report.
+    expect(r.revenue.wonCount).toBe(3);
+    expect(r.lostCount, "losses from other months leaked into the denominator").toBe(1);
+    expect(r.decidedCount).toBe(4);
+    expect(r.winRate, "the rate is measuring this month against all time").toBe(75);
+  });
+
+  it("still counts everything when no window is set", async () => {
+    await seedTwoMonths();
+    const r = await report();
+    expect(r.revenue.wonCount).toBe(4);
+    expect(r.lostCount).toBe(3);
+    expect(r.decidedCount).toBe(7);
+    expect(r.winRate).toBe(57); // 4/7
+  });
+
+  it("names a denominator the rate was actually computed from", async () => {
+    /**
+     * The tile printed "of {won + open} deals". An open deal is neither a win
+     * nor a loss and is no part of a win rate, so the screen named a number the
+     * figure beside it had never been divided by: "57% of 8 deals" where 57%
+     * was 4/7.
+     */
+    await seedDeals(`
+      ('w1','${TENANT_A}',NULL,NULL,'Won', 100000,'won','other',now(),NULL),
+      ('l1','${TENANT_A}',NULL,NULL,'Lost',100000,'lost','other',NULL,'Price'),
+      ('o1','${TENANT_A}',NULL,NULL,'Open',100000,'demo','other',NULL,NULL),
+      ('o2','${TENANT_A}',NULL,NULL,'Open2',100000,'discovery','other',NULL,NULL)`);
+
+    const r = await report();
+    expect(r.revenue.openCount, "setup: there should be open deals to exclude").toBe(2);
+    expect(r.decidedCount, "open deals were counted as decided").toBe(2);
+    expect(r.winRate).toBe(50);
+  });
+
+  it("stops counting a deal that is moved back out of Lost", async () => {
+    /* `lost_at` is cleared on the way out, the way `won_at` is — otherwise a
+       revived deal keeps dragging the denominator down forever. */
+    await seedDeals(
+      `('l1','${TENANT_A}',NULL,NULL,'Lost',100000,'lost','other',NULL,'Price'),
+       ('w1','${TENANT_A}',NULL,NULL,'Won', 100000,'won','other',now(),NULL)`
+    );
+    await db.seed(`UPDATE deals SET lost_at = now() WHERE id = 'l1'`);
+    expect((await report()).decidedCount).toBe(2);
+
+    const deals = await import("../src/server/repos/deals");
+    await withTenant(ctxFor(TENANT_A), (q) => deals.moveStage(q, "l1", "demo"));
+
+    const r = await report();
+    expect(r.lostCount, "a revived deal is still counted as a loss").toBe(0);
+    expect(r.decidedCount).toBe(1);
+    expect(r.winRate).toBe(100);
+  });
+});

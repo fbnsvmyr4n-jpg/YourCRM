@@ -70,6 +70,9 @@ export type ReportData = {
    * losses. Null until something has actually been decided.
    */
   winRate: number | null;
+  /** Deals the window can actually judge: won plus lost. */
+  decidedCount: number;
+  lostCount: number;
   byStage: StageRow[];
   bySource: SourceRow[];
   /** Why deals died, from the reason `moveStage` insists on. */
@@ -109,11 +112,15 @@ const n = (v: string | number | null | undefined): number => (v == null ? 0 : Nu
  */
 export type ReportWindow = { from: Date | null; to: Date | null };
 
-const wonWithin = (w: ReportWindow, next: number): { sql: string; params: (Date)[] } => {
+const withinOn = (
+  column: "won_at" | "lost_at",
+  w: ReportWindow,
+  next: number
+): { sql: string; params: Date[] } => {
   if (!w.from || !w.to) return { sql: "", params: [] };
-  // Half-open: a deal won at exactly midnight on the 1st belongs to one month,
-  // not to both.
-  return { sql: ` AND won_at >= $${next} AND won_at < $${next + 1}`, params: [w.from, w.to] };
+  // Half-open: a deal closed at exactly midnight on the 1st belongs to one
+  // month, not to both.
+  return { sql: ` AND ${column} >= $${next} AND ${column} < $${next + 1}`, params: [w.from, w.to] };
 };
 
 export async function reportData(
@@ -121,7 +128,20 @@ export async function reportData(
   window: ReportWindow = { from: null, to: null }
 ): Promise<ReportData> {
   const tenant = q.ctx.subAccountId;
-  const won = wonWithin(window, 3);
+  const won = withinOn("won_at", window, 3);
+  /*
+     Losses are windowed too, and were not.
+
+     Win Rate is `won / (won + lost)`. The numerator was filtered to the period
+     and the denominator was every loss the account had ever recorded, so a
+     month with three wins and one loss reported 50% instead of 75% — and the
+     error grows with the age of the account, which is the worst possible
+     direction for it to grow in. The comment on the query below claimed "won
+     and lost respect the window" the whole time.
+
+     Parameter numbers continue after the two `won_at` bounds.
+  */
+  const lost = withinOn("lost_at", window, 3 + won.params.length);
 
   /**
    * Issued one at a time, deliberately.
@@ -147,16 +167,21 @@ export async function reportData(
          * as "the open pipeline of July" — those deals have since closed or
          * are still open today — so it is deliberately unfiltered, and the
          * screen says so rather than implying the window applies to it.
+         *
+         * Won and lost genuinely do respect it, now that a loss has a date to
+         * respect it with. This comment said they both did while only one of
+         * them was filtered, which is how Win Rate came to measure a month's
+         * wins against every loss ever recorded.
          */
         `SELECT
            COALESCE(SUM(value_cents) FILTER (WHERE won_at IS NOT NULL${won.sql}), 0)::text AS won_cents,
            count(*) FILTER (WHERE won_at IS NOT NULL${won.sql})::text                      AS won_count,
            COALESCE(SUM(value_cents) FILTER (WHERE stage = ANY($2)), 0)::text              AS open_cents,
            count(*) FILTER (WHERE stage = ANY($2))::text                                   AS open_count,
-           count(*) FILTER (WHERE stage = 'lost')::text                                    AS lost_count
+           count(*) FILTER (WHERE stage = 'lost'${lost.sql})::text                          AS lost_count
          FROM deals
          WHERE sub_account_id = $1 AND deleted_at IS NULL`,
-        [tenant, [...OPEN_STAGES], ...won.params]
+        [tenant, [...OPEN_STAGES], ...won.params, ...lost.params]
   );
 
   const stages = await q.rows<{ stage: Stage; count: string; value_cents: string }>(
@@ -173,12 +198,12 @@ export async function reportData(
         // history is what makes its conversion rate meaningful.
         `SELECT source,
                 count(*)::text AS deals,
-                count(*) FILTER (WHERE won_at IS NOT NULL${wonWithin(window, 2).sql})::text AS won_deals,
-                COALESCE(SUM(value_cents) FILTER (WHERE won_at IS NOT NULL${wonWithin(window, 2).sql}), 0)::text AS won_cents
+                count(*) FILTER (WHERE won_at IS NOT NULL${withinOn("won_at", window, 2).sql})::text AS won_deals,
+                COALESCE(SUM(value_cents) FILTER (WHERE won_at IS NOT NULL${withinOn("won_at", window, 2).sql}), 0)::text AS won_cents
          FROM deals
          WHERE sub_account_id = $1 AND deleted_at IS NULL
          GROUP BY source`,
-        [tenant, ...wonWithin(window, 2).params]
+        [tenant, ...withinOn("won_at", window, 2).params]
   );
 
   const losses = await q.rows<{ reason: string; count: string }>(
@@ -276,6 +301,13 @@ export async function reportData(
      * Every rate in the product now means the same thing.
      */
     winRate: decided > 0 ? Math.round((wonCount / decided) * 100) : null,
+
+    /* The number the rate is actually OUT OF, so the screen can say so. The
+       tile used to print "of {won + open} deals" beside it — open deals have
+       not been decided and are no part of a win rate, so it named a denominator
+       that was not the denominator. */
+    decidedCount: decided,
+    lostCount,
 
     // Every stage appears, including the empty ones: a pipeline chart that
     // silently drops a stage with no deals in it makes the funnel look shorter

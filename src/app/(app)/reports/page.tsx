@@ -151,7 +151,12 @@ export default async function ReportsPage({
       icon: <TrendingUp className="h-5 w-5" />,
       label: "Win Rate",
       value: rate(r.winRate),
-      sub: `of ${r.wonCount + r.openCount} deal${r.wonCount + r.openCount === 1 ? "" : "s"}`,
+      /* The number it is actually out of. This said "of {won + open} deals",
+         which counted deals that have not been decided — an open deal is
+         neither a win nor a loss and is no part of a win rate. On a fixture of
+         four wins and three losses the tile read "57% of 8 deals", where 57%
+         was 4/7. */
+      sub: `of ${r.decidedCount} decided deal${r.decidedCount === 1 ? "" : "s"}`,
       tone: "var(--purple)",
       soft: "var(--purple-soft)",
     },
@@ -159,7 +164,10 @@ export default async function ReportsPage({
       icon: <Wallet className="h-5 w-5" />,
       label: "Average Deal",
       value: r.avgDealSize === null ? "—" : money(r.avgDealSize),
-      sub: "across every deal",
+      /* It is won revenue divided by won COUNT, so "every deal" was wrong in
+         the direction that flatters: it implied open and lost deals were in
+         there, dragging the figure down, when they never were. */
+      sub: "across won deals",
       tone: "var(--amber)",
       soft: "var(--amber-soft)",
     },
@@ -447,7 +455,12 @@ export default async function ReportsPage({
                   <CardHeader
                     title="Where leads come from"
                     icon={<Radar className="h-[18px] w-[18px] text-accent" />}
-                    action={<span className="text-xs text-faint">{totalLeads} leads</span>}
+                    /* Deals, because deals is what this counts: a source lives
+                       on the deal, and one person can bring several. Calling
+                       them leads made this card say "11 leads" while the Leads
+                       page said 6 — the same word for two different things on
+                       two screens. */
+                    action={<span className="text-xs text-faint">{totalLeads} deals</span>}
                   />
                   {totalLeads === 0 ? (
                     <p className="py-6 text-sm text-faint">No leads captured yet.</p>
@@ -560,9 +573,19 @@ export default async function ReportsPage({
                       <p className="text-[11px] text-faint">Reach Closed Won</p>
                       <p className="text-lg font-bold tabular-nums text-green">{rate(r.leadConversion)}</p>
                     </div>
+                    {/* The working behind the figure above it.
+                        This looked for a `leadStatus` entry labelled "Closed
+                        Won". The labels are "Clients", "In progress" and "No
+                        open deal" — there is no "Closed Won" among them, so the
+                        lookup never matched and the count was `?? 0` every time.
+                        The sentence read "0 of 11 leads captured" beside a
+                        conversion figure of 67%, contradicting it on the same
+                        card. It also counted DEALS on one side of "of" and
+                        people on the other. Both halves now come from the same
+                        two numbers the percentage is made of. */}
                     <p className="mt-1 text-xs text-faint">
-                      {r.leadStatus.find((s) => s.label === "Closed Won")?.count ?? 0} of {totalLeads} leads
-                      captured.
+                      {r.clientsCount} of {r.contactsTotal}{" "}
+                      {r.contactsTotal === 1 ? "contact has" : "contacts have"} bought.
                     </p>
                   </div>
 

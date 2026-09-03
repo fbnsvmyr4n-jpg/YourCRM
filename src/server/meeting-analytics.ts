@@ -128,14 +128,39 @@ export async function meetingAnalytics(q: TenantQuery): Promise<MeetingAnalytics
       { label: "Closed won", value: won, pct: pct(won, decided) },
     ],
 
-    // A no-show is a loss with a known cause, so it joins the breakdown rather
-    // than sitting outside it and making the percentages fail to add up.
-    lossReasons: [
-      ...LOSS_REASONS.map((label) => ({
-        label,
-        count: (byReason.get(label) ?? 0) + (label === "No-show" ? noShow : 0),
-      })),
-    ]
+    /**
+     * A no-show is a loss with a known cause, so it joins the breakdown rather
+     * than sitting outside it and making the percentages fail to add up.
+     *
+     * And every OTHER loss has to land somewhere too. This mapped over the
+     * fixed `LOSS_REASONS` list and looked each one up, which silently dropped
+     * any reason not on it: the meeting still counted in `lost`, and therefore
+     * in `lossRate` and the funnel, but its row vanished. The breakdown then
+     * accounted for fewer losses than the panel above it claimed — two losses,
+     * one line, and no way to tell from the screen.
+     *
+     * The UI only ever writes reasons from the list, so this is a guard against
+     * a legacy row or a direct write rather than a daily occurrence. It still
+     * belongs here: the failure is silent and lands on a number, which is the
+     * combination worth being paranoid about. Unrecognised reasons are folded
+     * into "Other", which claims nothing about why.
+     */
+    lossReasons: (() => {
+      const known = new Set<string>(LOSS_REASONS);
+      let unrecognised = 0;
+      for (const [reason, count] of byReason) {
+        if (!known.has(reason)) unrecognised += count;
+      }
+      return [
+        ...LOSS_REASONS.map((label) => ({
+          label,
+          count:
+            (byReason.get(label) ?? 0) +
+            (label === "No-show" ? noShow : 0) +
+            (label === "Other" ? unrecognised : 0),
+        })),
+      ];
+    })()
       .filter((r) => r.count > 0)
       .map((r) => ({ ...r, pct: pct(r.count, lossTotal) }))
       .sort((a, b) => b.count - a.count),
