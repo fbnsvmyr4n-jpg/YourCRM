@@ -93,3 +93,48 @@ describe("no loss disappears from the breakdown", () => {
     expect(meeting).toMatch(/\(label === "Other" \? unrecognised : 0\)/);
   });
 });
+
+describe("Largest deals gives the words somewhere to go", () => {
+  /**
+   * Reported from a phone as "strange lines out of place", with a screenshot of
+   * two rows showing stray marks where a name should be.
+   *
+   * They were not marks. The row was avatar | name+title | stage badge | value
+   * on one line, and the only flexible column was the one with the words in it.
+   * The badge runs about 78px and the value is a fixed 80, so at 393px the text
+   * column was crushed to roughly 30px — and `truncate` renders whatever fits,
+   * which at that width is a SLIVER OF A GLYPH. The "lines" were the left-hand
+   * strokes of clipped characters.
+   */
+  it("moves the stage badge off the name's line on a phone", () => {
+    /* Two renderings of the same badge, one per breakpoint, so the phone gets
+       the whole row for words and the desktop row is untouched. */
+    expect(page).toMatch(/text-\[10px\] font-semibold sm:hidden/);
+    expect(page).toMatch(/hidden shrink-0 rounded-lg px-2 py-0\.5 text-\[11px\] font-semibold sm:inline-block/);
+  });
+
+  it("does not print a dash where a person should be", () => {
+    /**
+     * A deal with nobody linked sent `"—"` as the contact NAME, so the row's
+     * primary line was a dash — and once the column collapsed, a dash was
+     * exactly one of the stray marks on screen. The server now sends null and
+     * the row decides: the deal's own title leads instead.
+     */
+    expect(view).toMatch(/contact: d\.contact_name,/);
+    expect(view).not.toMatch(/contact: d\.contact_name \?\? "—"/);
+    expect(view).toMatch(/contact: string \| null;/);
+    expect(page).toMatch(/\{d\.contact \?\? d\.title\}/);
+  });
+
+  it("does not repeat the title when it is already the heading", () => {
+    /* With no contact the title is promoted to the first line, so printing it
+       again underneath would be the same words twice. */
+    expect(page).toMatch(/\{d\.contact && <span className="truncate">\{d\.title\}<\/span>\}/);
+  });
+
+  it("builds the avatar from whatever is actually shown", () => {
+    /* It took initials from `d.contact`, which for an unlinked deal was the
+       dash — so the avatar read "—" too. */
+    expect(page).toMatch(/\(d\.contact \?\? d\.title\)\s*\n?\s*\.split/);
+  });
+});

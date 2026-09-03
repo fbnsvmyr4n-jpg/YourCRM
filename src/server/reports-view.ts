@@ -81,7 +81,9 @@ export type ReportView = {
   }[];
   meetings: MeetingAnalytics;
   awaiting: { past: number; upcoming: number };
-  topDeals: { id: string; title: string; contact: string; value: number; stage: string }[];
+  /** `contact` is null when the deal has nobody linked — the screen decides
+      what to show, rather than being handed a dash to print. */
+  topDeals: { id: string; title: string; contact: string | null; value: number; stage: string }[];
   owners: { owner: string; won: number; revenue: number }[];
   contacts: { clients: number; leads: number };
   voice: {
@@ -300,7 +302,10 @@ export async function reportView(q: TenantQuery, period?: Period): Promise<Repor
     topDeals: topDeals.map((d) => ({
       id: d.id,
       title: d.title,
-      contact: d.contact_name ?? "—",
+      /* Null, not "—". A dash is a decision about presentation and it was made
+         in the wrong place: the row printed it as the person's NAME, so a deal
+         with no contact showed a dash on the line where a human should be. */
+      contact: d.contact_name,
       value: toUnits(Number(d.value_cents)),
       stage: stageMeta(d.stage as Parameters<typeof stageMeta>[0]).label,
     })),

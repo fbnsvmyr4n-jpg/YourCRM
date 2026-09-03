@@ -377,7 +377,7 @@ export default async function ReportsPage({
                           >
                             <Avatar
                               initials={
-                                d.contact
+                                (d.contact ?? d.title)
                                   .split(/\s+/)
                                   .filter(Boolean)
                                   .slice(0, 2)
@@ -388,12 +388,41 @@ export default async function ReportsPage({
                               color="blue"
                               size="sm"
                             />
+                            {/*
+                                The name gets the room, and the badge gets out of
+                                its way on a phone.
+
+                                This row was avatar | name+title | stage badge |
+                                value, all on one line. The badge is about 78px
+                                and the value is a fixed 80, so on a 393px screen
+                                the only flexible column — the one with the words
+                                in it — was crushed to roughly 30px. `truncate`
+                                then rendered a SLIVER OF A GLYPH: the reported
+                                "strange lines" were clipped fragments of a dash
+                                and a title, which is why they looked like marks
+                                rather than text.
+
+                                Below `sm` the badge moves onto the second line
+                                beside the title, so the words have the whole row
+                                less the avatar and the figure. From `sm` up
+                                nothing moves — the desktop row is exactly as it
+                                was.
+                            */}
                             <div className="min-w-0 flex-1 leading-tight">
-                              <p className="truncate text-sm font-medium">{d.contact}</p>
-                              <p className="truncate text-xs text-faint">{d.title}</p>
+                              <p className="truncate text-sm font-medium">{d.contact ?? d.title}</p>
+                              <p className="mt-0.5 flex items-center gap-1.5 text-xs text-faint">
+                                <span
+                                  className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold sm:hidden"
+                                  style={{ color: stage?.color, background: "var(--raise)" }}
+                                >
+                                  {stage?.label ?? d.stage}
+                                </span>
+                                {/* Only when it is not already the line above. */}
+                                {d.contact && <span className="truncate">{d.title}</span>}
+                              </p>
                             </div>
                             <span
-                              className="shrink-0 rounded-lg px-2 py-0.5 text-[11px] font-semibold"
+                              className="hidden shrink-0 rounded-lg px-2 py-0.5 text-[11px] font-semibold sm:inline-block"
                               style={{ color: stage?.color, background: "var(--raise)" }}
                             >
                               {stage?.label ?? d.stage}
