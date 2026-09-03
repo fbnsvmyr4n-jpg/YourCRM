@@ -410,24 +410,29 @@ export default async function ReportsPage({
                             */}
                             <div className="min-w-0 flex-1 leading-tight">
                               <p className="truncate text-sm font-medium">{d.title}</p>
-                              <p className="mt-0.5 flex items-center gap-1.5 overflow-hidden text-xs text-faint">
+                              {/*
+                                  The stage, and nothing else.
+
+                                  The contact's name used to sit here beside the
+                                  badge. It was redundant more often than not —
+                                  a deal called "Jenny — enquiry" printed "Jenny"
+                                  again directly underneath — and it was the
+                                  thing competing for the little width this line
+                                  has. The avatar already carries who it is.
+
+                                  `sm:hidden` on the whole line, not on the badge
+                                  inside it: from `sm` up the badge is shown on
+                                  the right instead, so with the name gone there
+                                  is nothing left here to render, and an empty
+                                  paragraph would still be spending its `mt-0.5`.
+                              */}
+                              <p className="mt-0.5 flex items-center gap-1.5 overflow-hidden text-xs text-faint sm:hidden">
                                 <span
-                                  className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold sm:hidden"
+                                  className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold"
                                   style={{ color: stage?.color, background: "var(--raise)" }}
                                 >
                                   {stage?.label ?? d.stage}
                                 </span>
-                                {/*
-                                    `min-w-0` is what lets this truncate at all.
-
-                                    `truncate` sets `white-space: nowrap`, and a
-                                    FLEX ITEM's `min-width` defaults to `auto`,
-                                    which for nowrap text resolves to the width of
-                                    the whole string — so without this the span
-                                    refuses to shrink, the ellipsis never engages,
-                                    and the text runs on out of its column.
-                                */}
-                                {d.contact && <span className="min-w-0 truncate">{d.contact}</span>}
                               </p>
                             </div>
                             <span

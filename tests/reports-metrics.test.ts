@@ -106,10 +106,11 @@ describe("Largest deals gives the words somewhere to go", () => {
    * which at that width is a SLIVER OF A GLYPH. The "lines" were the left-hand
    * strokes of clipped characters.
    */
-  it("moves the stage badge off the name's line on a phone", () => {
+  it("moves the stage badge off the title's line on a phone", () => {
     /* Two renderings of the same badge, one per breakpoint, so the phone gets
-       the whole row for words and the desktop row is untouched. */
-    expect(page).toMatch(/text-\[10px\] font-semibold sm:hidden/);
+       the whole row for words and the desktop row is untouched. The phone one
+       is hidden by its PARENT line rather than by itself — see below. */
+    expect(page).toMatch(/text-xs text-faint sm:hidden">\s*\n\s*<span/);
     expect(page).toMatch(/hidden shrink-0 rounded-lg px-2 py-0\.5 text-\[11px\] font-semibold sm:inline-block/);
   });
 
@@ -140,7 +141,23 @@ describe("Largest deals gives the words somewhere to go", () => {
      * what the panel is about: these are the largest DEALS.
      */
     expect(page).toMatch(/<p className="truncate text-sm font-medium">\{d\.title\}<\/p>/);
-    expect(page).toMatch(/\{d\.contact && <span className="min-w-0 truncate">\{d\.contact\}<\/span>\}/);
+  });
+
+  it("puts nothing but the stage on the second line", () => {
+    /**
+     * The contact's name sat here beside the badge and was redundant more often
+     * than not — a deal called "Jenny — enquiry" printed "Jenny" again directly
+     * underneath itself — while being the thing competing for the little width
+     * this line has. The avatar already carries who it is.
+     *
+     * With the name gone the line holds only the phone badge, so the LINE is
+     * what hides from `sm` up. Hiding the badge alone would leave an empty
+     * paragraph still spending its `mt-0.5` on every desktop row.
+     */
+    expect(page).not.toMatch(/\{d\.contact && <span/);
+    expect(page).toMatch(/mt-0\.5 flex items-center gap-1\.5 overflow-hidden text-xs text-faint sm:hidden/);
+    /* `d.contact` survives in exactly one place: the avatar. */
+    expect(page.match(/d\.contact/g) ?? []).toHaveLength(1);
   });
 
   it("stops the figure reserving width the title needs", () => {
@@ -151,26 +168,24 @@ describe("Largest deals gives the words somewhere to go", () => {
     expect(page).not.toMatch(/className="w-20 shrink-0 text-right/);
   });
 
-  it("lets the title actually truncate inside the flex row", () => {
+  it("keeps the wrapper that lets the title truncate", () => {
     /**
-     * The second half of the reported problem, and a classic.
+     * The title is a block `<p className="truncate">` inside `min-w-0 flex-1`.
+     * The `min-w-0` is what carries it: a flex item's `min-width` defaults to
+     * `auto`, which for the nowrap text `truncate` produces resolves to the
+     * width of the whole string — so without it the column refuses to shrink,
+     * the ellipsis never engages, and the title runs on out of the row.
      *
-     * `truncate` sets `white-space: nowrap`. A FLEX ITEM's `min-width` defaults
-     * to `auto`, which for nowrap text resolves to the width of the whole
-     * string — so the span refused to shrink, the ellipsis never engaged, and a
-     * long title ran on out of its column past the badge. On a phone that reads
-     * as letters appearing after "Closed Won" with nothing stopping them, which
-     * is exactly how it was reported the second time.
-     *
-     * `min-w-0` is the fix; `overflow-hidden` on the line is the guard behind
-     * it, so even a future child without `min-w-0` is clipped rather than
-     * spilling into the figure.
+     * This was learned the expensive way on the line below, where a span had
+     * `truncate` and no `min-w-0` and spilled letters past the badge.
      */
-    expect(page).toMatch(/<span className="min-w-0 truncate">\{d\.contact\}<\/span>/);
-    expect(page).toMatch(/mt-0\.5 flex items-center gap-1\.5 overflow-hidden text-xs text-faint/);
-    /* The bare version is what shipped and what broke: without `min-w-0` the
-       span refuses to shrink and the text runs out of its column. */
-    expect(page).not.toMatch(/<span className="truncate">\{d\.contact\}<\/span>/);
+    /* Anchored to THIS row, not just to the file. Two lists here share that
+       wrapper class, so a bare match would have passed while the deals row lost
+       it — a mutation removing it hit exactly that ambiguity and could not be
+       applied uniquely, which is the tell. */
+    expect(page).toMatch(
+      /<div className="min-w-0 flex-1 leading-tight">\s*\n\s*<p className="truncate text-sm font-medium">\{d\.title\}<\/p>/
+    );
   });
 
   it("builds the avatar from whatever the row is about", () => {
