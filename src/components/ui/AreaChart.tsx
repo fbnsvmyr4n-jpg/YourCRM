@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { placeValueLabels } from "@/lib/place-labels";
 
 type Point = { label: string; value: number };
@@ -241,6 +241,10 @@ export function AreaChart({
 const AXIS_FONT = 12;
 /** The bold figures on the peak and the newest point. */
 const VALUE_FONT = 13;
+/* The chip each figure sits on. Padding is horizontal only; the height is
+   fixed so every chip on the chart is the same size whatever it says. */
+const CHIP_PAD_X = 8;
+const CHIP_H = 22;
 
 function Plot({
   data,
@@ -255,6 +259,10 @@ function Plot({
   format: (n: number) => string;
   ticks: number;
 }) {
+  /* Scoped, so two charts on one page cannot claim the same gradient. They sit
+     on different pages today, which made this a landmine rather than a bug. */
+  const uid = useId().replace(/:/g, "");
+
   const max = Math.max(...data.map((d) => d.value));
   const { niceMax, step } = niceScale(max, ticks);
 
@@ -310,14 +318,28 @@ function Plot({
   return (
     <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} role="img" aria-label="Revenue over the last six weeks">
       <defs>
-        <linearGradient id="areaFill" x1="0" y1="0" x2="0" y2="1">
+        <linearGradient id={`${uid}-area`} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0" stopColor="var(--accent-to)" stopOpacity="0.30" />
           <stop offset="1" stopColor="var(--accent-to)" stopOpacity="0" />
         </linearGradient>
-        <linearGradient id="lineStroke" x1="0" y1="0" x2="1" y2="0">
+        {/* Three stops rather than two. A straight from→to ramp puts the
+            midpoint of the blend exactly halfway along the chart wherever the
+            line happens to be; lifting the middle keeps the brightest part of
+            the stroke over the middle of the plot, which is where the eye
+            travels. */}
+        <linearGradient id={`${uid}-line`} x1="0" y1="0" x2="1" y2="0">
           <stop offset="0" stopColor="var(--accent-from)" />
+          <stop offset="0.55" stopColor="var(--accent)" />
           <stop offset="1" stopColor="var(--accent-to)" />
         </linearGradient>
+        {/* The line's own light. On a dark panel a flat 2.5px stroke reads as
+            drawn ON the card; a soft copy underneath makes it read as lit,
+            which is the whole difference between a chart that looks plotted
+            and one that looks designed. Blur only — the colour and opacity are
+            on the path, so this filter costs one pass. */}
+        <filter id={`${uid}-glow`} x="-25%" y="-50%" width="150%" height="200%">
+          <feGaussianBlur stdDeviation="5" />
+        </filter>
       </defs>
 
       {yTicks.map((t, i) => (
@@ -329,12 +351,48 @@ function Plot({
         </g>
       ))}
 
-      <path d={area} fill="url(#areaFill)" />
-      <path d={line} fill="none" stroke="url(#lineStroke)" strokeWidth="2.5" strokeLinecap="round" />
+      <path d={area} fill={`url(#${uid}-area)`} />
 
+      {/* Beneath the real stroke, never instead of it. */}
+      <path
+        d={line}
+        fill="none"
+        stroke="var(--accent)"
+        strokeWidth="6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        opacity="0.3"
+        filter={`url(#${uid}-glow)`}
+      />
+      <path
+        d={line}
+        fill="none"
+        stroke={`url(#${uid}-line)`}
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        /* A tall spike meets its neighbours at a sharp angle, and the default
+           mitre grows a spur off the top of it — visible on a week that is ten
+           times the one before. */
+        strokeLinejoin="round"
+      />
+
+      {/*
+          Six identical rings competed with the line for attention, so the
+          chart read as a row of dots that happened to be joined up. The points
+          that carry a NUMBER are the ones worth emphasising; the rest are
+          there to say "a week was measured here" and can be quieter.
+      */}
       {pts.map((p, i) => (
         <g key={i}>
-          <circle cx={p.x} cy={p.y} r="4" fill="var(--panel-solid)" stroke="var(--accent)" strokeWidth="2.5" />
+          <circle
+            cx={p.x}
+            cy={p.y}
+            r={labelled.has(i) ? 4.5 : 3}
+            fill="var(--panel-solid)"
+            stroke="var(--accent)"
+            strokeWidth={labelled.has(i) ? 2.5 : 2}
+            opacity={labelled.has(i) ? 1 : 0.55}
+          />
           {showLabel.has(i) && (
             <text x={clampX(p.x, p.label, AXIS_FONT)} y={H - 10} textAnchor="middle" fontSize={AXIS_FONT} fill="var(--text-muted)">
               {p.label}
@@ -356,34 +414,66 @@ function Plot({
         [...labelled].map((i) => ({
           i,
           x: pts[i].x,
-          width: textWidth(format(pts[i].value), VALUE_FONT),
+          // The CHIP's width, not the text's — the chip is what can collide.
+          width: textWidth(format(pts[i].value), VALUE_FONT) + CHIP_PAD_X * 2,
         })),
         // Left is the plot edge — beyond it is the gutter holding the tick
         // figures. Right is the chart edge, because that padding is empty.
         { left: padL, right: W - 4 }
       ).map(({ i, x }) => {
         const p = pts[i];
+        /* Clear of the marker beneath it. The newest point now wears a 12px
+           halo, so the lift has to exceed that or the chip sits in the glow. */
+        const baseline = Math.max(padT - 4, p.y - 22);
+        const w = textWidth(format(p.value), VALUE_FONT) + CHIP_PAD_X * 2;
         return (
-          <text
-            key={`v${i}`}
-            x={x}
-            /* Clear of the marker beneath it. The newest point wears an 11px
-               halo, so the old 14px lift left three pixels between the text and
-               the glow — close enough to read as a collision even though the
-               boxes did not touch. */
-            y={Math.max(padT - 8, p.y - 20)}
-            textAnchor="middle"
-            fontSize={VALUE_FONT}
-            fontWeight="700"
-            fill="var(--text)"
-          >
-            {format(p.value)}
-          </text>
+          <g key={`v${i}`}>
+            {/*
+                The figure sits ON something.
+                Bare text floated over the gridlines and the area fill, so it
+                changed contrast depending on where the line happened to be and
+                read as unfinished — a number dropped on top of a picture rather
+                than a label belonging to it. A chip in the panel's own colour
+                gives it a consistent ground everywhere on the chart.
+            */}
+            <rect
+              x={x - w / 2}
+              y={baseline - CHIP_H + 6}
+              width={w}
+              height={CHIP_H}
+              rx="7"
+              fill="var(--panel-solid)"
+              fillOpacity="0.92"
+              stroke="var(--border)"
+            />
+            <text
+              x={x}
+              y={baseline}
+              textAnchor="middle"
+              fontSize={VALUE_FONT}
+              fontWeight="700"
+              fill="var(--text)"
+              // Digits of equal width, so two chips of the same figure length
+              // are the same size and the numbers do not shuffle on redraw.
+              style={{ fontVariantNumeric: "tabular-nums" }}
+            >
+              {format(p.value)}
+            </text>
+          </g>
         );
       })}
 
-      <circle cx={last.x} cy={last.y} r="6" fill="var(--accent)" />
-      <circle cx={last.x} cy={last.y} r="11" fill="var(--accent)" opacity="0.18" />
+      {/*
+          The newest week, built in layers rather than as one flat blob.
+          Two falling opacities give it a glow that belongs to the point rather
+          than to the whole line, and the panel-coloured core turns a dot into a
+          mark that looks placed — the difference between "a bigger circle" and
+          the end of a line being pointed at.
+      */}
+      <circle cx={last.x} cy={last.y} r="12" fill="var(--accent)" opacity="0.14" />
+      <circle cx={last.x} cy={last.y} r="7.5" fill="var(--accent)" opacity="0.26" />
+      <circle cx={last.x} cy={last.y} r="5" fill="var(--accent)" />
+      <circle cx={last.x} cy={last.y} r="1.9" fill="var(--panel-solid)" />
     </svg>
   );
 }

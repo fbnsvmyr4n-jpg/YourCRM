@@ -42,11 +42,71 @@ describe("the value labels are laid out against each other", () => {
   });
 
   it("lifts a value label clear of the marker under it", () => {
-    /* The newest point wears an 11px halo. A 14px lift left three pixels
-       between the text and the glow, which reads as a collision even though the
-       boxes never touched. */
-    expect(src).toMatch(/p\.y - 20/);
+    /* The newest point wears a 12px halo. A 14px lift left three pixels between
+       the text and the glow, which reads as a collision even though the boxes
+       never touched; the chip has to clear the halo, not merely the dot. */
+    expect(src).toMatch(/p\.y - 22/);
     expect(src).not.toMatch(/p\.y - 14/);
+  });
+});
+
+describe("the chart is lit, not merely plotted", () => {
+  it("draws a soft copy of the line beneath the real one", () => {
+    /* On a dark panel a flat 2.5px stroke reads as drawn ON the card. The blur
+       underneath is what makes it read as lit — the single largest difference
+       between a chart that looks plotted and one that looks designed. It is a
+       second path, never a replacement: the crisp stroke still carries the
+       data. */
+    expect(src).toMatch(/filter=\{`url\(#\$\{uid\}-glow\)`\}/);
+    expect(src).toMatch(/<feGaussianBlur stdDeviation="5" \/>/);
+    expect(src).toMatch(/stroke=\{`url\(#\$\{uid\}-line\)`\}/);
+  });
+
+  it("rounds the joins so a spike does not grow a spur", () => {
+    /* A week ten times the one before meets its neighbours at a sharp angle,
+       and the default mitre runs off the top of the peak. */
+    expect(src).toMatch(/strokeLinejoin="round"/);
+  });
+
+  it("gives every chart its own gradient ids", () => {
+    /* Two charts on one page would otherwise both define `areaFill`, and the
+       second would silently repaint the first. They sit on different pages
+       today, which made it a landmine rather than a bug. */
+    expect(src).toMatch(/const uid = useId\(\)\.replace\(\/:\/g, ""\);/);
+    expect(src).not.toMatch(/id="areaFill"/);
+    expect(src).not.toMatch(/id="lineStroke"/);
+  });
+});
+
+describe("the marks carry a hierarchy", () => {
+  it("quietens the points that carry no number", () => {
+    /* Six identical rings competed with the line, so the chart read as a row of
+       dots that happened to be joined up. The points with a figure attached are
+       the ones worth emphasising. */
+    expect(src).toMatch(/r=\{labelled\.has\(i\) \? 4\.5 : 3\}/);
+    expect(src).toMatch(/opacity=\{labelled\.has\(i\) \? 1 : 0\.55\}/);
+  });
+
+  it("builds the newest point in layers", () => {
+    /* Two falling opacities give the glow to the POINT rather than the line,
+       and the panel-coloured core turns a dot into a mark that looks placed. */
+    expect(src).toMatch(/r="12" fill="var\(--accent\)" opacity="0\.14"/);
+    expect(src).toMatch(/r="7\.5" fill="var\(--accent\)" opacity="0\.26"/);
+    expect(src).toMatch(/r="1\.9" fill="var\(--panel-solid\)"/);
+  });
+
+  it("stands the figures on a chip rather than on the picture", () => {
+    /**
+     * Bare text floated over the gridlines and the area fill, so its contrast
+     * changed depending on where the line happened to be — a number dropped on
+     * top of a picture rather than a label belonging to it.
+     *
+     * The chip is also what can collide, so it is the chip's width that goes
+     * into the placement, not the text's.
+     */
+    expect(src).toMatch(/textWidth\(format\(pts\[i\]\.value\), VALUE_FONT\) \+ CHIP_PAD_X \* 2/);
+    expect(src).toMatch(/fill="var\(--panel-solid\)"\s*\n\s*fillOpacity="0\.92"/);
+    expect(src).toMatch(/fontVariantNumeric: "tabular-nums"/);
   });
 });
 
