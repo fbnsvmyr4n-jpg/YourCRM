@@ -9,6 +9,7 @@ import {
   KanbanSquare,
   LifeBuoy,
   MessageSquare,
+  NotebookPen,
   Settings,
   Target,
   Users,
@@ -62,6 +63,9 @@ export const NAV: NavSection[] = [
   {
     heading: "Other",
     items: [
+      /* Above Settings, and not in Pipeline: notes are not a daily-glance
+         figure, they are something you come looking for. */
+      { label: "Notes", href: "/notes", icon: NotebookPen },
       { label: "Settings", href: "/settings", icon: Settings },
       { label: "Support & FAQs", href: "/support", icon: LifeBuoy },
     ],
