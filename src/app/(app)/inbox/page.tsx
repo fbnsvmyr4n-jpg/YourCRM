@@ -1,4 +1,5 @@
 import { listMessages, purgeExpiredMessages } from "@/server/repos/inbox";
+import { contactSummaries } from "@/server/contact-summaries";
 import { listContacts } from "@/server/repos/contacts";
 import { listDeals } from "@/server/repos/deals";
 import { decorateMessage } from "@/server/decorate-message";
@@ -17,7 +18,7 @@ const SOURCE_LABEL: Record<string, ContactChannel> = {
 };
 
 export default async function InboxPage() {
-  const { messages, contactFor, channelFor, people, recent } = await withTenantPage(async (q) => {
+  const { messages, contactFor, channelFor, people, recent, revenueFor } = await withTenantPage(async (q) => {
     /* Before reading, so nothing expired is listed and then vanishes on the
        next load. There is no scheduler in this app; the bin is emptied by
        whoever opens the inbox next, which for an account in use is often
@@ -121,12 +122,35 @@ export default async function InboxPage() {
       .filter(({ at, s }) => at !== undefined && s.email)
       .map(({ s }) => asPerson(s));
 
+    /*
+       What each sender is worth, for the Revenue action on their card.
+
+       The same `contactSummaries` the Contacts page uses, so the two screens
+       cannot disagree about a person's figures — the Inbox previously answered
+       "Revenue" by sending you to the whole deals board, which is not this
+       person's revenue at all.
+
+       Only the senders actually on screen: this is one query for the ids the
+       list already resolved, not a scan.
+    */
+    const contactIds = [...new Set(Object.values(contactFor))].filter(Boolean);
+    const summaries = contactIds.length ? await contactSummaries(q, contactIds) : {};
+    const revenueFor: Record<string, { won: number; open: number; deals: number }> = {};
+    for (const [id, sum] of Object.entries(summaries)) {
+      revenueFor[id] = {
+        won: Math.round(sum.wonValueCents / 100),
+        open: Math.round(sum.openValueCents / 100),
+        deals: sum.deals.length,
+      };
+    }
+
     return {
       messages: rows.map((m) => decorateMessage(m, senders)),
       contactFor,
       channelFor,
       people: addressBook,
       recent: recentPeople,
+      revenueFor,
     };
   });
 
@@ -134,6 +158,7 @@ export default async function InboxPage() {
     <InboxView
       messages={messages}
       contactFor={contactFor}
+      revenueFor={revenueFor}
       channelFor={channelFor}
       people={people}
       recent={recent}

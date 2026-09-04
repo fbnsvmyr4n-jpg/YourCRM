@@ -41,6 +41,7 @@ import {
   type Message,
   type MsgCategory,
 } from "@/data/inbox";
+import { addNoteAction } from "@/app/(app)/contacts/actions";
 import { clsx } from "@/lib/clsx";
 import { useElementWidth } from "@/lib/use-element-width";
 import { AnchoredMenu } from "@/components/ui/AnchoredMenu";
@@ -74,6 +75,12 @@ const INBOX_SORTS = [
 ] as const;
 type InboxSort = (typeof INBOX_SORTS)[number]["id"];
 
+/* Whole figures, because a contact card has room for them and an abbreviated
+   "$4.5K" beside "Won" invites the reader to wonder what got rounded away. */
+function money(n: number) {
+  return `$${n.toLocaleString()}`;
+}
+
 function sortMessages(rows: Message[], sort: InboxSort): Message[] {
   // Copied before sorting: `sort` mutates, and this array comes from props.
   const out = [...rows];
@@ -102,15 +109,20 @@ function sortMessages(rows: Message[], sort: InboxSort): Message[] {
  */
 const DRAFT_KEY = "yourcrm:inbox:draft";
 
+export type ContactRevenue = { won: number; open: number; deals: number };
+
 export function InboxView({
   messages,
   contactFor,
   channelFor,
   people,
   recent,
+  revenueFor,
 }: {
   messages: Message[];
   contactFor: Record<string, string>;
+  /** What each sender is worth, keyed by contact id — for the Revenue action. */
+  revenueFor: Record<string, ContactRevenue>;
   /** Where each sender came from — a real source, resolved on the server. */
   channelFor: Record<string, ContactChannel>;
   /** Contacts and leads, so addressing a new email is recognition, not recall. */
@@ -446,6 +458,7 @@ export function InboxView({
             message={selected}
             messages={messages}
             contactId={contactFor[selected.id]}
+            revenue={revenueFor[contactFor[selected.id]]}
           />
         ) : (
           /* An empty card is a desktop grid cell holding its column open, and
@@ -1002,13 +1015,27 @@ function ContactCard({
   message,
   messages,
   contactId,
+  revenue,
   className,
 }: {
   message: Message;
   messages: Message[];
   contactId?: string;
+  revenue?: ContactRevenue;
   className?: string;
 }) {
+  /*
+     Which of the two in-place actions is open, if either.
+
+     Revenue and Note used to be links. "Note" pointed at
+     `/contacts?open=<id>` — the SAME destination as the last button beside it,
+     so two of the six did the identical thing and neither of them took a note.
+     "Revenue" opened the whole deals board, which is not this person's revenue.
+     Both now answer where they were asked.
+  */
+  const [panel, setPanel] = useState<"revenue" | "note" | null>(null);
+  const [noteSaved, setNoteSaved] = useState(false);
+  const [savingNote, setSavingNote] = useState(false);
   const tel = message.phone.replace(/[^\d+]/g, "");
   const hasEmail = message.email && message.email !== "—";
 
@@ -1044,14 +1071,19 @@ function ContactCard({
     {
       label: "Revenue",
       icon: DollarSign,
-      href: contactId ? "/deals" : undefined,
-      why: contactId ? "See deals for this contact" : "Not in your contacts yet",
+      /* Answered here rather than by navigating to the deals board, which
+         showed everybody's deals and called it this person's revenue. */
+      onClick: contactId ? () => setPanel((p) => (p === "revenue" ? null : "revenue")) : undefined,
+      why: contactId ? "What this contact is worth" : "Not in your contacts yet",
     },
     {
       label: "Note",
       icon: StickyNote,
-      href: contactId ? `/contacts?open=${contactId}` : undefined,
-      why: contactId ? "Add a note on their contact record" : "Not in your contacts yet",
+      /* Actually takes the note. This pointed at the contact record — the same
+         place as the button beside it — so it moved you somewhere to go and
+         find the real Note button. */
+      onClick: contactId ? () => setPanel((p) => (p === "note" ? null : "note")) : undefined,
+      why: contactId ? "Add a note against this contact" : "Not in your contacts yet",
     },
     {
       label: "Contact",
@@ -1096,6 +1128,22 @@ function ContactCard({
             </>
           );
 
+          if (a.onClick) {
+            const open = (a.label === "Revenue" && panel === "revenue") || (a.label === "Note" && panel === "note");
+            return (
+              <button
+                key={a.label}
+                type="button"
+                onClick={a.onClick}
+                title={a.why}
+                aria-expanded={open}
+                className="focus-ring group flex flex-col items-center gap-1"
+              >
+                {body}
+              </button>
+            );
+          }
+
           return a.href ? (
             a.href.startsWith("/") ? (
               <Link key={a.label} href={a.href} title={a.why} className="focus-ring group flex flex-col items-center gap-1">
@@ -1113,6 +1161,79 @@ function ContactCard({
           );
         })}
       </div>
+
+      {/* The answer, where the question was asked. */}
+      {panel === "revenue" && contactId && (
+        <div className="mt-4 rounded-xl border border-[var(--border)] p-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-faint">Won</p>
+              <p className="mt-0.5 text-lg font-bold tabular-nums text-[var(--green)]">
+                {money(revenue?.won ?? 0)}
+              </p>
+            </div>
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-faint">In pipeline</p>
+              <p className="mt-0.5 text-lg font-bold tabular-nums">{money(revenue?.open ?? 0)}</p>
+            </div>
+          </div>
+          {/* Says where the figures come from rather than leaving two numbers
+              floating; and a way through to the board for the detail. */}
+          <p className="mt-2 text-[11px] text-faint">
+            {revenue?.deals
+              ? `Across ${revenue.deals} deal${revenue.deals === 1 ? "" : "s"}.`
+              : "No deals recorded against this contact yet."}{" "}
+            <Link href={`/contacts?open=${contactId}`} className="focus-ring rounded text-accent hover:underline">
+              Open contact
+            </Link>
+          </p>
+        </div>
+      )}
+
+      {panel === "note" && contactId && (
+        <form
+          className="mt-4 rounded-xl border border-[var(--border)] p-3"
+          action={async (formData: FormData) => {
+            setSavingNote(true);
+            try {
+              await addNoteAction(contactId, formData);
+              /* Confirmed in place. The note lands on the contact's timeline,
+                 which is a different screen — so without a word here the only
+                 feedback would be the box emptying. */
+              setNoteSaved(true);
+            } finally {
+              setSavingNote(false);
+            }
+          }}
+        >
+          <label className="block">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-faint">
+              Add a note
+            </span>
+            <textarea
+              name="note"
+              rows={3}
+              required
+              autoFocus
+              onChange={() => setNoteSaved(false)}
+              placeholder={`What did ${message.name.split(/\s+/)[0]} say?`}
+              className="field-input mt-1.5 resize-none"
+            />
+          </label>
+          <div className="mt-2 flex items-center justify-between gap-3">
+            <p className="text-[11px] text-faint">
+              {noteSaved ? "Saved to their timeline." : "Saved against this contact."}
+            </p>
+            <button
+              type="submit"
+              disabled={savingNote}
+              className="btn-accent focus-ring rounded-lg px-3 py-1.5 text-xs font-semibold disabled:opacity-60"
+            >
+              {savingNote ? "Saving…" : "Save note"}
+            </button>
+          </div>
+        </form>
+      )}
 
       <p className="mt-6 mb-3 border-t border-[var(--border)] pt-5 text-[11px] font-semibold uppercase tracking-[0.14em] text-faint">
         Contact Details
