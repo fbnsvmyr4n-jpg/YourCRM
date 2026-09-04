@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
+import { useFormDisclosure } from "@/lib/form-disclosure";
 import { Building2, KeyRound, LogOut, Plus, Target, UserRound } from "lucide-react";
 import { signOutAction } from "@/app/(auth)/actions";
 import { Card, CardHeader } from "@/components/ui/Card";
@@ -138,30 +139,70 @@ export function TargetsForm({ settings }: { settings: Settings }) {
   );
 }
 
+/**
+ * Changing a password, behind a disclosure.
+ *
+ * Three empty password fields were on screen on every visit to Settings, for a
+ * thing almost nobody came to do — 315px of the page spent standing ready. The
+ * form is one tap away and the answer stays visible after it closes, which is
+ * the part a fold usually gets wrong.
+ */
 export function PasswordForm() {
   const [state, action, pending] = useActionState<FormState, FormData>(changePasswordAction, undefined);
+  const [open, openForm, closeForm] = useFormDisclosure(state, (s) => Boolean(s?.ok));
 
   return (
     <Card className="card-q">
-      <CardHeader title="Password" icon={<KeyRound className="h-[18px] w-[18px] text-accent" />} />
-      <form action={action} className="space-y-4">
-        <Banner state={state} />
-        <Field label="Current password" name="currentPassword" type="password" required />
-        <div className="grid grid-cols-1 gap-4 @min-[440px]:grid-cols-2">
-          <Field label="New password" name="newPassword" type="password" required />
-          <Field label="Confirm new password" name="confirmPassword" type="password" required />
-        </div>
-        <p className="text-xs text-faint">Must be at least 8 characters.</p>
-        <div className="flex justify-end">
-          <button
-            type="submit"
-            disabled={pending}
-            className="btn-accent focus-ring rounded-xl px-5 py-2.5 text-sm font-semibold disabled:opacity-60"
-          >
-            {pending ? "Updating…" : "Change password"}
-          </button>
-        </div>
-      </form>
+      <CardHeader
+        title="Password"
+        icon={<KeyRound className="h-[18px] w-[18px] text-accent" />}
+        action={
+          !open && (
+            <button
+              type="button"
+              onClick={openForm}
+              className="btn-soft focus-ring rounded-xl px-4 py-2 text-xs font-semibold"
+            >
+              Change
+            </button>
+          )
+        }
+      />
+
+      {!open && !state && (
+        <p className="text-xs text-faint">
+          You&apos;ll need your current password to set a new one.
+        </p>
+      )}
+      {!open && state && <Banner state={state} />}
+
+      {open && (
+        <form action={action} className="space-y-4">
+          <Banner state={state} />
+          <Field label="Current password" name="currentPassword" type="password" required />
+          <div className="grid grid-cols-1 gap-4 @min-[440px]:grid-cols-2">
+            <Field label="New password" name="newPassword" type="password" required />
+            <Field label="Confirm new password" name="confirmPassword" type="password" required />
+          </div>
+          <p className="text-xs text-faint">Must be at least 8 characters.</p>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={closeForm}
+              className="btn-soft focus-ring rounded-xl px-4 py-2.5 text-sm font-medium text-muted"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={pending}
+              className="btn-accent focus-ring rounded-xl px-5 py-2.5 text-sm font-semibold disabled:opacity-60"
+            >
+              {pending ? "Updating…" : "Change password"}
+            </button>
+          </div>
+        </form>
+      )}
     </Card>
   );
 }
@@ -246,6 +287,7 @@ export function WorkspacesCard({
     undefined
   );
   const atLimit = limit !== null && workspaces.length >= limit;
+  const [addOpen, openAdd, closeAdd] = useFormDisclosure(createState, (st) => Boolean(st?.ok));
 
   return (
     <Card>
@@ -312,28 +354,67 @@ export function WorkspacesCard({
         })}
       </ul>
 
+      {/*
+          Adding a client is behind the same disclosure as the password and the
+          invitation, and for the same reason: it is a rare action, and its two
+          empty fields plus their explanation sat under the list on every visit
+          — on a phone that is more of the screen than the list itself.
+      */}
       {canManage && (
-        <form action={create} className="mt-4 space-y-4 border-t border-[var(--border)] pt-4">
-          <Banner state={createState} />
-          <div className="grid grid-cols-1 gap-4 @min-[440px]:grid-cols-2">
-            <Field label="Client name" name="name" required />
-            <Field label="Phone number (optional)" name="phoneNumber" />
-          </div>
-          <p className="text-xs text-faint">
-            A number routes that client&apos;s inbound calls to their own workspace. It has to be
-            unique, because a call can only belong to one of them.
-          </p>
-          <div className="flex justify-end">
-            <button
-              type="submit"
-              disabled={creating}
-              className="btn-accent focus-ring flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold disabled:opacity-60"
-            >
-              <Plus className="h-4 w-4" />
-              {creating ? "Adding…" : "Add workspace"}
-            </button>
-          </div>
-        </form>
+        <div className="mt-4 border-t border-[var(--border)] pt-4">
+          {!addOpen ? (
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              {createState ? (
+                <div className="min-w-0 flex-1">
+                  <Banner state={createState} />
+                </div>
+              ) : (
+                <p className="min-w-0 flex-1 text-xs text-faint">
+                  {atLimit
+                    ? `Your plan covers ${limit} workspace${limit === 1 ? "" : "s"}. Upgrade under Billing to add more.`
+                    : "Add another client and their records start empty and separate."}
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={openAdd}
+                className="btn-accent focus-ring flex shrink-0 items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold"
+              >
+                <Plus className="h-4 w-4" />
+                Add workspace
+              </button>
+            </div>
+          ) : (
+            <form action={create} className="space-y-4">
+              <Banner state={createState} />
+              <div className="grid grid-cols-1 gap-4 @min-[440px]:grid-cols-2">
+                <Field label="Client name" name="name" required />
+                <Field label="Phone number (optional)" name="phoneNumber" />
+              </div>
+              <p className="text-xs text-faint">
+                A number routes that client&apos;s inbound calls to their own workspace. It has to be
+                unique, because a call can only belong to one of them.
+              </p>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={closeAdd}
+                  className="btn-soft focus-ring rounded-xl px-4 py-2.5 text-sm font-medium text-muted"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={creating}
+                  className="btn-accent focus-ring flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold disabled:opacity-60"
+                >
+                  <Plus className="h-4 w-4" />
+                  {creating ? "Adding…" : "Add workspace"}
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
       )}
     </Card>
   );

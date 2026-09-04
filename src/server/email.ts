@@ -68,6 +68,55 @@ export async function sendEmail(opts: {
   }
 }
 
+/**
+ * Anything that came from a person, on its way into an HTML string.
+ *
+ * `resetEmail` interpolates only a token this server generated, so it needed
+ * none of this. An invite carries the inviter's own name, typed into a form,
+ * and an unescaped `<` there is markup in somebody else's mailbox.
+ */
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/**
+ * The invitation.
+ *
+ * It carries a reset link rather than a password. Emailing somebody a password
+ * puts a live credential in a mailbox for as long as the mailbox exists; a
+ * one-hour single-use link lets them choose their own and expires whether they
+ * use it or not.
+ */
+export function inviteEmail(link: string, inviterName: string, workspaceName: string) {
+  const inviter = inviterName.trim() || "A colleague";
+  const workspace = workspaceName.trim() || "YourCRM";
+  return {
+    subject: `${inviter} invited you to ${workspace} on YourCRM`,
+    text:
+      `${inviter} has added you to ${workspace} on YourCRM.\n\n` +
+      `Choose your password to get started:\n${link}\n\n` +
+      `The link expires in one hour and can only be used once. ` +
+      `If it expires, use "Forgot your password?" on the sign-in page with this address.`,
+    html: `<div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:520px;margin:0 auto;padding:32px 24px;color:#0b1220">
+  <h1 style="margin:0 0 16px;font-size:20px;font-weight:600">You&rsquo;ve been added to ${escapeHtml(workspace)}</h1>
+  <p style="margin:0 0 20px;line-height:1.6;color:#55617a">
+    ${escapeHtml(inviter)} has invited you to YourCRM. Choose a password and you&rsquo;re in.
+  </p>
+  <p style="margin:0 0 24px">
+    <a href="${link}" style="display:inline-block;background:linear-gradient(135deg,#3b82f6,#06b6d4);color:#fff;text-decoration:none;padding:12px 22px;border-radius:999px;font-weight:600">Choose your password</a>
+  </p>
+  <p style="margin:0;line-height:1.6;font-size:13px;color:#8a94a8">
+    The link expires in one hour and can only be used once. If it expires, use
+    &ldquo;Forgot your password?&rdquo; on the sign-in page with this address.
+  </p>
+</div>`,
+  };
+}
+
 /** The reset email. Plain and legible — this is a security message, not a newsletter. */
 export function resetEmail(link: string) {
   return {

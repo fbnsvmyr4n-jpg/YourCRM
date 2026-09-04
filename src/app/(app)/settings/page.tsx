@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation";
-import { Database, HardDrive, ShieldAlert, ShieldCheck } from "lucide-react";
-import { Avatar } from "@/components/ui/Avatar";
+import { Database, Download, HardDrive, ShieldAlert, ShieldCheck } from "lucide-react";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { authSecretConfigured } from "@/server/auth";
 import { ReferralCard } from "@/components/billing/ReferralCard";
@@ -12,13 +11,17 @@ import { agencyBilling, trialDaysLeft } from "@/server/billing/checkout";
 import { PLAN_INFO, PLANS } from "@/server/billing/plans";
 import { stripeConfigured } from "@/server/billing/stripe";
 import { entitlementsFor, limitOf } from "@/server/entitlements";
-import { roleCan } from "@/server/permissions";
+import { outranks, roleCan } from "@/server/permissions";
 import { getSettings } from "@/server/repos/settings";
+import { listUsers } from "@/server/repos/users";
 import { listSubAccounts } from "@/server/sub-accounts";
 import { listTrash } from "@/server/trash";
-import { withSystem } from "@/server/tenant";
+import { ROLES, withSystem } from "@/server/tenant";
 import { currentUser, requireTenantPage, withTenantPage } from "@/server/tenant-session";
 import { storageEngine } from "@/server/store";
+import { SettingsNav } from "./SettingsNav";
+import { sectionFromParam, type SettingsSectionId } from "./sections";
+import { TeamCard } from "./TeamCard";
 import {
   AppearanceCard,
   PasswordForm,
@@ -38,12 +41,36 @@ const PLAN_NAMES: Record<string, string> = {
   saas_pro: "SaaS Pro",
 };
 
-export default async function SettingsPage() {
+/**
+ * Initials from a name rather than a stored field. A second copy of somebody's
+ * initials is a second thing to keep in step with the name.
+ */
+function initialsOf(name: string): string {
+  return (
+    name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((p) => p[0])
+      .join("")
+      .toUpperCase() || "?"
+  );
+}
+
+export default async function SettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ s?: string }>;
+}) {
+  /* Which area to open, from the URL. Validated here rather than trusted: an
+     unrecognised value opens Account instead of rendering nothing. */
+  const initial = sectionFromParam((await searchParams).s);
+
   const user = await currentUser();
   if (!user) redirect("/login");
   const engine = storageEngine();
   const secretOk = authSecretConfigured();
-  // One tenant round trip for both — they render on the same page.
+  // One tenant round trip for all three — they render on the same page.
   const { settings, usage, trash } = await withTenantPage(async (q) => ({
     settings: await getSettings(q),
     usage: await usageThisMonth(q),
@@ -89,7 +116,7 @@ export default async function SettingsPage() {
     configured: stripeConfigured(),
     plans: PLANS.map((p) => PLAN_INFO[p]),
   };
-  const { workspaces, perWorkspace, plan, limit } = await withSystem(async (q) => {
+  const { workspaces, perWorkspace, plan, limit, team } = await withSystem(async (q) => {
     const rows = await listSubAccounts(q, user.agencyId);
     const perWorkspace = await usageByWorkspace(q, user.agencyId);
     const e = await entitlementsFor(q, user.agencyId);
@@ -97,6 +124,7 @@ export default async function SettingsPage() {
     return {
       perWorkspace,
       workspaces: rows,
+      team: await listUsers(q, user.agencyId),
       plan: PLAN_NAMES[e.plan] ?? e.plan,
       // `0` means the plan does not include extra workspaces at all; the one
       // they already have is their own business, so show it as the limit.
@@ -104,57 +132,51 @@ export default async function SettingsPage() {
     };
   });
 
-  return (
-    <div className="mx-auto max-w-[900px] animate-fade-up">
-      <div className="pb-5 pt-1">
-        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Settings</h1>
-        <p className="mt-1 text-sm text-muted">Manage your account, security, and preferences.</p>
-      </div>
+  const canManageUsers = roleCan(user.role, "manage_users");
 
-      {/* Account summary */}
-      <Card className="mb-5">
-        <div className="flex items-center gap-4">
-          <Avatar
-            initials={
-              // Derived from the name rather than stored. A second copy of
-              // somebody's initials is a second thing to keep in step.
-              user.name
-                .split(/\s+/)
-                .filter(Boolean)
-                .slice(0, 2)
-                .map((p) => p[0])
-                .join("")
-                .toUpperCase() || "?"
-            }
-            color="blue"
-            size="lg"
-          />
-          <div className="min-w-0 flex-1 leading-tight">
-            <p className="truncate text-lg font-semibold">{user.name}</p>
-            <p className="truncate text-sm text-muted">{user.email}</p>
-          </div>
-          <span
-            className="rounded-full px-3 py-1 text-xs font-semibold text-accent"
-            style={{ background: "var(--accent-soft)" }}
-          >
-            {user.role}
-          </span>
-        </div>
-      </Card>
-
-      <div className="flex flex-col gap-5">
-        <ProfileForm user={user} />
-        <UsageCard usage={usage} byWorkspace={perWorkspace} />
-        <ReferralCard
-          code={referral.code}
-          balanceCents={referral.balanceCents}
-          earnedCents={referral.earnedCents}
-          referred={referral.referred}
-          applicableCents={referral.applicableCents}
-          canManage={roleCan(user.role, "manage_billing")}
-          configured={stripeConfigured()}
+  /**
+   * The six areas, in the order they are offered.
+   *
+   * Each is server-rendered here with its data already in it, and the nav shows
+   * one at a time. That keeps the whole screen one round trip — the alternative,
+   * a route per area, would be six.
+   */
+  const sections: { id: SettingsSectionId; content: React.ReactNode }[] = [
+    {
+      id: "account",
+      content: (
+        <>
+          <ProfileForm user={user} />
+          <PasswordForm />
+          <SignOutCard />
+        </>
+      ),
+    },
+    {
+      id: "team",
+      content: (
+        <TeamCard
+          members={team.map((m) => ({
+            id: m.id,
+            name: m.name,
+            email: m.email,
+            role: m.role,
+            initials: initialsOf(m.name),
+            isYou: m.id === user.id,
+            /* Three conditions, all decided here: the reader manages people at
+               all, this is not the reader themselves, and the reader outranks
+               them. Every action re-checks the same thing — this only decides
+               whether the control is drawn. */
+            canManage: canManageUsers && m.id !== user.id && outranks(user.role, m.role),
+          }))}
+          canManage={canManageUsers}
+          assignable={ROLES.filter((r) => outranks(user.role, r))}
         />
-        <BillingCard billing={billing} canManage={roleCan(user.role, "manage_billing")} />
+      ),
+    },
+    {
+      id: "workspaces",
+      content: (
         <WorkspacesCard
           workspaces={workspaces}
           current={tenant.subAccountId}
@@ -162,84 +184,176 @@ export default async function SettingsPage() {
           planName={plan}
           canManage={roleCan(user.role, "manage_workspaces")}
         />
-        <TargetsForm settings={settings} />
-        <TrashCard items={trash} />
-        <PasswordForm />
-        <AppearanceCard />
+      ),
+    },
+    {
+      id: "preferences",
+      content: (
+        <>
+          <TargetsForm settings={settings} />
+          <AppearanceCard />
+        </>
+      ),
+    },
+    {
+      id: "billing",
+      content: (
+        <>
+          <BillingCard billing={billing} canManage={roleCan(user.role, "manage_billing")} />
+          <UsageCard usage={usage} byWorkspace={perWorkspace} />
+          <ReferralCard
+            code={referral.code}
+            balanceCents={referral.balanceCents}
+            earnedCents={referral.earnedCents}
+            referred={referral.referred}
+            applicableCents={referral.applicableCents}
+            canManage={roleCan(user.role, "manage_billing")}
+            configured={stripeConfigured()}
+          />
+        </>
+      ),
+    },
+    {
+      id: "data",
+      content: (
+        <>
+          <ExportCard />
+          <TrashCard items={trash} />
+          {/* Platform status is the account holder's business, not every
+              employee's — a member seeing "Set DATABASE_URL before deploying"
+              is being told about somebody else's deployment.
 
-        {/* Storage engine — makes the deploy blocker visible */}
-        <Card>
-          <CardHeader title="Data storage" />
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <span
-                className="grid h-10 w-10 shrink-0 place-items-center rounded-xl"
-                style={{
-                  background: engine === "postgres" ? "var(--green-soft)" : "var(--amber-soft)",
-                  color: engine === "postgres" ? "var(--green)" : "var(--amber)",
-                }}
-              >
-                {engine === "postgres" ? <Database className="h-5 w-5" /> : <HardDrive className="h-5 w-5" />}
-              </span>
-              <div className="min-w-0 leading-tight">
-                <p className="text-sm font-medium">
-                  {engine === "postgres" ? "Postgres database" : "Local files"}
-                </p>
-                <p className="mt-0.5 text-xs text-faint">
-                  {engine === "postgres"
-                    ? "Your data is stored in Postgres — ready for production."
-                    : "Development storage. Set DATABASE_URL before deploying, or data won't persist."}
-                </p>
-              </div>
-            </div>
-            <span
-              className="rounded-full px-3 py-1 text-xs font-semibold"
-              style={{
-                background: engine === "postgres" ? "var(--green-soft)" : "var(--amber-soft)",
-                color: engine === "postgres" ? "var(--green)" : "var(--amber)",
-              }}
-            >
-              {engine === "postgres" ? "PRODUCTION READY" : "DEV ONLY"}
-            </span>
-          </div>
+              Gated on `manage_billing` rather than on the word "owner": the
+              question is who answers for this deployment, and that is the same
+              person who answers for the bill. Asked through the matrix so it
+              cannot drift from the rest of the screen. */}
+          {roleCan(user.role, "manage_billing") && (
+            <PlatformCard engine={engine} secretOk={secretOk} />
+          )}
+        </>
+      ),
+    },
+  ];
 
-          {/* Session signing. Without a real AUTH_SECRET the app falls back to
-              a secret that lives in the source, which makes session cookies
-              forgeable — so it is called out here rather than left invisible. */}
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-4 border-t border-[var(--border)] pt-4">
-            <div className="flex items-center gap-3">
-              <span
-                className="grid h-10 w-10 shrink-0 place-items-center rounded-xl"
-                style={{
-                  background: secretOk ? "var(--green-soft)" : "var(--red-soft)",
-                  color: secretOk ? "var(--green)" : "var(--red)",
-                }}
-              >
-                {secretOk ? <ShieldCheck className="h-5 w-5" /> : <ShieldAlert className="h-5 w-5" />}
-              </span>
-              <div className="min-w-0 leading-tight">
-                <p className="text-sm font-medium">Session signing key</p>
-                <p className="mt-0.5 text-xs text-faint">
-                  {secretOk
-                    ? "AUTH_SECRET is set — session cookies are signed with your own key."
-                    : "Using the built-in dev key. Anyone with the source could forge a login. Set AUTH_SECRET before deploying."}
-                </p>
-              </div>
-            </div>
-            <span
-              className="rounded-full px-3 py-1 text-xs font-semibold"
-              style={{
-                background: secretOk ? "var(--green-soft)" : "var(--red-soft)",
-                color: secretOk ? "var(--green)" : "var(--red)",
-              }}
-            >
-              {secretOk ? "SECURE" : "DEV ONLY"}
-            </span>
-          </div>
-        </Card>
-
-        <SignOutCard />
+  return (
+    <div className="mx-auto max-w-[1080px] animate-fade-up">
+      <div className="pb-4 pt-1">
+        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Settings</h1>
+        <p className="mt-1 text-sm text-muted">Manage your account, your team and how this workspace works.</p>
       </div>
+
+      <SettingsNav
+        user={{
+          name: user.name,
+          email: user.email,
+          initials: initialsOf(user.name),
+          role: user.role,
+          planName: billing.planName,
+        }}
+        initial={initial}
+        sections={sections}
+      />
     </div>
+  );
+}
+
+/**
+ * Take your data out.
+ *
+ * Plain links, not buttons behind script: the browser is already very good at
+ * saving a file it was sent, and a download built in the client would mean the
+ * same rows crossing the wire twice.
+ */
+function ExportCard() {
+  const entities = [
+    { id: "contacts", label: "Contacts", detail: "Names, email, phone, company" },
+    { id: "deals", label: "Deals", detail: "Value, stage, source and outcome" },
+    { id: "meetings", label: "Meetings", detail: "When, with whom, and how it went" },
+    { id: "companies", label: "Companies", detail: "Names, domains and notes" },
+  ];
+
+  return (
+    <Card>
+      <CardHeader title="Export" icon={<Download className="h-[18px] w-[18px] text-accent" />} />
+      <p className="mb-3 text-xs text-faint">
+        A spreadsheet of this workspace, as it stands right now. Yours to keep.
+      </p>
+      <div className="grid grid-cols-1 gap-2 @min-[440px]:grid-cols-2">
+        {entities.map((e) => (
+          <a
+            key={e.id}
+            href={`/api/export/${e.id}`}
+            className="btn-soft focus-ring flex items-center gap-3 rounded-xl px-3.5 py-3"
+          >
+            <Download className="h-4 w-4 shrink-0 text-accent" />
+            <span className="min-w-0 leading-tight">
+              <span className="block truncate text-sm font-medium">{e.label}</span>
+              <span className="mt-0.5 block truncate text-xs text-faint">{e.detail}</span>
+            </span>
+          </a>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+/**
+ * Whether this deployment is actually ready to hold customer data.
+ *
+ * Two conditions that are invisible until the day they matter: data written to
+ * files instead of a database, and session cookies signed with a key that lives
+ * in the source, which makes a login forgeable by anyone who can read the repo.
+ *
+ * Compacted from two blocks to two lines, and shown to the owner only. It used
+ * to be two thirds of a card on everyone's Settings page, permanently green,
+ * explaining an environment variable to people who do not deploy anything.
+ */
+function PlatformCard({ engine, secretOk }: { engine: string; secretOk: boolean }) {
+  const rows = [
+    {
+      ok: engine === "postgres",
+      icon: engine === "postgres" ? Database : HardDrive,
+      label: "Data storage",
+      good: "Postgres — your records are on a real database.",
+      bad: "Local files. Set DATABASE_URL before deploying, or data will not persist.",
+    },
+    {
+      ok: secretOk,
+      icon: secretOk ? ShieldCheck : ShieldAlert,
+      label: "Session signing key",
+      good: "AUTH_SECRET is set — sign-in cookies are signed with your own key.",
+      bad: "Using the built-in development key. Anyone with the source could forge a login.",
+    },
+  ];
+
+  return (
+    <Card>
+      <CardHeader title="Platform" />
+      <ul className="flex flex-col gap-2">
+        {rows.map((r) => {
+          const Icon = r.icon;
+          const color = r.ok ? "var(--green)" : "var(--red)";
+          const soft = r.ok ? "var(--green-soft)" : "var(--red-soft)";
+          return (
+            <li
+              key={r.label}
+              className="flex items-center gap-3 rounded-xl px-3.5 py-3"
+              style={{ background: r.ok ? "var(--surface-2)" : soft }}
+            >
+              <span
+                className="grid h-8 w-8 shrink-0 place-items-center rounded-lg"
+                style={{ background: soft, color }}
+              >
+                <Icon className="h-4 w-4" />
+              </span>
+              <div className="min-w-0 flex-1 leading-tight">
+                <p className="text-sm font-medium">{r.label}</p>
+                <p className="mt-0.5 text-xs text-faint">{r.ok ? r.good : r.bad}</p>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </Card>
   );
 }

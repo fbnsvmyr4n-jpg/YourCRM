@@ -171,6 +171,14 @@ describe("no server action escapes the gate by accident", () => {
     changePasswordAction:
       "account management, and a security control besides — never gate the " +
       "ability to change a password.",
+    setMemberRoleAction:
+      "account administration, not product use. An account sorting out a lapsed " +
+      "payment may need to move who is in charge — the same reasoning that " +
+      "leaves the profile and password forms open.",
+    removeMemberAction:
+      "cutting off somebody's access is a security control, like changing a " +
+      "password. The moment it is most needed — an employee leaving while the " +
+      "card is failing — is exactly when a plan gate would refuse it.",
     switchWorkspaceAction:
       "sets a cookie naming which workspace to read. Harmless while lapsed: " +
       "every page renders the billing screen regardless of which one is chosen.",

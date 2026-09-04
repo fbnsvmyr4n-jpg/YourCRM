@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { CAPABILITIES, can, roleCan } from "../src/server/permissions";
+import { CAPABILITIES, can, outranks, roleCan } from "../src/server/permissions";
 import { ROLES } from "../src/server/tenant";
 
 /**
@@ -64,6 +64,57 @@ describe("roles grant what they should, and nothing more", () => {
         expect(roleCan(role, capability)).toBe(can(role, capability));
       }
     }
+  });
+});
+
+/**
+ * Who may administer whom.
+ *
+ * `outranks` is what stopped `role !== "owner"` from being written out five
+ * times across the team screen and its actions. The rule it encodes is not
+ * "owner beats admin" — that is only what falls out of the current matrix. It
+ * is "you may act on somebody only if you hold every capability they hold", so
+ * a fourth role, or a capability moving between roles, changes the answer here
+ * without anybody editing a comparison.
+ */
+describe("administering a colleague", () => {
+  it("an owner may act on anyone, including another owner", () => {
+    for (const role of ROLES) {
+      expect(outranks("owner", role), `owner could not act on ${role}`).toBe(true);
+    }
+  });
+
+  it("an admin may act on an admin or a member, but not on an owner", () => {
+    expect(outranks("admin", "member")).toBe(true);
+    expect(outranks("admin", "admin")).toBe(true);
+    expect(outranks("admin", "owner"), "an admin could remove the owner who pays").toBe(false);
+  });
+
+  it("holds for every pair, derived from the matrix rather than listed", () => {
+    // The property, stated once: outranking means holding a superset of the
+    // other's capabilities. Any pair that disagrees is a bug in `outranks` or
+    // an unnoticed change in the grants.
+    for (const viewer of ROLES) {
+      for (const target of ROLES) {
+        const superset = CAPABILITIES.every((c) => !can(target, c) || can(viewer, c));
+        expect(outranks(viewer, target), `${viewer} vs ${target}`).toBe(superset);
+      }
+    }
+  });
+
+  it("never grants on its own — a member outranks a member and still may not manage", () => {
+    // The two checks are separate on purpose. This one answers "may I act on
+    // THEM"; `manage_users` answers "may I act on anyone at all".
+    expect(outranks("member", "member")).toBe(true);
+    expect(roleCan("member", "manage_users")).toBe(false);
+  });
+
+  it("an unknown role can act on nobody who holds anything", () => {
+    // A role from a bad migration grants nothing, so it holds no capability and
+    // cannot be a superset of one that does. Fail closed, like `can`.
+    expect(outranks("superadmin", "member")).toBe(true);
+    expect(outranks("superadmin", "admin")).toBe(false);
+    expect(outranks("superadmin", "owner")).toBe(false);
   });
 });
 

@@ -230,6 +230,68 @@ export async function setPassword(
   return row ? { ok: true } : { error: "That account no longer exists." };
 }
 
+/**
+ * Change a colleague's role.
+ *
+ * Two things are enforced in the statement rather than around it:
+ *
+ *  - **`agency_id = $2`.** Ids are globally unique, so an id from another
+ *    agency is a perfectly valid-looking string. Scoping the write means a
+ *    hand-edited form matches no row rather than promoting a stranger.
+ *  - **The last owner cannot be demoted.** Checking that with a separate
+ *    SELECT leaves a gap: two admins demoting the two remaining owners at the
+ *    same moment would both read "there is another owner" and both succeed,
+ *    leaving an agency nobody can bill for. The EXISTS clause is part of the
+ *    same UPDATE, so one of the two writes matches no row.
+ *
+ * A null return is therefore "not yours, gone, or the last owner" — the caller
+ * asks a second question only to word the message, never to decide.
+ */
+export async function setUserRole(
+  q: SystemQuery,
+  agencyId: string,
+  id: string,
+  role: Role
+): Promise<SafeUser | null> {
+  const row = await q.one<Row>(
+    `UPDATE users u SET role = $3
+     WHERE u.id = $1 AND u.agency_id = $2 AND u.deleted_at IS NULL
+       AND ($3 = 'owner' OR u.role <> 'owner' OR EXISTS (
+             SELECT 1 FROM users o
+             WHERE o.agency_id = $2 AND o.role = 'owner'
+               AND o.deleted_at IS NULL AND o.id <> $1))
+     RETURNING u.id, u.agency_id, u.sub_account_id, u.name, u.email, u.role, u.created_at`,
+    [id, agencyId, role]
+  );
+  return row ? toSafeUser(row) : null;
+}
+
+/**
+ * Remove a colleague from the agency.
+ *
+ * Same two guarantees as `setUserRole`, for the same reasons: scoped to the
+ * agency, and the last owner survives. Losing every owner would leave nobody
+ * able to change the subscription, and no screen in the product could grant it
+ * back.
+ */
+export async function removeTeamMember(
+  q: SystemQuery,
+  agencyId: string,
+  id: string
+): Promise<boolean> {
+  const row = await q.one<{ id: string }>(
+    `UPDATE users u SET deleted_at = now()
+     WHERE u.id = $1 AND u.agency_id = $2 AND u.deleted_at IS NULL
+       AND (u.role <> 'owner' OR EXISTS (
+             SELECT 1 FROM users o
+             WHERE o.agency_id = $2 AND o.role = 'owner'
+               AND o.deleted_at IS NULL AND o.id <> $1))
+     RETURNING u.id`,
+    [id, agencyId]
+  );
+  return row !== null;
+}
+
 /** Soft delete, which also frees the email address for reuse. */
 export async function deleteUser(q: SystemQuery, id: string): Promise<boolean> {
   const row = await q.one<{ id: string }>(

@@ -20,6 +20,28 @@ export type CsvTable = {
   rows: string[][];
 };
 
+/**
+ * Writing one, for the export.
+ *
+ * The mirror of the parser above and subject to the same rules — a note
+ * containing a comma, a quote or a newline has to survive the round trip into
+ * Excel and back. Quoted unconditionally rather than only when it looks
+ * necessary: "only when necessary" is a second rule to get wrong, and the cost
+ * of always quoting is a few bytes.
+ *
+ * CRLF, because that is what the specification says and what Excel expects.
+ *
+ * The leading BOM is not decoration. Without it Excel on Windows reads the file
+ * as the local code page, and every accented name in an exported contact list
+ * arrives mangled — the same customer data, made wrong by the act of exporting
+ * it.
+ */
+export function toCsv(headers: string[], rows: string[][]): string {
+  const cell = (value: string) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+  const line = (values: string[]) => values.map(cell).join(",");
+  return `\uFEFF${[line(headers), ...rows.map(line)].join("\r\n")}\r\n`;
+}
+
 /** The character separating fields. Detected, because Excel in some locales
  *  exports semicolons and the file otherwise parses as one enormous column. */
 export function detectDelimiter(sample: string): "," | ";" | "\t" {

@@ -54,3 +54,26 @@ export function can(role: Role, capability: Capability): boolean {
 export function roleCan(role: string, capability: Capability): boolean {
   return can(role as Role, capability);
 }
+
+/**
+ * May somebody holding `viewer` administer somebody holding `target`?
+ *
+ * Yes exactly when the viewer holds every capability the target holds. An admin
+ * therefore cannot promote, demote or remove an owner — the owner has
+ * `manage_billing` and the admin does not — while an owner can act on anyone,
+ * and either can act on a member.
+ *
+ * Derived from the matrix rather than written as `role !== "owner"`, and that is
+ * the whole point. The inline version appeared in five places across the team
+ * screen and its three actions, which is five copies of a rule that has to
+ * agree with itself; the first time a fourth role is added, or `manage_billing`
+ * moves, they stop agreeing and the way it shows is an admin quietly able to
+ * remove the owner who pays the bill.
+ *
+ * Note this is about administering PEOPLE. Whether the viewer may manage people
+ * at all is `manage_users`, and both are checked — this one never grants on its
+ * own, since a member trivially outranks another member.
+ */
+export function outranks(viewer: string, target: string): boolean {
+  return CAPABILITIES.every((c) => !roleCan(target, c) || roleCan(viewer, c));
+}
