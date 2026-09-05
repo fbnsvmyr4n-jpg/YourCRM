@@ -171,6 +171,12 @@ describe("no server action escapes the gate by accident", () => {
     changePasswordAction:
       "account management, and a security control besides — never gate the " +
       "ability to change a password.",
+    updateStaffAction:
+      "the company directory — department, position, phone, scope of work. " +
+      "None of it is a permission and none of it is read for a decision; it is " +
+      "account management in the same sense the profile form is, and correcting " +
+      "a colleague's phone number while a payment is being sorted out is not " +
+      "product use.",
     setMemberRoleAction:
       "account administration, not product use. An account sorting out a lapsed " +
       "payment may need to move who is in charge — the same reasoning that " +

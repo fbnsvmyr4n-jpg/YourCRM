@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import {
-  Building2,
+  Briefcase,
   CreditCard,
   Database,
   SlidersHorizontal,
@@ -43,10 +43,10 @@ import type { SettingsSectionId } from "./sections";
 
 const META: Record<SettingsSectionId, { label: string; icon: LucideIcon; blurb: string }> = {
   account: { label: "Account", icon: UserRound, blurb: "Your name, sign-in and password" },
-  team: { label: "Team", icon: Users, blurb: "Who else can use this account" },
-  workspaces: { label: "Workspaces", icon: Building2, blurb: "Your clients, kept separate" },
+  team: { label: "Team", icon: Users, blurb: "Everyone who works here, by department" },
+  clients: { label: "Clients", icon: Briefcase, blurb: "Who is looking after whom" },
   preferences: { label: "Preferences", icon: SlidersHorizontal, blurb: "Targets, time zone and theme" },
-  billing: { label: "Billing", icon: CreditCard, blurb: "Plan, usage and referrals" },
+  billing: { label: "Billing", icon: CreditCard, blurb: "Plan, workspaces, usage and referrals" },
   data: { label: "Data", icon: Database, blurb: "Deleted records and storage" },
 };
 

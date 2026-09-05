@@ -31,7 +31,26 @@ export function ProfileForm({ user }: { user: SafeUser }) {
         <div className="grid grid-cols-1 gap-4 @min-[440px]:grid-cols-2">
           <Field label="Full name" name="name" defaultValue={user.name} required />
           <Field label="Email address" name="email" type="email" defaultValue={user.email} required />
+          {/* Your own entry in the company directory. It lives here rather than
+              under Team because Team deliberately refuses to edit `me` — one
+              form, one set of validation, no second way in. */}
+          <Field label="Department" name="department" defaultValue={user.department ?? ""} />
+          <Field label="Position" name="jobTitle" defaultValue={user.jobTitle ?? ""} />
+          <Field label="Phone or extension" name="phone" defaultValue={user.phone ?? ""} />
         </div>
+        <label className="block">
+          <span className="mb-1.5 block text-xs font-medium text-muted">Scope of work</span>
+          <textarea
+            name="scope"
+            rows={3}
+            defaultValue={user.scope ?? ""}
+            placeholder="What you are responsible for"
+            className="field-input resize-y"
+          />
+        </label>
+        <p className="text-xs text-faint">
+          Everything below your name shows on the Team directory. Leave a field empty to clear it.
+        </p>
         <div className="flex justify-end">
           <button
             type="submit"

@@ -5,12 +5,12 @@ import { headers } from "next/headers";
 import { emailConfigured, inviteEmail, sendEmail } from "@/server/email";
 import { outranks, roleCan } from "@/server/permissions";
 import { createResetToken } from "@/server/repos/auth";
-import { createUser, removeTeamMember, setUserRole } from "@/server/repos/users";
+import { createUser, removeTeamMember, setUserRole, updateProfile } from "@/server/repos/users";
 import { requireActivePlan } from "@/server/plan-gate";
 import { revalidateApp } from "@/server/revalidate";
 import { ROLES, withSystem } from "@/server/tenant";
 import { requireTenant } from "@/server/tenant-session";
-import { email as validEmail, id as validId, pick, text } from "@/server/validate";
+import { email as validEmail, id as validId, multiline, pick, text } from "@/server/validate";
 import type { FormState } from "./actions";
 
 /**
@@ -67,6 +67,13 @@ export async function inviteMemberAction(_prev: FormState, formData: FormData): 
   const name = text(formData.get("name"), 80);
   const address = validEmail(formData.get("email"));
   const role = pick(formData.get("role"), ROLES);
+  /* Where they sit and what they are called, taken at the point of invitation
+     so a new colleague is in the directory the moment they appear in it —
+     rather than as a blank row somebody has to remember to come back and fill
+     in. Both optional: not knowing somebody's title is no reason to be unable
+     to give them a login. */
+  const department = text(formData.get("department"), 60);
+  const jobTitle = text(formData.get("jobTitle"), 80);
 
   if (!name) return { error: "Give them a name." };
   if (!address) return { error: "Enter a valid email address." };
@@ -84,6 +91,8 @@ export async function inviteMemberAction(_prev: FormState, formData: FormData): 
       password: randomBytes(24).toString("base64url"),
       name,
       role,
+      department,
+      jobTitle,
     })
   );
   if (created.error || !created.user) {
@@ -240,4 +249,68 @@ export async function removeMemberAction(_prev: FormState, formData: FormData): 
 
   revalidateApp();
   return { ok: `${outcome.name} no longer has access.` };
+}
+
+/**
+ * Fill in a colleague's directory entry: department, title, phone, scope.
+ *
+ * None of it is a permission, and none of it is read for a decision — which is
+ * why the check is `manage_users` and not something stricter. It IS somebody
+ * else's record though, so the same rank rule applies as everywhere else on
+ * this screen: an admin may tidy up a member's entry, not an owner's.
+ *
+ * Your own entry goes through the profile form under Account instead, so this
+ * refuses `me` outright rather than quietly being a second way to edit
+ * yourself with different validation.
+ *
+ * Not plan-gated, for the same reason as the profile form: a company directory
+ * is account management, and correcting somebody's phone number while a payment
+ * is being sorted out is not product use.
+ */
+export async function updateStaffAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  const me = await requireTenant();
+  if (!roleCan(me.role, "manage_users")) {
+    return { error: "Only an owner or admin can edit somebody's details." };
+  }
+
+  const userId = validId(formData.get("userId"));
+  if (!userId) return { error: "That person could not be identified." };
+  if (userId === me.userId) {
+    return { error: "Edit your own details under Account." };
+  }
+
+  /* Every field is sent every time, and an empty one means "cleared". That is
+     why these are read as strings rather than skipped when blank: passing
+     `undefined` would make the form able to fill a phone number in and never
+     take it out again. */
+  const patch = {
+    department: text(formData.get("department"), 60),
+    jobTitle: text(formData.get("jobTitle"), 80),
+    phone: text(formData.get("phone"), 40),
+    scope: multiline(formData.get("scope"), 400),
+  };
+
+  const outcome = await withSystem(async (q) => {
+    const person = await q.one<{ name: string; role: string }>(
+      `SELECT name, role FROM users WHERE id = $1 AND agency_id = $2 AND deleted_at IS NULL`,
+      [userId, me.agencyId]
+    );
+    if (!person) return { ok: false as const, gone: true as const, name: "" };
+    if (!outranks(me.role, person.role)) {
+      return { ok: false as const, refused: true as const, name: person.name };
+    }
+    const result = await updateProfile(q, userId, patch);
+    return result.user
+      ? { ok: true as const, name: result.user.name }
+      : { ok: false as const, failed: result.error ?? "Those details were not saved.", name: "" };
+  });
+
+  if (!outcome.ok) {
+    if ("gone" in outcome) return { error: "That person is no longer on this account." };
+    if ("refused" in outcome) return { error: "Only an owner can edit another owner's details." };
+    return { error: outcome.failed };
+  }
+
+  revalidateApp();
+  return { ok: `${outcome.name}'s details updated.` };
 }

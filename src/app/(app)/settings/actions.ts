@@ -12,7 +12,7 @@ import { createSubAccount } from "@/server/sub-accounts";
 import { withSystem } from "@/server/tenant";
 import { requireTenant, SUB_ACCOUNT_COOKIE, withCurrentTenant } from "@/server/tenant-session";
 import { isTrashKind, nounFor, restoreFromTrash } from "@/server/trash";
-import { count, email as validEmail, money, text } from "@/server/validate";
+import { count, email as validEmail, money, multiline, text } from "@/server/validate";
 import { cookies } from "next/headers";
 
 /**
@@ -69,7 +69,20 @@ export async function updateProfileAction(_prev: FormState, formData: FormData):
   if (!name) return { error: "Name is required." };
   if (!email) return { error: "Enter a valid email address." };
 
-  const result = await withSystem((q) => updateProfile(q, me.userId, { name, email }));
+  /* Your own directory entry, edited here rather than under Team — that screen
+     deliberately refuses `me`, so there is exactly one form that can change
+     your own details and one set of validation behind it.
+
+     Sent every time, empty meaning cleared. Skipping blank fields would make
+     the form able to fill a phone number in and never take it out again. */
+  const details = {
+    department: text(formData.get("department"), 60),
+    jobTitle: text(formData.get("jobTitle"), 80),
+    phone: text(formData.get("phone"), 40),
+    scope: multiline(formData.get("scope"), 400),
+  };
+
+  const result = await withSystem((q) => updateProfile(q, me.userId, { name, email, ...details }));
   if (result.error) return { error: result.error };
 
   // Revalidate the layout so the sidebar/topbar pick up the new name,

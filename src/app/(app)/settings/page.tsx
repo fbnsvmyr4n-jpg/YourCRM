@@ -14,11 +14,14 @@ import { entitlementsFor, limitOf } from "@/server/entitlements";
 import { outranks, roleCan } from "@/server/permissions";
 import { getSettings } from "@/server/repos/settings";
 import { listUsers } from "@/server/repos/users";
+import { clientBook, groupByOwner } from "@/server/clients-view";
+import { groupByDepartment } from "@/server/directory";
 import { listSubAccounts } from "@/server/sub-accounts";
 import { listTrash } from "@/server/trash";
 import { ROLES, withSystem } from "@/server/tenant";
 import { currentUser, requireTenantPage, withTenantPage } from "@/server/tenant-session";
 import { storageEngine } from "@/server/store";
+import { ClientsCard } from "./ClientsCard";
 import { SettingsNav } from "./SettingsNav";
 import { sectionFromParam, type SettingsSectionId } from "./sections";
 import { TeamCard } from "./TeamCard";
@@ -71,12 +74,16 @@ export default async function SettingsPage({
   const engine = storageEngine();
   const secretOk = authSecretConfigured();
   // One tenant round trip for all three — they render on the same page.
-  const { settings, usage, trash } = await withTenantPage(async (q) => ({
+  const { settings, usage, trash, book } = await withTenantPage(async (q) => ({
     settings: await getSettings(q),
     usage: await usageThisMonth(q),
     // Recovery lives here because this is where somebody looks after deleting
     // the wrong thing, and it costs one more query on a page already open.
     trash: await listTrash(q),
+    // Every contact with their owner and their money, in one statement. Read
+    // per person it would re-read the deals table once for every member of the
+    // team, and the Clients area shows all of them at once.
+    book: await clientBook(q),
   }));
 
   // The workspace list and the plan behind it. Read here rather than in the
@@ -134,6 +141,37 @@ export default async function SettingsPage({
 
   const canManageUsers = roleCan(user.role, "manage_users");
 
+  /* Both screens are derived here, on the server, from the same one read of
+     `users`. The rank rule in particular: the reader manages people at all,
+     this is not the reader themselves, and the reader outranks them. Every
+     action re-checks it — this only decides whether the control is drawn. */
+  const directory = groupByDepartment(
+    team.map((m) => ({
+      id: m.id,
+      name: m.name,
+      email: m.email,
+      role: m.role,
+      initials: initialsOf(m.name),
+      department: m.department,
+      jobTitle: m.jobTitle,
+      phone: m.phone,
+      scope: m.scope,
+      isYou: m.id === user.id,
+      canManage: canManageUsers && m.id !== user.id && outranks(user.role, m.role),
+    }))
+  );
+
+  const books = groupByOwner(
+    book,
+    team.map((m) => ({
+      id: m.id,
+      name: m.name,
+      jobTitle: m.jobTitle,
+      department: m.department,
+    })),
+    user.id
+  );
+
   /**
    * The six areas, in the order they are offered.
    *
@@ -156,35 +194,26 @@ export default async function SettingsPage({
       id: "team",
       content: (
         <TeamCard
-          members={team.map((m) => ({
-            id: m.id,
-            name: m.name,
-            email: m.email,
-            role: m.role,
-            initials: initialsOf(m.name),
-            isYou: m.id === user.id,
-            /* Three conditions, all decided here: the reader manages people at
-               all, this is not the reader themselves, and the reader outranks
-               them. Every action re-checks the same thing — this only decides
-               whether the control is drawn. */
-            canManage: canManageUsers && m.id !== user.id && outranks(user.role, m.role),
-          }))}
+          groups={directory}
+          headcount={team.length}
           canManage={canManageUsers}
           assignable={ROLES.filter((r) => outranks(user.role, r))}
         />
       ),
     },
     {
-      id: "workspaces",
-      content: (
-        <WorkspacesCard
-          workspaces={workspaces}
-          current={tenant.subAccountId}
-          limit={limit}
-          planName={plan}
-          canManage={roleCan(user.role, "manage_workspaces")}
-        />
-      ),
+      /*
+         Who is looking after whom.
+
+         Not the same thing as a workspace, which is why this is a new area
+         rather than a rename. A workspace is an isolated tenant with its own
+         phone number and its own plan cap — an agency feature, now filed with
+         the subscription under Billing where its count and its limit already
+         live. This is the sales question: which of OUR people is carrying which
+         of OUR contacts.
+      */
+      id: "clients",
+      content: <ClientsCard books={books} readerId={user.id} />,
     },
     {
       id: "preferences",
@@ -200,6 +229,18 @@ export default async function SettingsPage({
       content: (
         <>
           <BillingCard billing={billing} canManage={roleCan(user.role, "manage_billing")} />
+          {/* Workspaces sit with the subscription because that is what they
+              are: a plan-limited, agency-level thing whose count and cap are
+              already shown beside the price. They are not the same concept as
+              the Clients area, and putting them there would have been two
+              meanings of the word on one screen. */}
+          <WorkspacesCard
+            workspaces={workspaces}
+            current={tenant.subAccountId}
+            limit={limit}
+            planName={plan}
+            canManage={roleCan(user.role, "manage_workspaces")}
+          />
           <UsageCard usage={usage} byWorkspace={perWorkspace} />
           <ReferralCard
             code={referral.code}

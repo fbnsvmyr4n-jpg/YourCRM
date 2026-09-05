@@ -895,3 +895,38 @@ UPDATE agencies
    AND trial_ends_at IS NULL
    AND deleted_at IS NULL;
 
+
+-- ---------------------------------------------------------------------------
+-- Who each colleague actually is.
+--
+-- `users` held a name, an email and a permission role, which is everything the
+-- software needed and nothing a person needed. The Team screen is meant to be
+-- the company directory — every department, who to call, what they are
+-- responsible for — and none of that could be stored.
+--
+-- Four columns, all nullable and all optional. An account that never fills them
+-- in shows a name and an email exactly as it does today; nothing on this list
+-- is required to sign in, be invited, or own a record.
+--
+--   department  groups the directory. NULL means "not filed yet", which is a
+--               real state on the day somebody joins and is shown as its own
+--               group rather than hidden.
+--   job_title   what they are, e.g. "Account Executive".
+--   phone       how to reach them. Deliberately free text: this is an internal
+--               directory, not a dialling target, and an extension like
+--               "x204" is a legitimate answer.
+--   scope       what they are responsible for, in their own words.
+--
+-- No CHECK on department. A fixed list of departments would be this product
+-- telling a customer how to organise their own company, and the first one to
+-- need "Field Ops" would be blocked by a migration.
+-- ---------------------------------------------------------------------------
+ALTER TABLE users ADD COLUMN IF NOT EXISTS department TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS job_title  TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS phone      TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS scope      TEXT;
+
+-- The directory is read grouped by department, per agency, and every read
+-- excludes the people who have left.
+CREATE INDEX IF NOT EXISTS users_directory_idx
+  ON users (agency_id, department) WHERE deleted_at IS NULL;

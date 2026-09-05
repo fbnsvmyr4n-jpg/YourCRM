@@ -59,6 +59,14 @@ export const EXPECTED_COLUMNS: ReadonlyArray<[string, string]> = [
      and keeps working, which is the cruel part — the page looks healthy until
      somebody picks a month. */
   ["deals", "lost_at"],
+  /* The staff directory. Named in the SELECT that every read of `users` goes
+     through, so on an unmigrated database this is not a missing field on one
+     screen — it is sign-in itself failing, because `findUserByEmail` reads the
+     same columns. */
+  ["users", "department"],
+  ["users", "job_title"],
+  ["users", "phone"],
+  ["users", "scope"],
 ];
 
 export type SchemaCheck = {
