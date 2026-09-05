@@ -106,8 +106,14 @@ CREATE TABLE IF NOT EXISTS users (
 
   -- Unlike the old `role`, which was stored, displayed, and never once read for
   -- a decision, this one is enforced.
+  --
+  -- Ordered here the way the matrix ranks them, most powerful first, because
+  -- `ROLES` in tenant.ts is read in that order to decide which roles somebody
+  -- may hand out and which is the least privileged. The two lists are pinned
+  -- together by a test — this pair had already drifted once, and nothing caught
+  -- it until a real INSERT failed.
   role            TEXT NOT NULL DEFAULT 'member'
-                    CHECK (role IN ('owner', 'admin', 'member')),
+                    CHECK (role IN ('owner', 'admin', 'finance', 'member')),
 
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
   deleted_at      TIMESTAMPTZ
@@ -930,3 +936,31 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS scope      TEXT;
 -- excludes the people who have left.
 CREATE INDEX IF NOT EXISTS users_directory_idx
   ON users (agency_id, department) WHERE deleted_at IS NULL;
+
+-- ---------------------------------------------------------------------------
+-- The finance role.
+--
+-- Billing was owner-only, and owner grants everything else as well. So letting
+-- the bookkeeper handle an invoice meant making them an owner — which also let
+-- them remove the CEO. That is the wrong shape for a company with an accounts
+-- department, and a fourth role is the smallest thing that fixes it.
+--
+-- `finance` holds `manage_billing` and nothing else. What follows from that is
+-- not written anywhere: `outranks` says you may act on somebody only if you
+-- hold every capability they hold, so an admin cannot touch a finance user
+-- (they do not hold manage_billing) and a finance user cannot touch anybody.
+-- Only an owner appoints or removes one.
+--
+-- The constraint is dropped and recreated rather than altered, because the
+-- inline CHECK above only applies to a database being created for the first
+-- time. `CREATE TABLE IF NOT EXISTS` does nothing to a table that already
+-- exists, so without this an existing deployment would keep the old three-value
+-- constraint and reject every finance user with a violation nobody could
+-- explain from the application's side.
+--
+-- Named explicitly rather than relying on Postgres's generated name, so this is
+-- re-runnable and says what it is dropping.
+-- ---------------------------------------------------------------------------
+ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
+ALTER TABLE users ADD CONSTRAINT users_role_check
+  CHECK (role IN ('owner', 'admin', 'finance', 'member'));

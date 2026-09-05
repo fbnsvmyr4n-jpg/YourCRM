@@ -101,7 +101,7 @@ export function BillingCard({ billing, canManage }: { billing: BillingView; canM
           Billing is not configured on this deployment, so plans cannot be changed here.
         </p>
       ) : !canManage ? (
-        <p className="text-xs text-faint">Only the account owner can change the subscription.</p>
+        <p className="text-xs text-faint">Only an owner or the finance team can change the subscription.</p>
       ) : (
         <div className="flex flex-col gap-4">
           {billing.hasSubscription && (

@@ -24,11 +24,18 @@ import { logDenied } from "./log";
  * kept identical by a test — an enum with two sources of truth is the drift the
  * project's rules exist to prevent, and this pair had already diverged once.
  *
+ * **The order is load-bearing**, not alphabetical and not historical: most
+ * powerful first. `assignable` on the Team screen is `ROLES.filter(...)` and
+ * takes its default from the LAST entry, so the least privileged role has to be
+ * last or a new colleague would default to the most powerful one somebody could
+ * grant. Ranked by what the matrix grants: owner (3 capabilities), admin (2),
+ * finance (1), member (0).
+ *
  * A user's *level* is not encoded here: agency staff have a NULL
  * `sub_account_id`, sub-account staff have one. Level is structure, role is
  * permission, and conflating them was what produced four overlapping values.
  */
-export const ROLES = ["owner", "admin", "member"] as const;
+export const ROLES = ["owner", "admin", "finance", "member"] as const;
 export type Role = (typeof ROLES)[number];
 
 export type TenantContext = {

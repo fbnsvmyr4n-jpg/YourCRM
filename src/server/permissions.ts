@@ -23,10 +23,23 @@ export type Capability = (typeof CAPABILITIES)[number];
  * A member is somebody's employee working inside one client's data. They do not
  * add workspaces (a permissions hole, and on a metered plan a bill), they do
  * not add colleagues, and they do not see the card details.
+ *
+ * `finance` is the accounts department, and it exists because the alternative
+ * was worse. Billing used to be owner-only, and owner grants everything else
+ * too — so letting a bookkeeper pay an invoice meant handing them the power to
+ * remove the CEO. One capability, and no others.
+ *
+ * Nothing else had to be written for that to be safe. `outranks` below reads
+ * this table, so an admin cannot act on a finance user (an admin does not hold
+ * `manage_billing`) and a finance user cannot act on anybody. Only an owner
+ * appoints or removes one. That is emergent, not special-cased, which is the
+ * whole reason the rule is expressed as capabilities rather than as a list of
+ * role names.
  */
 const GRANTS: Record<Role, readonly Capability[]> = {
   owner: CAPABILITIES,
   admin: ["manage_workspaces", "manage_users"],
+  finance: ["manage_billing"],
   member: [],
 };
 

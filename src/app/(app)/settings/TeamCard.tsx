@@ -62,6 +62,9 @@ export type TeamMember = {
 const ROLE_TONE: Record<string, { color: string; soft: string }> = {
   owner: { color: "var(--accent)", soft: "var(--accent-soft)" },
   admin: { color: "var(--purple)", soft: "var(--purple-soft)" },
+  /* Green, which everywhere else in this product means money that is real.
+     A finance user is the one who handles it. */
+  finance: { color: "var(--green)", soft: "var(--green-soft)" },
   member: { color: "var(--text-muted)", soft: "var(--raise)" },
 };
 
@@ -76,6 +79,7 @@ const ROLE_TONE: Record<string, { color: string; soft: string }> = {
 const ROLE_BLURB: Record<string, string> = {
   owner: "Everything, including the subscription and the card.",
   admin: "Everything except billing — adds people and workspaces.",
+  finance: "Billing and invoices, plus normal CRM use. No people or workspaces.",
   member: "Works inside the CRM. No billing, workspaces or people.",
 };
 
@@ -119,6 +123,11 @@ export function TeamCard({
   const [inviteOpen, openInvite, closeInvite] = useFormDisclosure(inviteState, (s) =>
     Boolean(s?.ok)
   );
+
+  /* The reader is in the directory like everybody else, so their own role is
+     already here — no extra prop, and no second place for it to go stale. */
+  const yourRole =
+    groups.flatMap((g) => g.people).find((p) => p.isYou)?.role ?? "member";
 
   return (
     <>
@@ -275,9 +284,18 @@ export function TeamCard({
             title="Your access"
             icon={<ShieldCheck className="h-[18px] w-[18px] text-accent" />}
           />
+          {/*
+              The reader's OWN role, found in the directory rather than assumed.
+
+              This said `ROLE_BLURB.member` outright, which was true only for as
+              long as `member` was the one role without `manage_users`. The
+              moment `finance` arrived it was telling a bookkeeper they have no
+              billing access on the very screen that proves they do. Read from
+              the list so it cannot be wrong again for the next role.
+          */}
           <p className="text-xs text-faint">
-            {ROLE_BLURB.member} An owner or admin on this account can change that, and can fill in
-            your position and scope of work.
+            {ROLE_BLURB[yourRole] ?? ROLE_BLURB.member} An owner or admin on this account can
+            change that, and can fill in your position and scope of work.
           </p>
         </Card>
       )}

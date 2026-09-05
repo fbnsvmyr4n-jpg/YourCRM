@@ -196,7 +196,7 @@ export async function switchWorkspaceAction(_prev: FormState, formData: FormData
 export async function startCheckoutAction(_prev: FormState, formData: FormData): Promise<FormState> {
   const me = await requireTenant();
   if (!roleCan(me.role, "manage_billing")) {
-    return { error: "Only the account owner can change the subscription." };
+    return { error: "Only an owner or the finance team can change the subscription." };
   }
 
   const plan = text(formData.get("plan"), 20);
@@ -224,7 +224,7 @@ export async function startCheckoutAction(_prev: FormState, formData: FormData):
 export async function billingPortalAction(_prev: FormState, _formData: FormData): Promise<FormState> {
   const me = await requireTenant();
   if (!roleCan(me.role, "manage_billing")) {
-    return { error: "Only the account owner can manage billing." };
+    return { error: "Only an owner or the finance team can manage billing." };
   }
 
   const result = await withSystem((q) => billingPortal(q, me.agencyId));
@@ -247,7 +247,7 @@ export async function applyReferralCreditAction(
 ): Promise<FormState> {
   const me = await requireTenant();
   if (!roleCan(me.role, "manage_billing")) {
-    return { error: "Only the account owner can use referral credit." };
+    return { error: "Only an owner or the finance team can use referral credit." };
   }
 
   return withSystem(async (q) => {

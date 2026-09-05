@@ -77,6 +77,69 @@ describe("roles grant what they should, and nothing more", () => {
  * a fourth role, or a capability moving between roles, changes the answer here
  * without anybody editing a comparison.
  */
+describe("the accounts department", () => {
+  /*
+     `finance` exists because billing used to be owner-only and owner grants
+     everything else too — so letting a bookkeeper pay an invoice meant handing
+     them the power to remove the CEO.
+  */
+  it("can touch the money and nothing else", () => {
+    expect(can("finance", "manage_billing")).toBe(true);
+    expect(can("finance", "manage_users"), "finance could add colleagues").toBe(false);
+    expect(can("finance", "manage_workspaces"), "finance could add workspaces").toBe(false);
+  });
+
+  it("is administered by an owner and by nobody else", () => {
+    // Emergent, not special-cased: an admin does not hold `manage_billing`, so
+    // `outranks` refuses. Nothing anywhere says "admins may not touch finance".
+    expect(outranks("owner", "finance")).toBe(true);
+    expect(outranks("admin", "finance"), "an admin could remove the bookkeeper").toBe(false);
+    expect(outranks("member", "finance")).toBe(false);
+  });
+
+  it("cannot administer anybody, including another finance user", () => {
+    // They hold a capability the others lack, so they never outrank an admin —
+    // and `manage_users` is what actually gates the screen anyway.
+    expect(outranks("finance", "admin")).toBe(false);
+    expect(outranks("finance", "owner")).toBe(false);
+    expect(roleCan("finance", "manage_users")).toBe(false);
+  });
+
+  it("is not offered by an admin inviting somebody", () => {
+    // The Team screen builds its list as ROLES.filter(r => outranks(me, r)),
+    // so an admin cannot hand out a role they could not then manage.
+    const offeredByAdmin = ROLES.filter((r) => outranks("admin", r));
+    expect(offeredByAdmin).not.toContain("finance");
+    expect(ROLES.filter((r) => outranks("owner", r))).toContain("finance");
+  });
+});
+
+describe("the order of ROLES is load-bearing", () => {
+  /*
+     The Team screen takes the default for a new colleague from the LAST role it
+     may offer. Alphabetise this array and an invitation quietly defaults to
+     "admin" — a change with no type error, no failing assertion anywhere else,
+     and a real consequence.
+  */
+  it("runs most powerful to least", () => {
+    const weight = (role: string) => CAPABILITIES.filter((c) => roleCan(role, c)).length;
+    const weights = ROLES.map(weight);
+    expect(weights).toEqual([...weights].sort((a, b) => b - a));
+  });
+
+  it("ends on a role that grants nothing, whoever is inviting", () => {
+    for (const inviter of ROLES) {
+      const offered = ROLES.filter((r) => outranks(inviter, r));
+      if (offered.length === 0) continue;
+      const fallback = offered[offered.length - 1];
+      expect(
+        CAPABILITIES.every((c) => !roleCan(fallback, c)),
+        `${inviter} would invite somebody as "${fallback}" by default`
+      ).toBe(true);
+    }
+  });
+});
+
 describe("administering a colleague", () => {
   it("an owner may act on anyone, including another owner", () => {
     for (const role of ROLES) {
