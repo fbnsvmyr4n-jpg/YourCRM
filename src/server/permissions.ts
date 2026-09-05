@@ -13,9 +13,57 @@ import { type Role } from "./tenant";
  * These share a source so they cannot disagree about which is which.
  */
 
-/** Capabilities that are decided by role rather than by plan. */
+/**
+ * Powers over the ACCOUNT — its people, its client workspaces, its money.
+ *
+ * These are ranked: `outranks` compares two roles by asking whether one holds
+ * everything the other does. Adding something here therefore changes who may
+ * administer whom, which is why data access below is deliberately NOT one of
+ * them.
+ */
 export const CAPABILITIES = ["manage_workspaces", "manage_users", "manage_billing"] as const;
 export type Capability = (typeof CAPABILITIES)[number];
+
+/**
+ * Who may read and write the customer records — contacts, deals, meetings,
+ * calls, messages, notes, and every report over them.
+ *
+ * A separate table, and the separation is the important part. This was very
+ * nearly written as a fourth entry in CAPABILITIES, which would have quietly
+ * broken the thing that matters most on the Team screen: `outranks` asks
+ * whether the viewer holds every capability the target holds, so the moment a
+ * member held `access_crm` and an admin did not, **an admin could no longer
+ * manage a member**. The entire people-management screen would have stopped
+ * working for exactly the role that exists to run it.
+ *
+ * They are different kinds of question and the code should say so. Administering
+ * people is a hierarchy — more power contains less. Seeing customer data is
+ * orthogonal to it: a member sees the CRM and administers nobody; an IT admin
+ * administers everybody and has no business reading a customer's phone number.
+ *
+ * Owner sees everything because they answer for the business. Member is the
+ * person actually doing the selling. Admin is IT and finance is accounts, and
+ * neither needs a customer's records to do their job — which is the whole point
+ * of separating them.
+ */
+const CRM_ACCESS: Record<Role, boolean> = {
+  owner: true,
+  admin: false,
+  finance: false,
+  member: true,
+};
+
+/**
+ * May this role open the CRM at all?
+ *
+ * `?? false` for the same fail-closed reason as `can`: the value arrives from a
+ * database column and is really whatever is in that column. An unrecognised
+ * role must see no customer data rather than fall through to a default that
+ * grants it.
+ */
+export function canAccessCrm(role: string): boolean {
+  return CRM_ACCESS[role as Role] ?? false;
+}
 
 /**
  * Role → capability.

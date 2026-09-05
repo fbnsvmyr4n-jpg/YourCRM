@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { readSessionToken, SESSION_COOKIE } from "./auth";
 import { logDenied } from "./log";
+import { canAccessCrm } from "./permissions";
 import { requireActivePlan } from "./plan-gate";
 import { findUserById, type SafeUser } from "./repos/users";
 import { withSystem, withTenant, type TenantContext, type TenantQuery } from "./tenant";
@@ -21,6 +22,23 @@ import { withSystem, withTenant, type TenantContext, type TenantQuery } from "./
  * against that user's own agency, on every request. A cookie naming somebody
  * else's sub-account resolves to the user's default, not to their data.
  */
+
+/**
+ * Refused because this role does not see customer records.
+ *
+ * Its own type, not a bare Error, so a caller can tell "you may not" from "it
+ * broke" — the same distinction `PlanInactiveError` draws, and the reason an
+ * API route can answer 403 instead of 500.
+ */
+export class CrmAccessError extends Error {
+  readonly reason =
+    "This account does not have access to customer records. Ask an owner if you need it.";
+
+  constructor() {
+    super("CRM access denied");
+    this.name = "CrmAccessError";
+  }
+}
 
 export const SUB_ACCOUNT_COOKIE = "yourcrm_sub_account";
 
@@ -133,9 +151,33 @@ export async function requireTenant(): Promise<TenantContext> {
  */
 export async function withCurrentTenant<T>(
   fn: (q: TenantQuery) => Promise<T>,
-  options: { allowInactive?: boolean } = {}
+  options: { allowInactive?: boolean; crmData?: boolean } = {}
 ): Promise<T> {
   const ctx = await requireTenant();
+
+  /**
+   * The customer-data gate, in the same place and for the same reason as the
+   * plan gate below it.
+   *
+   * IT and accounts run the account; they have no business reading a customer's
+   * phone number. Enforcing that per action would mean editing forty of them
+   * and remembering it for the forty-first — the failure mode this project has
+   * already had once, when 31 actions shipped with no authorisation check at
+   * all.
+   *
+   * So it defaults to REQUIRED, and the handful of tenant-scoped operations
+   * that genuinely handle no customer records opt out by naming themselves.
+   * Fail closed: a new action written by somebody who has never read this file
+   * is gated, and the way they find out is a refusal in development rather than
+   * a bookkeeper reading a client list in production.
+   *
+   * Every opt-out is listed and justified in the guard suite, exactly as
+   * `allowInactive` is.
+   */
+  if (options.crmData !== false && !canAccessCrm(ctx.role)) {
+    logDenied("crm-access", `${ctx.role} attempted a customer-data operation`);
+    throw new CrmAccessError();
+  }
 
   /**
    * The plan gate, here rather than in each of the 49 call sites.
@@ -171,11 +213,27 @@ export async function withCurrentTenant<T>(
  * paged somebody. Redirecting is the honest response to "not signed in" on a
  * page: it is not an exception, it is the answer.
  */
-export async function withTenantPage<T>(fn: (q: TenantQuery) => Promise<T>): Promise<T> {
+export async function withTenantPage<T>(
+  fn: (q: TenantQuery) => Promise<T>,
+  options: { crmData?: boolean } = {}
+): Promise<T> {
   const user = await currentUser();
   // `redirect` throws a control-flow signal Next understands, so nothing below
   // this line runs — and no error surfaces.
   if (!user) redirect("/login");
+
+  /**
+   * A page the reader may not see is a REDIRECT, not an error.
+   *
+   * Same reasoning as the plan gate: throwing renders an error boundary, which
+   * tells an IT admin the product is broken when the truth is that this screen
+   * is not theirs. Settings is where their work actually is, so that is where
+   * they go — and it opts out below, which is what stops this bouncing between
+   * the two forever.
+   */
+  if (options.crmData !== false && !canAccessCrm(user.role)) {
+    redirect("/settings");
+  }
 
   /**
    * Pages are NOT plan-gated here; the app layout redirects instead.
@@ -186,7 +244,7 @@ export async function withTenantPage<T>(fn: (q: TenantQuery) => Promise<T>): Pro
    * and the layout runs before any page in the group, so there is no route that
    * skips it.
    */
-  return withCurrentTenant(fn, { allowInactive: true });
+  return withCurrentTenant(fn, { allowInactive: true, crmData: options.crmData });
 }
 
 /** Same, for a page that needs the context rather than a querier. */

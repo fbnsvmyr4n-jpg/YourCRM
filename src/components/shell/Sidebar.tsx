@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ChevronsLeft, ChevronDown, LogOut } from "lucide-react";
-import { NAV } from "./nav";
+import { visibleNav } from "./nav";
 import { Logo, Wordmark } from "./Logo";
 import { signOutAction } from "@/app/(auth)/actions";
 import { clsx } from "@/lib/clsx";
@@ -23,6 +23,7 @@ export function Sidebar({
   mobileOpen,
   onMobileClose,
   counts,
+  crmAccess,
 }: {
   user: ShellUser;
   collapsed: boolean;
@@ -30,8 +31,11 @@ export function Sidebar({
   mobileOpen: boolean;
   onMobileClose: () => void;
   counts: NavCounts;
+  /** Decided on the server. False for IT and accounts. */
+  crmAccess: boolean;
 }) {
   const pathname = usePathname();
+  const nav = visibleNav(crmAccess);
   const [menuOpen, setMenuOpen] = useState(false);
 
   return (
@@ -51,7 +55,7 @@ export function Sidebar({
 
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto px-3">
-        {NAV.map((section, i) => (
+        {nav.map((section, i) => (
           <div key={i} className="mb-1.5">
             {section.heading && !collapsed && (
               <p className="px-3 pb-1.5 pt-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-faint">

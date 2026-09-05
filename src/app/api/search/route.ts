@@ -6,6 +6,7 @@ import { listMeetings } from "@/server/repos/meetings";
 import { listMessages } from "@/server/repos/inbox";
 import { getSettings } from "@/server/repos/settings";
 import { instantToWallClock } from "@/lib/zoned";
+import { canAccessCrm } from "@/server/permissions";
 import { requireTenant, withCurrentTenant } from "@/server/tenant-session";
 
 export const dynamic = "force-dynamic";
@@ -60,10 +61,27 @@ export async function GET() {
    * the half that did not exist before, and the half that matters once there is
    * more than one customer.
    */
+  let role: string;
   try {
-    await requireTenant();
+    role = (await requireTenant()).role;
   } catch {
     return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
+  }
+
+  /*
+     Search is the fastest route to a customer's name there is — it returns
+     contacts, deals, meetings and message subjects in one call, which is
+     exactly what made its unauthenticated version a Critical finding. IT and
+     accounts have no business in it.
+
+     `withCurrentTenant` below refuses anyway; this makes the answer an empty
+     result with a 403 rather than an exception.
+  */
+  if (!canAccessCrm(role)) {
+    return NextResponse.json(
+      { error: "This account does not have access to customer records.", items: [] },
+      { status: 403 }
+    );
   }
 
   const items = await withCurrentTenant(async (q) => {

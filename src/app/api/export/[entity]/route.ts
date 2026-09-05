@@ -3,6 +3,7 @@ import { listContacts } from "@/server/repos/contacts";
 import { listDeals } from "@/server/repos/deals";
 import { listMeetings } from "@/server/repos/meetings";
 import { toCsv } from "@/server/csv";
+import { canAccessCrm } from "@/server/permissions";
 import { requireTenant, withCurrentTenant } from "@/server/tenant-session";
 
 /**
@@ -49,10 +50,24 @@ export async function GET(
      server is broken" to a caller whose actual problem is an expired session,
      and files a real error in the log for something that is not one.
   */
+  let role: string;
   try {
-    await requireTenant();
+    role = (await requireTenant()).role;
   } catch {
     return new Response("Not authenticated.", { status: 401 });
+  }
+
+  /*
+     A CSV of every contact is the most complete customer record this product
+     can produce, so IT and accounts are refused it.
+
+     `withCurrentTenant` below would refuse anyway — that is the real guard, and
+     it is the reason this check being forgotten would not have leaked anything.
+     Asked here so the answer is a 403 saying why, rather than an exception that
+     reaches the caller as "something went wrong".
+  */
+  if (!canAccessCrm(role)) {
+    return new Response("This account does not have access to customer records.", { status: 403 });
   }
 
   const { entity } = await params;

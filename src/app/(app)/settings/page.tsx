@@ -11,7 +11,7 @@ import { agencyBilling, trialDaysLeft } from "@/server/billing/checkout";
 import { PLAN_INFO, PLANS } from "@/server/billing/plans";
 import { stripeConfigured } from "@/server/billing/stripe";
 import { entitlementsFor, limitOf } from "@/server/entitlements";
-import { outranks, roleCan } from "@/server/permissions";
+import { canAccessCrm, outranks, roleCan } from "@/server/permissions";
 import { getSettings } from "@/server/repos/settings";
 import { listUsers } from "@/server/repos/users";
 import { clientBook, groupByOwner } from "@/server/clients-view";
@@ -74,17 +74,29 @@ export default async function SettingsPage({
   const engine = storageEngine();
   const secretOk = authSecretConfigured();
   // One tenant round trip for all three — they render on the same page.
-  const { settings, usage, trash, book } = await withTenantPage(async (q) => ({
-    settings: await getSettings(q),
-    usage: await usageThisMonth(q),
-    // Recovery lives here because this is where somebody looks after deleting
-    // the wrong thing, and it costs one more query on a page already open.
-    trash: await listTrash(q),
-    // Every contact with their owner and their money, in one statement. Read
-    // per person it would re-read the deals table once for every member of the
-    // team, and the Clients area shows all of them at once.
-    book: await clientBook(q),
-  }));
+  /*
+     Settings is the one screen IT and accounts can open, so it opts out of the
+     customer-data gate — and then earns that by not fetching customer data for
+     a reader who may not see it. The bin holds deleted contacts and deals; the
+     book of business is every contact in the workspace. Both are skipped rather
+     than fetched and hidden, because a query that runs and is thrown away has
+     still read the records.
+  */
+  const crmAccess = canAccessCrm(user.role);
+  const { settings, usage, trash, book } = await withTenantPage(
+    async (q) => ({
+      settings: await getSettings(q),
+      usage: await usageThisMonth(q),
+      // Recovery lives here because this is where somebody looks after deleting
+      // the wrong thing, and it costs one more query on a page already open.
+      trash: crmAccess ? await listTrash(q) : [],
+      // Every contact with their owner and their money, in one statement. Read
+      // per person it would re-read the deals table once for every member of
+      // the team, and the Clients area shows all of them at once.
+      book: crmAccess ? await clientBook(q) : [],
+    }),
+    { crmData: false }
+  );
 
   // The workspace list and the plan behind it. Read here rather than in the
   // client component so the cap comes from the database on every render — a
@@ -179,7 +191,11 @@ export default async function SettingsPage({
    * one at a time. That keeps the whole screen one round trip — the alternative,
    * a route per area, would be six.
    */
-  const sections: { id: SettingsSectionId; content: React.ReactNode }[] = [
+  const allSections: {
+    id: SettingsSectionId;
+    content: React.ReactNode;
+    needsCrm?: boolean;
+  }[] = [
     {
       id: "account",
       content: (
@@ -214,6 +230,11 @@ export default async function SettingsPage({
       */
       id: "clients",
       content: <ClientsCard books={books} readerId={user.id} />,
+      /* Every contact in the workspace, by name. This area IS customer data,
+         so it is not offered at all to IT or accounts — the tab disappears
+         rather than opening onto an empty card, which would only invite the
+         question of what is being hidden. */
+      needsCrm: true,
     },
     {
       id: "preferences",
@@ -258,8 +279,12 @@ export default async function SettingsPage({
       id: "data",
       content: (
         <>
-          <ExportCard />
-          <TrashCard items={trash} />
+          {/* Both of these are the customer records themselves — a CSV of every
+              contact, and a bin holding the deleted ones. The platform card
+              below stays, because whether this deployment has a real database
+              is not a fact about anybody's customers. */}
+          {crmAccess && <ExportCard />}
+          {crmAccess && <TrashCard items={trash} />}
           {/* Platform status is the account holder's business, not every
               employee's — a member seeing "Set DATABASE_URL before deploying"
               is being told about somebody else's deployment.
@@ -276,6 +301,11 @@ export default async function SettingsPage({
     },
   ];
 
+  /* An area that needs customer records is not offered to a reader who has
+     none. `initial` is re-checked against what survives, so `?s=clients` typed
+     by hand opens Account rather than a tab that is not there. */
+  const sections = allSections.filter((section) => !section.needsCrm || crmAccess);
+
   return (
     <div className="mx-auto max-w-[1080px] animate-fade-up">
       <div className="pb-4 pt-1">
@@ -291,7 +321,7 @@ export default async function SettingsPage({
           role: user.role,
           planName: billing.planName,
         }}
-        initial={initial}
+        initial={sections.some((s) => s.id === initial) ? initial : "account"}
         sections={sections}
       />
     </div>

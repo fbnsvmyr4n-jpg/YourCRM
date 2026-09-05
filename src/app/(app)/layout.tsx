@@ -5,7 +5,7 @@ import { stripeConfigured } from "@/server/billing/stripe";
 import { PlanLapsed } from "@/components/billing/PlanLapsed";
 import { AppShell } from "@/components/shell/AppShell";
 import { planState } from "@/server/plan-gate";
-import { roleCan } from "@/server/permissions";
+import { canAccessCrm, roleCan } from "@/server/permissions";
 import { withSystem } from "@/server/tenant";
 import { navCounts } from "@/server/nav-counts";
 import { listNotifications } from "@/server/notifications";
@@ -57,10 +57,28 @@ export default async function AppGroupLayout({ children }: { children: React.Rea
   // One round trip for both: the bell and the sidebar counts are the same
   // question — what is waiting in this workspace — and the layout renders on
   // every navigation.
-  const { notifications, counts } = await withTenantPage(async (q) => ({
-    notifications: await listNotifications(q),
-    counts: await navCounts(q),
-  }));
+  /*
+     Both of these ARE customer data — what is waiting in the inbox, whose
+     meeting is today. A role that cannot open those pages has nothing to be
+     notified about, so the queries are skipped rather than run and discarded:
+     the cheapest query is the one not sent, and running it would mean this
+     layout reading records the reader may not see.
+
+     `crmData: false` on the call itself because the layout wraps EVERY page in
+     the group, Settings included. Left gated it would redirect an IT admin to
+     Settings, whose layout would redirect them again — the bounce that makes a
+     product look broken rather than restricted.
+  */
+  const crmAccess = canAccessCrm(user.role);
+  const { notifications, counts } = crmAccess
+    ? await withTenantPage(
+        async (q) => ({
+          notifications: await listNotifications(q),
+          counts: await navCounts(q),
+        }),
+        { crmData: false }
+      )
+    : { notifications: [], counts: { inbox: 0, calendarToday: false } };
 
   return (
     <AppShell
@@ -79,6 +97,10 @@ export default async function AppGroupLayout({ children }: { children: React.Rea
       }}
       notifications={notifications}
       counts={counts}
+      /* Presentation only. The refusal lives in `withTenantPage`, which is what
+         actually stops an IT admin opening /contacts by typing the URL. Hiding
+         the link keeps the sidebar honest about where they can go. */
+      crmAccess={crmAccess}
     >
       {children}
     </AppShell>

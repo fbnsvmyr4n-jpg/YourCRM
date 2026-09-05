@@ -27,6 +27,15 @@ import { cookies } from "next/headers";
  */
 export type FormState = { ok?: string; error?: string; redirect?: string } | undefined;
 
+/**
+ * `crmData: false` because a revenue target and a weekly capacity are numbers
+ * the business chooses about itself, not records about a customer. An owner or
+ * a finance user setting the month's target is not reading anybody's contact
+ * details.
+ *
+ * `restoreDeletedAction` below is deliberately NOT opted out: what it puts back
+ * is contacts, deals and meetings.
+ */
 export async function updateTargetsAction(_prev: FormState, formData: FormData): Promise<FormState> {
   return withCurrentTenant(async (q) => {
     const monthlyTarget = money(formData.get("monthlyTarget"));
@@ -58,7 +67,7 @@ export async function updateTargetsAction(_prev: FormState, formData: FormData):
     // Several pages read these, so refresh the group rather than just Settings.
     revalidateApp();
     return { ok: "Targets updated." };
-  });
+  }, { crmData: false });
 }
 
 export async function updateProfileAction(_prev: FormState, formData: FormData): Promise<FormState> {

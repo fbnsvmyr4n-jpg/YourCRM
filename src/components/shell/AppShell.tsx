@@ -14,11 +14,14 @@ export function AppShell({
   user,
   notifications,
   counts,
+  crmAccess,
 }: {
   children: React.ReactNode;
   user: ShellUser;
   notifications: Notification[];
   counts: NavCounts;
+  /** Decided on the server; false for IT and accounts. Presentation only. */
+  crmAccess: boolean;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -32,6 +35,7 @@ export function AppShell({
         mobileOpen={mobileOpen}
         onMobileClose={() => setMobileOpen(false)}
         counts={counts}
+        crmAccess={crmAccess}
       />
 
       {/* Mobile backdrop */}
@@ -44,7 +48,12 @@ export function AppShell({
       )}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <Topbar onMenu={() => setMobileOpen(true)} user={user} notifications={notifications} />
+        <Topbar
+          onMenu={() => setMobileOpen(true)}
+          user={user}
+          notifications={notifications}
+          crmAccess={crmAccess}
+        />
         {/* `@container` is what lets a page lay itself out against the room it
             actually has. A viewport media query can't see the sidebar, so a
             three-column grid switched on at 1024px was really being handed

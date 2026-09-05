@@ -65,10 +65,22 @@ export function Topbar({
   onMenu,
   user,
   notifications,
+  crmAccess,
 }: {
   onMenu?: () => void;
   user: ShellUser;
   notifications: Notification[];
+  /**
+   * Whether this reader may see customer records. Decided on the server.
+   *
+   * Three controls up here lead straight into the CRM — search, the assistant
+   * shortcut, and the same shortcut in the avatar menu. For IT and accounts all
+   * three would be refused, and a control that is visible, tappable and then
+   * refused is worse than no control: it reads as the product being broken
+   * rather than as a boundary. The refusal still stands in the server; this
+   * just stops offering the door.
+   */
+  crmAccess: boolean;
 }) {
   const [bellOpen, setBellOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -94,6 +106,7 @@ export function Topbar({
         <Menu className="h-5 w-5" />
       </button>
 
+      {crmAccess && (
       <button
         type="button"
         onClick={openCommandPalette}
@@ -174,6 +187,7 @@ export function Topbar({
           ⌘ K
         </kbd>
       </button>
+      )}
 
       {/*
           `ml-auto` takes up the slack the search no longer absorbs.
@@ -202,6 +216,7 @@ export function Topbar({
           360px it still has 76px and at 393px, which is the iPhone 15 and 16,
           it has 109px. Every current iPhone clears 360; only the oldest SE
           does not, and there it is the search that must win. */}
+      {crmAccess && (
       <Link
         href="/chat"
         aria-label="Ask the AI assistant"
@@ -241,6 +256,7 @@ export function Topbar({
       >
         <Sparkles className="h-[18px] w-[18px]" />
       </Link>
+      )}
 
       {/* Notifications — everything that needs attention, nothing filtered. */}
       <div className="relative" ref={bellRef}>
@@ -369,13 +385,15 @@ export function Topbar({
             >
               <SettingsIcon className="h-4 w-4 text-faint" /> Settings
             </Link>
-            <Link
-              href="/chat"
-              onClick={() => setMenuOpen(false)}
-              className="flex items-center gap-2.5 px-4 py-2.5 text-sm transition-colors hover:bg-[var(--raise)]"
-            >
-              <MessageSquare className="h-4 w-4 text-faint" /> Ask the assistant
-            </Link>
+            {crmAccess && (
+              <Link
+                href="/chat"
+                onClick={() => setMenuOpen(false)}
+                className="flex items-center gap-2.5 px-4 py-2.5 text-sm transition-colors hover:bg-[var(--raise)]"
+              >
+                <MessageSquare className="h-4 w-4 text-faint" /> Ask the assistant
+              </Link>
+            )}
             <form action={signOutAction} className="border-t border-[var(--border)]">
               <button
                 type="submit"
