@@ -1273,3 +1273,89 @@ ALTER TABLE messages
   DROP CONSTRAINT IF EXISTS messages_channel_check,
   ADD CONSTRAINT messages_channel_check
     CHECK (channel IN ('email', 'whatsapp', 'sms'));
+
+-- ---------------------------------------------------------------------------
+-- What things cost.
+--
+-- The prerequisite for an agent drafting a quotation, and the reason it is
+-- built first: an AI cannot invent prices. Asked to quote a crane it would
+-- otherwise produce a number that looks like a price and is not one — the same
+-- class of fabrication as the phantom lead, except this one goes to a customer
+-- with a total on it.
+--
+-- With a list, drafting stops being creative and becomes selection: pick the
+-- line, multiply by the quantity, show it to a human. Every figure on a
+-- generated quote traces back to a row somebody here typed.
+--
+-- `unit` is free text. "each", "per day", "per m²", "per pallet" — a CHECK
+-- would be this product telling a customer how their industry sells things,
+-- and the first one to need "per linear metre" would be blocked by a migration.
+--
+-- `active` rather than deletion for items no longer sold: a withdrawn item must
+-- stop being offered on new quotes while the quotes that already cite it keep
+-- making sense.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS price_items (
+  id              TEXT PRIMARY KEY,
+  sub_account_id  TEXT NOT NULL REFERENCES sub_accounts(id) ON DELETE CASCADE,
+
+  name            TEXT NOT NULL,
+  description     TEXT,
+  unit            TEXT NOT NULL DEFAULT 'each',
+  unit_cents      BIGINT NOT NULL DEFAULT 0,
+  active          BOOLEAN NOT NULL DEFAULT TRUE,
+
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  deleted_at      TIMESTAMPTZ
+);
+
+-- A rate is never negative. The repository refuses one, but this table is the
+-- source of every figure on a generated quotation, and a guarantee that lives
+-- only in one code path is a guarantee until somebody writes a second caller.
+-- A discount belongs on the quote as a line, not on the rate card as an item.
+ALTER TABLE price_items DROP CONSTRAINT IF EXISTS price_items_unit_cents_check;
+ALTER TABLE price_items ADD CONSTRAINT price_items_unit_cents_check
+  CHECK (unit_cents >= 0);
+
+-- One item per name. Two rows called "Crane hire" at different prices is a
+-- question the agent cannot answer and a person should not have to.
+CREATE UNIQUE INDEX IF NOT EXISTS price_items_name_once
+  ON price_items (sub_account_id, lower(name)) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS price_items_tenant_idx ON price_items (sub_account_id) WHERE deleted_at IS NULL;
+
+ALTER TABLE price_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE price_items FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS price_items_tenant_isolation ON price_items;
+CREATE POLICY price_items_tenant_isolation ON price_items
+  USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
+  WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
+
+-- ---------------------------------------------------------------------------
+-- A quotation an agent drafted, waiting for a human to say yes.
+--
+-- The safety property of the whole feature, expressed in the schema rather than
+-- in a code path somebody could forget: a document an AI produced carries
+-- `drafted_by_agent`, and nothing may leave for a client until `approved_at` is
+-- set. The agent can write and revise; only a person approves.
+--
+-- `approved_by_user_id` records WHO said yes. "The system sent it" is not an
+-- answer anybody wants when a customer queries a price.
+--
+-- `revision` counts how many times it has been sent back for changes, so the
+-- conversation about a quote has a spine and "the version we agreed" means
+-- something.
+-- ---------------------------------------------------------------------------
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS drafted_by_agent    TEXT;
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS approved_at         TIMESTAMPTZ;
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS approved_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS sent_at             TIMESTAMPTZ;
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS revision            INTEGER NOT NULL DEFAULT 0;
+
+-- The status a drafted quote sits in until somebody approves it. Added to the
+-- existing CHECK rather than replacing it, so the statuses already in use keep
+-- meaning what they meant.
+ALTER TABLE documents DROP CONSTRAINT IF EXISTS documents_status_check;
+ALTER TABLE documents ADD CONSTRAINT documents_status_check
+  CHECK (status IN ('draft', 'awaiting_approval', 'sent', 'accepted',
+                    'declined', 'paid', 'cancelled'));

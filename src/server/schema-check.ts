@@ -47,6 +47,7 @@ export const EXPECTED_TABLES = [
   "project_people",
   "documents",
   "document_lines",
+  "price_items",
 ] as const;
 
 /** Columns added by `ALTER TABLE … ADD COLUMN IF NOT EXISTS`, which a stale
@@ -81,6 +82,13 @@ export const EXPECTED_COLUMNS: ReadonlyArray<[string, string]> = [
   /* The inbox badge reads it on every row, so an unmigrated database is a
      broken list rather than a missing icon. */
   ["messages", "channel"],
+  /* The agent-drafted quote workflow. Read wherever a document is shown, so a
+     stale database breaks the project screen rather than one control. */
+  ["documents", "approved_at"],
+  ["documents", "approved_by_user_id"],
+  ["documents", "drafted_by_agent"],
+  ["documents", "revision"],
+  ["documents", "sent_at"],
 ];
 
 export type SchemaCheck = {

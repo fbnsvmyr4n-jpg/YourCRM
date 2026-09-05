@@ -11,6 +11,7 @@ import {
   MessageSquare,
   NotebookPen,
   Settings,
+  Tags,
   Target,
   Users,
   type LucideIcon,
@@ -81,6 +82,10 @@ export const NAV: NavSection[] = [
       /* Above Settings, and not in Pipeline: notes are not a daily-glance
          figure, they are something you come looking for. */
       { label: "Notes", href: "/notes", icon: NotebookPen },
+      /* Reference data you maintain rather than work in, so it sits with Notes
+         rather than in Pipeline — but NOT in Settings, because a price list
+         grows past what a settings area should hold and needs its own search. */
+      { label: "Price list", href: "/pricing", icon: Tags },
       /* The two screens an IT admin or a bookkeeper can actually use: their own
          account, the team, billing — and the help pages, which contain nothing
          at all about anybody's customers. */
