@@ -1,6 +1,6 @@
 import {
   BarChart3,
-  Building2,
+  Briefcase,
   CalendarDays,
   Handshake,
   Headphones,
@@ -56,7 +56,12 @@ export const NAV: NavSection[] = [
       { label: "Chat", href: "/chat", icon: MessageSquare },
       { label: "Voice Agents", href: "/voice-agents", icon: Headphones },
       { label: "Contacts", href: "/contacts", icon: Users },
-      { label: "Companies", href: "/companies", icon: Building2 },
+      /* Was "Companies". A client list is a filing cabinet; what people
+         actually navigate to is the work — "the Heineken warehouse job" — so
+         the front door is the projects and the company is how they are filed.
+         Companies itself is still a screen, reached from Projects, because
+         renaming and tidying them did not stop being necessary. */
+      { label: "Projects", href: "/projects", icon: Briefcase },
       { label: "Inbox", href: "/inbox", icon: Inbox, count: "inbox" },
       { label: "Calendar", href: "/calendar", icon: CalendarDays, count: "calendarToday" },
     ],

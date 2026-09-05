@@ -964,3 +964,89 @@ CREATE INDEX IF NOT EXISTS users_directory_idx
 ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
 ALTER TABLE users ADD CONSTRAINT users_role_check
   CHECK (role IN ('owner', 'admin', 'finance', 'member'));
+
+-- ---------------------------------------------------------------------------
+-- A deal belongs to a company, directly.
+--
+-- Projects are how the work is actually talked about: "Heineken — rebuild
+-- warehouse", and then next year another one for the same client. That is what
+-- a deal already IS — a title, a value, an owner, a stage that runs through
+-- delivery — so this adds no second entity to drift against it. What it adds is
+-- the missing edge.
+--
+-- Until now a deal reached its company only THROUGH a contact. Three ways that
+-- fails, all of them ordinary:
+--
+--   * a deal with no contact yet files under nothing;
+--   * a contact with no company does the same;
+--   * and the person who introduced the work leaves, the contact is reassigned
+--     or deleted, and the deal silently detaches from the client it was for.
+--
+-- The company is a fact about the work, not about whoever happened to be the
+-- point of contact, so it is stored on the work.
+--
+-- Backfilled from the contact's company, which is where the answer lives today.
+-- The WHERE stops matching once it has run, so this file stays re-runnable.
+-- ---------------------------------------------------------------------------
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS company_id TEXT;
+
+ALTER TABLE deals
+  DROP CONSTRAINT IF EXISTS deals_company_fk,
+  ADD CONSTRAINT deals_company_fk
+    FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE SET NULL;
+
+UPDATE deals d
+   SET company_id = c.company_id
+  FROM contacts c
+ WHERE d.contact_id = c.id
+   AND d.company_id IS NULL
+   AND c.company_id IS NOT NULL;
+
+-- The projects page reads every deal for one company, live ones first.
+CREATE INDEX IF NOT EXISTS deals_company_idx
+  ON deals (sub_account_id, company_id) WHERE deleted_at IS NULL;
+
+-- ---------------------------------------------------------------------------
+-- A company reference may not cross a tenant boundary.
+--
+-- Same hole as `owner_user_id` had, and it was never closed for companies:
+-- `company_id` is a foreign key to `companies(id)`, which says the company is a
+-- real row and says NOTHING about whose it is. Row level security does not
+-- catch it either — the write targets a row in this tenant and is legitimately
+-- allowed; only the VALUE is wrong. The result would be one customer's deal
+-- filed under another customer's client, and the projects page joins companies
+-- to show the NAME, so it would render there.
+--
+-- Applied to contacts as well as deals. The gap predates this change; adding a
+-- second way to reach it was the reason to fix both.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION assert_company_in_tenant() RETURNS trigger AS $$
+BEGIN
+  IF NEW.company_id IS NULL THEN
+    RETURN NEW;  -- unfiled is always valid
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM companies co
+     WHERE co.id = NEW.company_id
+       AND co.sub_account_id = NEW.sub_account_id
+       AND co.deleted_at IS NULL
+  ) THEN
+    RAISE EXCEPTION
+      'company % does not belong to sub-account %', NEW.company_id, NEW.sub_account_id
+      USING ERRCODE = 'check_violation';
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS deals_company_in_tenant ON deals;
+CREATE TRIGGER deals_company_in_tenant
+  BEFORE INSERT OR UPDATE OF company_id, sub_account_id ON deals
+  FOR EACH ROW EXECUTE FUNCTION assert_company_in_tenant();
+
+DROP TRIGGER IF EXISTS contacts_company_in_tenant ON contacts;
+CREATE TRIGGER contacts_company_in_tenant
+  BEFORE INSERT OR UPDATE OF company_id, sub_account_id ON contacts
+  FOR EACH ROW EXECUTE FUNCTION assert_company_in_tenant();

@@ -44,6 +44,17 @@ export const CLOSED_WON_STAGES = ["won", "delivery", "referral"] as const;
 export type DealRecord = {
   id: string;
   contactId: string | null;
+  /**
+   * The client this piece of work is for — a project's company.
+   *
+   * Derived from the contact on write rather than asked for on a form, so it
+   * cannot be forgotten and cannot disagree with the contact. Stored rather
+   * than joined through the contact every time, because the contact is the
+   * person who happens to be the point of contact and may be reassigned,
+   * replaced or deleted; the client the work is for does not change when they
+   * do.
+   */
+  companyId: string | null;
   ownerUserId: string | null;
   title: string;
   /**
@@ -81,6 +92,7 @@ export type NewDeal = {
 type Row = {
   id: string;
   contact_id: string | null;
+  company_id: string | null;
   owner_user_id: string | null;
   title: string;
   value_cents: string;
@@ -97,7 +109,7 @@ type Row = {
 };
 
 const SELECT = `
-  SELECT d.id, d.contact_id, d.owner_user_id, d.title, d.value_cents, d.stage,
+  SELECT d.id, d.contact_id, d.company_id, d.owner_user_id, d.title, d.value_cents, d.stage,
          d.source, d.lost_reason, d.won_at, d.pain_points,
          d.referred_by_contact_id, d.split_id, d.split_total_cents,
          d.created_at, d.updated_at
@@ -108,6 +120,7 @@ function toRecord(r: Row): DealRecord {
   return {
     id: r.id,
     contactId: r.contact_id,
+    companyId: r.company_id,
     ownerUserId: r.owner_user_id,
     title: r.title,
     valueCents: Number(r.value_cents),
@@ -174,11 +187,20 @@ export async function listDealsForContact(
 export async function createDeal(q: TenantQuery, input: NewDeal): Promise<DealRecord> {
   const stage = input.stage ?? "prospect";
   const row = await q.one<Row>(
+    /* `company_id` is read from the contact in the same statement rather than
+       fetched first and passed in. Two round trips would leave a window where
+       the contact moves company between them, and — more prosaically — a
+       second statement is a second thing a caller can forget. The sub-account
+       is matched too, so a contact id from another tenant contributes nothing
+       rather than reaching across. */
     `WITH inserted AS (
        INSERT INTO deals
-         (id, sub_account_id, contact_id, owner_user_id, title, value_cents, stage,
+         (id, sub_account_id, contact_id, company_id, owner_user_id, title, value_cents, stage,
           source, pain_points, referred_by_contact_id, won_at)
-       VALUES ($2, $1, $3, $4, $5, $6, $7, $8, $9::jsonb, $10,
+       VALUES ($2, $1, $3,
+               (SELECT c.company_id FROM contacts c
+                 WHERE c.id = $3 AND c.sub_account_id = $1 AND c.deleted_at IS NULL),
+               $4, $5, $6, $7, $8, $9::jsonb, $10,
                CASE WHEN $7 = 'won' THEN now() ELSE NULL END)
        RETURNING *
      )
@@ -216,6 +238,19 @@ export async function updateDeal(
          title         = COALESCE($3, title),
          value_cents   = COALESCE($4, value_cents),
          contact_id    = CASE WHEN $5::boolean  THEN $6  ELSE contact_id END,
+         /* The company follows the contact, in the same statement that moves
+            it. Left alone, a deal reassigned from somebody at Heineken to
+            somebody at another client would keep filing itself under Heineken —
+            the exact silent detachment this column exists to prevent, just in
+            the other direction. Only recomputed when the contact is actually
+            being changed; an update to the title must not clear it. */
+         company_id    = CASE
+                           WHEN $5::boolean THEN (
+                             SELECT c.company_id FROM contacts c
+                              WHERE c.id = $6 AND c.sub_account_id = $1
+                                AND c.deleted_at IS NULL)
+                           ELSE company_id
+                         END,
          owner_user_id = CASE WHEN $7::boolean  THEN $8  ELSE owner_user_id END,
          source        = COALESCE($9, source),
          pain_points   = COALESCE($10::jsonb, pain_points),

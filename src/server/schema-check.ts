@@ -67,6 +67,9 @@ export const EXPECTED_COLUMNS: ReadonlyArray<[string, string]> = [
   ["users", "job_title"],
   ["users", "phone"],
   ["users", "scope"],
+  /* Projects. Named in the SELECT the deals repo and the projects page both
+     use, so an unmigrated database breaks the pipeline board, not one page. */
+  ["deals", "company_id"],
 ];
 
 export type SchemaCheck = {
