@@ -19,6 +19,8 @@ import type { TenantQuery } from "./tenant";
 export type Project = {
   id: string;
   title: string;
+  /** Where the work is. "Heineken Stellenbosch" is the site, not the title. */
+  site: string | null;
   stage: Stage;
   valueCents: number;
   wonAt: string | null;
@@ -50,6 +52,7 @@ type Row = {
   domain: string | null;
   id: string;
   title: string;
+  site: string | null;
   stage: Stage;
   value_cents: string;
   won_at: Date | null;
@@ -88,7 +91,7 @@ export async function listProjects(q: TenantQuery): Promise<Row[]> {
     `SELECT co.id   AS company_id,
             co.name AS company_name,
             co.domain,
-            d.id, d.title, d.stage, d.value_cents, d.won_at,
+            d.id, d.title, d.site, d.stage, d.value_cents, d.won_at,
             u.name AS owner_name,
             NULLIF(TRIM(CONCAT(c.first_name, ' ', c.last_name)), '') AS contact_name,
             (SELECT count(*) FROM meetings m
@@ -143,6 +146,7 @@ export function groupByCompany(rows: Row[]): CompanyProjects[] {
     const project: Project = {
       id: r.id,
       title: r.title,
+      site: r.site,
       stage: r.stage,
       valueCents: Number(r.value_cents),
       wonAt: r.won_at ? r.won_at.toISOString() : null,

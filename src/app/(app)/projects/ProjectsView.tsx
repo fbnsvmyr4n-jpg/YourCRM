@@ -194,10 +194,15 @@ function ProjectRow({ project, muted = false }: { project: Project; muted?: bool
   const meta = stageMeta(project.stage);
 
   return (
-    <li
-      className="flex flex-wrap items-center gap-3 rounded-xl px-3.5 py-3"
-      style={{ background: muted ? "var(--raise)" : "var(--surface-2)" }}
-    >
+    <li>
+      {/* The whole row is the link. A project is a place you go, and a small
+          chevron at the end would be a target to aim at on a phone rather than
+          somewhere to tap. */}
+      <Link
+        href={`/projects/${project.id}`}
+        className="focus-ring flex flex-wrap items-center gap-3 rounded-xl px-3.5 py-3 transition-colors hover:brightness-110"
+        style={{ background: muted ? "var(--raise)" : "var(--surface-2)" }}
+      >
       <span
         className="grid h-8 w-8 shrink-0 place-items-center rounded-xl"
         style={{ background: `color-mix(in srgb, ${meta.color} 14%, transparent)`, color: meta.color }}
@@ -214,6 +219,7 @@ function ProjectRow({ project, muted = false }: { project: Project; muted?: bool
             dash. */}
         <span className="mt-0.5 block truncate text-xs text-faint">
           {[
+            project.site,
             project.ownerName ?? "Unassigned",
             project.contactName,
             project.meetings > 0
@@ -249,6 +255,7 @@ function ProjectRow({ project, muted = false }: { project: Project; muted?: bool
           {meta.label}
         </span>
       </span>
+      </Link>
     </li>
   );
 }

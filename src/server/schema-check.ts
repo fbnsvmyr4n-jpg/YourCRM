@@ -44,6 +44,9 @@ export const EXPECTED_TABLES = [
   "stripe_events",
   "usage_events",
   "referral_credits",
+  "project_people",
+  "documents",
+  "document_lines",
 ] as const;
 
 /** Columns added by `ALTER TABLE … ADD COLUMN IF NOT EXISTS`, which a stale
@@ -70,6 +73,11 @@ export const EXPECTED_COLUMNS: ReadonlyArray<[string, string]> = [
   /* Projects. Named in the SELECT the deals repo and the projects page both
      use, so an unmigrated database breaks the pipeline board, not one page. */
   ["deals", "company_id"],
+  ["deals", "site"],
+  ["deals", "starts_on"],
+  ["deals", "due_on"],
+  ["messages", "deal_id"],
+  ["messages", "thread_id"],
 ];
 
 export type SchemaCheck = {

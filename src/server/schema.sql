@@ -1050,3 +1050,196 @@ DROP TRIGGER IF EXISTS contacts_company_in_tenant ON contacts;
 CREATE TRIGGER contacts_company_in_tenant
   BEFORE INSERT OR UPDATE OF company_id, sub_account_id ON contacts
   FOR EACH ROW EXECUTE FUNCTION assert_company_in_tenant();
+
+-- ---------------------------------------------------------------------------
+-- A project is a job at a place, on a timescale.
+--
+-- "Heineken — rebuild warehouse" was enough to list the work. "Heineken
+-- Stellenbosch" is how people actually say it, because the same client has the
+-- same kind of job at more than one site, and telling two of them apart by
+-- title alone means retyping the site into every title and hoping everyone
+-- spells it the same way. Same argument as company names living in a text
+-- column, one level down.
+--
+-- Dates because a project without a deadline cannot be managed, only observed.
+-- Both nullable: work often starts before anybody agrees when it ends.
+-- ---------------------------------------------------------------------------
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS site      TEXT;
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS starts_on DATE;
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS due_on    DATE;
+
+-- ---------------------------------------------------------------------------
+-- Who is on the job.
+--
+-- A deal has ONE `contact_id` and ONE `owner_user_id`, which describes a sale:
+-- the person buying and the person selling. It does not describe a project,
+-- where a site manager, a quantity surveyor, two of your engineers and the
+-- client's procurement lead are all on the same thread.
+--
+-- One table for both sides deliberately. The alternative — a staff table and a
+-- client-contact table — means every screen that lists "everyone on this job"
+-- does two queries and merges them, and every new question about the team gets
+-- asked twice. Exactly one of `user_id` and `contact_id` is set, which the
+-- CHECK enforces rather than trusting.
+--
+-- `role_on_job` is free text on purpose. "Site Manager", "QS", "Client PM" —
+-- a fixed list would be this product telling a customer how their industry
+-- names its roles, and the first one to need "Clerk of Works" would be blocked
+-- by a migration.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS project_people (
+  id              TEXT PRIMARY KEY,
+  sub_account_id  TEXT NOT NULL REFERENCES sub_accounts(id) ON DELETE CASCADE,
+  deal_id         TEXT NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+
+  -- Exactly one of these. Your colleague, or their person.
+  user_id         TEXT REFERENCES users(id) ON DELETE CASCADE,
+  contact_id      TEXT REFERENCES contacts(id) ON DELETE CASCADE,
+  CONSTRAINT project_people_one_side
+    CHECK ((user_id IS NULL) <> (contact_id IS NULL)),
+
+  role_on_job     TEXT,
+  added_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Somebody is on a job once. Two partial indexes rather than one over both
+-- columns, because NULLs do not compare equal and a single index would happily
+-- allow the same person twice.
+CREATE UNIQUE INDEX IF NOT EXISTS project_people_user_once
+  ON project_people (deal_id, user_id) WHERE user_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS project_people_contact_once
+  ON project_people (deal_id, contact_id) WHERE contact_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS project_people_deal_idx ON project_people (sub_account_id, deal_id);
+
+ALTER TABLE project_people ENABLE ROW LEVEL SECURITY;
+ALTER TABLE project_people FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS project_people_tenant_isolation ON project_people;
+CREATE POLICY project_people_tenant_isolation ON project_people
+  USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
+  WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
+
+-- ---------------------------------------------------------------------------
+-- Quotations, purchase orders — and, shortly, invoices.
+--
+-- One table with a `kind`, not three tables. They are the same shape: a
+-- numbered document, issued to somebody on a date, with lines that add up and a
+-- status that moves. Modelling them separately would triple every query that
+-- asks "what is this project committed to" and guarantee the three drift.
+--
+-- `invoice` is in the CHECK from the start even though nothing issues one yet.
+-- Adding a value to a CHECK later is a migration; leaving room in it is free,
+-- and the next feature is billing.
+--
+-- Money is never stored on this row. A total that is both stored and derivable
+-- is two answers to one question, and the stored one goes stale the moment a
+-- line is edited. Totals come from `document_lines`, summed.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS documents (
+  id              TEXT PRIMARY KEY,
+  sub_account_id  TEXT NOT NULL REFERENCES sub_accounts(id) ON DELETE CASCADE,
+  deal_id         TEXT NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+
+  kind            TEXT NOT NULL
+                    CHECK (kind IN ('quote', 'purchase_order', 'invoice')),
+
+  -- What the customer calls it: "Q-1042", "PO-88". Theirs to choose, because
+  -- it has to match whatever their accounts department already uses.
+  number          TEXT NOT NULL,
+
+  -- A quote goes out, comes back accepted or declined. A purchase order is
+  -- sent and fulfilled. One list covers both; the UI shows the ones that make
+  -- sense for the kind.
+  status          TEXT NOT NULL DEFAULT 'draft'
+                    CHECK (status IN ('draft', 'sent', 'accepted', 'declined',
+                                      'paid', 'cancelled')),
+
+  -- Who it is to or from: the client for a quote, the supplier for a PO.
+  party           TEXT,
+  issued_on       DATE,
+  due_on          DATE,
+  notes           TEXT,
+
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  deleted_at      TIMESTAMPTZ
+);
+
+-- A number is unique within a kind, per workspace. Two quotes both called
+-- Q-1042 is an accounts problem nobody wants to untangle later.
+CREATE UNIQUE INDEX IF NOT EXISTS documents_number_once
+  ON documents (sub_account_id, kind, lower(number)) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS documents_deal_idx ON documents (sub_account_id, deal_id) WHERE deleted_at IS NULL;
+
+ALTER TABLE documents ENABLE ROW LEVEL SECURITY;
+ALTER TABLE documents FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS documents_tenant_isolation ON documents;
+CREATE POLICY documents_tenant_isolation ON documents
+  USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
+  WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
+
+-- ---------------------------------------------------------------------------
+-- What is actually on the quote.
+--
+-- `quantity` is NUMERIC, not a float and not an integer. Half a day and 2.5
+-- tonnes are both real quantities, and a float would make 0.1 + 0.2 a support
+-- ticket about a total being one cent out. NUMERIC in Postgres is exact
+-- decimal, which is the only correct choice for anything that is multiplied by
+-- money.
+--
+-- The line total is ROUND(quantity * unit_cents) — computed, never stored, for
+-- the same reason the document has no total column.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS document_lines (
+  id              TEXT PRIMARY KEY,
+  sub_account_id  TEXT NOT NULL REFERENCES sub_accounts(id) ON DELETE CASCADE,
+  document_id     TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+
+  description     TEXT NOT NULL,
+  quantity        NUMERIC(14, 3) NOT NULL DEFAULT 1,
+  unit_cents      BIGINT NOT NULL DEFAULT 0,
+
+  -- The order they were typed in. Without it the lines come back in whatever
+  -- order the planner chose, and a quote reads differently every time it loads.
+  position        INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS document_lines_doc_idx ON document_lines (sub_account_id, document_id, position);
+
+ALTER TABLE document_lines ENABLE ROW LEVEL SECURITY;
+ALTER TABLE document_lines FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS document_lines_tenant_isolation ON document_lines;
+CREATE POLICY document_lines_tenant_isolation ON document_lines
+  USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
+  WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
+
+-- ---------------------------------------------------------------------------
+-- Email, threaded, and attached to the job.
+--
+-- `messages` had a contact and nothing else: no project, and no notion of a
+-- reply belonging to anything. So "the email thread about the Stellenbosch
+-- warehouse" could not be asked for at all.
+--
+-- `thread_id` is backfilled by normalised subject within a contact, which is
+-- what every mail client does — strip the Re:/Fwd: prefixes and group what is
+-- left. It is a heuristic and it is applied ONCE, to history; everything new
+-- carries a real thread id from the moment it is created. Said plainly because
+-- a heuristic presented as a fact is how somebody later trusts it too far.
+--
+-- The WHERE stops matching once it has run, so this file stays re-runnable.
+-- ---------------------------------------------------------------------------
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS deal_id   TEXT REFERENCES deals(id) ON DELETE SET NULL;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS thread_id TEXT;
+
+UPDATE messages m
+   SET thread_id = 'th-' || encode(
+         sha256(
+           (COALESCE(m.contact_id, 'no-contact') || '|' ||
+            lower(regexp_replace(m.subject, '^\s*((re|fwd|fw)\s*:\s*)+', '', 'i'))
+           )::bytea
+         ), 'hex')
+ WHERE m.thread_id IS NULL;
+
+CREATE INDEX IF NOT EXISTS messages_thread_idx
+  ON messages (sub_account_id, thread_id) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS messages_deal_idx
+  ON messages (sub_account_id, deal_id) WHERE deleted_at IS NULL;

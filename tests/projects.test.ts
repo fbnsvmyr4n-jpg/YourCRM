@@ -35,6 +35,7 @@ function row(
     domain: null,
     id: `d-${title}`,
     title,
+    site: null,
     stage,
     value_cents: String(cents),
     won_at: null,
