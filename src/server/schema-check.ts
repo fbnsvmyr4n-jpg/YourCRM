@@ -78,6 +78,9 @@ export const EXPECTED_COLUMNS: ReadonlyArray<[string, string]> = [
   ["deals", "due_on"],
   ["messages", "deal_id"],
   ["messages", "thread_id"],
+  /* The inbox badge reads it on every row, so an unmigrated database is a
+     broken list rather than a missing icon. */
+  ["messages", "channel"],
 ];
 
 export type SchemaCheck = {

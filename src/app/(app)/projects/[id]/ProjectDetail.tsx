@@ -85,6 +85,9 @@ const DOC_STATUS_TONE: Record<string, { color: string; soft: string }> = {
 
 const EVENT_ICON = { email: Mail, meeting: Users, call: Phone, note: FileText, document: Receipt };
 
+/** Somebody who could be put on the job: a colleague, or any contact. */
+type Candidate = { id: string; name: string; company?: string | null; isClient?: boolean };
+
 const TABS = [
   { id: "team", label: "Team", icon: Users },
   { id: "documents", label: "Documents", icon: Receipt },
@@ -106,7 +109,7 @@ export function ProjectDetail({
   documents: ProjectDocument[];
   threads: ProjectThread[];
   timeline: ProjectEvent[];
-  candidates: { staff: { id: string; name: string }[]; contacts: { id: string; name: string }[] };
+  candidates: { staff: Candidate[]; contacts: Candidate[] };
 }) {
   const [tab, setTab] = useState<TabId>("team");
   const stage = stageMeta(header.stage);
@@ -358,7 +361,7 @@ function TeamTab({
 }: {
   dealId: string;
   people: ProjectPerson[];
-  candidates: { staff: { id: string; name: string }[]; contacts: { id: string; name: string }[] };
+  candidates: { staff: Candidate[]; contacts: Candidate[] };
 }) {
   const [addState, add, adding] = useActionState<FormState, FormData>(
     addProjectPersonAction,
@@ -423,12 +426,17 @@ function TeamTab({
                         </option>
                       ))}
                   </optgroup>
-                  <optgroup label="Client side">
+                  {/* "Contacts", not "Client side" — a subcontractor's
+                      engineer is on the job and does not work for the client.
+                      Each carries their company so two people called Dave are
+                      distinguishable, and the client's own sort first. */}
+                  <optgroup label="Contacts">
                     {candidates.contacts
                       .filter((c) => !onJob.has(c.id))
                       .map((c) => (
                         <option key={c.id} value={`client:${c.id}`}>
                           {c.name}
+                          {c.company ? ` — ${c.company}` : ""}
                         </option>
                       ))}
                   </optgroup>

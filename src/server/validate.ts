@@ -83,6 +83,33 @@ export function count(value: unknown, max = 1_000_000): number | null {
 }
 
 /**
+ * A non-negative decimal — a quantity or a price that has a fraction in it.
+ *
+ * Neither `money` nor `count` can carry one: both end in `Math.round`, because
+ * both were written for whole units. Reaching for them here is not a style
+ * choice, it is a silent data change, and it happened: a purchase order line
+ * entered as **3.5 days at $12,000** was stored as 4 days and went out at
+ * $58,000 instead of $50,750. The form accepted the number, altered it, and
+ * said nothing.
+ *
+ * Half a day and 2.5 tonnes are ordinary quantities, and `document_lines.quantity`
+ * is NUMERIC(14,3) precisely so they survive. `places` matches the column so a
+ * value cannot be accepted here and then rounded by the database instead.
+ *
+ * Rounded to `places` rather than rejected for having more: somebody pasting
+ * 3.33333 from a spreadsheet means a third, and refusing them is worse than
+ * storing three decimals of it. Anything that is not a finite, non-negative
+ * number is still null, so the caller rejects rather than persisting NaN.
+ */
+export function decimal(value: unknown, max: number, places: number): number | null {
+  if (value === null || value === undefined || value === "") return 0;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0 || n > max) return null;
+  const factor = 10 ** places;
+  return Math.round(n * factor) / factor;
+}
+
+/**
  * A record id arriving from the client. Ids we generate are slug-ish, so a
  * conservative character set is safe and keeps anything odd out of the store.
  */

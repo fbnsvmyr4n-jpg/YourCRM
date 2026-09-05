@@ -36,12 +36,25 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
       documents: await projectDocuments(q, id),
       threads: await projectThreads(q, id),
       timeline: await projectTimeline(q, id),
-      /* Candidates for "add somebody to the job": everyone at the client, and
-         every colleague. Read here rather than in the client component so the
-         list cannot be stale, and so the component never needs a fetch. */
+      /*
+         Candidates for "add somebody to the job": every colleague, and every
+         contact — not only the client's own people.
+
+         It filtered to the client's company first, and that was wrong for the
+         job this screen describes. A build has an engineer, an architect and
+         two subcontractors on it, none of whom work for Heineken; restricting
+         the list to Heineken staff made exactly the people Bradley described
+         unaddable. The client's own are sorted first and everyone carries their
+         company, so the list is still short to scan without being a fence.
+      */
       contacts: (await listContacts(q))
-        .filter((c) => c.companyId === header.companyId || header.companyId === null)
-        .map((c) => ({ id: c.id, name: `${c.firstName} ${c.lastName}`.trim() })),
+        .map((c) => ({
+          id: c.id,
+          name: `${c.firstName} ${c.lastName}`.trim(),
+          company: c.companyName,
+          isClient: c.companyId !== null && c.companyId === header.companyId,
+        }))
+        .sort((a, b) => Number(b.isClient) - Number(a.isClient) || a.name.localeCompare(b.name)),
     };
   });
 

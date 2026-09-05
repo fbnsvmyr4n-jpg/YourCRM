@@ -2,7 +2,9 @@
 
 import { revalidateApp } from "@/server/revalidate";
 import {
+  CHANNELS,
   createMessage,
+  fileThread,
   getMessage,
   restoreMessage,
   setCategory,
@@ -46,6 +48,11 @@ export async function addMessageAction(formData: FormData) {
     const created = await createMessage(q, {
       direction: "sent",
       contactId,
+      /* Which transport this was. Without somewhere to say it, WhatsApp could
+         never legitimately appear on a badge, and offering a channel nothing
+         can produce is the same class of lie as a phantom lead. Defaults to
+         email, which is what this composer actually sends. */
+      channel: pick(formData.get("channel"), CHANNELS) ?? "email",
       subject: text(formData.get("subject"), 200),
       body: multiline(formData.get("body"), 10_000),
     });
@@ -79,6 +86,17 @@ export async function replyAction(id: string, formData: FormData) {
       // Same thread, same person — carried by the link rather than re-derived
       // from a name that might now match somebody else.
       contactId: original.contactId,
+      /* And the same conversation. Without this every reply opened a NEW
+         thread, which is the threading being broken for exactly the case it
+         exists for — silently, because a thread of one looks like a thread.
+         The project comes with it: a reply about the Stellenbosch job is about
+         the Stellenbosch job. */
+      threadId: original.threadId,
+      dealId: original.dealId,
+      /* A reply to a WhatsApp is a WhatsApp. Defaulting it to email would put
+         two transports in one conversation and make the thread's badges
+         disagree with each other. */
+      channel: original.channel,
       subject: `Re: ${subject}`,
       body,
     });
@@ -125,6 +143,13 @@ export async function forwardAction(id: string, formData: FormData) {
     const created = await createMessage(q, {
       direction: "sent",
       contactId,
+      /* A forward opens its OWN thread — deliberately, and this is the one
+         place the two differ. It goes to somebody else, and pulling a third
+         party into the client's conversation would put their reply in front of
+         the client. It keeps the project, because a forward about this job is
+         still about this job. */
+      dealId: original.dealId,
+      channel: original.channel,
       subject: `Fwd: ${original.subject.replace(/^(fwd:\s*)+/i, "")}`,
       body: quoted,
     });
@@ -185,5 +210,34 @@ export async function restoreMessageAction(id: string) {
     if (!messageId) return;
     await restoreMessage(q, messageId);
     revalidateApp();
+  });
+}
+
+/**
+ * File a conversation against a project, or take it off one.
+ *
+ * Takes the THREAD id, not the message id, because that is the unit: a job's
+ * mail is conversations, and half a conversation filed one way and half the
+ * other is a state that makes both screens wrong.
+ *
+ * An empty `dealId` means "not filed", which is a real answer somebody chooses
+ * — a thread wrongly attached needs a way back off, and requiring them to pick
+ * a different wrong project instead is not one.
+ */
+export async function fileThreadAction(threadId: string, dealId: string | null) {
+  return withCurrentTenant(async (q) => {
+    const thread = validId(threadId);
+    if (!thread) return { error: "That conversation could not be identified." };
+
+    const target = dealId === null || dealId === "" ? null : validId(dealId);
+    if (dealId && !target) return { error: "That project could not be identified." };
+
+    const result = await fileThread(q, thread, target);
+    if ("error" in result) return result;
+
+    revalidateApp();
+    const n = result.moved;
+    const plural = `${n} ${n === 1 ? "message" : "messages"}`;
+    return { ok: target ? `${plural} filed against the project.` : `${plural} unfiled.` };
   });
 }

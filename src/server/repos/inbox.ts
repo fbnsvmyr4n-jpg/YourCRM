@@ -26,9 +26,36 @@ export type Folder = (typeof FOLDERS)[number];
 export const DIRECTIONS = ["received", "sent"] as const;
 export type Direction = (typeof DIRECTIONS)[number];
 
+/**
+ * How a message reached you. Mirrors the CHECK on `messages.channel`, and the
+ * pair is pinned together by a test — an enum with two sources of truth is the
+ * drift this project's rules exist to prevent.
+ */
+export const CHANNELS = ["email", "whatsapp", "sms"] as const;
+export type Channel = (typeof CHANNELS)[number];
+
 export type MessageRecord = {
   id: string;
   contactId: string | null;
+  /**
+   * The conversation this belongs to.
+   *
+   * Every message has one, including the first in a chain — a thread of one is
+   * still a thread, and making it nullable would mean every reader handling
+   * "no thread" as a special case forever.
+   */
+  threadId: string;
+  /** The project this conversation is filed against, once somebody files it. */
+  dealId: string | null;
+  /**
+   * The transport it arrived on — not where the contact originally came from.
+   *
+   * The badge in the list used to show the sender's ACQUISITION source, so
+   * somebody who found you through Facebook two years ago and has just sent a
+   * WhatsApp showed a Facebook badge. Two different facts; the source stays on
+   * the contact and this stays on the message.
+   */
+  channel: Channel;
   direction: Direction;
   subject: string;
   body: string;
@@ -46,6 +73,18 @@ export type NewMessage = {
   subject: string;
   body: string;
   contactId?: string | null;
+  /**
+   * Continue an existing conversation. Omit it and the message opens one.
+   *
+   * A reply MUST pass this. Without it every reply started a fresh thread, so
+   * the threading was broken for precisely the case it exists to handle — and
+   * silently, because a thread of one looks like a normal thread.
+   */
+  threadId?: string | null;
+  /** The project it belongs to. Inherited by a reply from what it answers. */
+  dealId?: string | null;
+  /** Defaults to email, which is what this app's composer sends. */
+  channel?: Channel;
   sentAt?: string | Date;
   /** Only set when a human chooses one; leave undefined to let the classifier decide. */
   category?: MsgCategory | null;
@@ -55,6 +94,9 @@ export type NewMessage = {
 type Row = {
   id: string;
   contact_id: string | null;
+  thread_id: string;
+  deal_id: string | null;
+  channel: Channel;
   direction: Direction;
   subject: string;
   body: string;
@@ -64,8 +106,8 @@ type Row = {
   deleted_at: Date | null;
 };
 
-const COLUMNS = `m.id, m.contact_id, m.direction, m.subject, m.body, m.category,
-                 m.unread, m.sent_at, m.deleted_at`;
+const COLUMNS = `m.id, m.contact_id, m.thread_id, m.deal_id, m.channel, m.direction,
+                 m.subject, m.body, m.category, m.unread, m.sent_at, m.deleted_at`;
 
 function toRecord(r: Row): MessageRecord {
   // The classifier takes paragraphs, which is how the body was modelled before
@@ -75,6 +117,9 @@ function toRecord(r: Row): MessageRecord {
   return {
     id: r.id,
     contactId: r.contact_id,
+    threadId: r.thread_id,
+    dealId: r.deal_id,
+    channel: r.channel,
     direction: r.direction,
     subject: r.subject,
     body: r.body,
@@ -146,17 +191,23 @@ export async function createMessage(q: TenantQuery, input: NewMessage): Promise<
   if (!DIRECTIONS.includes(input.direction)) {
     throw new Error(`Unknown direction: ${input.direction}`);
   }
+  /* Its own id when nothing is being continued. Generated here rather than
+     defaulted in SQL so the value is the same shape as the backfill's and there
+     is exactly one place that decides what a thread id looks like. */
+  const id = newId(input.subject);
   const row = await q.one<Row>(
     `WITH inserted AS (
        INSERT INTO messages
-         (id, sub_account_id, contact_id, direction, subject, body, category, unread, sent_at)
-       VALUES ($2, $1, $3, $4, $5, $6, $7, $8, COALESCE($9, now()))
+         (id, sub_account_id, contact_id, thread_id, deal_id, channel, direction,
+          subject, body, category, unread, sent_at)
+       VALUES ($2, $1, $3, COALESCE($10, 'th-' || $2), $11, COALESCE($12, 'email'),
+               $4, $5, $6, $7, $8, COALESCE($9, now()))
        RETURNING *
      )
      SELECT ${COLUMNS} FROM inserted m WHERE m.sub_account_id = $1`,
     [
       q.ctx.subAccountId,
-      newId(input.subject),
+      id,
       input.contactId ?? null,
       input.direction,
       input.subject.trim(),
@@ -166,6 +217,9 @@ export async function createMessage(q: TenantQuery, input: NewMessage): Promise<
       // outgoing message in the unread count.
       input.unread ?? input.direction === "received",
       input.sentAt ? checkWhen(input.sentAt) : null,
+      input.threadId ?? null,
+      input.dealId ?? null,
+      input.channel ?? null,
     ]
   );
   if (!row) throw new Error("Message was not created.");
@@ -277,4 +331,87 @@ export async function unreadCount(q: TenantQuery): Promise<number> {
     [q.ctx.subAccountId]
   );
   return Number(row?.n ?? 0);
+}
+
+/**
+ * File a whole conversation against a project — or unfile it.
+ *
+ * The THREAD, never a single message. Half a conversation on one job and half
+ * on none is a state nobody asked for and everybody would have to reason about:
+ * the project's thread list would show it, its message count would be wrong,
+ * and the reply that mattered could be the half that is missing.
+ *
+ * The deal is confirmed to be in this tenant before anything is written. Row
+ * level security refuses a foreign one anyway, but a caller passing an id from
+ * another workspace should get an answer rather than a constraint violation.
+ *
+ * Returns how many messages moved, which is what lets the caller say
+ * "3 messages filed" rather than a bare "done".
+ */
+export async function fileThread(
+  q: TenantQuery,
+  threadId: string,
+  dealId: string | null
+): Promise<{ moved: number } | { error: string }> {
+  if (dealId !== null) {
+    const deal = await q.one<{ id: string }>(
+      `SELECT id FROM deals WHERE id = $2 AND sub_account_id = $1 AND deleted_at IS NULL`,
+      [q.ctx.subAccountId, dealId]
+    );
+    if (!deal) return { error: "That project is not available on this account." };
+  }
+
+  const rows = await q.rows<{ id: string }>(
+    `UPDATE messages SET deal_id = $3
+      WHERE sub_account_id = $1 AND thread_id = $2 AND deleted_at IS NULL
+      RETURNING id`,
+    [q.ctx.subAccountId, threadId, dealId]
+  );
+  return { moved: rows.length };
+}
+
+export type ProjectOption = {
+  id: string;
+  title: string;
+  site: string | null;
+  companyId: string | null;
+  companyName: string | null;
+};
+
+/**
+ * The projects a conversation could plausibly belong to.
+ *
+ * Live work only — filing mail against a job finished two years ago is almost
+ * always a mis-tap, and the list stays short enough to be a choice rather than
+ * a search.
+ *
+ * It returns the company each project is for and stops there. WHICH of them to
+ * suggest depends on the message open at the time, and that changes with every
+ * click; computing it here would mean re-reading every project on each one.
+ * The screen matches `companyId` against the sender's own — see the inbox view.
+ */
+export async function projectOptions(q: TenantQuery): Promise<ProjectOption[]> {
+  const rows = await q.rows<{
+    id: string;
+    title: string;
+    site: string | null;
+    company_id: string | null;
+    company_name: string | null;
+  }>(
+    `SELECT d.id, d.title, d.site, d.company_id, co.name AS company_name
+       FROM deals d
+       LEFT JOIN companies co
+              ON co.id = d.company_id AND co.deleted_at IS NULL
+      WHERE d.sub_account_id = $1 AND d.deleted_at IS NULL
+        AND d.stage IN ('prospect', 'discovery', 'demo', 'won', 'delivery')
+      ORDER BY co.name NULLS LAST, d.title`,
+    [q.ctx.subAccountId]
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    title: r.title,
+    site: r.site,
+    companyId: r.company_id,
+    companyName: r.company_name,
+  }));
 }

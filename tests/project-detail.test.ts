@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { startTestDb, type TestDb, AGENCY, TENANT_A, TENANT_B, USER_A } from "./helpers/pg";
 import type { TenantContext } from "../src/server/tenant";
 
@@ -354,5 +356,236 @@ describe("the timeline", () => {
 
   it("shows another tenant nothing", async () => {
     expect(await inB((q) => projects.projectTimeline(q, JOB))).toEqual([]);
+  });
+});
+
+describe("filing a conversation against a project", () => {
+  let inbox: typeof import("../src/server/repos/inbox");
+
+  beforeAll(async () => {
+    inbox = await import("../src/server/repos/inbox");
+  });
+
+  beforeEach(() =>
+    db.seed(`
+      INSERT INTO messages (id, sub_account_id, contact_id, thread_id, direction, subject, body, sent_at) VALUES
+        ('fm1', '${TENANT_A}', 'ct_procure', 'th_file', 'received', 'Scope', 'a', '2026-09-01T09:00:00Z'),
+        ('fm2', '${TENANT_A}', NULL,         'th_file', 'sent',     'Re: Scope', 'b', '2026-09-02T09:00:00Z'),
+        ('fm3', '${TENANT_A}', 'ct_site',    'th_other','received', 'Unrelated', 'c', '2026-09-03T09:00:00Z')`)
+  );
+
+  it("files every message in the thread, and only that thread", async () => {
+    // The unit is the conversation. Half a thread on a job and half on nothing
+    // makes the project's message count wrong and can hide the reply that
+    // mattered.
+    const result = await inA((q) => inbox.fileThread(q, "th_file", JOB));
+    expect(result).toEqual({ moved: 2 });
+
+    const threads = await inA((q) => projects.projectThreads(q, JOB));
+    expect(threads.map((t) => t.id)).toEqual(["th_file"]);
+    expect(threads[0].messages).toBe(2);
+  });
+
+  it("takes a thread back off a project", async () => {
+    await inA((q) => inbox.fileThread(q, "th_file", JOB));
+    expect(await inA((q) => inbox.fileThread(q, "th_file", null))).toEqual({ moved: 2 });
+    expect(await inA((q) => projects.projectThreads(q, JOB))).toEqual([]);
+  });
+
+  it("refuses a project from another workspace", async () => {
+    await db.seed(`INSERT INTO deals (id, sub_account_id, title) VALUES ('d_other', '${TENANT_B}', 'Theirs')`);
+    const result = await inA((q) => inbox.fileThread(q, "th_file", "d_other"));
+    expect(result).toEqual({ error: expect.stringContaining("not available") });
+    // Refused, and nothing moved.
+    const still = await inA((q) =>
+      q.one<{ n: string }>(`SELECT count(*)::text AS n FROM messages WHERE deal_id IS NOT NULL`)
+    );
+    expect(still?.n).toBe("0");
+  });
+
+  it("gives a new message its own thread rather than none", async () => {
+    /*
+       The defect this closes. `thread_id` was backfilled for history and then
+       never set on anything new, so from the day it shipped every fresh
+       message had a null thread — a column populated for old rows and empty
+       for new ones, which is worse than not having it.
+    */
+    const created = await inA((q) =>
+      inbox.createMessage(q, { direction: "sent", subject: "Fresh", body: "x" })
+    );
+    expect(created.threadId).toBeTruthy();
+    expect(created.threadId).toContain("th-");
+  });
+
+  it("keeps a reply in the thread it answers, carrying the project", async () => {
+    await inA((q) => inbox.fileThread(q, "th_file", JOB));
+    const reply = await inA((q) =>
+      inbox.createMessage(q, {
+        direction: "sent",
+        subject: "Re: Scope",
+        body: "y",
+        threadId: "th_file",
+        dealId: JOB,
+      })
+    );
+    expect(reply.threadId).toBe("th_file");
+    expect(reply.dealId).toBe(JOB);
+
+    const threads = await inA((q) => projects.projectThreads(q, JOB));
+    expect(threads[0].messages, "the reply started its own thread").toBe(3);
+  });
+
+  it("offers only live projects to file against", async () => {
+    await db.seed(`
+      INSERT INTO deals (id, sub_account_id, company_id, title, stage)
+      VALUES ('d_done', '${TENANT_A}', 'co_heineken', 'Finished years ago', 'lost')`);
+    const options = await inA((q) => inbox.projectOptions(q));
+    expect(options.map((o) => o.id)).toContain(JOB);
+    expect(options.map((o) => o.id), "a lost job was offered").not.toContain("d_done");
+  });
+
+  it("carries the company on each option, so the sender's own can be marked", async () => {
+    const option = (await inA((q) => inbox.projectOptions(q))).find((o) => o.id === JOB);
+    expect(option?.companyId).toBe("co_heineken");
+    expect(option?.companyName).toBe("Heineken");
+  });
+});
+
+describe("how a message arrived", () => {
+  let inbox: typeof import("../src/server/repos/inbox");
+  beforeAll(async () => {
+    inbox = await import("../src/server/repos/inbox");
+  });
+
+  it("defaults to email, which is what this app's composer sends", async () => {
+    const m = await inA((q) =>
+      inbox.createMessage(q, { direction: "sent", subject: "Hello", body: "x" })
+    );
+    expect(m.channel).toBe("email");
+  });
+
+  it("records a WhatsApp when somebody says so", async () => {
+    // The reason the column exists. Without a way to SET it the badge could
+    // only ever draw an envelope, and a channel nothing can produce is an
+    // option that lies about what the product does.
+    const m = await inA((q) =>
+      inbox.createMessage(q, {
+        direction: "received",
+        subject: "Crane?",
+        body: "x",
+        channel: "whatsapp",
+      })
+    );
+    expect(m.channel).toBe("whatsapp");
+  });
+
+  it("refuses a transport the product does not have", async () => {
+    await expect(
+      db.seed(`INSERT INTO messages (id, sub_account_id, direction, subject, channel)
+               VALUES ('m_bad', '${TENANT_A}', 'received', 'x', 'carrier-pigeon')`)
+    ).rejects.toThrow();
+  });
+
+  it("keeps a reply on the same transport as what it answers", async () => {
+    /* A reply to a WhatsApp is a WhatsApp. Defaulting it to email would put two
+       transports in one conversation and make the thread's own badges disagree
+       with each other. */
+    const first = await inA((q) =>
+      inbox.createMessage(q, {
+        direction: "received",
+        subject: "Crane?",
+        body: "x",
+        channel: "whatsapp",
+      })
+    );
+    const reply = await inA((q) =>
+      inbox.createMessage(q, {
+        direction: "sent",
+        subject: "Re: Crane?",
+        body: "y",
+        threadId: first.threadId,
+        channel: first.channel,
+      })
+    );
+    expect(reply.channel).toBe("whatsapp");
+  });
+
+  it("matches the CHECK constraint exactly", () => {
+    /* The enum exists twice — as a CHECK in the schema and as an `as const`
+       array in TypeScript — because the database must reject bad data and the
+       compiler must reject bad code. Pinned together here rather than trusted;
+       `role` had already drifted this way once. */
+    const schema = readFileSync(join(__dirname, "..", "src", "server", "schema.sql"), "utf8");
+    const m = schema.match(/CHECK \(channel IN \(([^)]*)\)\)/);
+    expect(m, "no CHECK constraint on messages.channel").toBeTruthy();
+    const inSchema = [...m![1].matchAll(/'([^']+)'/g)].map((x) => x[1]).sort();
+    expect(inSchema).toEqual([...inbox.CHANNELS].sort());
+  });
+});
+
+describe("reading numbers off a document form", () => {
+  let decimal: typeof import("../src/server/validate").decimal;
+  beforeAll(async () => {
+    ({ decimal } = await import("../src/server/validate"));
+  });
+
+  /*
+     The regression this exists for.
+
+     A purchase order line entered as 3.5 days at $12,000 was stored as 4 days
+     and totalled $58,000 instead of $50,750. The form accepted the number,
+     changed it, and said nothing — because the action validated quantity with
+     `count`, which rounds to an integer, and unit price with `money`, which
+     rounds to whole currency units.
+
+     Nothing in the suite caught it: the repo tests insert quantities directly
+     as SQL, so they never went through the validator. Only using the real form
+     found it.
+  */
+  it("keeps a fractional quantity, which is the whole point of the column", () => {
+    expect(decimal("3.5", 1_000_000, 3)).toBe(3.5);
+    expect(decimal("2.5", 1_000_000, 3)).toBe(2.5);
+    expect(decimal("12.5", 1_000_000, 3)).toBe(12.5);
+  });
+
+  it("keeps cents on a unit price", () => {
+    // $12,000.50 became $12,001 before it was ever converted to cents.
+    expect(decimal("12000.50", 100_000_000, 2)).toBe(12000.5);
+    expect(Math.round((decimal("12000.50", 100_000_000, 2) ?? 0) * 100)).toBe(1200050);
+  });
+
+  it("rounds to the column's precision rather than refusing the number", () => {
+    // Somebody pasting a third from a spreadsheet means a third. Storing three
+    // decimals of it beats rejecting them, and matching NUMERIC(14,3) means the
+    // database does not round it a second time.
+    expect(decimal("3.33333", 1_000_000, 3)).toBe(3.333);
+  });
+
+  it("refuses what is not a number rather than storing a zero", () => {
+    // A quotation is a document somebody signs; a line silently priced at zero
+    // is worse than a refusal.
+    expect(decimal("abc", 1000, 3)).toBeNull();
+    expect(decimal("-2", 1000, 3)).toBeNull();
+    expect(decimal("1e999", 1000, 3)).toBeNull();
+  });
+
+  it("treats an empty field as nothing entered", () => {
+    expect(decimal("", 1000, 3)).toBe(0);
+    expect(decimal(undefined, 1000, 3)).toBe(0);
+  });
+
+  it("stores and totals a fractional line exactly, end to end", async () => {
+    // 3.5 x 12,000 = 42,000 and 3.5 x 2,500 = 8,750 -> 50,750.
+    await db.seed(`
+      INSERT INTO documents (id, sub_account_id, deal_id, kind, number)
+      VALUES ('doc_frac', '${TENANT_A}', '${JOB}', 'purchase_order', 'PO-91');
+      INSERT INTO document_lines (id, sub_account_id, document_id, description, quantity, unit_cents, position) VALUES
+        ('lf1', '${TENANT_A}', 'doc_frac', 'Mobile crane hire (days)', 3.5, 1200000, 0),
+        ('lf2', '${TENANT_A}', 'doc_frac', 'Operator', 3.5, 250000, 1)`);
+    const doc = (await inA((q) => projects.projectDocuments(q, JOB))).find(
+      (d) => d.number === "PO-91"
+    );
+    expect(doc?.lines.map((l) => l.quantity)).toEqual([3.5, 3.5]);
+    expect(doc?.totalCents).toBe(5075000);
   });
 });

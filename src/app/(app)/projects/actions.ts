@@ -2,7 +2,7 @@
 
 import { revalidateApp } from "@/server/revalidate";
 import { withCurrentTenant } from "@/server/tenant-session";
-import { count, id as validId, money, multiline, pick, text } from "@/server/validate";
+import { decimal, id as validId, multiline, pick, text } from "@/server/validate";
 
 /**
  * Running a project: who is on it, what it is quoted at, when it is due.
@@ -16,6 +16,8 @@ import { count, id as validId, money, multiline, pick, text } from "@/server/val
 export type FormState = { ok?: string; error?: string } | undefined;
 
 const DOC_KINDS = ["quote", "purchase_order", "invoice"] as const;
+/** A single line item's unit price ceiling, in whole currency units. */
+const MAX_UNIT_PRICE = 100_000_000;
 const DOC_STATUSES = ["draft", "sent", "accepted", "declined", "paid", "cancelled"] as const;
 
 /** A `YYYY-MM-DD` from a date input, or null. Never parsed into a Date. */
@@ -177,15 +179,39 @@ export async function createDocumentAction(
     const quantities = formData.getAll("lineQuantity");
     const units = formData.getAll("lineUnit");
 
+    /*
+       Both of these are decimals, and both were wrong.
+
+       `count` rounds to an integer, so a line of 3.5 days was stored as 4 —
+       a purchase order that went out at $58,000 instead of $50,750, with the
+       form accepting the number and silently changing it. `money` rounds to
+       whole units, so a unit price of $12,000.50 became $12,001 before it was
+       ever converted to cents.
+
+       Three decimal places for quantity, matching NUMERIC(14,3) on the column,
+       so nothing is accepted here and then rounded again by the database.
+    */
     const lines = descriptions
       .map((description, i) => ({
         description,
         // A quantity of zero is meaningful — a line included at no charge —
         // so only a MISSING quantity falls back to one.
-        quantity: count(quantities[i], 1_000_000) ?? 1,
-        unitCents: Math.round((money(units[i]) ?? 0) * 100),
+        quantity: decimal(quantities[i], 1_000_000, 3) ?? 1,
+        unitCents: Math.round((decimal(units[i], MAX_UNIT_PRICE, 2) ?? 0) * 100),
       }))
       .filter((l) => l.description !== "");
+
+    /* A line whose numbers could not be read is refused outright rather than
+       quietly priced at zero. A quotation is a document somebody signs. */
+    const unreadable = descriptions.some(
+      (description, i) =>
+        description !== "" &&
+        (decimal(quantities[i], 1_000_000, 3) === null ||
+          decimal(units[i], MAX_UNIT_PRICE, 2) === null)
+    );
+    if (unreadable) {
+      return { error: "A quantity or unit price could not be read as a number." };
+    }
 
     if (lines.length === 0) {
       return { error: "Add at least one line, so the document has a total." };

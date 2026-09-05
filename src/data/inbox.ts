@@ -1,3 +1,4 @@
+import type { Channel } from "@/server/repos/inbox";
 import type { AvatarColor } from "@/components/ui/Avatar";
 
 export type MsgFolder = "unread" | "assigned" | "sent" | "received" | "trash";
@@ -32,6 +33,12 @@ export type Attachment = {
 
 export type Message = {
   id: string;
+  /** The conversation. Filing works on this, never on one message. */
+  threadId: string;
+  /** The project this conversation is filed against, if any. */
+  dealId: string | null;
+  /** How it arrived — email, WhatsApp or SMS. Not the sender's lead source. */
+  channel: Channel;
   /**
    * The contact this message belongs to, by id.
    *

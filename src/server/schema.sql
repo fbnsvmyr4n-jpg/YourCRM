@@ -1243,3 +1243,33 @@ CREATE INDEX IF NOT EXISTS messages_thread_idx
   ON messages (sub_account_id, thread_id) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS messages_deal_idx
   ON messages (sub_account_id, deal_id) WHERE deleted_at IS NULL;
+
+-- ---------------------------------------------------------------------------
+-- How a message actually reached you.
+--
+-- The inbox badge showed the CONTACT'S acquisition source — Facebook, Google
+-- Ads, Referral — which is a real fact about the person and tells you nothing
+-- about the message. Somebody who first found you through Facebook two years
+-- ago and has just sent a WhatsApp still showed a Facebook badge, on a screen
+-- whose entire question is "what came in and from where".
+--
+-- Those are two different things and the product now stores both: the source
+-- stays on the contact, and the transport lives on the message.
+--
+-- `email` is the default, and it is the honest one rather than a convenience.
+-- Every message that exists today was either composed in this app — whose
+-- composer is an email composer, sending through Resend — or logged by hand as
+-- correspondence. ADD COLUMN with a DEFAULT fills the existing rows, so the
+-- backfill is the default and there is no second statement to keep in step.
+--
+-- No CHECK value is offered that nothing can produce. `whatsapp` and `sms`
+-- appear because somebody records a conversation on one, which the composer
+-- now asks for — a channel nothing could ever set would be a badge that never
+-- draws and an option that lies about what the product does.
+-- ---------------------------------------------------------------------------
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS channel TEXT NOT NULL DEFAULT 'email';
+
+ALTER TABLE messages
+  DROP CONSTRAINT IF EXISTS messages_channel_check,
+  ADD CONSTRAINT messages_channel_check
+    CHECK (channel IN ('email', 'whatsapp', 'sms'));

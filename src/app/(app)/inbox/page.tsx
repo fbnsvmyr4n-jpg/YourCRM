@@ -1,24 +1,15 @@
-import { listMessages, purgeExpiredMessages } from "@/server/repos/inbox";
+import { listMessages, projectOptions, purgeExpiredMessages } from "@/server/repos/inbox";
 import { contactSummaries } from "@/server/contact-summaries";
 import { listContacts } from "@/server/repos/contacts";
-import { listDeals } from "@/server/repos/deals";
 import { decorateMessage } from "@/server/decorate-message";
 import { withTenantPage } from "@/server/tenant-session";
-import type { ContactChannel } from "@/components/ui/ChannelBadge";
 import { InboxView } from "./InboxView";
 
 export const dynamic = "force-dynamic";
 
-/** The source values the badge understands, mapped from what the deal stores. */
-const SOURCE_LABEL: Record<string, ContactChannel> = {
-  google_ads: "Google Ads",
-  facebook: "Facebook",
-  referral: "Referral",
-  phone_call: "Phone Call",
-};
-
 export default async function InboxPage() {
-  const { messages, contactFor, channelFor, people, recent, revenueFor } = await withTenantPage(async (q) => {
+  const { messages, contactFor, people, recent, revenueFor, projects, companyFor } =
+    await withTenantPage(async (q) => {
     /* Before reading, so nothing expired is listed and then vanishes on the
        next load. There is no scheduler in this app; the bin is emptied by
        whoever opens the inbox next, which for an account in use is often
@@ -33,7 +24,6 @@ export default async function InboxPage() {
       await listMessages(q, "trash"),
     ];
     const contacts = await listContacts(q);
-    const deals = await listDeals(q);
 
     const senders = contacts.map((c) => ({
       id: c.id,
@@ -66,17 +56,6 @@ export default async function InboxPage() {
      * than a name match. Everything here arrives by email, so that fallback is
      * true rather than a placeholder.
      */
-    const sourceByContact = new Map<string, string>();
-    for (const d of [...deals].reverse()) {
-      if (d.contactId) sourceByContact.set(d.contactId, d.source);
-    }
-
-    const channelFor: Record<string, ContactChannel> = {};
-    for (const m of rows) {
-      const source = m.contactId ? sourceByContact.get(m.contactId) : undefined;
-      channelFor[m.id] = (source && SOURCE_LABEL[source]) || "Email";
-    }
-
     /**
      * Who has been written to or heard from most recently.
      *
@@ -147,10 +126,20 @@ export default async function InboxPage() {
     return {
       messages: rows.map((m) => decorateMessage(m, senders)),
       contactFor,
-      channelFor,
       people: addressBook,
       recent: recentPeople,
       revenueFor,
+      /* Every live project, once, for the whole screen. Fetched per selected
+         message it would be a round trip on every click through the list, and
+         the list is the thing people click through fastest. */
+      projects: await projectOptions(q),
+      /* Which company each sender belongs to, so the view can mark the
+         projects that are probably the right one for the message open. A map
+         rather than a lookup: the view has a contact id and needs an answer
+         without another query. */
+      companyFor: Object.fromEntries(
+        contacts.filter((c) => c.companyId).map((c) => [c.id, c.companyId as string])
+      ),
     };
   });
 
@@ -159,9 +148,10 @@ export default async function InboxPage() {
       messages={messages}
       contactFor={contactFor}
       revenueFor={revenueFor}
-      channelFor={channelFor}
       people={people}
       recent={recent}
+      projects={projects}
+      companyFor={companyFor}
     />
   );
 }

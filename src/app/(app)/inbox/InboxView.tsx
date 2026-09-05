@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import Link from "next/link";
 import {
   CalendarCheck,
+  Briefcase,
   ClipboardList,
   ChevronLeft,
   CornerUpLeft,
@@ -29,7 +30,7 @@ import {
   X,
 } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
-import { ChannelBadge, type ContactChannel } from "@/components/ui/ChannelBadge";
+import { MessageChannelBadge } from "@/components/ui/MessageChannelBadge";
 import { ClientClock } from "@/components/ui/ClientClock";
 import { PersonField, addressablePeople, type Person } from "@/components/ui/PersonField";
 import { TimeAgo } from "@/components/ui/TimeAgo";
@@ -48,12 +49,14 @@ import { AnchoredMenu } from "@/components/ui/AnchoredMenu";
 import { Overlay } from "@/components/ui/Overlay";
 import { SortMenu } from "@/components/ui/SortMenu";
 import { useOpenFromQuery } from "@/lib/useOpenFromQuery";
+import type { ProjectOption } from "@/server/repos/inbox";
 import { useDraft, hasContent, type Draft } from "@/lib/use-draft";
 import { SwipeToDelete } from "@/components/ui/SwipeToDelete";
 import {
   addMessageAction,
   forwardAction,
   markReadAction,
+  fileThreadAction,
   replyAction,
   restoreMessageAction,
   trashMessageAction,
@@ -114,21 +117,24 @@ export type ContactRevenue = { won: number; open: number; deals: number };
 export function InboxView({
   messages,
   contactFor,
-  channelFor,
   people,
   recent,
   revenueFor,
+  projects,
+  companyFor,
 }: {
   messages: Message[];
   contactFor: Record<string, string>;
   /** What each sender is worth, keyed by contact id — for the Revenue action. */
   revenueFor: Record<string, ContactRevenue>;
-  /** Where each sender came from — a real source, resolved on the server. */
-  channelFor: Record<string, ContactChannel>;
   /** Contacts and leads, so addressing a new email is recognition, not recall. */
   people: Person[];
   /** Most recently corresponded with, newest first — offered before typing. */
   recent: Person[];
+  /** Live projects a conversation can be filed against. */
+  projects: ProjectOption[];
+  /** Contact id → company id, for marking the sender's own jobs. */
+  companyFor: Record<string, string>;
 }) {
   /**
    * A message in progress survives the composer closing.
@@ -423,7 +429,6 @@ export function InboxView({
           onSelect={handleSelect}
           query={query}
           setQuery={setQuery}
-          channelFor={channelFor}
           sort={sort}
           setSort={setSort}
         />
@@ -434,6 +439,8 @@ export function InboxView({
             message={selected}
             people={people}
             recent={recent}
+            projects={projects}
+            companyFor={companyFor}
             busy={busy}
             onTrash={() => handleTrash(selected.id)}
             onRestore={() => handleRestore(selected.id)}
@@ -505,7 +512,6 @@ function MessageList({
   onSelect,
   query,
   setQuery,
-  channelFor,
   className,
   sort,
   setSort,
@@ -523,7 +529,6 @@ function MessageList({
   onSelect: (id: string) => void;
   query: string;
   setQuery: (q: string) => void;
-  channelFor: Record<string, ContactChannel>;
   className?: string;
   sort: InboxSort;
   setSort: (s: InboxSort) => void;
@@ -678,7 +683,13 @@ function MessageList({
                     the badge's, so it never reaches the name or the preview. */}
                 <div className="relative h-12 w-12 shrink-0">
                   <Avatar initials={m.initials} color={m.color} />
-                  <ChannelBadge channel={channelFor[m.id] ?? "Email"} />
+                  {/* How the message ARRIVED, not where the sender came from.
+                      This showed the contact's acquisition source, so a lead
+                      who found the business through Facebook two years ago and
+                      had just sent a WhatsApp still drew a Facebook badge — on
+                      the one screen whose question is what came in and by what
+                      route. */}
+                  <MessageChannelBadge channel={m.channel} />
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-2">
@@ -720,6 +731,8 @@ function Reader({
   message,
   people,
   recent,
+  projects,
+  companyFor,
   busy,
   onTrash,
   onRestore,
@@ -729,6 +742,10 @@ function Reader({
   message: Message;
   people: Person[];
   recent: Person[];
+  /** Live projects this conversation could belong to. The sender's own first. */
+  projects: ProjectOption[];
+  /** Contact id → company id, so the sender's own jobs can be marked. */
+  companyFor: Record<string, string>;
   busy: boolean;
   onTrash: () => void;
   onRestore: () => void;
@@ -765,7 +782,13 @@ function Reader({
           two-line column. */}
       <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] pb-4">
         <div className="flex min-w-0 items-center gap-3">
-          <Avatar initials={message.initials} color={message.color} size="lg" />
+          {/* The same badge as the list. Knowing you are answering a WhatsApp
+              rather than an email changes how you write the reply, so it
+              belongs on the screen where the reply is written too. */}
+          <div className="relative shrink-0">
+            <Avatar initials={message.initials} color={message.color} size="lg" />
+            <MessageChannelBadge channel={message.channel} />
+          </div>
           <div className="min-w-0">
             <p className="truncate text-base font-semibold">{message.name}</p>
             {message.at ? (
@@ -773,6 +796,14 @@ function Reader({
             ) : (
               <p className="text-xs text-faint">No timestamp recorded</p>
             )}
+            {/* In the header's own column rather than a band of its own.
+
+                Measured on a 375px screen: as a separate bordered row it cost
+                60px — exactly as tall as this header — while the message
+                itself had 107px. A fifth of the card, and the tallest thing on
+                it after the body, for one piece of metadata. Here it costs
+                about 24px and the body gets the difference. */}
+            <FileUnderProject message={message} projects={projects} companyFor={companyFor} />
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1">
@@ -1491,16 +1522,32 @@ function ComposeModal({
             />
             <input type="hidden" name="to" value={to} />
           </div>
-          <label className="block">
-            <span className="mb-1.5 block text-xs font-medium text-muted">Subject</span>
-            <input
-              name="subject"
-              value={draft.subject}
-              onChange={(e) => save({ ...draft, subject: e.target.value })}
-              placeholder="Subject line"
-              className="field-input"
-            />
-          </label>
+          <div className="grid grid-cols-1 gap-4 @min-[440px]:grid-cols-[1fr_auto]">
+            <label className="block">
+              <span className="mb-1.5 block text-xs font-medium text-muted">Subject</span>
+              <input
+                name="subject"
+                value={draft.subject}
+                onChange={(e) => save({ ...draft, subject: e.target.value })}
+                placeholder="Subject line"
+                className="field-input"
+              />
+            </label>
+            {/* Which transport this was.
+
+                It exists because the badge in the list has to be able to say
+                something other than "email", and a channel nothing can set is
+                an icon that never draws. Recording a WhatsApp conversation is
+                a real thing people do; this is where they say so. */}
+            <label className="block">
+              <span className="mb-1.5 block text-xs font-medium text-muted">Channel</span>
+              <select name="channel" defaultValue="email" className="field-input">
+                <option value="email">Email</option>
+                <option value="whatsapp">WhatsApp</option>
+                <option value="sms">SMS</option>
+              </select>
+            </label>
+          </div>
           <label className="block">
             <span className="mb-1.5 block text-xs font-medium text-muted">Message</span>
             <textarea
@@ -1534,5 +1581,115 @@ function ComposeModal({
       </form>
     </div>
     </Overlay>
+  );
+}
+
+/**
+ * Which project this conversation belongs to.
+ *
+ * The single most valuable thing you can record about an email in a business
+ * that runs on jobs, and until now there was nowhere to put it — mail belonged
+ * to a person and to nothing else, so "the thread about the Stellenbosch
+ * warehouse" could not be asked for.
+ *
+ * It files the THREAD, not the message. Replies inherit it automatically, so
+ * this is a decision made once per conversation rather than once per email.
+ *
+ * The sender's own company is marked "suggested" and sorted first, and that is
+ * as far as it goes: nothing is filed on the reader's behalf. A guess that puts
+ * a client's email on the wrong job is worse than leaving it unfiled, because
+ * nobody goes looking for a mistake they were never told about — and the moment
+ * a client has two live sites the guess is a coin toss.
+ */
+function FileUnderProject({
+  message,
+  projects,
+  companyFor,
+}: {
+  message: Message;
+  projects: ProjectOption[];
+  companyFor: Record<string, string>;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
+  const filed = projects.find((p) => p.id === message.dealId);
+
+  /*
+     The sender's own company's jobs, first and marked.
+
+     A suggestion and no more — nothing is filed on the reader's behalf. An
+     email put on the wrong job by a guess is worse than one left unfiled,
+     because nobody goes looking for a mistake they were never told about, and
+     the moment a client has two live sites the guess is a coin toss.
+  */
+  const senderCompany = message.contactId ? companyFor[message.contactId] : undefined;
+  const ordered = useMemo(() => {
+    const suggested = (p: ProjectOption) =>
+      senderCompany !== undefined && p.companyId === senderCompany;
+    return [...projects]
+      .map((p) => ({ ...p, suggested: suggested(p) }))
+      .sort((a, b) => Number(b.suggested) - Number(a.suggested));
+  }, [projects, senderCompany]);
+
+  /* Nothing to file against, and nothing useful to say about it. A dropdown
+     with no options is a control that cannot be used. */
+  if (projects.length === 0 && !message.dealId) return null;
+
+  async function choose(dealId: string) {
+    setSaving(true);
+    setResult(null);
+    try {
+      const r = await fileThreadAction(message.threadId, dealId || null);
+      setResult(("ok" in r ? r.ok : r.error) ?? null);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="mt-1.5 flex min-w-0 items-center gap-1.5">
+      <Briefcase className="h-3 w-3 shrink-0 text-faint" aria-hidden />
+      <label className="sr-only" htmlFor={`file-${message.threadId}`}>
+        File this conversation against a project
+      </label>
+      <select
+        id={`file-${message.threadId}`}
+        value={message.dealId ?? ""}
+        disabled={saving}
+        onChange={(e) => choose(e.target.value)}
+        /* `max-w-full`, not `flex-1`. Stretched, it filled 218px of a 333px
+           card and read as the primary control on a screen whose primary
+           control is Reply. Sized to its content it is what it should be:
+           a label you can change. */
+        className="focus-ring min-w-0 max-w-full truncate rounded-md border border-[var(--border)] px-1.5 py-0.5 font-medium disabled:opacity-60"
+        /* The size is set here, not with `text-xs`.
+
+           Measured: the class was on it and the computed size was still 16px,
+           which is why it dwarfed the timestamp beside it. A select is a
+           replaced element and browsers apply their own font to it; an inline
+           style is the one thing that reliably wins. Same reason the Notes
+           search sets its padding this way. */
+        style={{
+          fontSize: 11,
+          lineHeight: "16px",
+          ...(filed
+            ? { background: "var(--accent-soft)", color: "var(--accent)" }
+            : { background: "transparent", color: "var(--text-faint)" }),
+        }}
+      >
+        <option value="">Not filed to a project</option>
+        {ordered.map((p) => (
+          <option key={p.id} value={p.id}>
+            {[p.companyName, p.site, p.title].filter(Boolean).join(" · ")}
+            {p.suggested ? "  — this sender's client" : ""}
+          </option>
+        ))}
+      </select>
+
+      {/* Truncated rather than wrapped: this sits in the header's column and a
+          two-line confirmation would push the message down to say something
+          that is already visible in the control itself. */}
+      {result && <span className="min-w-0 truncate text-[11px] text-faint">{result}</span>}
+    </div>
   );
 }

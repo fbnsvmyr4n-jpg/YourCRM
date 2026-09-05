@@ -180,7 +180,17 @@ describe("the schema can be applied to an existing database", () => {
   });
 
   it("adds columns only with IF NOT EXISTS", () => {
-    const adds = [...SCHEMA.matchAll(/ADD COLUMN(?! IF NOT EXISTS)/g)];
+    /*
+       Matched against the STATEMENTS, not the file.
+
+       This read the raw text and fired on a `--` comment that happened to
+       contain the words "ADD COLUMN with a DEFAULT" — prose explaining the
+       very rule it was checking. A detector that reports a violation nobody
+       committed gets read as noise, and the next real one is read as noise
+       too. Comments are stripped first so it measures SQL.
+    */
+    const sql = SCHEMA.replace(/^\s*--.*$/gm, "");
+    const adds = [...sql.matchAll(/ADD COLUMN(?! IF NOT EXISTS)/g)];
     expect(adds.length, "an ADD COLUMN without IF NOT EXISTS breaks re-application").toBe(0);
   });
 });
