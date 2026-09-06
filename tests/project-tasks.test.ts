@@ -479,3 +479,35 @@ describe("the workspace's own days off", () => {
     expect(after?.startsOn).toBe("2026-09-24");
   });
 });
+
+describe("a task has one length, not two", () => {
+  it("counts duration in WORKING days, the same unit the scheduler moves in", async () => {
+    /*
+       Friday to Monday is two days of work, not four days of calendar. It read
+       "4 days" in the task list while the cascade preserved it as two — so the
+       same task had two lengths, and moving it to a Monday-Tuesday slot would
+       have displayed "2 days" as though it had shrunk.
+    */
+    const { task } = await add("Friday to Monday", "2026-09-18", "2026-09-21");
+    expect(task?.durationDays).toBe(2);
+  });
+
+  it("does not spend a public holiday on a task's length either", async () => {
+    await db.seed(`INSERT INTO workspace_holidays (id, sub_account_id, on_date, name)
+                   VALUES ('hol_h', '${TENANT_A}', DATE '2026-09-24', 'Heritage Day')`);
+    // Mon 21 to Fri 25 September: five weekdays, one of them closed.
+    const { task } = await add("Across Heritage Day", "2026-09-21", "2026-09-25");
+    expect(task?.durationDays).toBe(4);
+  });
+
+  it("weights the rollup by working days, so a weekend does not inflate a task", async () => {
+    /* The rollup multiplies by this number, so a calendar count gave a
+       weekend-spanning task twice the weight it had earned. */
+    await add("Fri to Mon, untouched", "2026-09-18", "2026-09-21", 0); // 2 days
+    await add("Tue to Wed, done", "2026-09-22", "2026-09-23", 100); // 2 days
+    const list = await inA((q) => tasks.listTasks(q, JOB));
+    // Two equal tasks, one finished: half. With calendar days it would be 4:2
+    // and report 33%.
+    expect(tasks.summarise(list, "2026-09-30").percentComplete).toBe(50);
+  });
+});

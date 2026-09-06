@@ -326,7 +326,24 @@ export function ProjectSchedule({
                       className={clsx(
                         "absolute top-0 whitespace-nowrap text-[10px] text-faint",
                         !first && !last && "-translate-x-1/2",
-                        last && "-translate-x-full"
+                        last && "-translate-x-full",
+                        /*
+                           Every other label goes on a narrow screen.
+
+                           The tick COUNT is chosen from the plan's length — one
+                           per week, up to eight — which says nothing about the
+                           room to draw them in. On a phone the bar area is about
+                           205px, and eight dates at roughly 40px each ran into
+                           one another: a fifty-two day plan rendered its axis as
+                           "5 S4pSe22 Sep1 Oct9 Oct18 Oct26 Oct4 Nov1 Nov".
+                           Unreadable, and worse than fewer labels.
+
+                           Dropped with CSS rather than by computing a different
+                           count, so the positions of the surviving labels do not
+                           move when the container resizes. The ends are always
+                           kept: they are the ones that say what the chart spans.
+                        */
+                        !first && !last && i % 2 === 1 && "hidden @min-[560px]:inline"
                       )}
                       style={{ left: `${t.at}%` }}
                     >

@@ -37,9 +37,16 @@ export type ProjectTask = {
   ownerName: string | null;
   position: number;
   /**
-   * Whole days from start to finish INCLUSIVE, so a task that starts and
-   * finishes on the same day is one day rather than zero — which is what a
-   * person means by a one-day job, and what every schedule shows.
+   * WORKING days from start to finish inclusive, so a task that starts and
+   * finishes on the same day is one day rather than zero.
+   *
+   * Working, not calendar, and that distinction is the whole point: the
+   * scheduler moves tasks by working days, so a calendar count made the same
+   * task two lengths at once. A job running Friday to Monday showed "4 days"
+   * in the list while the cascade preserved it as two days of work — and
+   * moving it to a Monday-to-Tuesday slot would then have displayed "2 days",
+   * as though the task had shrunk. It also skews the rollup, which weights by
+   * this number: a weekend-spanning task counted double what it was worth.
    */
   durationDays: number | null;
 };
@@ -60,19 +67,16 @@ type Row = {
    calendar day; read as a timestamp and formatted in a zone behind UTC, a
    1 September start renders as 31 August — the bug this project has already
    had once, on the project header's own dates. */
-const MS_PER_DAY = 86_400_000;
-
-function durationOf(startsOn: string | null, dueOn: string | null): number | null {
+function durationOf(
+  startsOn: string | null,
+  dueOn: string | null,
+  closed: ReadonlySet<string> | undefined
+): number | null {
   if (!startsOn || !dueOn) return null;
-  /* Both are `YYYY-MM-DD`, so parsing them as UTC midnight is exact — no zone
-     is involved on either side and the difference is a whole number of days. */
-  const start = Date.parse(`${startsOn}T00:00:00Z`);
-  const due = Date.parse(`${dueOn}T00:00:00Z`);
-  if (!Number.isFinite(start) || !Number.isFinite(due)) return null;
-  return Math.round((due - start) / MS_PER_DAY) + 1;
+  return workingDaysBetween(startsOn, dueOn, closed);
 }
 
-const toTask = (r: Row): ProjectTask => ({
+const toTask = (r: Row, closed?: ReadonlySet<string>): ProjectTask => ({
   id: r.id,
   name: r.name,
   startsOn: r.starts_on,
@@ -82,7 +86,7 @@ const toTask = (r: Row): ProjectTask => ({
   ownerUserId: r.owner_user_id,
   ownerName: r.owner_name,
   position: r.position,
-  durationDays: durationOf(r.starts_on, r.due_on),
+  durationDays: durationOf(r.starts_on, r.due_on, closed),
 });
 
 function newId(): string {
@@ -115,7 +119,10 @@ export async function listTasks(q: TenantQuery, dealId: string): Promise<Project
       ORDER BY t.position, t.starts_on NULLS LAST, t.created_at`,
     [q.ctx.subAccountId, dealId]
   );
-  return rows.map(toTask);
+  /* Read once for the whole list. Durations are counted in working days, so
+     the closed days are part of the answer, not a detail of the cascade. */
+  const closed = await holidaySet(q);
+  return rows.map((r) => toTask(r, closed));
 }
 
 export type TaskInput = {
@@ -190,7 +197,8 @@ export async function addTask(
 
 export async function findTask(q: TenantQuery, taskId: string): Promise<ProjectTask | null> {
   const rows = await q.rows<Row>(`${TASK_SELECT} AND t.id = $2`, [q.ctx.subAccountId, taskId]);
-  return rows[0] ? toTask(rows[0]) : null;
+  if (!rows[0]) return null;
+  return toTask(rows[0], await holidaySet(q));
 }
 
 /**
