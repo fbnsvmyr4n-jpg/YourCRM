@@ -121,19 +121,45 @@ export async function inviteMemberAction(_prev: FormState, formData: FormData): 
 
   /*
      What the inviter is told is the truth about what happened, not a cheerful
-     default. Three genuinely different outcomes:
+     default. Four genuinely different outcomes:
 
        - mail went out;
        - there is no mail provider and this is development, so the link is
          handed over directly rather than going nowhere silently;
-       - mail failed in production, where the account exists and the invitation
-         does not — saying "invited" there would leave somebody waiting for an
-         email that is never coming.
+       - there is no mail provider in PRODUCTION, which is not a failure to
+         retry but a setting nobody has filled in;
+       - mail was configured and the send failed, which is worth retrying.
   */
   if (sent.sent) return { ok: `${name} has been invited — the email is on its way.` };
   if (!emailConfigured() && process.env.NODE_ENV !== "production") {
     return { ok: `${name} was added. Email is not configured here, so send them this link: ${link}` };
   }
+
+  /*
+     Not configured is its own answer, and it used to be folded into the one
+     below — which sent the inviter to a dead end.
+
+     "Ask them to use Forgot your password?" is sound advice when a single send
+     failed. It is useless when there is no mail provider at all, because that
+     page cannot send either: the colleague would be told to use a button that
+     silently cannot work, and the inviter would have no idea why. Production
+     currently has no RESEND_API_KEY, so this is the branch a real invitation
+     takes today, not a hypothetical one.
+
+     The link is deliberately NOT handed over here the way it is in
+     development. It sets a password on somebody else's account, and putting
+     one on a screen — where it will be copied into a chat message — is a
+     decision to take deliberately rather than as a fallback, so this says what
+     is wrong and who can fix it instead.
+  */
+  if (!emailConfigured()) {
+    return {
+      error:
+        `${name} was added, but nothing could be emailed — this workspace has no mail provider configured, ` +
+        `so no invitation was sent and "Forgot your password?" cannot reach them either. An owner needs to set RESEND_API_KEY.`,
+    };
+  }
+
   return {
     error: `${name} was added, but the invitation email could not be sent. Ask them to use "Forgot your password?" on the sign-in page.`,
   };
