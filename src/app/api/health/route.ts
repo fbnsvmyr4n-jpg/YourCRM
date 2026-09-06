@@ -162,6 +162,18 @@ export async function GET() {
       deployment: {
         commit: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? "not a Vercel deployment",
         environment: process.env.VERCEL_ENV ?? "local",
+        /**
+         * The deployment's own address, which is unique per deployment.
+         *
+         * The commit alone could not answer the question actually being asked.
+         * Pressing Redeploy rebuilds the SAME commit, so a redeploy that worked
+         * and a redeploy that never happened both report the same seven
+         * characters — and we spent a cycle unable to tell them apart. This
+         * changes every time a build is created, so it distinguishes them.
+         *
+         * Not a secret: it is the public hostname Vercel gives the deployment.
+         */
+        id: process.env.VERCEL_URL ?? "local",
       },
     },
     { status: ready ? 200 : 503 }
