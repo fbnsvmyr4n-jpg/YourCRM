@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
+import { aiConfigured, quotationReadiness } from "@/server/ai";
 import { authSecretConfigured } from "@/server/auth";
+import { emailConfigured } from "@/server/email";
 import { stripeConfigured, webhookSecret } from "@/server/billing/stripe";
 import { PLANS, priceIdFor } from "@/server/billing/plans";
 import { checkIsolation, checkSchema, pingDatabase } from "@/server/db";
@@ -68,6 +70,30 @@ export async function GET() {
   const missingPrices = billingOn ? PLANS.filter((p) => !priceIdFor(p)) : [];
   const billingBroken = billingOn && (!webhookSecret() || missingPrices.length > 0);
 
+  /**
+   * The quotation path's two external dependencies.
+   *
+   * Neither fails loudly, and between them they decide whether the feature this
+   * product just shipped can happen at all — which nothing, anywhere, currently
+   * reports. Without `ANTHROPIC_API_KEY` the assistant silently falls back to
+   * the deterministic one: it still answers from real data, but it has no tools
+   * and cannot draft a quotation, so the price list sits there and the thing a
+   * person asks for does not happen. Without `RESEND_API_KEY` a quotation can
+   * be drafted and approved and then goes nowhere.
+   *
+   * The dangerous combination is the same shape as billing's: **an assistant
+   * that can draft and no way to send.** A workspace then approves quotes that
+   * never reach anybody — the approval is recorded, the name is stamped, and
+   * the client hears nothing. Called out on its own line rather than left to be
+   * inferred from two "not configured" strings.
+   *
+   * Unlike billing, none of this makes the deployment unready. A workspace with
+   * no assistant is a smaller product, not a broken one, and returning 503 for
+   * it would take the site down in the eyes of anything watching this endpoint.
+   */
+  const ai = aiConfigured();
+  const mail = emailConfigured();
+
   const schemaOk = schema === null ? true : schema.ok;
   const ready = secretOk && persistent && isolated && schemaOk && !billingBroken;
 
@@ -108,6 +134,13 @@ export async function GET() {
             : missingPrices.length > 0
               ? `BROKEN: no Stripe price configured for ${missingPrices.join(", ")} — those plans cannot be bought`
               : "ok: checkout, webhook and all prices configured",
+        assistant: ai
+          ? "ok: a model is configured — the agent can answer and draft quotations"
+          : "not configured — the assistant answers from data only and CANNOT draft a quotation (ANTHROPIC_API_KEY unset)",
+        outboundEmail: mail
+          ? "ok: quotations, invites and password resets can be sent"
+          : "not configured — nothing can be emailed (RESEND_API_KEY unset)",
+        quotations: quotationReadiness(ai, mail),
       },
       engine,
     },

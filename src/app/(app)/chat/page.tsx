@@ -2,6 +2,7 @@ import { listChat } from "@/server/repos/chat";
 import { listContacts } from "@/server/repos/contacts";
 import { listDeals } from "@/server/repos/deals";
 import { listMeetings } from "@/server/repos/meetings";
+import { aiConfigured } from "@/server/ai";
 import { quotesNeedingUser } from "@/server/repos/quotes";
 import { getSettings } from "@/server/repos/settings";
 import { withTenantPage } from "@/server/tenant-session";
@@ -33,7 +34,11 @@ export default async function ChatPage() {
   return (
     <ChatView
       messages={messages}
-      aiEnabled={!!process.env.ANTHROPIC_API_KEY}
+      /* The same function the agent and the health check ask, so the dot on
+         this page cannot say "Online" while the assistant is actually falling
+         back — an empty-string key reads as set to `process.env` and as absent
+         to the API. */
+      aiEnabled={aiConfigured()}
       knows={knows}
       timeZone={timeZone}
       quotes={quotes}
