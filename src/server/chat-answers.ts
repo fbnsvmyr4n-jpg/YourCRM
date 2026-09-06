@@ -44,6 +44,39 @@ export const INTENTS: Intent[] = [
     keywords: ["deal", "deals", "closed", "close", "won", "winning", "negotiation", "negotiations", "proposal", "proposals", "qualified"],
   },
   {
+    /*
+       Asking for a quotation, which the assistant can only actually DO when a
+       model is configured and the price list has something on it. The intent
+       exists either way: without it the request fell through to "I'm not sure
+       what you're after", which is the worst possible answer to a specific
+       question the product advertises. Now it says which of the two things is
+       missing.
+
+       "proposal" and "price" are deliberately absent — they already belong to
+       `deals` and would take that intent's questions away from it.
+    */
+    id: "quote",
+    keywords: ["quote", "quotes", "quotation", "quotations", "quoting", "estimate", "estimates"],
+    /*
+       Stems, not whole words: "draft a quot" matches both "draft a quote" and
+       "draft a quotation", where spelling out each ending misses half of what
+       people type. Written out in full, "can you draft a quotation for the
+       Heineken job" scored 0.50 against a 0.55 threshold — one strong keyword
+       divided by four words — and fell through to "I'm not certain what you're
+       after".
+    */
+    phrases: ["draft a quot", "generate a quot", "create a quot", "send a quot", "quote for", "quotation for"],
+    /*
+       A nudge, because this intent shares vocabulary with two others and loses
+       ties by declaration order. "quote this client" scored exactly level with
+       `contacts` — one keyword each over two words — and answered "No contacts
+       yet", which is a confident answer to a question nobody asked. The weight
+       only breaks ties: a question with no quoting word in it still scores zero
+       here and is filtered out entirely.
+    */
+    weight: 1.2,
+  },
+  {
     id: "inbox",
     keywords: ["inbox", "message", "messages", "email", "emails", "unread", "mail"],
   },

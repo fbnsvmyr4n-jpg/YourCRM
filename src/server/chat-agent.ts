@@ -1,6 +1,7 @@
 /* Type-only: erased at build, so the SDK is still loaded lazily at the one
    place that needs it and a deployment without a key never imports it. */
 import type Anthropic from "@anthropic-ai/sdk";
+import { aiConfigured } from "./ai";
 import { BOARD_STAGES as STAGES } from "@/data/pipeline";
 import { listContacts } from "./repos/contacts";
 import { listDeals } from "./repos/deals";
@@ -107,6 +108,10 @@ export async function buildCrmContext(q: TenantQuery) {
     calls,
     prices,
     pendingQuotes,
+    /* Whether there is a model behind the assistant at all. The deterministic
+       answers below are the ones a user sees when there is not, so they are
+       the ones that have to be able to say so. */
+    aiLive: aiConfigured(),
     monthlyTarget,
     wonThisMonth,
     /**
@@ -328,8 +333,16 @@ export async function answer(
       }
     } catch (err) {
       const detail = err instanceof Error ? err.message : "unknown error";
+      /*
+         The fallback must not contradict the sentence above it.
+         `aiLive` means "a key is set", which is not the same as "the model
+         answered" — with a key present but rejected, the quote answer cheerfully
+         offered to draft one immediately below a line saying the AI could not be
+         reached. Seen for real: a placeholder left in `.env.local` produced a
+         401, and the reply both apologised and volunteered.
+      */
       return {
-        text: `I couldn't reach the AI service just now (${detail}). Here's what I can tell you from your data:\n\n${localAnswer(question, ctx)}`,
+        text: `I couldn't reach the AI service just now (${detail}). Here's what I can tell you from your data:\n\n${localAnswer(question, { ...ctx, aiLive: false })}`,
         live: false,
       };
     }
@@ -527,6 +540,48 @@ function answerFor(id: string, ctx: CrmContext): string {
               }`
           ),
       ].join("\n");
+    }
+
+    case "quote": {
+      /**
+       * Why a quotation cannot be drafted, when it cannot.
+       *
+       * This branch only runs on the deterministic assistant — the live agent
+       * has tools and does the work — so reaching it means something is
+       * missing, and the useful answer names WHICH thing. Before this existed
+       * the request fell through to "I'm not sure what you're after", which is
+       * how a feature that is merely switched off looks broken.
+       */
+      const priced = ctx.prices.length;
+      const waiting = ctx.pendingQuotes.length;
+
+      if (!ctx.aiLive) {
+        return [
+          "I can't draft quotations at the moment — the AI assistant isn't switched on for this workspace, so I'm answering from your data only.",
+          "",
+          "An owner can turn it on by setting an Anthropic API key on the deployment. Once it is on, I can build a quote from your price list and put it in front of you to approve.",
+          priced
+            ? `Your price list has ${priced} item${priced === 1 ? "" : "s"} ready for it.`
+            : "You'll also want some prices on the Price list page — that is where a quote's figures come from.",
+        ].join("\n");
+      }
+
+      if (!priced) {
+        return [
+          "I can draft quotations, but your price list is empty — and every figure on a quote comes from it, so there is nothing for me to build one out of.",
+          "",
+          "Add what you sell on the Price list page — a name, a unit and a rate — and then ask me again.",
+        ].join("\n");
+      }
+
+      return [
+        `I can draft a quotation from your price list (${priced} item${priced === 1 ? "" : "s"}).`,
+        "",
+        "Tell me the project and what goes on it — something like *quote the Heineken rebuild for three days of crane hire*. I'll put it in front of you to approve; nothing goes to a client until you say so.",
+        waiting ? `\nYou have ${waiting} quotation${waiting === 1 ? "" : "s"} waiting for approval.` : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
     }
 
     case "attachments":
