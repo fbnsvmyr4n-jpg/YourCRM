@@ -82,10 +82,21 @@ describe("Revenue means this contact's revenue", () => {
 describe("the pair behave like one control", () => {
   it("only one panel is open at a time", () => {
     /* Two stacked panels in a narrow side card would push the contact details
-       off the bottom, and the second would look like a bug. */
-    expect(view).toMatch(/useState<"revenue" \| "note" \| null>\(null\)/);
-    expect(view).toMatch(/setPanel\(\(p\) => \(p === "revenue" \? null : "revenue"\)\)/);
-    expect(view).toMatch(/setPanel\(\(p\) => \(p === "note" \? null : "note"\)\)/);
+       off the bottom, and the second would look like a bug.
+
+       Matched on the SHAPE rather than on the exact union, which spelled out
+       "revenue" and "note" and went red the moment Call and Text joined them —
+       a correct change failing a guard that was really checking a spelling.
+       The property is that ONE `panel` variable decides and that pressing an
+       open one closes it; a second panel arriving as its own piece of state is
+       what this still catches. */
+    expect(view).toMatch(/const \[panel, setPanel\] = useState<[^>]*\| null>\(null\)/);
+    for (const name of ["revenue", "note", "call", "text"]) {
+      expect(view, `${name} does not toggle through the shared panel state`).toMatch(
+        new RegExp(`setPanel\\(\\(p\\) => \\(p === "${name}" \\? null : "${name}"\\)\\)`)
+      );
+    }
+    expect(view.match(/const \[panel, setPanel\] = useState/g)).toHaveLength(1);
   });
 
   it("tells a screen reader they toggle something", () => {

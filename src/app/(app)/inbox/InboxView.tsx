@@ -49,6 +49,7 @@ import { AnchoredMenu } from "@/components/ui/AnchoredMenu";
 import { Overlay } from "@/components/ui/Overlay";
 import { SortMenu } from "@/components/ui/SortMenu";
 import { useOpenFromQuery } from "@/lib/useOpenFromQuery";
+import { useCanDial } from "@/lib/useCanDial";
 import type { ProjectOption } from "@/server/repos/inbox";
 import { useDraft, hasContent, type Draft } from "@/lib/use-draft";
 import { SwipeToDelete } from "@/components/ui/SwipeToDelete";
@@ -179,7 +180,44 @@ export function InboxView({
   const readerOnly = stacked && showReader;
 
   const [composeOpen, setComposeOpen] = useState(false);
-  useOpenFromQuery("compose", useCallback(() => setComposeOpen(true), []));
+  /**
+   * `?compose=1&to=…` — Email on a contact card, arriving already addressed.
+   *
+   * That button used to be a `mailto:` link, which on a desktop hands off to
+   * whatever the operating system has registered and frequently to nothing at
+   * all: Bradley reported it as "doesn't work", and it was the oldest item
+   * still outstanding. The product has its own composer and its own thread
+   * history, so the honest destination for Email is this box — the message then
+   * lives in the CRM rather than in somebody's personal mail client, which is
+   * most of the reason the inbox exists.
+   *
+   * Unsent WRITING outranks the address — a subject or a body, not merely a
+   * leftover recipient.
+   *
+   * `hasContent` counts a bare address as a draft, and using it here was wrong
+   * in a way only visible by driving it: press Email on Cher, close the box,
+   * press Email on Ben, and the composer opened addressed to Cher. Nothing was
+   * being protected in that case except a field the previous button had filled
+   * in, and the cost was ignoring the button just pressed — which is how you
+   * send a mail to the wrong person.
+   *
+   * Someone halfway through writing is a different matter: the recipient is not
+   * rewritten underneath them, and the restored-draft notice explains what they
+   * are looking at.
+   */
+  const draftHasWriting = Boolean(draft.subject.trim() || draft.body.trim());
+  useOpenFromQuery(
+    "compose",
+    useCallback(
+      (carried: Record<string, string>) => {
+        const to = carried.to?.trim();
+        if (to && !draftHasWriting) save({ ...draft, to });
+        setComposeOpen(true);
+      },
+      [draft, draftHasWriting, save]
+    ),
+    ["to"]
+  );
   const [busy, setBusy] = useState(false);
 
   /**
@@ -1064,7 +1102,10 @@ function ContactCard({
      "Revenue" opened the whole deals board, which is not this person's revenue.
      Both now answer where they were asked.
   */
-  const [panel, setPanel] = useState<"revenue" | "note" | null>(null);
+  /* "call" and "text" join Revenue and Note in answering here rather than
+     handing off to a dialler this device may not have. */
+  const [panel, setPanel] = useState<"revenue" | "note" | "call" | "text" | null>(null);
+  const canDial = useCanDial();
   const [noteSaved, setNoteSaved] = useState(false);
   const [savingNote, setSavingNote] = useState(false);
   const tel = message.phone.replace(/[^\d+]/g, "");
@@ -1095,10 +1136,36 @@ function ContactCard({
     return { first: mine[0], latest: mine[mine.length - 1], count: mine.length };
   }, [messages, message.contactId, message.email, message.id]);
 
+  /*
+     The same three handoffs the contact card had, and the same problem: on a
+     desktop `tel:`, `sms:` and `mailto:` go to whatever the operating system
+     has registered, which is usually nothing at all. Call and Text now answer
+     in place with the number when there is no dialler, and Email opens this
+     product's own composer already addressed — better than `mailto:` even where
+     `mailto:` works, because the message then stays in the CRM's own thread
+     history instead of leaving in somebody's personal mail client.
+  */
   const actions = [
-    { label: "Call", icon: Phone, href: tel ? `tel:${tel}` : undefined, why: tel ? `Call ${message.phone}` : "No phone number" },
-    { label: "Text", icon: MessageCircle, href: tel ? `sms:${tel}` : undefined, why: tel ? `Text ${message.phone}` : "No phone number" },
-    { label: "Email", icon: Mail, href: hasEmail ? `mailto:${message.email}` : undefined, why: hasEmail ? `Email ${message.email}` : "No email address" },
+    {
+      label: "Call",
+      icon: Phone,
+      href: tel && canDial ? `tel:${tel}` : undefined,
+      onClick: tel && !canDial ? () => setPanel((p) => (p === "call" ? null : "call")) : undefined,
+      why: tel ? `Call ${message.phone}` : "No phone number",
+    },
+    {
+      label: "Text",
+      icon: MessageCircle,
+      href: tel && canDial ? `sms:${tel}` : undefined,
+      onClick: tel && !canDial ? () => setPanel((p) => (p === "text" ? null : "text")) : undefined,
+      why: tel ? `Text ${message.phone}` : "No phone number",
+    },
+    {
+      label: "Email",
+      icon: Mail,
+      href: hasEmail ? `/inbox?compose=1&to=${encodeURIComponent(message.email)}` : undefined,
+      why: hasEmail ? `Email ${message.email}` : "No email address",
+    },
     {
       label: "Revenue",
       icon: DollarSign,
@@ -1160,7 +1227,7 @@ function ContactCard({
           );
 
           if (a.onClick) {
-            const open = (a.label === "Revenue" && panel === "revenue") || (a.label === "Note" && panel === "note");
+            const open = a.label.toLowerCase() === panel;
             return (
               <button
                 key={a.label}
@@ -1194,6 +1261,26 @@ function ContactCard({
       </div>
 
       {/* The answer, where the question was asked. */}
+      {(panel === "call" || panel === "text") && tel && (
+        <div className="mt-4 rounded-xl border border-[var(--border)] p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            {/* Selectable, because the first thing anybody does with a number
+                on screen is drag across it. */}
+            <span className="select-all text-base font-semibold tabular-nums">{message.phone}</span>
+            <a
+              href={panel === "call" ? `tel:${tel}` : `sms:${tel}`}
+              className="focus-ring rounded text-xs text-accent hover:underline"
+            >
+              {panel === "call" ? "Open in your dialler" : "Open in your messages app"}
+            </a>
+          </div>
+          <p className="mt-1.5 text-[11px] text-faint">
+            This device has no {panel === "call" ? "dialler" : "messages app"} to hand off to, so
+            here is the number.
+          </p>
+        </div>
+      )}
+
       {panel === "revenue" && contactId && (
         <div className="mt-4 rounded-xl border border-[var(--border)] p-3">
           <div className="grid grid-cols-2 gap-3">

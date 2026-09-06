@@ -47,6 +47,7 @@ export type { Contact, ContactType } from "@/server/decorate-contact";
 import { clsx } from "@/lib/clsx";
 import { useElementWidth } from "@/lib/use-element-width";
 import { useRememberedToggle } from "@/lib/remembered-toggle";
+import { useCanDial } from "@/lib/useCanDial";
 import type { ImportPreview, ImportResult } from "@/server/import-contacts";
 import {
   addContactAction,
@@ -63,7 +64,9 @@ import {
 
 /** null = closed, "new" = add mode, Contact = edit mode */
 type ModalState = null | "new" | "import" | Contact;
-type Panel = null | "note" | "revenue";
+/* "call" and "text" answer in place on a device with no dialler, the same way
+   Revenue and Note already do, rather than handing off to nothing. */
+type Panel = null | "note" | "revenue" | "call" | "text";
 
 /** Takes integer cents, because that is what the database stores. */
 const money = (cents: number) => `$${Math.round(cents / 100).toLocaleString()}`;
@@ -469,6 +472,8 @@ function ProfilePanel({
   const [copied, setCopied] = useState<string | null>(null);
   const [more, setMore] = useState(false);
   const [pending, setPending] = useState(false);
+  /* Whether `tel:` and `sms:` can reach anything on this device. */
+  const canDial = useCanDial();
 
   const tel = contact.phone.replace(/[^\d+]/g, "");
 
@@ -500,27 +505,61 @@ function ProfilePanel({
     }
   }
 
+  /*
+     What Call, Text and Email actually do, which until now was nothing on a
+     desktop.
+
+     All three were handoffs — `tel:`, `sms:`, `mailto:` — and a handoff only
+     works if the operating system has something registered to receive it. On a
+     phone all three do. On a desktop typically none do: the click is swallowed,
+     no window opens, and the button reads as broken. That is what Bradley
+     reported as "doesn't work", and it was the oldest thing still outstanding.
+
+     Worse than the silence: the outreach was logged either way, so Contact
+     Activity recorded a call that never happened. This product's one rule is
+     that it does not show things that are not true, and a fabricated call in
+     somebody's history is exactly that.
+
+     So the handoff is kept where it works and replaced where it does not:
+
+       - Call / Text on a touchscreen: unchanged, a real `tel:` / `sms:` link.
+       - Call / Text elsewhere: the number answers in place with a copy button,
+         the same shape Revenue and Note already use, and the outreach is
+         logged when the number is actually taken rather than when the panel
+         opens.
+       - Email everywhere: the in-app composer, pre-addressed. It is better than
+         `mailto:` even where `mailto:` works, because the message then lives in
+         the CRM's own thread history instead of in a personal mail client.
+  */
   const actions = [
     {
       label: "Call",
       icon: Phone,
-      href: tel ? `tel:${tel}` : undefined,
+      href: tel && canDial ? `tel:${tel}` : undefined,
       disabled: !tel,
       title: tel ? `Call ${contact.phone}` : "No phone number on file",
-      onClick: () => reach("call"),
+      onClick: canDial
+        ? () => reach("call")
+        : () => setPanel(panel === "call" ? null : "call"),
     },
     {
       label: "Text",
       icon: MessageCircle,
-      href: tel ? `sms:${tel}` : undefined,
+      href: tel && canDial ? `sms:${tel}` : undefined,
       disabled: !tel,
       title: tel ? `Text ${contact.phone}` : "No phone number on file",
-      onClick: () => reach("text"),
+      onClick: canDial
+        ? () => reach("text")
+        : () => setPanel(panel === "text" ? null : "text"),
     },
     {
       label: "Email",
       icon: Mail,
-      href: contact.email ? `mailto:${contact.email}` : undefined,
+      /* The product's own composer, not the operating system's. `encodeURIComponent`
+         because an address is user data going into a URL. */
+      href: contact.email
+        ? `/inbox?compose=1&to=${encodeURIComponent(contact.email)}`
+        : undefined,
       disabled: !contact.email,
       title: contact.email ? `Email ${contact.email}` : "No email address on file",
       onClick: () => reach("email"),
@@ -689,6 +728,23 @@ function ProfilePanel({
 
       {panel === "note" && <NotePanel contactId={contact.id} onDone={() => setPanel(null)} />}
       {panel === "revenue" && <RevenuePanel summary={summary} />}
+      {(panel === "call" || panel === "text") && (
+        <ReachPanel
+          kind={panel}
+          number={contact.phone}
+          tel={tel}
+          copied={copied === panel}
+          onCopy={async () => {
+            await copy(contact.phone, panel);
+            /* Logged HERE rather than when the panel opened. Taking the number
+               is the moment something actually happened; opening a panel to
+               look at it is not an outreach, and recording one would put a call
+               in this person's history that nobody made. */
+            await reach(panel);
+          }}
+          onHandoff={() => reach(panel)}
+        />
+      )}
 
       <ActivityPanel foldsActivity={foldsActivity} contact={contact} entries={summary?.timeline ?? []} currentUserId={currentUserId} />
     </section>
@@ -787,6 +843,73 @@ function NotePanel({ contactId, onDone }: { contactId: string; onDone: () => voi
         </button>
       </div>
     </form>
+  );
+}
+
+/**
+ * The number, on a machine that cannot dial it.
+ *
+ * A desktop browser has nowhere to send `tel:`, so Call used to do nothing
+ * visible at all. What somebody actually wants at that moment is the number —
+ * to read it off to a desk phone, or to paste it into whatever they really call
+ * with — so that is what this gives them, in the same answer-in-place shape
+ * Revenue and Note use rather than as a new kind of overlay.
+ *
+ * The handoff link is still offered underneath. Plenty of desktops do have
+ * something registered — Skype, FaceTime, a softphone — and for those people
+ * the old behaviour was correct; it is simply no longer the only thing on
+ * offer, and no longer silent when it fails.
+ */
+function ReachPanel({
+  kind,
+  number,
+  tel,
+  copied,
+  onCopy,
+  onHandoff,
+}: {
+  kind: "call" | "text";
+  number: string;
+  tel: string;
+  copied: boolean;
+  onCopy: () => void;
+  onHandoff: () => void;
+}) {
+  return (
+    <div className="mt-6 rounded-2xl border border-[var(--border)] p-5">
+      <h3 className="text-base font-semibold">{kind === "call" ? "Call" : "Text"} this contact</h3>
+      <p className="mt-1 text-xs text-muted">
+        This device has no {kind === "call" ? "dialler" : "messages app"} to hand off to, so here is
+        the number.
+      </p>
+
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        {/* Selectable, because the first thing somebody does with a number on
+            screen is drag across it. */}
+        <span className="select-all text-xl font-semibold tracking-tight tabular-nums">{number}</span>
+        <button
+          type="button"
+          onClick={onCopy}
+          className="btn-soft focus-ring flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium"
+        >
+          {copied ? (
+            <Check className="h-3.5 w-3.5 text-[var(--green)]" />
+          ) : (
+            <Copy className="h-3.5 w-3.5" />
+          )}
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+
+      <a
+        href={kind === "call" ? `tel:${tel}` : `sms:${tel}`}
+        onClick={onHandoff}
+        className="focus-ring mt-3 inline-block text-xs text-accent hover:underline"
+      >
+        {kind === "call" ? "Open in your dialler" : "Open in your messages app"} — if this computer
+        has one
+      </a>
+    </div>
   );
 }
 
