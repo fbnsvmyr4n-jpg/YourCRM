@@ -45,7 +45,7 @@ const META: Record<SettingsSectionId, { label: string; icon: LucideIcon; blurb: 
   account: { label: "Account", icon: UserRound, blurb: "Your name, sign-in and password" },
   team: { label: "Team", icon: Users, blurb: "Everyone who works here, by department" },
   clients: { label: "Clients", icon: Briefcase, blurb: "Who is looking after whom" },
-  preferences: { label: "Preferences", icon: SlidersHorizontal, blurb: "Targets, time zone and theme" },
+  preferences: { label: "Preferences", icon: SlidersHorizontal, blurb: "Targets, working calendar and theme" },
   billing: { label: "Billing", icon: CreditCard, blurb: "Plan, workspaces, usage and referrals" },
   data: { label: "Data", icon: Database, blurb: "Deleted records and storage" },
 };
