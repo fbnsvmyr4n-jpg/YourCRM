@@ -143,6 +143,26 @@ export async function GET() {
         quotations: quotationReadiness(ai, mail),
       },
       engine,
+      /**
+       * Which build is answering, and where it thinks it is running.
+       *
+       * Added after an hour lost to a different question than the one being
+       * asked. Two keys were set in the Vercel dashboard and a redeploy was
+       * run, and this endpoint still reported them unset — with no way from
+       * outside to tell whether the redeploy had landed, whether the domain
+       * pointed at the project being edited, or whether the variables were
+       * scoped to Preview rather than Production. Three very different
+       * problems, one identical symptom.
+       *
+       * `VERCEL_GIT_COMMIT_SHA` and `VERCEL_ENV` are set by the platform. Both
+       * are safe to state publicly: the repository is public, and the
+       * environment name is not a secret. Absent locally, which is itself the
+       * honest answer for a machine that is not a deployment.
+       */
+      deployment: {
+        commit: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? "not a Vercel deployment",
+        environment: process.env.VERCEL_ENV ?? "local",
+      },
     },
     { status: ready ? 200 : 503 }
   );
