@@ -47,6 +47,33 @@ export default defineConfig({
      */
     testTimeout: 30_000,
     hookTimeout: 60_000,
+
+    /**
+     * ONE pooled connection, because the test database serves one session.
+     *
+     * This is the cause of the `ownership.test.ts` flake — twelve red tests in
+     * a whole file, roughly one run in three, filed as timing since 2026-09-04
+     * and blamed on the hook timeouts above. It is not timing. The suites talk
+     * to PGlite through its socket server, which serves EXACTLY ONE session at
+     * a time, while `db.ts` defaults the pool to three. So a second connection
+     * opens while the first is mid-transaction, the two sessions tread on each
+     * other, and every statement afterwards answers "current transaction is
+     * aborted, commands ignored until end of transaction block" — which takes
+     * the rest of the file down with it. `ownership.test.ts` is the usual
+     * victim because it makes many short tenant transactions and several of
+     * them deliberately fail.
+     *
+     * The identical fault was already diagnosed and fixed for local
+     * development, where `.env.local` sets `PG_POOL_MAX=1` and the comment in
+     * `db.ts` explains why: Next renders a layout and its page concurrently,
+     * and the first connection was reset mid-query. The harness was never given
+     * the same setting, so the bug survived in the one place whose job is to
+     * catch bugs.
+     *
+     * Set here rather than in `helpers/pg.ts` so it is in place before any test
+     * file imports `db.ts` and builds a pool.
+     */
+    env: { PG_POOL_MAX: "1" },
   },
   resolve: {
     alias: {
