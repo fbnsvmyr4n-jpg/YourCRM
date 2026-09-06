@@ -7,7 +7,10 @@ import {
   projectThreads,
   projectTimeline,
 } from "@/server/repos/projects";
+import { getSettings } from "@/server/repos/settings";
+import { listTasks, summarise } from "@/server/repos/tasks";
 import { listUsers } from "@/server/repos/users";
+import { instantToWallClock } from "@/lib/zoned";
 import { withSystem } from "@/server/tenant";
 import { requireTenantPage, withTenantPage } from "@/server/tenant-session";
 import { ProjectDetail } from "./ProjectDetail";
@@ -36,6 +39,19 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
       documents: await projectDocuments(q, id),
       threads: await projectThreads(q, id),
       timeline: await projectTimeline(q, id),
+      tasks: await listTasks(q, id),
+      /*
+         Today, in the BUSINESS's zone rather than the server's.
+
+         "Overdue" and the marker on the chart both turn on which day it is, and
+         a server in UTC deciding that for a business in Johannesburg gets it
+         wrong for two hours every evening — a task would read as overdue before
+         its own due date had ended. Same reasoning as every other date on this
+         screen, and the same helper.
+      */
+      today:
+        instantToWallClock(new Date().toISOString(), (await getSettings(q)).timeZone)?.date ??
+        new Date().toISOString().slice(0, 10),
       /*
          Candidates for "add somebody to the job": every colleague, and every
          contact — not only the client's own people.
@@ -73,6 +89,9 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
       documents={data.documents}
       threads={data.threads}
       timeline={data.timeline}
+      tasks={data.tasks}
+      scheduleSummary={summarise(data.tasks, data.today)}
+      today={data.today}
       candidates={{
         staff: staff.map((u) => ({ id: u.id, name: u.name })),
         contacts: data.contacts,

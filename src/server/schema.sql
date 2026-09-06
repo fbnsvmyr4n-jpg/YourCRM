@@ -1378,3 +1378,91 @@ ALTER TABLE documents DROP CONSTRAINT IF EXISTS documents_status_check;
 ALTER TABLE documents ADD CONSTRAINT documents_status_check
   CHECK (status IN ('draft', 'awaiting_approval', 'approved', 'sent', 'accepted',
                     'declined', 'paid', 'cancelled'));
+
+-- ---------------------------------------------------------------------------
+-- What a project is actually made of, and how far along each piece is.
+--
+-- The project screen could say what a job was worth, who was on it and what had
+-- been said about it, and could not say what the WORK was. "Rebuild warehouse"
+-- is not a plan; the plan is nineteen tasks with dates against them, which is
+-- what every schedule Bradley works from looks like — his own 2026 Procedures
+-- baseline is a task list with a start, a finish and a percentage on each row.
+--
+-- Duration is not stored. It is `due_on - starts_on`, and a stored copy would
+-- be a second answer to a question the dates already answer — the same rule the
+-- documents table follows for totals, and for the same reason: the copy goes
+-- stale the first time somebody moves a date.
+--
+-- `percent_complete` is an integer 0-100 rather than a boolean. A task is
+-- routinely half done, and a schedule that can only say "finished" or "not"
+-- cannot show the thing a person opens it to see — where the work actually is.
+-- `done_at` records WHEN it reached 100, which a percentage cannot: two tasks
+-- both at 100 tell you nothing about which one has been sitting finished for a
+-- fortnight.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS project_tasks (
+  id               TEXT PRIMARY KEY,
+  sub_account_id   TEXT NOT NULL REFERENCES sub_accounts(id) ON DELETE CASCADE,
+  deal_id          TEXT NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+
+  name             TEXT NOT NULL,
+
+  starts_on        DATE,
+  due_on           DATE,
+
+  percent_complete INTEGER NOT NULL DEFAULT 0
+                     CHECK (percent_complete BETWEEN 0 AND 100),
+
+  -- When it reached 100. Set and cleared by the repository alongside the
+  -- percentage, so "finished" and "finished on" cannot disagree.
+  done_at          TIMESTAMPTZ,
+
+  -- Who is doing it. A colleague, not a client — a task is our work.
+  owner_user_id    TEXT REFERENCES users(id) ON DELETE SET NULL,
+
+  -- The order it reads in. Without it the rows come back in whatever order the
+  -- planner chose and a schedule reads differently every time it loads, which
+  -- is precisely what a schedule must not do.
+  position         INTEGER NOT NULL DEFAULT 0,
+
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  deleted_at       TIMESTAMPTZ
+);
+
+-- A finish before its start is a typo, and catching it in the database means it
+-- is caught for every writer rather than for the one form that remembers.
+ALTER TABLE project_tasks DROP CONSTRAINT IF EXISTS project_tasks_dates_ordered;
+ALTER TABLE project_tasks ADD CONSTRAINT project_tasks_dates_ordered
+  CHECK (starts_on IS NULL OR due_on IS NULL OR due_on >= starts_on);
+
+CREATE INDEX IF NOT EXISTS project_tasks_deal_idx ON project_tasks (sub_account_id, deal_id, position) WHERE deleted_at IS NULL;
+
+ALTER TABLE project_tasks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE project_tasks FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS project_tasks_tenant_isolation ON project_tasks;
+CREATE POLICY project_tasks_tenant_isolation ON project_tasks
+  USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
+  WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
+
+-- A task belongs to a project in THIS tenant. Row-level security already stops
+-- the read, and this stops the write — the same guard `assert_company_in_tenant`
+-- gives deals and contacts, for the same reason: a rule that lives in one code
+-- path is a rule until somebody writes a second caller.
+CREATE OR REPLACE FUNCTION assert_task_deal_in_tenant() RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.deal_id IS NOT NULL THEN
+    PERFORM 1 FROM deals d
+     WHERE d.id = NEW.deal_id AND d.sub_account_id = NEW.sub_account_id;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'deal % does not belong to sub-account %', NEW.deal_id, NEW.sub_account_id;
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS project_tasks_deal_in_tenant ON project_tasks;
+CREATE TRIGGER project_tasks_deal_in_tenant
+  BEFORE INSERT OR UPDATE OF deal_id, sub_account_id ON project_tasks
+  FOR EACH ROW EXECUTE FUNCTION assert_task_deal_in_tenant();

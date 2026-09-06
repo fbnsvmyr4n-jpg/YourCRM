@@ -1,0 +1,287 @@
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { startTestDb, type TestDb, AGENCY, TENANT_A, TENANT_B, USER_A } from "./helpers/pg";
+import type { TenantContext } from "../src/server/tenant";
+
+/**
+ * A project's schedule.
+ *
+ * The figure that matters is the rollup, and it is the one most easily made to
+ * lie: a plain average of percentages reports a job half done when the ten-day
+ * task has not started and the half-day one is finished. The arithmetic is
+ * right and the answer is wrong, which is the worst kind of number to put on a
+ * screen somebody plans from. So it is weighted by duration, and the fixture
+ * below is sized so every expected figure was worked out by hand first.
+ *
+ * The other trap is the DATE, which this codebase has fallen into before: a
+ * calendar day read as a timestamp and formatted in a zone behind UTC comes
+ * back a day early. Dates here are compared as strings for that reason.
+ */
+
+let db: TestDb;
+let withTenant: typeof import("../src/server/tenant").withTenant;
+let tasks: typeof import("../src/server/repos/tasks");
+let closePool: typeof import("../src/server/db").closePool;
+
+const ctxFor = (subAccountId: string): TenantContext => ({
+  agencyId: AGENCY,
+  subAccountId,
+  userId: USER_A,
+  role: "owner",
+});
+const inA = <T>(fn: Parameters<typeof withTenant<T>>[1]) => withTenant(ctxFor(TENANT_A), fn);
+const inB = <T>(fn: Parameters<typeof withTenant<T>>[1]) => withTenant(ctxFor(TENANT_B), fn);
+
+const JOB = "d_warehouse";
+const OTHER_JOB = "d_other_tenant";
+
+beforeAll(async () => {
+  db = await startTestDb();
+  ({ withTenant } = await import("../src/server/tenant"));
+  ({ closePool } = await import("../src/server/db"));
+  tasks = await import("../src/server/repos/tasks");
+});
+
+afterAll(async () => {
+  await closePool?.();
+  await db.stop();
+});
+
+beforeEach(() =>
+  db.seed(`
+    DELETE FROM project_tasks; DELETE FROM deals; DELETE FROM contacts; DELETE FROM companies;
+
+    INSERT INTO companies (id, sub_account_id, name) VALUES
+      ('co_heineken', '${TENANT_A}', 'Heineken');
+
+    INSERT INTO deals (id, sub_account_id, company_id, title, value_cents, stage) VALUES
+      ('${JOB}',       '${TENANT_A}', 'co_heineken', 'Rebuild warehouse', 1800000_00, 'delivery'),
+      ('${OTHER_JOB}', '${TENANT_B}', NULL,          'Another tenant''s job', 1000_00, 'discovery');`)
+);
+
+const add = (name: string, startsOn: string | null, dueOn: string | null, percent = 0) =>
+  inA((q) => tasks.addTask(q, JOB, { name, startsOn, dueOn, percentComplete: percent }));
+
+describe("what a task is", () => {
+  it("stores the calendar day it was given, not a day either side of it", async () => {
+    const { task } = await add("Radial arm drilling machine", "2026-09-01", "2026-09-02");
+    expect(task?.startsOn).toBe("2026-09-01");
+    expect(task?.dueOn).toBe("2026-09-02");
+    expect(task?.durationDays).toBe(2);
+  });
+
+  it("treats a same-day task as one day", async () => {
+    const { task } = await add("Phase finish", "2026-08-24", "2026-08-24");
+    expect(task?.durationDays).toBe(1);
+  });
+
+  it("leaves duration unknown when a date is missing", async () => {
+    const { task } = await add("Unscheduled", null, null);
+    expect(task?.durationDays).toBeNull();
+  });
+
+  it("refuses a task that finishes before it starts", async () => {
+    const { error } = await add("Backwards", "2026-09-10", "2026-09-01");
+    expect(error).toMatch(/finishes before it starts/i);
+  });
+
+  it("refuses a task with no name", async () => {
+    const { error } = await add("   ", "2026-09-01", "2026-09-02");
+    expect(error).toMatch(/give the task a name/i);
+  });
+
+  it("keeps the plan's order rather than re-sorting by date", async () => {
+    await add("Second in the plan", "2026-09-10", "2026-09-11");
+    await add("First in the plan", "2026-09-01", "2026-09-02");
+    const list = await inA((q) => tasks.listTasks(q, JOB));
+    // Added second, dated earlier — and it stays where it was put.
+    expect(list.map((t) => t.name)).toEqual(["Second in the plan", "First in the plan"]);
+  });
+});
+
+describe("finishing a task", () => {
+  it("stamps when it reached a hundred", async () => {
+    const { task } = await add("Lathe", "2026-09-01", "2026-09-02");
+    expect(task?.doneAt).toBeNull();
+
+    const done = await inA((q) => tasks.setTaskComplete(q, task!.id, true));
+    expect(done.task?.percentComplete).toBe(100);
+    expect(done.task?.doneAt).not.toBeNull();
+  });
+
+  it("clears the stamp when it is reopened", async () => {
+    const { task } = await add("Milling machine", "2026-09-01", "2026-09-02", 100);
+    expect(task?.doneAt).not.toBeNull();
+
+    const reopened = await inA((q) => tasks.setTaskComplete(q, task!.id, false));
+    expect(reopened.task?.percentComplete).toBe(0);
+    expect(reopened.task?.doneAt).toBeNull();
+  });
+
+  it("does not move the completion date when a finished task is edited", async () => {
+    /* Fixing a typo in the name of a task finished a fortnight ago must not
+       report it as finished today. */
+    const { task } = await add("Angle grinder", "2026-09-01", "2026-09-02", 100);
+    const first = task!.doneAt;
+
+    const edited = await inA((q) =>
+      tasks.updateTask(q, task!.id, {
+        name: "Angle grinder (bench)",
+        startsOn: "2026-09-01",
+        dueOn: "2026-09-02",
+        percentComplete: 100,
+      })
+    );
+    expect(edited.task?.name).toBe("Angle grinder (bench)");
+    expect(edited.task?.doneAt).toBe(first);
+  });
+
+  it("clamps a percentage rather than storing nonsense", async () => {
+    const { task } = await add("Hand drills", "2026-09-09", "2026-09-10", 300);
+    expect(task?.percentComplete).toBe(100);
+    const low = await inA((q) =>
+      tasks.updateTask(q, task!.id, { name: "Hand drills", percentComplete: -50 })
+    );
+    expect(low.task?.percentComplete).toBe(0);
+  });
+});
+
+describe("how far along the project is", () => {
+  it("weights by duration rather than averaging percentages", () => {
+    /*
+       The whole reason this function exists.
+
+       A ten-day task not started and a one-day task finished is 1 day of 11
+       done — 9%. A plain average of 0 and 100 says 50%, which would tell
+       somebody a job is half built when almost none of it is.
+    */
+    const list = [
+      { durationDays: 10, percentComplete: 0 },
+      { durationDays: 1, percentComplete: 100 },
+    ] as Parameters<typeof tasks.summarise>[0];
+
+    expect(tasks.summarise(list, "2026-09-01").percentComplete).toBe(9);
+  });
+
+  it("counts a task with no dates as a day rather than dropping it", () => {
+    const list = [
+      { durationDays: null, percentComplete: 100 },
+      { durationDays: 1, percentComplete: 0 },
+    ] as Parameters<typeof tasks.summarise>[0];
+    // One day done of two, not "100% because the other one has no weight".
+    expect(tasks.summarise(list, "2026-09-01").percentComplete).toBe(50);
+  });
+
+  it("reports the span the plan covers", async () => {
+    await add("First", "2026-08-24", "2026-08-25");
+    await add("Last", "2026-09-23", "2026-09-28");
+    await add("Middle", "2026-09-01", "2026-09-02");
+    const list = await inA((q) => tasks.listTasks(q, JOB));
+    const summary = tasks.summarise(list, "2026-09-06");
+    expect(summary.startsOn).toBe("2026-08-24");
+    expect(summary.dueOn).toBe("2026-09-28");
+    expect(summary.tasks).toBe(3);
+  });
+
+  it("counts an unfinished task past its date as overdue, and a finished one not", async () => {
+    await add("Late", "2026-08-01", "2026-08-05", 40);
+    await add("Late but done", "2026-08-01", "2026-08-05", 100);
+    await add("Still to come", "2026-12-01", "2026-12-05", 0);
+    const list = await inA((q) => tasks.listTasks(q, JOB));
+    expect(tasks.summarise(list, "2026-09-06").overdue).toBe(1);
+  });
+
+  it("says nothing rather than zero when nothing is scheduled", () => {
+    const summary = tasks.summarise([], "2026-09-06");
+    expect(summary.percentComplete).toBeNull();
+    expect(summary.tasks).toBe(0);
+  });
+
+  it("counts what is finished", async () => {
+    await add("One", "2026-09-01", "2026-09-02", 100);
+    await add("Two", "2026-09-03", "2026-09-04", 50);
+    const list = await inA((q) => tasks.listTasks(q, JOB));
+    expect(tasks.summarise(list, "2026-09-06").done).toBe(1);
+  });
+});
+
+describe("rearranging the plan", () => {
+  it("moves a task up past its neighbour", async () => {
+    await add("A", "2026-09-01", "2026-09-02");
+    await add("B", "2026-09-03", "2026-09-04");
+    await add("C", "2026-09-05", "2026-09-06");
+    const before = await inA((q) => tasks.listTasks(q, JOB));
+
+    await inA((q) => tasks.moveTask(q, JOB, before[2].id, "up"));
+    const after = await inA((q) => tasks.listTasks(q, JOB));
+    expect(after.map((t) => t.name)).toEqual(["A", "C", "B"]);
+  });
+
+  it("refuses to move the first task up, or the last down", async () => {
+    await add("A", "2026-09-01", "2026-09-02");
+    await add("B", "2026-09-03", "2026-09-04");
+    const list = await inA((q) => tasks.listTasks(q, JOB));
+    expect(await inA((q) => tasks.moveTask(q, JOB, list[0].id, "up"))).toBe(false);
+    expect(await inA((q) => tasks.moveTask(q, JOB, list[1].id, "down"))).toBe(false);
+  });
+
+  it("reorders tasks that all share a position", async () => {
+    /* Every task written before ordering existed carries position 0, and
+       swapping two identical numbers moves nothing. Rewriting by index does. */
+    await add("A", null, null);
+    await add("B", null, null);
+    await db.seed(`UPDATE project_tasks SET position = 0`);
+
+    const before = await inA((q) => tasks.listTasks(q, JOB));
+    await inA((q) => tasks.moveTask(q, JOB, before[1].id, "up"));
+    const after = await inA((q) => tasks.listTasks(q, JOB));
+    expect(after.map((t) => t.name)).toEqual([before[1].name, before[0].name]);
+  });
+});
+
+describe("a task belongs to one project in one workspace", () => {
+  it("is invisible to another tenant", async () => {
+    const { task } = await add("Ours", "2026-09-01", "2026-09-02");
+    expect(await inB((q) => tasks.findTask(q, task!.id))).toBeNull();
+    expect(await inB((q) => tasks.listTasks(q, JOB))).toEqual([]);
+  });
+
+  it("cannot be added to another tenant's project", async () => {
+    const { error } = await inA((q) =>
+      tasks.addTask(q, OTHER_JOB, { name: "Sneaky", startsOn: null, dueOn: null })
+    );
+    expect(error).toMatch(/no longer exists/i);
+  });
+
+  it("is refused by the database even without the repository's check", async () => {
+    /* The trigger is what makes the rule true of the DATA rather than true of
+       one function — a bulk import or a script written next year cannot write
+       the row either. */
+    await expect(
+      db.seed(`INSERT INTO project_tasks (id, sub_account_id, deal_id, name)
+               VALUES ('pt_bad', '${TENANT_A}', '${OTHER_JOB}', 'Cross-tenant')`)
+    ).rejects.toThrow(/does not belong to sub-account/i);
+  });
+
+  it("refuses a backwards date range at the database too", async () => {
+    await expect(
+      db.seed(`INSERT INTO project_tasks (id, sub_account_id, deal_id, name, starts_on, due_on)
+               VALUES ('pt_back', '${TENANT_A}', '${JOB}', 'Backwards',
+                       DATE '2026-09-10', DATE '2026-09-01')`)
+    ).rejects.toThrow();
+  });
+});
+
+describe("removing a task", () => {
+  it("takes it off the plan without erasing that it was planned", async () => {
+    const { task } = await add("Dropped", "2026-09-01", "2026-09-02");
+    expect(await inA((q) => tasks.deleteTask(q, task!.id))).toBe(true);
+    expect(await inA((q) => tasks.listTasks(q, JOB))).toEqual([]);
+
+    const row = await inA((q) =>
+      q.one<{ deleted_at: Date | null }>(`SELECT deleted_at FROM project_tasks WHERE id = $1`, [
+        task!.id,
+      ])
+    );
+    expect(row?.deleted_at).not.toBeNull();
+  });
+});

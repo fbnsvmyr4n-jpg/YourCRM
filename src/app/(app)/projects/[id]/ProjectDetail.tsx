@@ -8,6 +8,7 @@ import {
   CalendarDays,
   ChevronDown,
   FileText,
+  GanttChartSquare,
   Mail,
   MapPin,
   Phone,
@@ -31,6 +32,8 @@ import type {
   ProjectPerson,
   ProjectThread,
 } from "@/server/repos/projects";
+import type { ProjectTask, ScheduleSummary } from "@/server/repos/tasks";
+import { ProjectSchedule } from "./ProjectSchedule";
 import {
   addProjectPersonAction,
   createDocumentAction,
@@ -122,11 +125,22 @@ const EVENT_ICON = { email: Mail, meeting: Users, call: Phone, note: FileText, d
 /** Somebody who could be put on the job: a colleague, or any contact. */
 type Candidate = { id: string; name: string; company?: string | null; isClient?: boolean };
 
+/*
+   "Timeline" is the PLAN; "History" is what has already happened.
+
+   The activity feed was called Timeline, and it is not one — it is a record of
+   emails, meetings and documents after the fact, which is a history. A timeline
+   is what a person means when they ask when the work happens: tasks, dates and
+   how far along each one is. Naming the feed History frees the word for the
+   thing it describes, and the feed's own heading already said "Everything that
+   has happened".
+*/
 const TABS = [
   { id: "team", label: "Team", icon: Users },
+  { id: "timeline", label: "Timeline", icon: GanttChartSquare },
   { id: "documents", label: "Documents", icon: Receipt },
   { id: "threads", label: "Emails", icon: Mail },
-  { id: "timeline", label: "Timeline", icon: CalendarDays },
+  { id: "history", label: "History", icon: CalendarDays },
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
 
@@ -136,6 +150,9 @@ export function ProjectDetail({
   documents,
   threads,
   timeline,
+  tasks,
+  scheduleSummary,
+  today,
   candidates,
 }: {
   header: ProjectHeader;
@@ -143,6 +160,10 @@ export function ProjectDetail({
   documents: ProjectDocument[];
   threads: ProjectThread[];
   timeline: ProjectEvent[];
+  tasks: ProjectTask[];
+  scheduleSummary: ScheduleSummary;
+  /** The business's own today, resolved on the server against its time zone. */
+  today: string;
   candidates: { staff: Candidate[]; contacts: Candidate[] };
 }) {
   const [tab, setTab] = useState<TabId>("team");
@@ -178,10 +199,16 @@ export function ProjectDetail({
 
       <MoneyStrip value={header.valueCents} quoted={quoted} committed={committed} />
 
-      {/* A grid, not a wrapping row: four labels of different lengths let the
-          width decide where the breaks fall, which is how a tab row ends up
-          ragged on one device and fine on another. */}
-      <div className="mt-4 grid grid-cols-4 gap-1.5">
+      {/* A grid, not a wrapping row: labels of different lengths let the width
+          decide where the breaks fall, which is how a tab row ends up ragged on
+          one device and fine on another.
+
+          Three across on a phone since Timeline made five. Five columns at
+          375px gives each tab 71px for an 18px icon and a word beside it, and
+          "Documents" does not fit — it truncates to "Docum…", which reads as a
+          bug rather than as a tab. Two rows of a readable label beats one row
+          of five unreadable ones. */}
+      <div className="mt-4 grid grid-cols-3 gap-1.5 @min-[560px]:grid-cols-5">
         {TABS.map((t) => {
           const Icon = t.icon;
           const active = tab === t.id;
@@ -216,7 +243,16 @@ export function ProjectDetail({
         {tab === "team" && <TeamTab dealId={header.id} people={people} candidates={candidates} />}
         {tab === "documents" && <DocumentsTab dealId={header.id} documents={documents} />}
         {tab === "threads" && <ThreadsTab threads={threads} />}
-        {tab === "timeline" && <TimelineTab events={timeline} />}
+        {tab === "timeline" && (
+          <ProjectSchedule
+            dealId={header.id}
+            tasks={tasks}
+            summary={scheduleSummary}
+            today={today}
+            staff={candidates.staff}
+          />
+        )}
+        {tab === "history" && <TimelineTab events={timeline} />}
       </div>
     </div>
   );

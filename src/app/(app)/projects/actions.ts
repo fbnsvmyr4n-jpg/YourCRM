@@ -1,5 +1,6 @@
 "use server";
 
+import { logWrite } from "@/server/log";
 import { revalidateApp } from "@/server/revalidate";
 import { withCurrentTenant } from "@/server/tenant-session";
 import { decimal, id as validId, multiline, pick, text } from "@/server/validate";
@@ -298,5 +299,128 @@ export async function setDocumentStatusAction(
 
     revalidateApp();
     return { ok: `${row.number} marked ${status}.` };
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* The schedule                                                        */
+/*                                                                     */
+/* A project's tasks: what the work actually is, and how far along.    */
+/* Same gate as everything above — a schedule is customer data, so IT  */
+/* and accounts are refused by construction rather than by a check.    */
+/* ------------------------------------------------------------------ */
+
+/** A percentage arriving from a form. Not `count`: 0 is meaningful and 100 is the cap. */
+function percent(value: unknown): number {
+  const n = Number(text(value, 8));
+  if (!Number.isFinite(n)) return 0;
+  return Math.min(100, Math.max(0, Math.round(n)));
+}
+
+export async function addTaskAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  return withCurrentTenant(async (q) => {
+    const dealId = validId(formData.get("dealId"));
+    if (!dealId) return { error: "That project could not be identified." };
+
+    const name = text(formData.get("name"), 140);
+    if (!name) return { error: "Give the task a name." };
+
+    const { addTask } = await import("@/server/repos/tasks");
+    const result = await addTask(q, dealId, {
+      name,
+      startsOn: isoDate(formData.get("startsOn")),
+      dueOn: isoDate(formData.get("dueOn")),
+      percentComplete: percent(formData.get("percentComplete")),
+      ownerUserId: validId(formData.get("ownerUserId")),
+    });
+    if (result.error) return { error: result.error };
+
+    revalidateApp();
+    return { ok: `${result.task?.name} added to the schedule.` };
+  });
+}
+
+export async function updateTaskAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  return withCurrentTenant(async (q) => {
+    const taskId = validId(formData.get("taskId"));
+    if (!taskId) return { error: "That task could not be identified." };
+
+    const name = text(formData.get("name"), 140);
+    if (!name) return { error: "Give the task a name." };
+
+    const { updateTask } = await import("@/server/repos/tasks");
+    const result = await updateTask(q, taskId, {
+      name,
+      startsOn: isoDate(formData.get("startsOn")),
+      dueOn: isoDate(formData.get("dueOn")),
+      percentComplete: percent(formData.get("percentComplete")),
+      ownerUserId: validId(formData.get("ownerUserId")),
+    });
+    if (result.error) return { error: result.error };
+
+    revalidateApp();
+    return { ok: `${result.task?.name} updated.` };
+  });
+}
+
+/**
+ * Tick a task off, or reopen it.
+ *
+ * The change that actually gets made day to day, so it is one press from the
+ * schedule rather than a trip through the edit form.
+ */
+export async function setTaskCompleteAction(
+  _prev: FormState,
+  formData: FormData
+): Promise<FormState> {
+  return withCurrentTenant(async (q) => {
+    const taskId = validId(formData.get("taskId"));
+    if (!taskId) return { error: "That task could not be identified." };
+    const done = formData.get("done") === "true";
+
+    const { setTaskComplete } = await import("@/server/repos/tasks");
+    const result = await setTaskComplete(q, taskId, done);
+    if (result.error) return { error: result.error };
+
+    revalidateApp();
+    return { ok: done ? `${result.task?.name} marked done.` : `${result.task?.name} reopened.` };
+  });
+}
+
+export async function moveTaskAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  return withCurrentTenant(async (q) => {
+    const dealId = validId(formData.get("dealId"));
+    const taskId = validId(formData.get("taskId"));
+    const direction = pick(formData.get("direction"), ["up", "down"] as const);
+    if (!dealId || !taskId) return { error: "That task could not be identified." };
+    if (!direction) return { error: "Choose a direction." };
+
+    const { moveTask } = await import("@/server/repos/tasks");
+    const moved = await moveTask(q, dealId, taskId, direction);
+    /* Not an error. Pressing up on the first row is a no-op, and telling
+       somebody off for it would be noise on a control they will press by
+       accident every day. */
+    if (!moved) return undefined;
+
+    revalidateApp();
+    return undefined;
+  });
+}
+
+export async function deleteTaskAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  return withCurrentTenant(async (q) => {
+    const taskId = validId(formData.get("taskId"));
+    if (!taskId) return { error: "That task could not be identified." };
+
+    const { deleteTask } = await import("@/server/repos/tasks");
+    const gone = await deleteTask(q, taskId);
+    if (!gone) return { error: "That task is already gone." };
+
+    /* A task vanishing off a schedule is exactly the sort of thing somebody
+       asks about later. The id and the actor, and nothing about what it said —
+       the log must never carry record contents. */
+    logWrite("delete", "project_task", { id: taskId, actor: q.ctx.userId });
+    revalidateApp();
+    return { ok: "Removed from the schedule." };
   });
 }
