@@ -44,8 +44,16 @@ describe("the assistant fills the phone screen", () => {
   it("shows something before the first question", () => {
     /* The conversation is flex-1, so on an empty chat it was a blank panel
        taking most of the screen — the single biggest reason the page read as
-       unfinished. */
-    expect(view).toMatch(/items\.length === 0 && !busy/);
+       unfinished.
+
+       The condition gained `pending.length === 0` when quotations started
+       appearing at the foot of the thread: the empty state is `h-full`, so with
+       a quote waiting and no messages it centred itself over the whole scroll
+       area and pushed the card — the only thing on the screen worth reading —
+       most of a viewport down. Matched on the two facts that matter rather than
+       on the exact expression, so the next thing that counts as content does
+       not fail a correct screen. */
+    expect(view).toMatch(/items\.length === 0 &&[^)]*!busy/);
   });
 
 });

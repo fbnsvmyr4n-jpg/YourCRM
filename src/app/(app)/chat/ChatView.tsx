@@ -1,12 +1,19 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { RotateCcw, Send, Sparkles } from "lucide-react";
+import { Check, Pencil, RotateCcw, Send, Sparkles, Trash2 } from "lucide-react";
 import { instantToWallClock } from "@/lib/zoned";
 import type { ChatMessage } from "@/server/repos/chat";
+import type { Quote } from "@/server/repos/quotes";
 import { intentOf, suggestFor } from "@/server/chat-answers";
 import { clsx } from "@/lib/clsx";
-import { clearChatAction, sendChatAction } from "./actions";
+import {
+  approveQuoteAction,
+  clearChatAction,
+  discardQuoteAction,
+  sendChatAction,
+  sendQuoteAction,
+} from "./actions";
 
 /** Minimal markdown: **bold**, *italic*, and `code`. */
 function renderText(text: string) {
@@ -30,6 +37,151 @@ function renderText(text: string) {
 }
 
 type Knows = { contacts: number; deals: number; meetings: number };
+
+const money = (cents: number) =>
+  `$${(cents / 100).toLocaleString("en-US", {
+    minimumFractionDigits: cents % 100 === 0 ? 0 : 2,
+    maximumFractionDigits: 2,
+  })}`;
+
+/** A quantity reads as "3.5" and "2", never "3.500" and "2.000". */
+const qty = (n: number) => String(Number(n.toFixed(3)));
+
+/**
+ * A drafted quotation, waiting on a person.
+ *
+ * This card is the safety property of the whole feature made visible. The agent
+ * wrote every figure on it from the price list and can rewrite them on request,
+ * and it cannot send it: the only thing that puts this in front of a client is
+ * somebody here pressing Approve. So the card shows the money first, says
+ * exactly which address it would go to, and puts the irreversible action next
+ * to the reversible ones rather than alone under a heading.
+ */
+function QuoteCard({
+  quote,
+  busy,
+  disabled,
+  onApprove,
+  onSend,
+  onDiscard,
+  onRequestChanges,
+}: {
+  quote: Quote;
+  busy: boolean;
+  disabled: boolean;
+  onApprove: () => void;
+  onSend: () => void;
+  onDiscard: () => void;
+  onRequestChanges: () => void;
+}) {
+  const approved = quote.status === "approved";
+  const off = busy || disabled;
+
+  return (
+    <div
+      className="mt-3 overflow-hidden rounded-2xl border"
+      style={{ background: "var(--surface-2)", borderColor: "var(--border)" }}
+    >
+      <div className="flex flex-wrap items-start gap-2 px-3.5 pt-3">
+        <div className="min-w-0 flex-1 leading-tight">
+          <p className="truncate text-sm font-semibold">Quotation {quote.number}</p>
+          <p className="mt-0.5 truncate text-xs text-faint">
+            {[quote.projectTitle, quote.party, quote.revision > 0 ? `revision ${quote.revision}` : null]
+              .filter(Boolean)
+              .join(" · ")}
+          </p>
+        </div>
+        <span
+          className="shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold"
+          style={
+            approved
+              ? { background: "var(--accent-soft)", color: "var(--accent)" }
+              : { background: "var(--amber-soft)", color: "var(--amber)" }
+          }
+        >
+          {approved ? "Approved — not sent" : "Needs your approval"}
+        </span>
+      </div>
+
+      <ul className="mt-2.5 flex flex-col gap-1.5 px-3.5">
+        {quote.lines.map((l) => (
+          <li key={l.id} className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-xs">
+            <span className="min-w-0 flex-1 truncate">{l.description}</span>
+            <span className="shrink-0 tabular-nums text-faint">
+              {qty(l.quantity)} × {money(l.unitCents)}
+            </span>
+            <span className="w-20 shrink-0 text-right font-semibold tabular-nums">
+              {money(l.totalCents)}
+            </span>
+          </li>
+        ))}
+      </ul>
+
+      <div className="mt-2 flex items-baseline justify-between border-t border-[var(--border)] px-3.5 pt-2">
+        <span className="text-xs font-medium text-muted">Total</span>
+        <span className="text-sm font-bold tabular-nums">{money(quote.totalCents)}</span>
+      </div>
+
+      {quote.notes && (
+        <p className="mt-2 whitespace-pre-line px-3.5 text-xs text-muted">{quote.notes}</p>
+      )}
+
+      {/*
+          Where it goes, stated before it goes anywhere.
+
+          Approving is the irreversible step, and "approve" without an address
+          beside it is a button whose consequence is off screen. When there is
+          no address the card says so in amber and Approve still works — the
+          approval is real and worth recording; it simply cannot be emailed
+          until somebody adds one.
+      */}
+      <p
+        className="mt-2 px-3.5 text-xs"
+        style={{ color: quote.partyEmail ? "var(--text-faint)" : "var(--amber)" }}
+      >
+        {quote.partyEmail
+          ? `Emails to ${quote.partyEmail}`
+          : `No email address on file for ${quote.party ?? "this contact"} — add one to send it.`}
+      </p>
+
+      <div className="mt-3 flex flex-wrap items-center justify-end gap-2 border-t border-[var(--border)] px-3.5 py-2.5">
+        <button
+          type="button"
+          onClick={onDiscard}
+          disabled={off}
+          className="btn-soft focus-ring rounded-lg p-2 text-muted transition-colors hover:text-red disabled:opacity-50"
+          aria-label={`Discard ${quote.number}`}
+          title="Discard"
+        >
+          <Trash2 className="h-4 w-4" />
+        </button>
+        {/* Only while it can still be changed. Asking the agent to revise an
+            approved quotation would be asking it to alter a document a person
+            has already put their name to. */}
+        {!approved && (
+          <button
+            type="button"
+            onClick={onRequestChanges}
+            disabled={off}
+            className="btn-soft focus-ring flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium disabled:opacity-50"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+            Request changes
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={approved ? onSend : onApprove}
+          disabled={off}
+          className="btn-accent focus-ring flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-xs font-semibold disabled:opacity-50"
+        >
+          {approved ? <Send className="h-3.5 w-3.5" /> : <Check className="h-3.5 w-3.5" />}
+          {busy ? "Working…" : approved ? "Send again" : "Approve & send"}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 /**
  * "12 March 2026" from a `YYYY-MM-DD` key, for the day separator.
@@ -76,6 +228,7 @@ export function ChatView({
   aiEnabled,
   knows,
   timeZone,
+  quotes,
 }: {
   messages: ChatMessage[];
   aiEnabled: boolean;
@@ -83,8 +236,14 @@ export function ChatView({
   /** The business's zone. See `page.tsx`: bubble times must not be formatted
       against the device, or the server and the client disagree. */
   timeZone: string;
+  /** Quotations the agent drafted that are waiting on a person. */
+  quotes: Quote[];
 }) {
   const [items, setItems] = useState(messages);
+  const [pending, setPending] = useState(quotes);
+  /** The quotation currently being acted on, so only its own buttons go quiet. */
+  const [workingId, setWorkingId] = useState<string | null>(null);
+  const [quoteNote, setQuoteNote] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const narrow = useNarrow();
   const [busy, setBusy] = useState(false);
@@ -121,7 +280,9 @@ export function ChatView({
     const log = logRef.current;
     if (!log) return;
     log.scrollTo({ top: log.scrollHeight, behavior: "smooth" });
-  }, [items, busy]);
+    /* `pending` too: a drafted quotation appears at the foot of the thread, and
+       arriving off the bottom of the screen is the same as not arriving. */
+  }, [items, busy, pending]);
 
   /*
      Size the page to what is actually VISIBLE, and freeze while typing.
@@ -284,9 +445,50 @@ export function ChatView({
     try {
       const res = await sendChatAction(question);
       if (res?.message) setItems((prev) => [...prev, res.message]);
+      /* The server's list, not a guess: a quotation the agent drafted appears,
+         one a colleague approved while this was in flight disappears. */
+      if (res?.quotes) setPending(res.quotes);
+      setQuoteNote(null);
     } finally {
       setBusy(false);
     }
+  }
+
+  /**
+   * Approving, sending and discarding, all of which return the true list back.
+   *
+   * Only the quotation being acted on goes quiet — a workspace with three
+   * drafts waiting should not freeze all three because somebody approved one.
+   */
+  async function runQuote(id: string, action: (documentId: string) => Promise<{
+    ok?: string;
+    error?: string;
+    quotes: Quote[];
+  }>) {
+    if (workingId) return;
+    setWorkingId(id);
+    setQuoteNote(null);
+    try {
+      const res = await action(id);
+      setPending(res.quotes);
+      setQuoteNote(res.error ?? res.ok ?? null);
+    } finally {
+      setWorkingId(null);
+    }
+  }
+
+  /**
+   * Asking for a change hands the sentence back to the person.
+   *
+   * The composer is filled with the quotation's number and the caret put after
+   * it, rather than a menu of edits: what needs changing is a sentence — "drop
+   * the crane to 2 days and add a site survey" — and the agent revises from it.
+   * Prefilling the number is what makes that sentence unambiguous when three
+   * quotes are waiting.
+   */
+  function requestChanges(quote: Quote) {
+    setDraft(`Change ${quote.number}: `);
+    inputRef.current?.focus();
   }
 
   async function reset() {
@@ -490,7 +692,12 @@ export function ChatView({
               the promise the Reports page makes: the figures come from the
               user's own records rather than being estimated.
           */}
-          {items.length === 0 && !busy && (
+          {/* `pending` counts as content. The empty state is `h-full` and
+              centres itself, so with a quotation waiting and no messages it
+              took the whole scroll area and pushed the card — the only thing
+              on the screen worth reading — most of a viewport down. Measured on
+              a 375px phone: 240px of void above a card asking for a decision. */}
+          {items.length === 0 && pending.length === 0 && !busy && (
             <div className="flex h-full flex-col items-center justify-center px-6 text-center">
               <span className="chat-orb mb-4">
                 <Sparkles className="h-[22px] w-[22px]" />
@@ -612,6 +819,36 @@ export function ChatView({
               </div>
             );
           })}
+
+          {/*
+              The quotations, at the foot of the thread.
+
+              Not inside a message bubble, and deliberately: a bubble is
+              something that was said, and this is a document with money on it
+              that somebody has to decide about. It also has to survive a reload
+              and be visible to a colleague who was never in this conversation,
+              which a bubble in one person's transcript cannot do.
+
+              They sit at the end rather than beside the message that produced
+              them because that is where a pending decision belongs — the last
+              thing you see before the box you would type into.
+          */}
+          {pending.map((quote) => (
+            <QuoteCard
+              key={quote.id}
+              quote={quote}
+              busy={workingId === quote.id}
+              disabled={workingId !== null && workingId !== quote.id}
+              onApprove={() => runQuote(quote.id, approveQuoteAction)}
+              onSend={() => runQuote(quote.id, sendQuoteAction)}
+              onDiscard={() => runQuote(quote.id, discardQuoteAction)}
+              onRequestChanges={() => requestChanges(quote)}
+            />
+          ))}
+
+          {quoteNote && (
+            <p className="mt-2 px-2 text-center text-xs text-muted">{quoteNote}</p>
+          )}
 
           {busy && (
             <div className="mt-2.5 flex justify-start">

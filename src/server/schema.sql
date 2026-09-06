@@ -1347,15 +1347,34 @@ CREATE POLICY price_items_tenant_isolation ON price_items
 -- something.
 -- ---------------------------------------------------------------------------
 ALTER TABLE documents ADD COLUMN IF NOT EXISTS drafted_by_agent    TEXT;
+
+-- WHO it goes to, as a record rather than as a name.
+--
+-- `party` is display text — "Marius Steyn, Heineken" — and an email address
+-- cannot be recovered from it. Resolving the recipient at approval time by
+-- matching that string against contacts would mean the address a person
+-- approved and the address it was sent to are established by two different
+-- pieces of code at two different moments, which is exactly the kind of seam a
+-- quotation must not have. The contact is pinned when the quote is drafted, the
+-- approval screen shows that person's real address, and the send reads the same
+-- row.
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS party_contact_id    TEXT REFERENCES contacts(id) ON DELETE SET NULL;
 ALTER TABLE documents ADD COLUMN IF NOT EXISTS approved_at         TIMESTAMPTZ;
 ALTER TABLE documents ADD COLUMN IF NOT EXISTS approved_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL;
 ALTER TABLE documents ADD COLUMN IF NOT EXISTS sent_at             TIMESTAMPTZ;
 ALTER TABLE documents ADD COLUMN IF NOT EXISTS revision            INTEGER NOT NULL DEFAULT 0;
 
--- The status a drafted quote sits in until somebody approves it. Added to the
+-- The two states a drafted quote passes through on its way out. Added to the
 -- existing CHECK rather than replacing it, so the statuses already in use keep
 -- meaning what they meant.
+--
+-- `approved` earns its place by being a state that really happens: somebody
+-- says yes and the email does not go — no address on file, or Resend is not
+-- configured, or it returns a 500. Without it the only honest options are to
+-- claim the quote was sent when it was not, or to throw the approval away and
+-- ask for it again. Approval and despatch are already two columns; they are two
+-- statuses for the same reason.
 ALTER TABLE documents DROP CONSTRAINT IF EXISTS documents_status_check;
 ALTER TABLE documents ADD CONSTRAINT documents_status_check
-  CHECK (status IN ('draft', 'awaiting_approval', 'sent', 'accepted',
+  CHECK (status IN ('draft', 'awaiting_approval', 'approved', 'sent', 'accepted',
                     'declined', 'paid', 'cancelled'));

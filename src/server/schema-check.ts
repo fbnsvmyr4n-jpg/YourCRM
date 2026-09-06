@@ -87,6 +87,7 @@ export const EXPECTED_COLUMNS: ReadonlyArray<[string, string]> = [
   ["documents", "approved_at"],
   ["documents", "approved_by_user_id"],
   ["documents", "drafted_by_agent"],
+  ["documents", "party_contact_id"],
   ["documents", "revision"],
   ["documents", "sent_at"],
 ];

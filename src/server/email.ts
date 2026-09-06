@@ -117,6 +117,76 @@ export function inviteEmail(link: string, inviterName: string, workspaceName: st
   };
 }
 
+/**
+ * The quotation itself, as an email.
+ *
+ * Plain: a client reading this on a phone wants the number, the lines and the
+ * total, and no gradient. It carries no link back into the CRM — the recipient
+ * has no account here, and a dead link on a priced document reads as carelessness.
+ *
+ * Every value on it is escaped. The lines came out of the price list and the
+ * project came from a deal title, but both were typed by a person, and an
+ * unescaped `<` in "Steel < 6mm" is markup in a customer's mailbox.
+ */
+export function quotationEmail(quote: {
+  number: string;
+  project: string;
+  from: string;
+  approvedBy: string;
+  notes: string | null;
+  lines: { description: string; quantity: number; unitCents: number; totalCents: number }[];
+  totalCents: number;
+}) {
+  const money = (cents: number) =>
+    `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const qty = (n: number) => String(Number(n.toFixed(3)));
+
+  const subject = `Quotation ${quote.number} — ${quote.project}`;
+
+  const text = [
+    `Quotation ${quote.number}`,
+    quote.project,
+    "",
+    ...quote.lines.map(
+      (l) => `${l.description}\n  ${qty(l.quantity)} × ${money(l.unitCents)} = ${money(l.totalCents)}`
+    ),
+    "",
+    `Total: ${money(quote.totalCents)}`,
+    ...(quote.notes ? ["", quote.notes] : []),
+    "",
+    `Sent by ${quote.approvedBy}, ${quote.from}.`,
+  ].join("\n");
+
+  const rows = quote.lines
+    .map(
+      (l) => `    <tr>
+      <td style="padding:8px 0;border-bottom:1px solid #e6e9f0">${escapeHtml(l.description)}</td>
+      <td style="padding:8px 0;border-bottom:1px solid #e6e9f0;text-align:right;white-space:nowrap;color:#55617a">${qty(l.quantity)} &times; ${money(l.unitCents)}</td>
+      <td style="padding:8px 0 8px 16px;border-bottom:1px solid #e6e9f0;text-align:right;white-space:nowrap;font-weight:600">${money(l.totalCents)}</td>
+    </tr>`
+    )
+    .join("\n");
+
+  const html = `<div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:560px;margin:0 auto;padding:32px 24px;color:#0b1220">
+  <h1 style="margin:0 0 4px;font-size:20px;font-weight:600">Quotation ${escapeHtml(quote.number)}</h1>
+  <p style="margin:0 0 24px;color:#55617a">${escapeHtml(quote.project)}</p>
+  <table style="width:100%;border-collapse:collapse;font-size:14px">
+${rows}
+    <tr>
+      <td style="padding:12px 0;font-weight:600">Total</td>
+      <td></td>
+      <td style="padding:12px 0 12px 16px;text-align:right;font-weight:700;font-size:16px">${money(quote.totalCents)}</td>
+    </tr>
+  </table>
+  ${quote.notes ? `<p style="margin:20px 0 0;line-height:1.6;color:#55617a;white-space:pre-line">${escapeHtml(quote.notes)}</p>` : ""}
+  <p style="margin:28px 0 0;font-size:13px;color:#8a94a8">
+    Sent by ${escapeHtml(quote.approvedBy)}, ${escapeHtml(quote.from)}.
+  </p>
+</div>`;
+
+  return { subject, text, html };
+}
+
 /** The reset email. Plain and legible — this is a security message, not a newsletter. */
 export function resetEmail(link: string) {
   return {

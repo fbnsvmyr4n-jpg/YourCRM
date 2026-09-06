@@ -55,7 +55,23 @@ import {
  * every time regardless of why you opened it.
  */
 
-const money = (cents: number) => `$${Math.round(cents / 100).toLocaleString()}`;
+/**
+ * Money, with the cents only when there are any.
+ *
+ * It was `Math.round(cents / 100)`, which reads well on a project value and
+ * lies on a quotation line: a rate of $1,250.50 rendered as $1,251, so a line
+ * showed "2 × $1,251 = $2,501" — arithmetic that does not work, on a document
+ * somebody signs. Found by opening the screen with a real quote on it, not by a
+ * test; every figure involved was correct in the database and correct in the
+ * total, and only the unit price was repainted.
+ *
+ * Whole amounts keep their old appearance, so nothing else on this page moves.
+ */
+const money = (cents: number) =>
+  `$${(cents / 100).toLocaleString("en-US", {
+    minimumFractionDigits: cents % 100 === 0 ? 0 : 2,
+    maximumFractionDigits: 2,
+  })}`;
 
 const initialsOf = (name: string) =>
   name
@@ -76,12 +92,30 @@ function readableDay(iso: string | null): string | null {
 
 const DOC_STATUS_TONE: Record<string, { color: string; soft: string }> = {
   draft: { color: "var(--text-muted)", soft: "var(--raise)" },
+  awaiting_approval: { color: "var(--amber)", soft: "var(--amber-soft)" },
+  approved: { color: "var(--accent)", soft: "var(--accent-soft)" },
   sent: { color: "var(--accent)", soft: "var(--accent-soft)" },
   accepted: { color: "var(--green)", soft: "var(--green-soft)" },
   paid: { color: "var(--green)", soft: "var(--green-soft)" },
   declined: { color: "var(--red)", soft: "var(--red-soft)" },
   cancelled: { color: "var(--red)", soft: "var(--red-soft)" },
 };
+
+/**
+ * The two statuses a person does not set from this screen.
+ *
+ * A quotation an agent drafted is approved in Chat, where the lines and the
+ * recipient are in front of whoever is deciding. This screen's status control
+ * offers six values and not these two — so before this list existed, an
+ * awaiting-approval quote rendered with its select defaulted to "draft" (no
+ * option matched) and one press of Update silently threw the pending approval
+ * away. Found by opening the project screen, not by a type error: every one of
+ * those values is a string.
+ */
+const AGENT_STATUSES = ["awaiting_approval", "approved"];
+
+/** "awaiting_approval" is a column value, not something to show a person. */
+const statusLabel = (status: string) => status.replace(/_/g, " ");
 
 const EVENT_ICON = { email: Mail, meeting: Users, call: Phone, note: FileText, document: Receipt };
 
@@ -659,7 +693,7 @@ function DocumentRow({
             className="shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold capitalize"
             style={{ background: tone.soft, color: tone.color }}
           >
-            {doc.status}
+            {statusLabel(doc.status)}
           </span>
           <ChevronDown className={clsx("h-4 w-4 shrink-0 text-muted transition-transform", open && "rotate-180")} aria-hidden />
         </span>
@@ -682,8 +716,19 @@ function DocumentRow({
           </ul>
           {doc.notes && <p className="mt-3 whitespace-pre-line text-xs text-muted">{doc.notes}</p>}
 
-          {/* Moving a document along is the change actually made day to day, so
-              it is one control here rather than an edit screen. */}
+          {/* A quotation waiting on an approval is not moved along from here:
+              the decision belongs where the lines and the recipient are, and a
+              select that cannot represent this document's own status would
+              change it to something else the moment anybody pressed Update. */}
+          {AGENT_STATUSES.includes(doc.status) ? (
+            <p className="mt-3 text-right text-xs text-muted">
+              {doc.status === "approved"
+                ? "Approved, waiting to be sent — finish it in Chat."
+                : "Waiting for approval in Chat."}
+            </p>
+          ) : (
+          /* Moving a document along is the change actually made day to day, so
+             it is one control here rather than an edit screen. */
           <form action={onStatus} className="mt-3 flex items-center justify-end gap-2">
             <input type="hidden" name="documentId" value={doc.id} />
             <label className="sr-only" htmlFor={`status-${doc.id}`}>
@@ -707,6 +752,7 @@ function DocumentRow({
               Update
             </button>
           </form>
+          )}
         </div>
       )}
     </li>

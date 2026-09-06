@@ -267,13 +267,34 @@ export async function setDocumentStatusAction(
     if (!documentId) return { error: "That document could not be identified." };
     if (!status) return { error: "Choose a status." };
 
+    /*
+       A quotation waiting on an approval is not moved along from here.
+
+       `DOC_STATUSES` cannot express `awaiting_approval` or `approved`, so
+       without this predicate any Update on such a document rewrote it to
+       whichever value the select happened to be showing — throwing away a
+       pending approval, or marking an unsent quote sent. The screen hides the
+       control; this is what makes hiding it true, because a server action is a
+       public endpoint and the screen is only a suggestion.
+    */
     const row = await q.one<{ number: string }>(
       `UPDATE documents SET status = $3, updated_at = now()
         WHERE id = $2 AND sub_account_id = $1 AND deleted_at IS NULL
+          AND status NOT IN ('awaiting_approval', 'approved')
         RETURNING number`,
       [q.ctx.subAccountId, documentId, status]
     );
-    if (!row) return { error: "That document no longer exists." };
+    if (!row) {
+      const doc = await q.one<{ number: string; status: string }>(
+        `SELECT number, status FROM documents
+          WHERE id = $2 AND sub_account_id = $1 AND deleted_at IS NULL`,
+        [q.ctx.subAccountId, documentId]
+      );
+      if (!doc) return { error: "That document no longer exists." };
+      return {
+        error: `${doc.number} is waiting on an approval. Approve or discard it in Chat first.`,
+      };
+    }
 
     revalidateApp();
     return { ok: `${row.number} marked ${status}.` };

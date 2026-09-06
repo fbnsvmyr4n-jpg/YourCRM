@@ -172,6 +172,13 @@ export async function projectPeople(q: TenantQuery, dealId: string): Promise<Pro
 export type DocumentKind = "quote" | "purchase_order" | "invoice";
 export type DocumentStatus =
   | "draft"
+  /* An agent drafted it and nobody has said yes yet, then: a person has, and it
+     has not gone out. Both have been on the CHECK constraint since quotations
+     were added, and both were missing here — so the project screen rendered a
+     document whose own status its status control could not express, and one
+     press of Update threw the pending approval away. */
+  | "awaiting_approval"
+  | "approved"
   | "sent"
   | "accepted"
   | "declined"

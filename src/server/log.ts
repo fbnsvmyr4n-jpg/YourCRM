@@ -72,7 +72,13 @@ export function logAuth(
 export function logWrite(
   // `restore` exists because deletion is now soft: undoing one is a real write,
   // and a log that records only the destruction tells half the story.
-  action: "create" | "update" | "delete" | "restore",
+  //
+  // `draft`, `approve` and `send` are not `update` for the same reason. A
+  // priced document an AI wrote, the named person who approved it, and the
+  // moment it left for a client are the three events somebody comes looking for
+  // when a customer queries a price — flattened into "update" they are
+  // indistinguishable from a typo being fixed.
+  action: "create" | "update" | "delete" | "restore" | "draft" | "approve" | "send",
   entity: string,
   fields: { id?: string; actor?: string; detail?: string } = {}
 ): void {

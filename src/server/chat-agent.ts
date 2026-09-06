@@ -1,3 +1,6 @@
+/* Type-only: erased at build, so the SDK is still loaded lazily at the one
+   place that needs it and a deployment without a key never imports it. */
+import type Anthropic from "@anthropic-ai/sdk";
 import { BOARD_STAGES as STAGES } from "@/data/pipeline";
 import { listContacts } from "./repos/contacts";
 import { listDeals } from "./repos/deals";
@@ -5,7 +8,10 @@ import { listMeetings } from "./repos/meetings";
 import { listMessages, unreadCount } from "./repos/inbox";
 import type { ChatMessage } from "./repos/chat";
 import { listCalls } from "./repos/calls";
+import { listPriceItems } from "./repos/pricing";
+import { quotesAwaitingApproval } from "./repos/quotes";
 import { getSettings } from "./repos/settings";
+import { QUOTE_TOOLS, quoteInstructions, runQuoteTool } from "./quote-agent";
 import { instantToWallClock } from "@/lib/zoned";
 import type { TenantQuery } from "./tenant";
 import { aiCostMicros, recordUsage } from "./usage";
@@ -29,6 +35,11 @@ export async function buildCrmContext(q: TenantQuery) {
   const meetings = await listMeetings(q);
   const messages = await listMessages(q, "inbox");
   const calls = await listCalls(q);
+  /* Active items only: a withdrawn rate must not be offered on a new quote,
+     and the agent quoting one would be the price list's whole reason for
+     existing, defeated. */
+  const prices = await listPriceItems(q, true);
+  const pendingQuotes = await quotesAwaitingApproval(q);
 
   // Money arrives in cents and every line below is written for a human, so it
   // is converted once here rather than at each mention.
@@ -94,6 +105,8 @@ export async function buildCrmContext(q: TenantQuery) {
     unread,
     byStage,
     calls,
+    prices,
+    pendingQuotes,
     monthlyTarget,
     wonThisMonth,
     /**
@@ -135,6 +148,35 @@ export async function buildCrmContext(q: TenantQuery) {
         .map((c) => `${c.callerName || "unknown caller"} — ${c.outcome ?? "no outcome recorded"}`)
         .join("; ")}`,
       `TARGET: ${money(wonThisMonth)} won this month against a ${money(monthlyTarget)} monthly target`,
+      /*
+         The price list, verbatim, because it is the only place a quotation's
+         figures may come from. Rendered with the unit so a line reads properly
+         — "per day" and "each" change what a quantity means — and in dollars
+         and cents rather than cents, so 1,200,050 is never repeated to somebody
+         as a price.
+      */
+      prices.length
+        ? `PRICE LIST (the ONLY prices you may quote):\n${prices
+            .map(
+              (p) =>
+                `  • ${p.name} — $${(p.unitCents / 100).toFixed(2)} ${p.unit}${
+                  p.description ? ` (${p.description})` : ""
+                }`
+            )
+            .join("\n")}`
+        : "PRICE LIST: empty — nothing has been priced yet, so no quotation can be drafted.",
+      pendingQuotes.length
+        ? `QUOTATIONS WAITING FOR THE USER'S APPROVAL:\n${pendingQuotes
+            .map(
+              (d) =>
+                `  • ${d.number} — ${d.projectTitle}${d.party ? ` for ${d.party}` : ""}, ${money(
+                  Math.round(d.totalCents / 100)
+                )}${d.revision > 0 ? `, revision ${d.revision}` : ""}: ${d.lines
+                  .map((l) => `${l.description} ×${l.quantity}`)
+                  .join("; ")}`
+            )
+            .join("\n")}`
+        : "QUOTATIONS WAITING FOR APPROVAL: none",
     ].join("\n"),
   };
 }
@@ -163,45 +205,102 @@ export async function answer(
 
   if (process.env.ANTHROPIC_API_KEY) {
     try {
-      const { default: Anthropic } = await import("@anthropic-ai/sdk");
+      const { default: AnthropicClient } = await import("@anthropic-ai/sdk");
       // The SDK defaults to roughly a 10-minute timeout, which in a chat box
       // is indistinguishable from a hang. One retry, then fall back to the
       // deterministic assistant rather than leaving the user waiting.
-      const client = new Anthropic({ timeout: 30_000, maxRetries: 1 });
+      const client = new AnthropicClient({ timeout: 30_000, maxRetries: 1 });
 
-      const response = await client.messages.create({
-        model: MODEL,
-        max_tokens: 1024,
-        thinking: { type: "adaptive" },
-        // Chat is latency-sensitive and these are lookup-style questions.
-        output_config: { effort: "low" },
-        system: [
-          // The name comes from the session. It was hardcoded to "Lang Lee
-          // (Admin)", so the assistant addressed every user on every account by
-          // one person's name — harmless while there was one user, and a
-          // stranger's name on screen the moment there were two.
-          `You are the assistant inside YourCRM, a sales CRM. You help ${userName} run their pipeline.`,
-          "Answer using ONLY the CRM data below. If something isn't in the data, say so plainly rather than inventing it.",
-          "Be concise and practical — lead with the answer, then a short supporting detail. Use the person's real names and figures.",
-          "When it helps, suggest the next action (who to follow up with, what to close).",
-          "",
-          "=== LIVE CRM DATA ===",
-          ctx.text,
-        ].join("\n"),
-        messages: [
-          ...history.slice(-8).map((m) => ({
-            role: m.role,
-            content: m.text,
-          })),
-          { role: "user" as const, content: question },
-        ],
-      });
+      /* The SDK's own type, not a hand-written one. The conversation now grows
+         mid-request — assistant turns with thinking and tool_use blocks, user
+         turns carrying tool results — and a local `{role, content}` interface
+         would type-check every one of those into a shape the API rejects. */
+      const messages: Anthropic.MessageParam[] = [
+        ...history.slice(-8).map((m) => ({
+          role: m.role,
+          content: m.text,
+        })),
+        { role: "user" as const, content: question },
+      ];
 
-      const text = response.content
-        .filter((b): b is Extract<typeof b, { type: "text" }> => b.type === "text")
-        .map((b) => b.text)
-        .join("\n")
-        .trim();
+      /* Usage is accumulated across the whole exchange rather than read off the
+         last response. A message that drafts a quotation is two or three calls
+         to the model, and billing the customer's usage for only the last of
+         them would under-report exactly the messages that cost the most. */
+      let inputTokens = 0;
+      let outputTokens = 0;
+      let text = "";
+
+      /*
+         The tool loop.
+
+         Four iterations: draft, respond to a tool result, revise, respond. More
+         than that in one message is a conversation the model is having with
+         itself, and each pass is a paid call with a chat box waiting on it. If
+         it runs out, whatever text it has produced is what the user gets —
+         truncated help, never a silent nothing.
+      */
+      for (let step = 0; step < 4; step++) {
+        const response = await client.messages.create({
+          model: MODEL,
+          max_tokens: 1024,
+          thinking: { type: "adaptive" },
+          // Chat is latency-sensitive and these are lookup-style questions.
+          output_config: { effort: "low" },
+          tools: QUOTE_TOOLS,
+          system: [
+            // The name comes from the session. It was hardcoded to "Lang Lee
+            // (Admin)", so the assistant addressed every user on every account by
+            // one person's name — harmless while there was one user, and a
+            // stranger's name on screen the moment there were two.
+            `You are the assistant inside YourCRM, a sales CRM. You help ${userName} run their pipeline.`,
+            "Answer using ONLY the CRM data below. If something isn't in the data, say so plainly rather than inventing it.",
+            "Be concise and practical — lead with the answer, then a short supporting detail. Use the person's real names and figures.",
+            "When it helps, suggest the next action (who to follow up with, what to close).",
+            "",
+            quoteInstructions(),
+            "",
+            "=== LIVE CRM DATA ===",
+            ctx.text,
+          ].join("\n"),
+          messages,
+        });
+
+        inputTokens += response.usage?.input_tokens ?? 0;
+        outputTokens += response.usage?.output_tokens ?? 0;
+
+        const said = response.content
+          .filter((b): b is Extract<typeof b, { type: "text" }> => b.type === "text")
+          .map((b) => b.text)
+          .join("\n")
+          .trim();
+        if (said) text = text ? `${text}\n\n${said}` : said;
+
+        const calls = response.content.filter(
+          (b): b is Extract<typeof b, { type: "tool_use" }> => b.type === "tool_use"
+        );
+        if (calls.length === 0) break;
+
+        /* The assistant turn goes back UNCHANGED, thinking blocks included.
+           Rebuilding it from the text would drop them, and a model asked to
+           continue from a turn it did not produce is a model that has lost its
+           own reasoning halfway through pricing a job. */
+        messages.push({ role: "assistant", content: response.content });
+
+        const results = [];
+        for (const call of calls) {
+          const outcome = await runQuoteTool(q, call.name, call.input, "chat");
+          results.push({
+            type: "tool_result" as const,
+            tool_use_id: call.id,
+            content: outcome.text,
+          });
+        }
+        /* All of them in ONE user message. Splitting tool results across
+           several messages teaches the model to stop asking for more than one
+           thing at a time. */
+        messages.push({ role: "user", content: results });
+      }
 
       if (text) {
         /**
@@ -220,17 +319,10 @@ export async function answer(
         await recordUsage(q, {
           kind: "ai_message",
           quantity: 1,
-          costMicros: aiCostMicros(
-            response.usage?.input_tokens ?? 0,
-            response.usage?.output_tokens ?? 0
-          ),
+          costMicros: aiCostMicros(inputTokens, outputTokens),
           // Enough to recompute the cost when the rates change, and nothing
           // about what was asked or answered.
-          detail: {
-            model: MODEL,
-            inputTokens: response.usage?.input_tokens ?? 0,
-            outputTokens: response.usage?.output_tokens ?? 0,
-          },
+          detail: { model: MODEL, inputTokens, outputTokens },
         });
         return { text, live: true };
       }
