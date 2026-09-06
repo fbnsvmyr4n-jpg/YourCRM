@@ -2,9 +2,18 @@
 
 import { useActionState } from "react";
 import { useFormDisclosure } from "@/lib/form-disclosure";
-import { Building2, KeyRound, LogOut, Plus, Target, UserRound } from "lucide-react";
+import {
+  Building2,
+  CalendarOff,
+  KeyRound,
+  LogOut,
+  Plus,
+  Target,
+  Trash2,
+  UserRound,
+} from "lucide-react";
 import { signOutAction } from "@/app/(auth)/actions";
-import { Card, CardHeader } from "@/components/ui/Card";
+import { Card, CardHeader, CardMeta } from "@/components/ui/Card";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { useTheme } from "@/components/theme/ThemeProvider";
 import { Banner } from "@/components/ui/Banner";
@@ -12,8 +21,11 @@ import type { Settings } from "@/server/repos/settings";
 import type { SafeUser } from "@/server/repos/users";
 import type { WorkspaceRow } from "@/server/sub-accounts";
 import {
+  addHolidayAction,
   changePasswordAction,
   createWorkspaceAction,
+  importHolidaysAction,
+  removeHolidayAction,
   switchWorkspaceAction,
   updateProfileAction,
   updateTargetsAction,
@@ -469,4 +481,158 @@ function Field({
       />
     </label>
   );
+}
+
+/**
+ * The days this workspace does not work.
+ *
+ * Weekends are a rule the scheduler already knows; these are data it cannot
+ * guess. A day added here moves every project task that would have crossed it —
+ * which is why the card says so rather than presenting itself as a list nobody
+ * reads.
+ *
+ * The importer fills a year from a country's public holidays. It is a
+ * convenience for filling the list, not a source the schedule trusts: the dates
+ * land in this workspace's own table, where any of them can be removed.
+ */
+export function HolidaysCard({
+  holidays,
+  thisYear,
+}: {
+  holidays: { id: string; onDate: string; name: string }[];
+  /** Resolved on the server against the business's zone, not the device's. */
+  thisYear: number;
+}) {
+  const [addState, add, adding] = useActionState<FormState, FormData>(addHolidayAction, undefined);
+  const [importState, importYear, importing] = useActionState<FormState, FormData>(
+    importHolidaysAction,
+    undefined
+  );
+  const [removeState, remove] = useActionState<FormState, FormData>(
+    removeHolidayAction,
+    undefined
+  );
+
+  /* Grouped by year, newest first, because a calendar with three years in it is
+     three lists rather than one of forty rows. */
+  const byYear = new Map<string, typeof holidays>();
+  for (const h of holidays) {
+    const year = h.onDate.slice(0, 4);
+    const bucket = byYear.get(year);
+    if (bucket) bucket.push(h);
+    else byYear.set(year, [h]);
+  }
+  const years = [...byYear.keys()].sort().reverse();
+
+  return (
+    <Card>
+      <CardHeader
+        title="Working calendar"
+        icon={<CalendarOff className="h-[18px] w-[18px] text-accent" />}
+        action={<CardMeta value={holidays.length}>{holidays.length === 1 ? "day" : "days"}</CardMeta>}
+      />
+      <p className="mb-4 text-xs text-muted">
+        Days this workspace is closed. Project schedules skip them, the same way they skip
+        weekends — so adding one moves any task that would have run across it.
+      </p>
+
+      <div className="flex flex-col gap-2 empty:hidden">
+        <Banner state={addState} />
+        <Banner state={importState} />
+        <Banner state={removeState} />
+      </div>
+
+      <form action={importYear} className="mt-3 flex flex-wrap items-end gap-2">
+        <input type="hidden" name="setId" value="za" />
+        <label className="w-28">
+          <span className="mb-1.5 block text-xs font-medium text-muted">Year</span>
+          <input
+            type="number"
+            name="year"
+            min="2020"
+            max="2100"
+            defaultValue={thisYear}
+            className="field-input"
+          />
+        </label>
+        <button
+          type="submit"
+          disabled={importing}
+          className="btn-soft focus-ring rounded-xl px-4 py-2.5 text-sm font-medium disabled:opacity-60"
+        >
+          {importing ? "Adding…" : "Add South African holidays"}
+        </button>
+      </form>
+
+      <form action={add} className="mt-3 flex flex-wrap items-end gap-2 border-t border-[var(--border)] pt-3">
+        <label className="w-40">
+          <span className="mb-1.5 block text-xs font-medium text-muted">Date</span>
+          <input type="date" name="onDate" required className="field-input" />
+        </label>
+        <label className="min-w-0 flex-1">
+          <span className="mb-1.5 block text-xs font-medium text-muted">What it is</span>
+          <input name="name" placeholder="Company shutdown" required className="field-input" />
+        </label>
+        <button
+          type="submit"
+          disabled={adding}
+          className="btn-accent focus-ring rounded-xl px-4 py-2.5 text-sm font-semibold disabled:opacity-60"
+        >
+          Add a day
+        </button>
+      </form>
+
+      {holidays.length === 0 ? (
+        <p className="mt-4 text-xs text-faint">
+          Nothing yet — schedules currently skip weekends only.
+        </p>
+      ) : (
+        <div className="mt-4 flex flex-col gap-4">
+          {years.map((year) => (
+            <div key={year}>
+              <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-faint">
+                {year}
+              </p>
+              <ul className="flex flex-col gap-1.5">
+                {(byYear.get(year) ?? []).map((h) => (
+                  <li
+                    key={h.id}
+                    className="flex items-center gap-3 rounded-xl px-3 py-2"
+                    style={{ background: "var(--surface-2)" }}
+                  >
+                    <span className="w-24 shrink-0 text-xs tabular-nums text-muted">
+                      {readableHoliday(h.onDate)}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-sm">{h.name}</span>
+                    <form action={remove} className="shrink-0">
+                      <input type="hidden" name="id" value={h.id} />
+                      <button
+                        type="submit"
+                        aria-label={`Remove ${h.name}`}
+                        className="btn-soft focus-ring rounded-lg p-2 text-muted transition-colors hover:text-red"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </form>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+/** "24 Sep · Thu" — the weekday matters here: it says why a day costs the plan
+    anything at all, since a Saturday closure changes nothing. */
+function readableHoliday(iso: string): string {
+  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const [y, m, d] = iso.split("-").map(Number);
+  /* Built as UTC and read as UTC, so the weekday cannot slip in a zone behind
+     Greenwich — the same rule every other date on this project follows. */
+  const weekday = DAYS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
+  return `${d} ${MONTHS[m - 1]} · ${weekday}`;
 }

@@ -12,7 +12,7 @@ import { createSubAccount } from "@/server/sub-accounts";
 import { withSystem } from "@/server/tenant";
 import { requireTenant, SUB_ACCOUNT_COOKIE, withCurrentTenant } from "@/server/tenant-session";
 import { isTrashKind, nounFor, restoreFromTrash } from "@/server/trash";
-import { count, email as validEmail, money, multiline, text } from "@/server/validate";
+import { count, email as validEmail, id as validId, money, multiline, pick, text } from "@/server/validate";
 import { cookies } from "next/headers";
 
 /**
@@ -311,4 +311,88 @@ export async function restoreDeletedAction(kind: string, id: string): Promise<Fo
     revalidateApp();
     return { ok: `${nounFor(kind)} restored.` };
   });
+}
+
+/* ------------------------------------------------------------------ */
+/* The working calendar                                                */
+/*                                                                     */
+/* Which days this workspace does not work. Read by the project        */
+/* schedule, so a day added here moves the plans that cross it.        */
+/* ------------------------------------------------------------------ */
+
+/** Whose holidays a generator offers. One entry per country supported. */
+const HOLIDAY_SET_IDS = ["za"] as const;
+
+export async function addHolidayAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  return withCurrentTenant(async (q) => {
+    const onDate = text(formData.get("onDate"), 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(onDate)) return { error: "Choose a date." };
+    const name = text(formData.get("name"), 80);
+    if (!name) return { error: "Give the day a name, so the calendar reads." };
+
+    const { addHolidays } = await import("@/server/repos/holidays");
+    const result = await addHolidays(q, [{ onDate, name }]);
+    if (result.error) return { error: result.error };
+
+    revalidateApp();
+    /* Zero added is not an error — the day was already on the list, which is
+       what somebody adding it twice meant anyway. */
+    return { ok: result.added === 0 ? "Already on the calendar." : `${name} added.` };
+  }, { crmData: false });
+}
+
+/**
+ * Fill a year from a country's public holidays.
+ *
+ * A convenience for the person maintaining the list, not a fact the scheduler
+ * trusts: the dates land in the workspace's own table where they can be edited
+ * and removed. Days already present are skipped, so pressing it twice adds
+ * nothing rather than failing.
+ */
+export async function importHolidaysAction(
+  _prev: FormState,
+  formData: FormData
+): Promise<FormState> {
+  return withCurrentTenant(async (q) => {
+    const setId = pick(formData.get("setId"), HOLIDAY_SET_IDS);
+    if (!setId) return { error: "Choose which country's holidays to add." };
+
+    const year = count(formData.get("year"), 2200) ?? 0;
+    /* A sane window rather than any integer: a typo of 20226 would otherwise
+       write a year nobody will ever see, and the schedule would carry it. */
+    if (year < 2020 || year > 2100) return { error: "Choose a year between 2020 and 2100." };
+
+    const { HOLIDAY_SETS } = await import("@/server/holidays");
+    const set = HOLIDAY_SETS.find((s) => s.id === setId);
+    if (!set) return { error: "That country is not available." };
+
+    const { addHolidays } = await import("@/server/repos/holidays");
+    const result = await addHolidays(q, set.generate(year));
+    if (result.error) return { error: result.error };
+
+    revalidateApp();
+    return {
+      ok:
+        result.added === 0
+          ? `${year} was already on the calendar.`
+          : `Added ${result.added} ${set.label} ${result.added === 1 ? "holiday" : "holidays"} for ${year}.`,
+    };
+  }, { crmData: false });
+}
+
+export async function removeHolidayAction(
+  _prev: FormState,
+  formData: FormData
+): Promise<FormState> {
+  return withCurrentTenant(async (q) => {
+    const id = validId(formData.get("id"));
+    if (!id) return { error: "That day could not be identified." };
+
+    const { removeHoliday } = await import("@/server/repos/holidays");
+    const gone = await removeHoliday(q, id);
+    if (!gone) return { error: "That day is no longer on the calendar." };
+
+    revalidateApp();
+    return { ok: "Removed from the calendar." };
+  }, { crmData: false });
 }

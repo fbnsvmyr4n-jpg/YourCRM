@@ -1,4 +1,5 @@
 import { earliestStart, finishAfter, workingDaysBetween } from "../schedule";
+import { holidaySet } from "./holidays";
 import type { TenantQuery } from "../tenant";
 
 /**
@@ -489,6 +490,11 @@ export async function cascade(q: TenantQuery, dealId: string): Promise<number> {
   const links = await listDependencies(q, dealId);
   if (links.size === 0) return 0;
 
+  /* Read once for the whole cascade rather than per task: it is the same set
+     for every date being computed, and a query inside the loop would be one
+     round trip per row of the plan. */
+  const closed = await holidaySet(q);
+
   const byId = new Map(tasks.map((t) => [t.id, { ...t }]));
 
   /*
@@ -531,15 +537,16 @@ export async function cascade(q: TenantQuery, dealId: string): Promise<number> {
     if (!task) continue;
 
     const start = earliestStart(
-      deps.map((d) => ({ dueOn: byId.get(d.dependsOnId)?.dueOn ?? null, lagDays: d.lagDays }))
+      deps.map((d) => ({ dueOn: byId.get(d.dependsOnId)?.dueOn ?? null, lagDays: d.lagDays })),
+      closed
     );
     if (!start || start === task.startsOn) continue;
 
     /* The task keeps its own length. Without a finish date there is no length
        to keep, so it takes a single day rather than inventing a span. */
     const days =
-      task.startsOn && task.dueOn ? workingDaysBetween(task.startsOn, task.dueOn) : 1;
-    const due = finishAfter(start, days);
+      task.startsOn && task.dueOn ? workingDaysBetween(task.startsOn, task.dueOn, closed) : 1;
+    const due = finishAfter(start, days, closed);
 
     await q.rows(
       `UPDATE project_tasks SET starts_on = $3::date, due_on = $4::date, updated_at = now()

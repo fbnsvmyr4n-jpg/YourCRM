@@ -48,6 +48,7 @@ afterAll(async () => {
 
 beforeEach(() =>
   db.seed(`
+    DELETE FROM workspace_holidays;
     DELETE FROM project_tasks; DELETE FROM deals; DELETE FROM contacts; DELETE FROM companies;
 
     INSERT INTO companies (id, sub_account_id, name) VALUES
@@ -430,5 +431,51 @@ describe("what a task waits for", () => {
 
     await db.seed(`DELETE FROM project_tasks WHERE id = '${a.task!.id}'`);
     expect((await inA((q) => tasks.listDependencies(q, JOB))).size).toBe(0);
+  });
+});
+
+describe("the workspace's own days off", () => {
+  it("pushes a dependent task past a public holiday", async () => {
+    /* Heritage Day 2026 is Thursday 24 September. A predecessor finishing on
+       the Wednesday does not hand over until the Friday. */
+    await db.seed(`INSERT INTO workspace_holidays (id, sub_account_id, on_date, name)
+                   VALUES ('hol_heritage', '${TENANT_A}', DATE '2026-09-24', 'Heritage Day')`);
+
+    const a = await add("Before", "2026-09-22", "2026-09-23");
+    const b = await add("After", "2026-09-01", "2026-09-01");
+    await inA((q) => tasks.addDependency(q, JOB, b.task!.id, a.task!.id));
+
+    const after = await inA((q) => tasks.findTask(q, b.task!.id));
+    expect(after?.startsOn).toBe("2026-09-25");
+  });
+
+  it("does not spend a holiday on a task's duration", async () => {
+    /* A three-day task handed over on the Wednesday runs Wed, Fri, Mon —
+       Thursday is closed, so the finish is the following Monday. */
+    await db.seed(`INSERT INTO workspace_holidays (id, sub_account_id, on_date, name)
+                   VALUES ('hol_heritage', '${TENANT_A}', DATE '2026-09-24', 'Heritage Day')`);
+
+    const a = await add("Before", "2026-09-21", "2026-09-22");
+    const b = await add("Three days", "2026-09-01", "2026-09-03"); // three working days
+    await inA((q) => tasks.addDependency(q, JOB, b.task!.id, a.task!.id));
+
+    const after = await inA((q) => tasks.findTask(q, b.task!.id));
+    expect(after?.startsOn).toBe("2026-09-23");
+    expect(after?.dueOn).toBe("2026-09-28");
+  });
+
+  it("is another workspace's business, not this one's", async () => {
+    /* The holidays are tenant data like everything else: a client of this
+       agency closing for a day must not move another client's schedule. */
+    await db.seed(`INSERT INTO workspace_holidays (id, sub_account_id, on_date, name)
+                   VALUES ('hol_theirs', '${TENANT_B}', DATE '2026-09-24', 'Not ours')`);
+
+    const a = await add("Before", "2026-09-22", "2026-09-23");
+    const b = await add("After", "2026-09-01", "2026-09-01");
+    await inA((q) => tasks.addDependency(q, JOB, b.task!.id, a.task!.id));
+
+    const after = await inA((q) => tasks.findTask(q, b.task!.id));
+    // Thursday is a working day here, because THIS workspace declared nothing.
+    expect(after?.startsOn).toBe("2026-09-24");
   });
 });

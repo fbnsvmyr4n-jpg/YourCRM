@@ -12,6 +12,8 @@ import { PLAN_INFO, PLANS } from "@/server/billing/plans";
 import { stripeConfigured } from "@/server/billing/stripe";
 import { entitlementsFor, limitOf } from "@/server/entitlements";
 import { canAccessCrm, outranks, roleCan } from "@/server/permissions";
+import { instantToWallClock } from "@/lib/zoned";
+import { listHolidays } from "@/server/repos/holidays";
 import { getSettings } from "@/server/repos/settings";
 import { listUsers } from "@/server/repos/users";
 import { clientBook, groupByOwner } from "@/server/clients-view";
@@ -27,6 +29,7 @@ import { sectionFromParam, type SettingsSectionId } from "./sections";
 import { TeamCard } from "./TeamCard";
 import {
   AppearanceCard,
+  HolidaysCard,
   PasswordForm,
   ProfileForm,
   SignOutCard,
@@ -83,9 +86,12 @@ export default async function SettingsPage({
      still read the records.
   */
   const crmAccess = canAccessCrm(user.role);
-  const { settings, usage, trash, book } = await withTenantPage(
+  const { settings, usage, trash, book, holidays } = await withTenantPage(
     async (q) => ({
       settings: await getSettings(q),
+      /* Not customer data — it is when this business is closed — so it loads
+         for IT and accounts too, alongside the rest of Preferences. */
+      holidays: await listHolidays(q),
       usage: await usageThisMonth(q),
       // Recovery lives here because this is where somebody looks after deleting
       // the wrong thing, and it costs one more query on a page already open.
@@ -102,6 +108,14 @@ export default async function SettingsPage({
   // client component so the cap comes from the database on every render — a
   // limit cached in the bundle is a limit that stays wrong after an upgrade.
   const tenant = await requireTenantPage();
+
+  /* The year the importer offers, in the BUSINESS's zone. A server in UTC would
+     offer the wrong year to somebody in Auckland for most of New Year's Eve. */
+  const thisYear = Number(
+    (instantToWallClock(new Date().toISOString(), settings.timeZone)?.date ??
+      new Date().toISOString().slice(0, 10)
+    ).slice(0, 4)
+  );
 
   // Read on every render rather than cached: a cancellation should take effect
   // on the next page load, not whenever somebody signs out.
@@ -241,6 +255,7 @@ export default async function SettingsPage({
       content: (
         <>
           <TargetsForm settings={settings} />
+          <HolidaysCard holidays={holidays} thisYear={thisYear} />
           <AppearanceCard />
         </>
       ),

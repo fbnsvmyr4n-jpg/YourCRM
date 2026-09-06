@@ -166,3 +166,60 @@ describe("where a dependent task starts", () => {
     ).toBe("2026-09-22");
   });
 });
+
+describe("when the workspace is closed for a holiday", () => {
+  /* 2026-09-24 is Heritage Day, a Thursday. Chosen because it sits mid-week:
+     a holiday on a Monday could be confused with the weekend rule already
+     working, and would prove nothing. */
+  const heritage = new Set(["2026-09-24"]);
+
+  it("skips a holiday the way it skips a weekend", () => {
+    // Wednesday + 1 working day is the Friday, because Thursday is closed.
+    expect(addWorkingDays("2026-09-23", 1, heritage)).toBe("2026-09-25");
+  });
+
+  it("does not count a holiday as work", () => {
+    // Mon 21 to Fri 25 September is five calendar weekdays, four of them worked.
+    expect(workingDaysBetween("2026-09-21", "2026-09-25", heritage)).toBe(4);
+  });
+
+  it("moves a start off a holiday", () => {
+    expect(nextWorkingDay("2026-09-24", heritage)).toBe("2026-09-25");
+  });
+
+  it("pushes a dependent task past it", () => {
+    // Predecessor finishes Wednesday; the next working day is the Friday.
+    expect(earliestStart([{ dueOn: "2026-09-23", lagDays: 0 }], heritage)).toBe("2026-09-25");
+  });
+
+  it("carries a task's finish over it, keeping the task's length", () => {
+    // Three days of work from Wednesday, with Thursday closed: Wed, Fri, Mon.
+    expect(finishAfter("2026-09-23", 3, heritage)).toBe("2026-09-28");
+  });
+
+  it("steps over a holiday that lands beside a weekend", () => {
+    /* Christmas Day 2026 is a Friday and Boxing Day the Saturday, so a task
+       finishing Thursday the 24th does not resume until Monday the 28th. */
+    const christmas = new Set(["2026-12-25", "2026-12-26"]);
+    expect(earliestStart([{ dueOn: "2026-12-24", lagDays: 0 }], christmas)).toBe("2026-12-28");
+  });
+
+  it("behaves exactly as before when no holidays are given", () => {
+    /* The whole point of passing them in: a workspace that has declared none
+       gets the old behaviour, not a guess. */
+    expect(addWorkingDays("2026-09-23", 1)).toBe("2026-09-24");
+    expect(workingDaysBetween("2026-09-21", "2026-09-25")).toBe(5);
+  });
+
+  it("does not hang when everything is a holiday", () => {
+    /* Absurd input, but it arrives from a table a person edits, and a loop that
+       never ends inside a request is worse than a wrong date. */
+    const everything = new Set(
+      Array.from({ length: 500 }, (_, i) =>
+        new Date(Date.UTC(2026, 0, 1) + i * 86_400_000).toISOString().slice(0, 10)
+      )
+    );
+    const answer = nextWorkingDay("2026-01-01", everything);
+    expect(typeof answer).toBe("string");
+  });
+});

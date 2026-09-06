@@ -1556,3 +1556,41 @@ DROP TRIGGER IF EXISTS project_task_deps_within_project ON project_task_dependen
 CREATE TRIGGER project_task_deps_within_project
   BEFORE INSERT OR UPDATE ON project_task_dependencies
   FOR EACH ROW EXECUTE FUNCTION assert_dependency_within_project();
+
+-- ---------------------------------------------------------------------------
+-- The days this workspace does not work.
+--
+-- Weekends are a rule; holidays are DATA, and they belong to the workspace
+-- rather than to this code. A hardcoded list is wrong for every customer in
+-- another country and wrong for this one the year a government moves a date —
+-- and a wrong holiday is worse than none, because it moves somebody's work for
+-- a reason they cannot see.
+--
+-- So the schedule reads this table and nothing else. `src/server/holidays.ts`
+-- can GENERATE a country's dates to fill it, which is a convenience for the
+-- person filling the list, not a fact the scheduler trusts on its own.
+--
+-- `name` is carried so the list reads as a calendar rather than as a column of
+-- dates: "why is nothing scheduled on 16 December" has an answer on the screen.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS workspace_holidays (
+  id              TEXT PRIMARY KEY,
+  sub_account_id  TEXT NOT NULL REFERENCES sub_accounts(id) ON DELETE CASCADE,
+
+  on_date         DATE NOT NULL,
+  name            TEXT NOT NULL,
+
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- One entry per day. Adding a year twice is a double-click, and two rows for
+-- Christmas would not close the office twice.
+CREATE UNIQUE INDEX IF NOT EXISTS workspace_holidays_once ON workspace_holidays (sub_account_id, on_date);
+CREATE INDEX IF NOT EXISTS workspace_holidays_tenant_idx ON workspace_holidays (sub_account_id, on_date);
+
+ALTER TABLE workspace_holidays ENABLE ROW LEVEL SECURITY;
+ALTER TABLE workspace_holidays FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS workspace_holidays_tenant_isolation ON workspace_holidays;
+CREATE POLICY workspace_holidays_tenant_isolation ON workspace_holidays
+  USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
+  WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
