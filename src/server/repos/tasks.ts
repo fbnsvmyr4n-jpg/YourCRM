@@ -1,3 +1,4 @@
+import { earliestStart, finishAfter, workingDaysBetween } from "../schedule";
 import type { TenantQuery } from "../tenant";
 
 /**
@@ -356,4 +357,199 @@ export function summarise(tasks: ProjectTask[], today: string): ScheduleSummary 
     overdue: tasks.filter((t) => t.percentComplete < 100 && t.dueOn !== null && t.dueOn < today)
       .length,
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* What a task waits for                                               */
+/* ------------------------------------------------------------------ */
+
+export type Dependency = { id: string; dependsOnId: string; lagDays: number };
+
+/** Every link on a project, keyed by the task that waits. */
+export async function listDependencies(
+  q: TenantQuery,
+  dealId: string
+): Promise<Map<string, Dependency[]>> {
+  const rows = await q.rows<{ id: string; task_id: string; depends_on_id: string; lag_days: number }>(
+    `SELECT d.id, d.task_id, d.depends_on_id, d.lag_days
+       FROM project_task_dependencies d
+       JOIN project_tasks t ON t.id = d.task_id AND t.deleted_at IS NULL
+      WHERE d.sub_account_id = $1 AND t.deal_id = $2
+      ORDER BY d.created_at`,
+    [q.ctx.subAccountId, dealId]
+  );
+
+  const byTask = new Map<string, Dependency[]>();
+  for (const r of rows) {
+    const link: Dependency = { id: r.id, dependsOnId: r.depends_on_id, lagDays: r.lag_days };
+    const bucket = byTask.get(r.task_id);
+    if (bucket) bucket.push(link);
+    else byTask.set(r.task_id, [link]);
+  }
+  return byTask;
+}
+
+export type LinkResult = { error?: string; moved?: number };
+
+/**
+ * Make one task wait for another, then let the dates fall out of it.
+ *
+ * The cycle check is the load-bearing part. A → B → A is not merely invalid
+ * data: the cascade below walks the graph, so a loop is an infinite one, and
+ * the first person to draw a circle would hang their own request. It is checked
+ * with a recursive query against the database rather than against a list held
+ * in memory, so a link added by anything — this function, a script, a future
+ * importer — is checked against what is actually stored.
+ */
+export async function addDependency(
+  q: TenantQuery,
+  dealId: string,
+  taskId: string,
+  dependsOnId: string,
+  lagDays = 0
+): Promise<LinkResult> {
+  if (taskId === dependsOnId) return { error: "A task cannot wait for itself." };
+
+  /*
+     Would this close a loop? It does if the task being waited FOR already
+     depends, at any depth, on the task that would be waiting.
+
+     `UNION` rather than `UNION ALL`: on a graph that already contained a cycle
+     the ALL form would never terminate, and the query written to detect loops
+     must not be the thing that hangs on one.
+  */
+  const loop = await q.one<{ id: string }>(
+    `WITH RECURSIVE upstream(id) AS (
+       SELECT depends_on_id FROM project_task_dependencies
+        WHERE sub_account_id = $1 AND task_id = $2
+       UNION
+       SELECT d.depends_on_id FROM project_task_dependencies d
+         JOIN upstream u ON u.id = d.task_id
+        WHERE d.sub_account_id = $1
+     )
+     SELECT id FROM upstream WHERE id = $3 LIMIT 1`,
+    [q.ctx.subAccountId, dependsOnId, taskId]
+  );
+  if (loop) {
+    return { error: "That would make the two tasks wait for each other." };
+  }
+
+  try {
+    await q.rows(
+      `INSERT INTO project_task_dependencies (id, sub_account_id, task_id, depends_on_id, lag_days)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [`dep-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+       q.ctx.subAccountId, taskId, dependsOnId, Math.max(0, Math.round(lagDays))]
+    );
+  } catch (err) {
+    const message = String(err);
+    if (message.includes("project_task_deps_once")) {
+      return { error: "That task already waits for this one." };
+    }
+    if (message.includes("same project")) {
+      return { error: "A task can only wait for another task on the same project." };
+    }
+    throw err;
+  }
+
+  return { moved: await cascade(q, dealId) };
+}
+
+export async function removeDependency(q: TenantQuery, linkId: string): Promise<boolean> {
+  const row = await q.one<{ id: string }>(
+    `DELETE FROM project_task_dependencies
+      WHERE id = $2 AND sub_account_id = $1 RETURNING id`,
+    [q.ctx.subAccountId, linkId]
+  );
+  return row !== null;
+}
+
+/**
+ * Push every dependent task to where its predecessors leave it.
+ *
+ * This is what "the staircase maintains itself" means: move one date and
+ * everything below it follows, keeping each task's own length. Run after any
+ * change that could invalidate a date — a link added, a task's finish moved.
+ *
+ * Two rules make it safe to run at any time.
+ *
+ * It is **idempotent**: a plan already consistent moves nothing, so this can be
+ * called after every write without dates drifting a day each time.
+ *
+ * It moves a task **only when it has somewhere to be** — an undated predecessor
+ * implies nothing, and a task nobody waits behind is left exactly where the
+ * person who typed it put it. The cascade tidies consequences; it does not
+ * take over the plan.
+ *
+ * Returns how many tasks actually moved, so the screen can say so rather than
+ * silently rewriting dates somebody chose.
+ */
+export async function cascade(q: TenantQuery, dealId: string): Promise<number> {
+  const tasks = await listTasks(q, dealId);
+  const links = await listDependencies(q, dealId);
+  if (links.size === 0) return 0;
+
+  const byId = new Map(tasks.map((t) => [t.id, { ...t }]));
+
+  /*
+     Topological order, so a task is placed only after everything it waits for.
+     Kahn's algorithm; anything left over sat in a cycle, which the insert path
+     refuses — but a graph written before that check existed, or by hand, would
+     otherwise loop here forever. Leftovers are skipped rather than trusted.
+  */
+  const waitingOn = new Map<string, number>();
+  const feeds = new Map<string, string[]>();
+  for (const task of tasks) waitingOn.set(task.id, 0);
+  for (const [taskId, deps] of links) {
+    if (!waitingOn.has(taskId)) continue;
+    for (const dep of deps) {
+      if (!waitingOn.has(dep.dependsOnId)) continue;
+      waitingOn.set(taskId, (waitingOn.get(taskId) ?? 0) + 1);
+      const list = feeds.get(dep.dependsOnId);
+      if (list) list.push(taskId);
+      else feeds.set(dep.dependsOnId, [taskId]);
+    }
+  }
+
+  const queue = tasks.filter((t) => (waitingOn.get(t.id) ?? 0) === 0).map((t) => t.id);
+  const order: string[] = [];
+  while (queue.length > 0) {
+    const id = queue.shift()!;
+    order.push(id);
+    for (const next of feeds.get(id) ?? []) {
+      const remaining = (waitingOn.get(next) ?? 0) - 1;
+      waitingOn.set(next, remaining);
+      if (remaining === 0) queue.push(next);
+    }
+  }
+
+  let moved = 0;
+  for (const id of order) {
+    const deps = links.get(id);
+    if (!deps || deps.length === 0) continue;
+    const task = byId.get(id);
+    if (!task) continue;
+
+    const start = earliestStart(
+      deps.map((d) => ({ dueOn: byId.get(d.dependsOnId)?.dueOn ?? null, lagDays: d.lagDays }))
+    );
+    if (!start || start === task.startsOn) continue;
+
+    /* The task keeps its own length. Without a finish date there is no length
+       to keep, so it takes a single day rather than inventing a span. */
+    const days =
+      task.startsOn && task.dueOn ? workingDaysBetween(task.startsOn, task.dueOn) : 1;
+    const due = finishAfter(start, days);
+
+    await q.rows(
+      `UPDATE project_tasks SET starts_on = $3::date, due_on = $4::date, updated_at = now()
+        WHERE id = $2 AND sub_account_id = $1`,
+      [q.ctx.subAccountId, id, start, due]
+    );
+    task.startsOn = start;
+    task.dueOn = due;
+    moved += 1;
+  }
+
+  return moved;
 }

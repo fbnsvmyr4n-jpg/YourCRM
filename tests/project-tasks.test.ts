@@ -285,3 +285,150 @@ describe("removing a task", () => {
     expect(row?.deleted_at).not.toBeNull();
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* Dependencies                                                        */
+/* ------------------------------------------------------------------ */
+
+describe("what a task waits for", () => {
+  it("pushes a dependent task to the working day after its predecessor", async () => {
+    const a = await add("Pedestal Drill", "2026-09-17", "2026-09-18"); // finishes Friday
+    const b = await add("Lathe", "2026-09-01", "2026-09-02"); // wrongly earlier
+
+    const { error, moved } = await inA((q) =>
+      tasks.addDependency(q, JOB, b.task!.id, a.task!.id)
+    );
+    expect(error).toBeUndefined();
+    expect(moved).toBe(1);
+
+    const after = await inA((q) => tasks.findTask(q, b.task!.id));
+    // Friday finish → Monday start, not Saturday.
+    expect(after?.startsOn).toBe("2026-09-21");
+    // And it keeps its own length: two working days.
+    expect(after?.dueOn).toBe("2026-09-22");
+  });
+
+  it("carries the move down a chain", async () => {
+    const a = await add("A", "2026-09-01", "2026-09-01");
+    const b = await add("B", "2026-09-02", "2026-09-02");
+    const c = await add("C", "2026-09-03", "2026-09-03");
+    await inA((q) => tasks.addDependency(q, JOB, b.task!.id, a.task!.id));
+    await inA((q) => tasks.addDependency(q, JOB, c.task!.id, b.task!.id));
+
+    // Move the first task a week later; everything below follows.
+    await inA((q) =>
+      tasks.updateTask(q, a.task!.id, { name: "A", startsOn: "2026-09-08", dueOn: "2026-09-08" })
+    );
+    const movedCount = await inA((q) => tasks.cascade(q, JOB));
+    expect(movedCount).toBe(2);
+
+    const list = await inA((q) => tasks.listTasks(q, JOB));
+    const byName = new Map(list.map((t) => [t.name, t]));
+    expect(byName.get("B")?.startsOn).toBe("2026-09-09");
+    expect(byName.get("C")?.startsOn).toBe("2026-09-10");
+  });
+
+  it("waits for the later of two predecessors", async () => {
+    const early = await add("Early", "2026-09-01", "2026-09-02");
+    const late = await add("Late", "2026-09-08", "2026-09-10");
+    const both = await add("Needs both", "2026-09-01", "2026-09-01");
+
+    await inA((q) => tasks.addDependency(q, JOB, both.task!.id, early.task!.id));
+    await inA((q) => tasks.addDependency(q, JOB, both.task!.id, late.task!.id));
+
+    const after = await inA((q) => tasks.findTask(q, both.task!.id));
+    expect(after?.startsOn).toBe("2026-09-11");
+  });
+
+  it("honours a lag rather than closing the gap", async () => {
+    const a = await add("Pour concrete", "2026-09-01", "2026-09-01");
+    const b = await add("Build on it", "2026-09-02", "2026-09-02");
+    await inA((q) => tasks.addDependency(q, JOB, b.task!.id, a.task!.id, 3));
+
+    const after = await inA((q) => tasks.findTask(q, b.task!.id));
+    // Tuesday finish + one day + three working days of curing.
+    expect(after?.startsOn).toBe("2026-09-07");
+  });
+
+  it("refuses a loop rather than hanging on one", async () => {
+    const a = await add("A", "2026-09-01", "2026-09-01");
+    const b = await add("B", "2026-09-02", "2026-09-02");
+    const c = await add("C", "2026-09-03", "2026-09-03");
+    await inA((q) => tasks.addDependency(q, JOB, b.task!.id, a.task!.id));
+    await inA((q) => tasks.addDependency(q, JOB, c.task!.id, b.task!.id));
+
+    // A waiting for C would close the ring A → B → C → A.
+    const { error } = await inA((q) => tasks.addDependency(q, JOB, a.task!.id, c.task!.id));
+    expect(error).toMatch(/wait for each other/i);
+  });
+
+  it("refuses a task waiting for itself", async () => {
+    const a = await add("A", "2026-09-01", "2026-09-01");
+    const { error } = await inA((q) => tasks.addDependency(q, JOB, a.task!.id, a.task!.id));
+    expect(error).toMatch(/cannot wait for itself/i);
+  });
+
+  it("refuses the same link twice", async () => {
+    const a = await add("A", "2026-09-01", "2026-09-01");
+    const b = await add("B", "2026-09-02", "2026-09-02");
+    await inA((q) => tasks.addDependency(q, JOB, b.task!.id, a.task!.id));
+    const { error } = await inA((q) => tasks.addDependency(q, JOB, b.task!.id, a.task!.id));
+    expect(error).toMatch(/already waits/i);
+  });
+
+  it("leaves a plan that is already consistent alone", async () => {
+    /* Idempotence. The cascade runs after every write, so a plan that drifted a
+       day on each pass would be worse than no cascade at all. */
+    const a = await add("A", "2026-09-01", "2026-09-01");
+    const b = await add("B", "2026-09-02", "2026-09-02");
+    await inA((q) => tasks.addDependency(q, JOB, b.task!.id, a.task!.id));
+
+    expect(await inA((q) => tasks.cascade(q, JOB))).toBe(0);
+    expect(await inA((q) => tasks.cascade(q, JOB))).toBe(0);
+    const after = await inA((q) => tasks.findTask(q, b.task!.id));
+    expect(after?.startsOn).toBe("2026-09-02");
+  });
+
+  it("does not move a task whose predecessor has no finish date", async () => {
+    /* An unknown predecessor implies nothing, and a confident bar with nothing
+       behind it is worse than an empty row. */
+    const a = await add("Unscheduled", null, null);
+    const b = await add("Waiting", "2026-09-02", "2026-09-03");
+    await inA((q) => tasks.addDependency(q, JOB, b.task!.id, a.task!.id));
+
+    const after = await inA((q) => tasks.findTask(q, b.task!.id));
+    expect(after?.startsOn).toBe("2026-09-02");
+  });
+
+  it("cannot link across projects, even past the repository", async () => {
+    const mine = await add("Mine", "2026-09-01", "2026-09-01");
+    await db.seed(`INSERT INTO project_tasks (id, sub_account_id, deal_id, name)
+                   VALUES ('pt_other', '${TENANT_B}', '${OTHER_JOB}', 'Theirs')`);
+    await expect(
+      db.seed(`INSERT INTO project_task_dependencies (id, sub_account_id, task_id, depends_on_id)
+               VALUES ('dep_bad', '${TENANT_A}', '${mine.task!.id}', 'pt_other')`)
+    ).rejects.toThrow();
+  });
+
+  it("forgets the link when it is removed", async () => {
+    const a = await add("A", "2026-09-01", "2026-09-01");
+    const b = await add("B", "2026-09-02", "2026-09-02");
+    await inA((q) => tasks.addDependency(q, JOB, b.task!.id, a.task!.id));
+
+    const links = await inA((q) => tasks.listDependencies(q, JOB));
+    const link = links.get(b.task!.id)![0];
+    expect(await inA((q) => tasks.removeDependency(q, link.id))).toBe(true);
+    expect((await inA((q) => tasks.listDependencies(q, JOB))).size).toBe(0);
+  });
+
+  it("drops a link when the task it points at is deleted", async () => {
+    /* A dangling predecessor would make the cascade read a task that is not
+       there. The foreign key cascades, so the link goes with it. */
+    const a = await add("A", "2026-09-01", "2026-09-01");
+    const b = await add("B", "2026-09-02", "2026-09-02");
+    await inA((q) => tasks.addDependency(q, JOB, b.task!.id, a.task!.id));
+
+    await db.seed(`DELETE FROM project_tasks WHERE id = '${a.task!.id}'`);
+    expect((await inA((q) => tasks.listDependencies(q, JOB))).size).toBe(0);
+  });
+});

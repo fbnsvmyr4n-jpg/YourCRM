@@ -1,9 +1,10 @@
 "use server";
 
 import { logWrite } from "@/server/log";
+import { cascade } from "@/server/repos/tasks";
 import { revalidateApp } from "@/server/revalidate";
 import { withCurrentTenant } from "@/server/tenant-session";
-import { decimal, id as validId, multiline, pick, text } from "@/server/validate";
+import { count, decimal, id as validId, multiline, pick, text } from "@/server/validate";
 
 /**
  * Running a project: who is on it, what it is quoted at, when it is due.
@@ -358,8 +359,23 @@ export async function updateTaskAction(_prev: FormState, formData: FormData): Pr
     });
     if (result.error) return { error: result.error };
 
+    /*
+       Moving a date is the whole reason dependencies exist, so the plan is
+       settled immediately rather than on the next page load. Saying HOW MANY
+       tasks moved matters: dates somebody typed have just been rewritten, and
+       a screen that changes six rows without mentioning it is a screen people
+       stop trusting.
+    */
+    const dealId = validId(formData.get("dealId"));
+    const moved = dealId ? await cascade(q, dealId) : 0;
+
     revalidateApp();
-    return { ok: `${result.task?.name} updated.` };
+    return {
+      ok:
+        moved > 0
+          ? `${result.task?.name} updated — ${moved} later ${moved === 1 ? "task" : "tasks"} moved with it.`
+          : `${result.task?.name} updated.`,
+    };
   });
 }
 
@@ -422,5 +438,54 @@ export async function deleteTaskAction(_prev: FormState, formData: FormData): Pr
     logWrite("delete", "project_task", { id: taskId, actor: q.ctx.userId });
     revalidateApp();
     return { ok: "Removed from the schedule." };
+  });
+}
+
+/**
+ * Make one task wait for another.
+ *
+ * The dates follow immediately: that is the point of the link, and a
+ * dependency that drew a line without moving anything would be decoration.
+ */
+export async function addDependencyAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  return withCurrentTenant(async (q) => {
+    const dealId = validId(formData.get("dealId"));
+    const taskId = validId(formData.get("taskId"));
+    const dependsOnId = validId(formData.get("dependsOnId"));
+    if (!dealId || !taskId) return { error: "That task could not be identified." };
+    if (!dependsOnId) return { error: "Choose which task it waits for." };
+
+    const lag = count(formData.get("lagDays"), 365) ?? 0;
+
+    const { addDependency } = await import("@/server/repos/tasks");
+    const result = await addDependency(q, dealId, taskId, dependsOnId, lag);
+    if (result.error) return { error: result.error };
+
+    revalidateApp();
+    return {
+      ok:
+        result.moved && result.moved > 0
+          ? `Linked — ${result.moved} ${result.moved === 1 ? "task" : "tasks"} moved to follow on.`
+          : "Linked.",
+    };
+  });
+}
+
+/** Break a link. The dates it forced are left where they are, deliberately —
+    unpicking a dependency is not a reason to move work somebody has planned. */
+export async function removeDependencyAction(
+  _prev: FormState,
+  formData: FormData
+): Promise<FormState> {
+  return withCurrentTenant(async (q) => {
+    const linkId = validId(formData.get("linkId"));
+    if (!linkId) return { error: "That link could not be identified." };
+
+    const { removeDependency } = await import("@/server/repos/tasks");
+    const gone = await removeDependency(q, linkId);
+    if (!gone) return { error: "That link is already gone." };
+
+    revalidateApp();
+    return { ok: "No longer waiting on it." };
   });
 }

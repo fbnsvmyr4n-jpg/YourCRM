@@ -6,18 +6,22 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
+  Link2 as LinkIcon,
   Pencil,
   Plus,
   Trash2,
+  X,
 } from "lucide-react";
 import { Banner } from "@/components/ui/Banner";
 import { Card, CardHeader, CardMeta } from "@/components/ui/Card";
 import { clsx } from "@/lib/clsx";
 import { useFormDisclosure } from "@/lib/form-disclosure";
-import type { ProjectTask, ScheduleSummary } from "@/server/repos/tasks";
+import type { Dependency, ProjectTask, ScheduleSummary } from "@/server/repos/tasks";
 import {
+  addDependencyAction,
   addTaskAction,
   deleteTaskAction,
+  removeDependencyAction,
   moveTaskAction,
   setTaskCompleteAction,
   updateTaskAction,
@@ -54,18 +58,38 @@ const isoFor = (day: number) => new Date(day * MS_PER_DAY).toISOString().slice(0
 export function ProjectSchedule({
   dealId,
   tasks,
+  dependencies,
   summary,
   today,
   staff,
 }: {
   dealId: string;
   tasks: ProjectTask[];
+  dependencies: { taskId: string; links: Dependency[] }[];
   summary: ScheduleSummary;
   /** The business's own today, resolved on the server against its time zone. */
   today: string;
   staff: { id: string; name: string }[];
 }) {
   const [editing, setEditing] = useState<ProjectTask | null>(null);
+  /** Which task's "waits for" picker is open. One at a time. */
+  const [linking, setLinking] = useState<string | null>(null);
+
+  const [linkState, link, linkBusy] = useActionState<FormState, FormData>(
+    addDependencyAction,
+    undefined
+  );
+  const [unlinkState, unlink] = useActionState<FormState, FormData>(
+    removeDependencyAction,
+    undefined
+  );
+
+  /* Rebuilt from the pairs the server sent — a Map cannot cross that boundary. */
+  const linksFor = useMemo(
+    () => new Map(dependencies.map((d) => [d.taskId, d.links])),
+    [dependencies]
+  );
+  const nameOf = useMemo(() => new Map(tasks.map((t) => [t.id, t.name])), [tasks]);
 
   const [addState, add, adding] = useActionState<FormState, FormData>(addTaskAction, undefined);
   const [editState, edit, editingBusy] = useActionState<FormState, FormData>(
@@ -124,6 +148,66 @@ export function ProjectSchedule({
   const todayAt = range
     ? ((dayNumber(today) - range.from) / range.days) * 100
     : null;
+
+  /*
+     Where each connector goes: out of the right-hand end of the predecessor's
+     bar, across, and into the left-hand end of the dependent's.
+
+     Rows are a fixed 20px tall with a 6px gap — `h-5` and `gap-1.5` below — so
+     a row's centre is arithmetic rather than a measurement. Percentages
+     horizontally, pixels vertically: the width changes with the container and
+     the row height does not.
+
+     Only between two DATED tasks. A link to something unscheduled has no
+     position to draw from, and a line to the left edge would say something
+     untrue about when the work starts.
+  */
+  const ROW_HEIGHT = 20;
+  const ROW_GAP = 6;
+  const links = useMemo(() => {
+    if (!range) return [];
+    const rowOf = new Map(tasks.map((t, i) => [t.id, i]));
+    const out: { key: string; left: string; width: string; top: number; height: number }[] = [];
+    const centre = (row: number) => row * (ROW_HEIGHT + ROW_GAP) + ROW_HEIGHT / 2;
+    const at = (iso: string) => ((dayNumber(iso) - range.from) / range.days) * 100;
+
+    for (const { taskId, links: deps } of dependencies) {
+      const to = tasks.find((t) => t.id === taskId);
+      const toRow = rowOf.get(taskId);
+      if (!to || toRow === undefined || !to.startsOn) continue;
+
+      for (const dep of deps) {
+        const from = tasks.find((t) => t.id === dep.dependsOnId);
+        const fromRow = rowOf.get(dep.dependsOnId);
+        if (!from || fromRow === undefined || !from.dueOn) continue;
+
+        /* Out of the end of the predecessor's bar, across, and into the start
+           of the dependent's — an elbow, which is how every scheduling tool
+           draws this and what keeps two links on one row apart. */
+        const x1 = at(from.dueOn) + (1 / range.days) * 100;
+        const x2 = at(to.startsOn);
+        const y1 = centre(fromRow);
+        const y2 = centre(toRow);
+        const elbow = Math.max(x1, x2);
+
+        const span = (a: number, b: number) => ({
+          left: `${Math.min(a, b)}%`,
+          width: `${Math.abs(b - a)}%`,
+        });
+
+        out.push({ key: `${dep.id}-a`, ...span(x1, elbow), top: y1, height: 1 });
+        out.push({
+          key: `${dep.id}-b`,
+          left: `${elbow}%`,
+          width: "1px",
+          top: Math.min(y1, y2),
+          height: Math.abs(y2 - y1),
+        });
+        out.push({ key: `${dep.id}-c`, ...span(elbow, x2), top: y2, height: 1 });
+      }
+    }
+    return out;
+  }, [dependencies, tasks, range]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -188,6 +272,8 @@ export function ProjectSchedule({
         <Banner state={completeState} />
         <Banner state={moveState} />
         <Banner state={removeState} />
+        <Banner state={linkState} />
+        <Banner state={unlinkState} />
         {!addOpen && <Banner state={addState} />}
         {!editing && <Banner state={editState} />}
       </div>
@@ -250,6 +336,47 @@ export function ProjectSchedule({
                 })}
               </div>
 
+              {/*
+                  The links, drawn behind the bars.
+
+                  They belong to the GRID rather than to either row, because a
+                  connector runs between two of them — so they are laid over the
+                  whole list, positioned in percentages horizontally and in
+                  pixels vertically. Rows are a fixed height, so a row's centre
+                  is arithmetic rather than a measurement: no refs, no layout
+                  effect, nothing to get out of step when the container resizes.
+
+                  `pointer-events-none` because these are annotation. The bars
+                  underneath carry the tooltips, and a line intercepting a hover
+                  would trade a real one for a decoration.
+              */}
+              <div className="relative">
+                {/*
+                    Drawn as positioned elements, not as an SVG polyline.
+
+                    The first version put percentages in a `points` attribute,
+                    which SVG does not accept — `points` takes plain user units,
+                    so every connector was misparsed and landed in the wrong
+                    place. Found by reading the rendered attribute, not by
+                    looking at the picture: at this size and opacity a line in
+                    the wrong position and a line correctly drawn look much the
+                    same. Percentages are native here, and the geometry survives
+                    the container-query resize with no measurement pass.
+                */}
+                {links.map((seg) => (
+                  <span
+                    key={seg.key}
+                    className="pointer-events-none absolute"
+                    style={{
+                      left: seg.left,
+                      width: seg.width,
+                      top: seg.top,
+                      height: Math.max(1, seg.height),
+                      background: "var(--border)",
+                    }}
+                    aria-hidden
+                  />
+                ))}
               <ul className="flex flex-col gap-1.5">
                 {tasks.map((task) => {
                   const scheduled = task.startsOn && task.dueOn;
@@ -341,6 +468,7 @@ export function ProjectSchedule({
                   );
                 })}
               </ul>
+              </div>
             </div>
           </div>
         </Card>
@@ -415,7 +543,7 @@ export function ProjectSchedule({
                     <p className={clsx("truncate text-sm", done && "text-faint line-through")}>
                       {task.name}
                     </p>
-                    <p className="mt-0.5 truncate text-[11px] text-faint">
+                    <p className="truncate text-[11px] text-faint">
                       {[
                         task.startsOn && task.dueOn
                           ? `${shortDay(task.startsOn)} — ${shortDay(task.dueOn)}`
@@ -429,6 +557,89 @@ export function ProjectSchedule({
                         .join(" · ")}
                       {late && <span style={{ color: "var(--red)" }}> · overdue</span>}
                     </p>
+
+                    {/*
+                        What it waits for, named rather than drawn as an id.
+                        A schedule where the links exist only as lines on a
+                        chart is one you cannot check by reading.
+                    */}
+                    {(linksFor.get(task.id) ?? []).length > 0 && (
+                      /* A DIV, not a paragraph. The unlink control is a form —
+                         it writes — and HTML forbids a form inside a `p`, which
+                         does not fail quietly: React's hydration gave up and
+                         rendered the whole project screen blank. */
+                      <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[11px]">
+                        <LinkIcon className="h-3 w-3 shrink-0 text-faint" aria-hidden />
+                        {(linksFor.get(task.id) ?? []).map((l) => (
+                          <span key={l.id} className="inline-flex items-center gap-1">
+                            <span className="text-muted">
+                              after {nameOf.get(l.dependsOnId) ?? "a removed task"}
+                              {l.lagDays > 0 && ` + ${l.lagDays}d`}
+                            </span>
+                            <form action={unlink} className="inline">
+                              <input type="hidden" name="linkId" value={l.id} />
+                              <button
+                                type="submit"
+                                aria-label={`Stop waiting for ${nameOf.get(l.dependsOnId) ?? "that task"}`}
+                                className="focus-ring rounded text-faint transition-colors hover:text-red"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </form>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    {linking === task.id && (
+                      <form action={link} className="mt-2 flex flex-wrap items-end gap-2">
+                        <input type="hidden" name="dealId" value={dealId} />
+                        <input type="hidden" name="taskId" value={task.id} />
+                        <label className="min-w-0 flex-1">
+                          <span className="mb-1 block text-[10px] font-medium text-muted">
+                            Starts after
+                          </span>
+                          <select name="dependsOnId" className="field-input !py-1.5 text-xs" required>
+                            <option value="">Choose a task…</option>
+                            {/* Itself excluded; a loop is refused by the server
+                                anyway, but offering it is offering a mistake. */}
+                            {tasks
+                              .filter((other) => other.id !== task.id)
+                              .map((other) => (
+                                <option key={other.id} value={other.id}>
+                                  {other.name}
+                                </option>
+                              ))}
+                          </select>
+                        </label>
+                        <label className="w-20">
+                          <span className="mb-1 block text-[10px] font-medium text-muted">
+                            Wait (days)
+                          </span>
+                          <input
+                            type="number"
+                            name="lagDays"
+                            min="0"
+                            defaultValue={0}
+                            className="field-input !py-1.5 text-xs"
+                          />
+                        </label>
+                        <button
+                          type="submit"
+                          disabled={linkBusy}
+                          className="btn-accent focus-ring rounded-lg px-3 py-2 text-xs font-semibold disabled:opacity-60"
+                        >
+                          Link
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setLinking(null)}
+                          className="btn-soft focus-ring rounded-lg px-3 py-2 text-xs font-medium text-muted"
+                        >
+                          Cancel
+                        </button>
+                      </form>
+                    )}
                   </div>
 
                   <span className="shrink-0 text-xs font-semibold tabular-nums">
@@ -464,6 +675,15 @@ export function ProjectSchedule({
                         <ChevronDown className="h-3.5 w-3.5" />
                       </button>
                     </form>
+                    <button
+                      type="button"
+                      onClick={() => setLinking(linking === task.id ? null : task.id)}
+                      aria-label={`Set what ${task.name} waits for`}
+                      title="Waits for"
+                      className="btn-soft focus-ring rounded-lg p-1.5 text-muted transition-colors hover:text-accent"
+                    >
+                      <LinkIcon className="h-3.5 w-3.5" />
+                    </button>
                     <button
                       type="button"
                       onClick={() => {

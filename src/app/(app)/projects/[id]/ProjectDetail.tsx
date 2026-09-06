@@ -32,7 +32,7 @@ import type {
   ProjectPerson,
   ProjectThread,
 } from "@/server/repos/projects";
-import type { ProjectTask, ScheduleSummary } from "@/server/repos/tasks";
+import type { Dependency, ProjectTask, ScheduleSummary } from "@/server/repos/tasks";
 import { ProjectSchedule } from "./ProjectSchedule";
 import {
   addProjectPersonAction,
@@ -151,6 +151,7 @@ export function ProjectDetail({
   threads,
   timeline,
   tasks,
+  dependencies,
   scheduleSummary,
   today,
   candidates,
@@ -161,6 +162,7 @@ export function ProjectDetail({
   threads: ProjectThread[];
   timeline: ProjectEvent[];
   tasks: ProjectTask[];
+  dependencies: { taskId: string; links: Dependency[] }[];
   scheduleSummary: ScheduleSummary;
   /** The business's own today, resolved on the server against its time zone. */
   today: string;
@@ -247,6 +249,7 @@ export function ProjectDetail({
           <ProjectSchedule
             dealId={header.id}
             tasks={tasks}
+            dependencies={dependencies}
             summary={scheduleSummary}
             today={today}
             staff={candidates.staff}

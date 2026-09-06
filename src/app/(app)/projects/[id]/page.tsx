@@ -8,7 +8,7 @@ import {
   projectTimeline,
 } from "@/server/repos/projects";
 import { getSettings } from "@/server/repos/settings";
-import { listTasks, summarise } from "@/server/repos/tasks";
+import { listDependencies, listTasks, summarise } from "@/server/repos/tasks";
 import { listUsers } from "@/server/repos/users";
 import { instantToWallClock } from "@/lib/zoned";
 import { withSystem } from "@/server/tenant";
@@ -40,6 +40,14 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
       threads: await projectThreads(q, id),
       timeline: await projectTimeline(q, id),
       tasks: await listTasks(q, id),
+      /* Sent as an array of pairs: a Map cannot cross the server/client
+         boundary, and rebuilding one in the view is a line of code against a
+         serialisation bug that would otherwise arrive as "dependencies is not
+         a function" in production. */
+      dependencies: [...(await listDependencies(q, id))].map(([taskId, links]) => ({
+        taskId,
+        links,
+      })),
       /*
          Today, in the BUSINESS's zone rather than the server's.
 
@@ -90,6 +98,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
       threads={data.threads}
       timeline={data.timeline}
       tasks={data.tasks}
+      dependencies={data.dependencies}
       scheduleSummary={summarise(data.tasks, data.today)}
       today={data.today}
       candidates={{

@@ -1466,3 +1466,93 @@ DROP TRIGGER IF EXISTS project_tasks_deal_in_tenant ON project_tasks;
 CREATE TRIGGER project_tasks_deal_in_tenant
   BEFORE INSERT OR UPDATE OF deal_id, sub_account_id ON project_tasks
   FOR EACH ROW EXECUTE FUNCTION assert_task_deal_in_tenant();
+
+-- ---------------------------------------------------------------------------
+-- What a task is waiting on.
+--
+-- The staircase in every real schedule — each task starting when the one before
+-- it finishes — was a shape somebody maintained by hand. Moving one date meant
+-- retyping every date below it, and the first one missed is a plan that is
+-- quietly wrong in exactly the place people trust it.
+--
+-- Finish-to-start only, deliberately. It is the relationship every one of those
+-- staircases is made of; start-to-start and the rest are real but rare, and
+-- three more kinds would triple the scheduling code to serve a case nobody here
+-- has yet. The column is absent rather than a `kind` with one value, because a
+-- column with one possible value is a decision pretending to be a feature.
+--
+-- `lag_days` is the gap AFTER the predecessor finishes. Zero means the next
+-- task starts on the following working day, which is the staircase. It exists
+-- so a deliberate wait — concrete curing, a part on order — survives the
+-- cascade instead of being closed up by it.
+--
+-- A many-to-many table rather than a `predecessor_id` column on the task: a
+-- task genuinely can wait on two things, and the moment it does, a single
+-- column forces somebody to pick which dependency to record and which to
+-- remember.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS project_task_dependencies (
+  id               TEXT PRIMARY KEY,
+  sub_account_id   TEXT NOT NULL REFERENCES sub_accounts(id) ON DELETE CASCADE,
+
+  -- The task that waits.
+  task_id          TEXT NOT NULL REFERENCES project_tasks(id) ON DELETE CASCADE,
+  -- The task it waits for.
+  depends_on_id    TEXT NOT NULL REFERENCES project_tasks(id) ON DELETE CASCADE,
+
+  lag_days         INTEGER NOT NULL DEFAULT 0 CHECK (lag_days >= 0),
+
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- A task cannot wait for itself. The cheapest cycle to draw and the one a
+-- double-click will produce, so it is refused by the table rather than by the
+-- code that happens to be calling.
+ALTER TABLE project_task_dependencies DROP CONSTRAINT IF EXISTS project_task_deps_not_self;
+ALTER TABLE project_task_dependencies ADD CONSTRAINT project_task_deps_not_self
+  CHECK (task_id <> depends_on_id);
+
+-- One link per pair. Adding the same dependency twice is a double-click, not an
+-- intention, and two identical rows would double nothing except the confusion.
+CREATE UNIQUE INDEX IF NOT EXISTS project_task_deps_once
+  ON project_task_dependencies (sub_account_id, task_id, depends_on_id);
+CREATE INDEX IF NOT EXISTS project_task_deps_tenant_idx ON project_task_dependencies (sub_account_id, task_id);
+CREATE INDEX IF NOT EXISTS project_task_deps_upstream_idx ON project_task_dependencies (sub_account_id, depends_on_id);
+
+ALTER TABLE project_task_dependencies ENABLE ROW LEVEL SECURITY;
+ALTER TABLE project_task_dependencies FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS project_task_dependencies_tenant_isolation ON project_task_dependencies;
+CREATE POLICY project_task_dependencies_tenant_isolation ON project_task_dependencies
+  USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
+  WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
+
+-- Both ends belong to this tenant, and to the SAME project.
+--
+-- The tenant half is the security rule every table here carries. The project
+-- half is the one that keeps a schedule meaningful: a task on the Heineken job
+-- waiting for a task on somebody else's job would draw a link between two
+-- charts and cascade dates across a customer boundary.
+CREATE OR REPLACE FUNCTION assert_dependency_within_project() RETURNS TRIGGER AS $$
+DECLARE
+  task_deal TEXT;
+  upstream_deal TEXT;
+BEGIN
+  SELECT deal_id INTO task_deal FROM project_tasks
+   WHERE id = NEW.task_id AND sub_account_id = NEW.sub_account_id;
+  SELECT deal_id INTO upstream_deal FROM project_tasks
+   WHERE id = NEW.depends_on_id AND sub_account_id = NEW.sub_account_id;
+
+  IF task_deal IS NULL OR upstream_deal IS NULL THEN
+    RAISE EXCEPTION 'both tasks must belong to sub-account %', NEW.sub_account_id;
+  END IF;
+  IF task_deal <> upstream_deal THEN
+    RAISE EXCEPTION 'a task can only depend on a task in the same project';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS project_task_deps_within_project ON project_task_dependencies;
+CREATE TRIGGER project_task_deps_within_project
+  BEFORE INSERT OR UPDATE ON project_task_dependencies
+  FOR EACH ROW EXECUTE FUNCTION assert_dependency_within_project();
