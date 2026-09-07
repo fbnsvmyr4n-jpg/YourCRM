@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
+  AlertTriangle,
   Bell,
   CalendarClock,
   ChevronDown,
@@ -33,6 +34,7 @@ const KIND_ICON: Record<NotificationKind, typeof Bell> = {
   message: Mail,
   call: Phone,
   deal: DollarSign,
+  stuck: AlertTriangle,
 };
 const KIND_TONE: Record<NotificationKind, string> = {
   meeting: "var(--red)",
@@ -40,6 +42,9 @@ const KIND_TONE: Record<NotificationKind, string> = {
   message: "var(--accent)",
   call: "var(--purple)",
   deal: "var(--green)",
+  // Red, like a meeting starting now. Both mean somebody is waiting on you —
+  // the difference is that this one already believes it was dealt with.
+  stuck: "var(--red)",
 };
 
 /** Closes a popover on outside click and on Escape. */
@@ -328,7 +333,17 @@ export function Topbar({
                       </span>
                       <span className="min-w-0 flex-1 leading-tight">
                         <span className="block truncate text-sm font-medium">{n.title}</span>
-                        <span className="mt-0.5 block truncate text-xs text-faint">{n.detail}</span>
+                        {/* Two lines, not one.
+                            A detail used to be a name or a short count. Now it
+                            can be a provider's explanation — "…you can only
+                            send to your own address. To send to other
+                            recipients, verify a domain" — and a single
+                            truncated line cut it off exactly where it started
+                            being useful. Still bounded, so a long error cannot
+                            push the rest of the list off the screen. */}
+                        <span className="mt-0.5 line-clamp-2 text-xs leading-snug text-faint">
+                          {n.detail}
+                        </span>
                       </span>
                     </Link>
                   );

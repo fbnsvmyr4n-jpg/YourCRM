@@ -1,4 +1,6 @@
 import { listCalls } from "./repos/calls";
+import { deadJobs } from "./repos/outbox";
+import { CALL_ANALYSIS, QUOTE_EMAIL } from "./outbox-handlers";
 import { listDeals } from "./repos/deals";
 import { listMeetings } from "./repos/meetings";
 import { listContacts } from "./repos/contacts";
@@ -21,7 +23,16 @@ import type { TenantQuery } from "./tenant";
  * question asked of the data, not a queue to keep in step.
  */
 
-export type NotificationKind = "meeting" | "lead" | "message" | "call" | "deal";
+/**
+ * `stuck` is the odd one out, deliberately.
+ *
+ * Every other kind is work a PERSON has not done yet. This one is work the
+ * SYSTEM promised and then gave up on — a quotation whose email was refused,
+ * a call it could not read. Those failures existed only in one `console.error`
+ * and a row nobody queries, which meant the person who needed the email found
+ * out from the client.
+ */
+export type NotificationKind = "meeting" | "lead" | "message" | "call" | "deal" | "stuck";
 
 export type Notification = {
   id: string;
@@ -32,6 +43,61 @@ export type Notification = {
   /** Sorts the feed. Higher is more urgent. */
   weight: number;
 };
+
+/**
+ * What a given kind of abandoned job means to a person, and where they go.
+ *
+ * Keyed by handler name so a handler added later without an entry here still
+ * SURFACES — see the fallback below. A job nobody can see is the failure this
+ * whole section exists to prevent, and forgetting to add a line to a lookup
+ * table should not silently recreate it.
+ */
+const STUCK_META: Record<string, { noun: (n: number) => string; verb: string; href: string }> = {
+  [QUOTE_EMAIL]: {
+    noun: (n) => (n === 1 ? "quotation" : "quotations"),
+    verb: "could not be emailed",
+    href: "/chat",
+  },
+  [CALL_ANALYSIS]: {
+    noun: (n) => (n === 1 ? "call" : "calls"),
+    verb: "could not be read",
+    href: "/voice-agents",
+  },
+};
+
+/* Worded to agree with either count — "could not be completed" reads correctly
+   for one task and for nine, which a verb like "were abandoned" does not. */
+const FALLBACK_STUCK = {
+  noun: (n: number) => (n === 1 ? "background task" : "background tasks"),
+  verb: "could not be completed",
+  href: "/settings",
+};
+
+function groupByHandler(jobs: { handler: string; lastError: string | null }[]) {
+  const map = new Map<string, { handler: string; lastError: string | null }[]>();
+  for (const job of jobs) {
+    const list = map.get(job.handler);
+    if (list) list.push(job);
+    else map.set(job.handler, [job]);
+  }
+  return map;
+}
+
+/**
+ * A provider's error, cut down to the part a person can act on.
+ *
+ * These arrive as JSON — `Resend returned 403 {"statusCode":403,...,"message":
+ * "You can only send testing emails to your own address"}` — and the message
+ * is the only part worth reading. Pulled out when it is there, trimmed when it
+ * is not, because a notification that wraps three lines of JSON is one nobody
+ * reads at all.
+ */
+export function shortenError(raw: string | null): string {
+  if (!raw) return "";
+  const message = raw.match(/"message"\s*:\s*"([^"]+)"/)?.[1];
+  const text = (message ?? raw).replace(/\s+/g, " ").trim();
+  return text.length > 120 ? `${text.slice(0, 117)}…` : text;
+}
 
 export async function listNotifications(q: TenantQuery): Promise<Notification[]> {
   const settings = await getSettings(q);
@@ -47,6 +113,36 @@ export async function listNotifications(q: TenantQuery): Promise<Notification[]>
     new Date().toISOString().slice(0, 10);
 
   const out: Notification[] = [];
+
+  /*
+     Work the system gave up on, first — above everything a person merely has
+     not got to yet.
+
+     A quotation somebody approved that never reached the client is the most
+     expensive thing this feed can carry: the decision was made, the price went
+     nowhere, and nothing else on any screen shouts about it. Until now it lived
+     in a `console.error` inside a scheduled sweep and a row nobody queries,
+     which is another way of saying the client told you.
+
+     The provider's own words are carried through rather than replaced with
+     "something went wrong". "You can only send testing emails to your own
+     address" tells somebody exactly what to fix; a friendly paraphrase does
+     not, and this is a feed for people who have to act.
+  */
+  const stuck = await deadJobs(q);
+  for (const [handler, jobs] of groupByHandler(stuck)) {
+    const meta = STUCK_META[handler] ?? FALLBACK_STUCK;
+    out.push({
+      id: `stuck-${handler}`,
+      kind: "stuck",
+      title: `${jobs.length} ${meta.noun(jobs.length)} ${meta.verb}`,
+      detail: shortenError(jobs[0].lastError) || "No reason was recorded",
+      href: meta.href,
+      // Above the most time-critical human task. Somebody's client is waiting
+      // on something this workspace believes it already sent.
+      weight: 110,
+    });
+  }
 
   // Meetings happening today — the most time-critical thing on the list, and
   // counted in the business's zone rather than the server's.
