@@ -149,6 +149,7 @@ export function ProjectDetail({
   header,
   people,
   documents,
+  priceItems,
   threads,
   timeline,
   tasks,
@@ -160,6 +161,8 @@ export function ProjectDetail({
   header: ProjectHeader;
   people: ProjectPerson[];
   documents: ProjectDocument[];
+  /** The active price list, so a hand-typed line can pick a rate. */
+  priceItems: { id: string; name: string; unit: string; unitCents: number }[];
   threads: ProjectThread[];
   timeline: ProjectEvent[];
   tasks: ProjectTask[];
@@ -244,7 +247,9 @@ export function ProjectDetail({
 
       <div className="mt-4 flex flex-col gap-4">
         {tab === "team" && <TeamTab dealId={header.id} people={people} candidates={candidates} />}
-        {tab === "documents" && <DocumentsTab dealId={header.id} documents={documents} />}
+        {tab === "documents" && (
+          <DocumentsTab dealId={header.id} documents={documents} priceItems={priceItems} />
+        )}
         {tab === "threads" && <ThreadsTab threads={threads} />}
         {tab === "timeline" && (
           <ProjectSchedule
@@ -620,7 +625,17 @@ function PeopleGroup({
 
 /* ---------------- documents ---------------- */
 
-function DocumentsTab({ dealId, documents }: { dealId: string; documents: ProjectDocument[] }) {
+type PriceItem = { id: string; name: string; unit: string; unitCents: number };
+
+function DocumentsTab({
+  dealId,
+  documents,
+  priceItems,
+}: {
+  dealId: string;
+  documents: ProjectDocument[];
+  priceItems: PriceItem[];
+}) {
   const [createState, create, creating] = useActionState<FormState, FormData>(
     createDocumentAction,
     undefined
@@ -658,7 +673,16 @@ function DocumentsTab({ dealId, documents }: { dealId: string; documents: Projec
         {!open && <Banner state={createState} />}
       </div>
 
-      {open && <DocumentForm dealId={dealId} action={create} pending={creating} state={createState} onCancel={closeForm} />}
+      {open && (
+        <DocumentForm
+          dealId={dealId}
+          priceItems={priceItems}
+          action={create}
+          pending={creating}
+          state={createState}
+          onCancel={closeForm}
+        />
+      )}
 
       {documents.length === 0 && !open ? (
         <p className="text-xs text-faint">
@@ -808,12 +832,14 @@ const BLANK_LINES = [0, 1, 2, 3];
 
 function DocumentForm({
   dealId,
+  priceItems,
   action,
   pending,
   state,
   onCancel,
 }: {
   dealId: string;
+  priceItems: PriceItem[];
   action: (formData: FormData) => void;
   pending: boolean;
   state: FormState;
@@ -846,6 +872,27 @@ function DocumentForm({
                 placeholder={i === 0 ? "Description" : ""}
                 className="field-input"
                 aria-label={`Line ${i + 1} description`}
+                /* The price list, offered rather than imposed. A one-off line
+                   still needs to be typeable — but a line that MATCHES a price
+                   item is worth much more than one that does not: it carries
+                   the agreed rate, and the plan builder recovers the unit from
+                   it, so "3" becomes three days rather than a one-day
+                   placeholder. */
+                list="price-items"
+                onChange={(e) => {
+                  const match = priceItems.find(
+                    (p) => p.name.trim().toLowerCase() === e.target.value.trim().toLowerCase()
+                  );
+                  if (!match) return;
+                  /* Fill the rate, and only if the person has not typed one —
+                     overwriting a deliberate price with the list price would
+                     silently change what a client is charged. */
+                  const row = e.target.closest("div");
+                  const unit = row?.querySelector<HTMLInputElement>('input[name="lineUnit"]');
+                  if (unit && !unit.value) unit.value = (match.unitCents / 100).toFixed(2);
+                  const qty = row?.querySelector<HTMLInputElement>('input[name="lineQuantity"]');
+                  if (qty && !qty.value) qty.value = "1";
+                }}
               />
               <input
                 name="lineQuantity"
@@ -868,8 +915,19 @@ function DocumentForm({
             </div>
           ))}
         </div>
+        {/* One list for every row. Typing still works; picking fills the
+            agreed rate so nobody retypes a number that already exists. */}
+        <datalist id="price-items">
+          {priceItems.map((p) => (
+            <option key={p.id} value={p.name}>
+              {`${money(p.unitCents)} ${p.unit}`}
+            </option>
+          ))}
+        </datalist>
         <p className="mt-1.5 text-xs text-faint">
-          Leave a line blank to skip it. The total is worked out from quantity × unit price.
+          {priceItems.length > 0
+            ? "Start typing to pick from the price list — the rate fills itself. Leave a line blank to skip it."
+            : "Leave a line blank to skip it. The total is worked out from quantity × unit price."}
         </p>
       </div>
 

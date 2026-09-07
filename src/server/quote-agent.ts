@@ -1,4 +1,6 @@
-import { listDeals } from "./repos/deals";
+import { createDeal, listDeals } from "./repos/deals";
+import { logActivity } from "./repos/activity";
+import { isLive } from "./projects-view";
 import { listContacts } from "./repos/contacts";
 import { listPriceItems, type PriceItem } from "./repos/pricing";
 import {
@@ -45,6 +47,34 @@ const MAX_LINES = 30;
 const MAX_QUANTITY = 1_000_000;
 
 export const QUOTE_TOOLS = [
+  {
+    name: "start_project",
+    description:
+      "Start a project for a client who does not have one yet, so work can be quoted against it. " +
+      "Only use this when the client genuinely has no project for this piece of work — check the " +
+      "existing projects first, because a second project for the same job splits its documents, " +
+      "its schedule and its margin in two. Say that you have started it.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        client: {
+          type: "string",
+          description: "The contact this work is for, by name. They must already be in the CRM.",
+        },
+        title: {
+          type: "string",
+          description:
+            "What the work is, in the client's own words — e.g. 'Rebuild warehouse roof'. " +
+            "This becomes the project name, so make it specific enough to tell apart from their next job.",
+        },
+        valueHint: {
+          type: "number",
+          description: "Only if the client stated a budget. Omit otherwise — do not estimate.",
+        },
+      },
+      required: ["client", "title"],
+    },
+  },
   {
     name: "draft_quotation",
     description:
@@ -276,8 +306,79 @@ export async function runQuoteTool(
 ): Promise<ToolOutcome> {
   const args = (input ?? {}) as Record<string, unknown>;
 
+  if (name === "start_project") {
+    /*
+       Quoting used to require a project that already existed, and nothing in
+       chat could make one — so a new enquiry meant leaving the conversation,
+       opening Deals, adding one, opening it, and coming back. Three screens
+       before anything could be priced.
+       The voice agent has never had that problem: `log_enquiry` creates the
+       job as part of taking the call. This is the same move, in the same
+       shape, so both agents work the same way.
+    */
+    const contacts = await listContacts(q);
+    const fullName = (c: (typeof contacts)[number]) => `${c.firstName} ${c.lastName}`.trim();
+    const { item: client, error } = resolveOne(text(args.client, 140), contacts, fullName);
+    if (!client) {
+      /* Deliberately no contact is created here. Adding a person to the CRM
+         from a half-remembered name is how duplicate records start, and the
+         agent has no way to check an email or a number. */
+      return { text: `${error} Add them to Contacts first, then I can start the project.` };
+    }
+
+    const title = text(args.title, 140);
+    if (!title) return { text: "What is the work? I need a name for the project." };
+
+    /* A budget the client stated, never an estimate. The value on a deal
+       drives the pipeline and the forecast, and a number the agent invented
+       would read there exactly like one somebody was told. */
+    const stated = typeof args.valueHint === "number" && Number.isFinite(args.valueHint)
+      ? Math.max(0, Math.round(args.valueHint * 100))
+      : 0;
+
+    const deal = await createDeal(q, {
+      title,
+      contactId: client.id,
+      valueCents: stated,
+      stage: "prospect",
+      source: "other",
+      ownerUserId: q.ctx.userId,
+    });
+    await logActivity(q, {
+      entityType: "deal",
+      entityId: deal.id,
+      kind: "created",
+      title: `Project started — ${deal.title}`,
+      detail: `Started from chat for ${fullName(client)}`,
+      amountCents: deal.valueCents,
+      actorUserId: q.ctx.userId,
+    });
+    logWrite("create", "deal", { id: deal.id, actor: q.ctx.userId, detail: "chat agent" });
+
+    return {
+      text:
+        `Started "${deal.title}" for ${fullName(client)}. It is on the board at Prospect. ` +
+        `You can quote against it now.`,
+    };
+  }
+
   if (name === "draft_quotation") {
-    const deals = (await listDeals(q)).filter((d) => d.wonAt === null);
+    /*
+       Every project that is still work, which is NOT the same as every project
+       that is still open.
+
+       This filtered on `wonAt === null`, and `won_at` is stamped at the close
+       and deliberately PRESERVED through Delivery and Referral — so the moment
+       work actually started, the job vanished from the agent's list. Asking for
+       a variation on a job somebody is on site delivering got "Open projects
+       are:" with that job missing, which is exactly when a re-quote is most
+       likely.
+
+       `isLive` is the Projects page's own definition, imported rather than
+       restated. Two lists of "the current jobs" on two screens is how they
+       drift, and this is the drift.
+    */
+    const deals = (await listDeals(q)).filter((d) => isLive(d.stage));
     const contacts = await listContacts(q);
     const fullName = (c: (typeof contacts)[number]) => `${c.firstName} ${c.lastName}`.trim();
 
@@ -288,7 +389,7 @@ export async function runQuoteTool(
     );
     if (!deal) {
       return {
-        text: `${dealError} Open projects are: ${deals.map((d) => d.title).join(", ") || "none"}.`,
+        text: `${dealError} Current projects are: ${deals.map((d) => d.title).join(", ") || "none"}.`,
       };
     }
 
@@ -388,5 +489,7 @@ export function quoteInstructions(): string {
     "A draft appears in the chat with Approve and Request changes buttons; only the user can send it, by approving it.",
     "Every line takes its price from the price list. If somebody asks you to quote something that is not on it, say so and offer what is — never estimate a price.",
     "When the user asks for a change to a quotation that is waiting for approval, call revise_quotation with the FULL set of lines it should end up with.",
+    "A quotation always belongs to a project. If the work has no project yet, call start_project first and then quote against it — do not ask the user to go and make one.",
+    "Before starting a project, check the existing ones: a second project for the same job splits its documents, its schedule and its margin in two.",
   ].join("\n");
 }

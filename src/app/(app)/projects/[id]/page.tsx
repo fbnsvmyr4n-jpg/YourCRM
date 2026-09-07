@@ -12,6 +12,7 @@ import { listDependencies, listTasks, summarise } from "@/server/repos/tasks";
 import { listUsers } from "@/server/repos/users";
 import { instantToWallClock } from "@/lib/zoned";
 import { withSystem } from "@/server/tenant";
+import { listPriceItems } from "@/server/repos/pricing";
 import { requireTenantPage, withTenantPage } from "@/server/tenant-session";
 import { ProjectDetail } from "./ProjectDetail";
 
@@ -37,6 +38,9 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
       header,
       people: await projectPeople(q, id),
       documents: await projectDocuments(q, id),
+      /* So a hand-typed document can pick from the price list instead of
+         retyping a rate. Active only: a withdrawn rate must not be offered. */
+      priceItems: await listPriceItems(q, true),
       threads: await projectThreads(q, id),
       timeline: await projectTimeline(q, id),
       tasks: await listTasks(q, id),
@@ -95,6 +99,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
       header={data.header}
       people={data.people}
       documents={data.documents}
+      priceItems={data.priceItems}
       threads={data.threads}
       timeline={data.timeline}
       tasks={data.tasks}

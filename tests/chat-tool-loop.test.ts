@@ -269,10 +269,26 @@ describe("the model asks for a quotation and gets one", () => {
     expect(system).toMatch(/You CANNOT send a quotation/);
     expect(system).toMatch(/Mobile crane hire — \$12000\.00 per day/);
 
-    // And the tools are on every call, so the capability does not depend on
-    // the question having sounded like a quotation.
+    /*
+       And the tools are on every call, so the capability does not depend on
+       the question having sounded like a quotation.
+
+       Written as the WHOLE list rather than a contains-check, deliberately: a
+       tool reaching the model is a capability somebody granted it, and this
+       failing when one is added is the point. `start_project` was added here
+       on purpose — quoting requires a project, and before it the agent could
+       only refuse and send somebody to another screen.
+    */
     const tools = created[0].tools as Array<{ name: string }>;
-    expect(tools.map((t) => t.name).sort()).toEqual(["draft_quotation", "revise_quotation"]);
+    expect(tools.map((t) => t.name).sort()).toEqual([
+      "draft_quotation",
+      "revise_quotation",
+      "start_project",
+    ]);
+
+    /* And it is told when NOT to reach for it. A second project for the same
+       job splits its documents, its schedule and its margin in two. */
+    expect(system).toMatch(/a second project for the same job splits/i);
   });
 
   it("gives up after four passes rather than talking to itself", async () => {

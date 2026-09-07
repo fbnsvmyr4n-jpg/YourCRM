@@ -23,6 +23,7 @@ import type { TenantContext } from "../src/server/tenant";
 let db: TestDb;
 let withTenant: typeof import("../src/server/tenant").withTenant;
 let quotes: typeof import("../src/server/repos/quotes");
+let deals: typeof import("../src/server/repos/deals");
 let runQuoteTool: typeof import("../src/server/quote-agent").runQuoteTool;
 let closePool: typeof import("../src/server/db").closePool;
 
@@ -47,6 +48,7 @@ beforeAll(async () => {
   ({ withTenant } = await import("../src/server/tenant"));
   ({ closePool } = await import("../src/server/db"));
   quotes = await import("../src/server/repos/quotes");
+  deals = await import("../src/server/repos/deals");
   ({ runQuoteTool } = await import("../src/server/quote-agent"));
 });
 
@@ -303,6 +305,91 @@ describe("what the agent can and cannot do", () => {
     // The model is told what happens next, in the words the user will see.
     expect(text).toMatch(/waiting for the user's approval/i);
     expect(text).toMatch(/amara@heineken\.test/);
+  });
+
+  it("starts a project for a client who has none, so quoting need not leave the chat", async () => {
+    /*
+       The three-screen errand this removes: a quotation has always required a
+       project, and nothing in chat could make one — so a new enquiry meant
+       leaving the conversation, opening Deals, adding one, opening it, and
+       coming back. The voice agent has never had that problem; `log_enquiry`
+       creates the job as part of the call. This is the same move.
+    */
+    const { text } = await tool("start_project", {
+      client: "Amara Dube",
+      title: "New loading bay",
+    });
+    expect(text).toMatch(/Started "New loading bay"/);
+
+    const started = (await inA((q) => deals.listDeals(q))).find((d) => d.title === "New loading bay");
+    expect(started?.stage).toBe("prospect");
+    expect(started?.contactId).toBe("ct_procure");
+    /* The company follows the contact, which is what puts the new job on the
+       Projects page under the right client. */
+    expect(started?.companyId).toBe("co_heineken");
+
+    // And it is immediately quotable, which is the entire point.
+    const { quote } = await tool("draft_quotation", {
+      project: "New loading bay",
+      lines: [{ item: "Site survey", quantity: 1 }],
+    });
+    expect(quote?.totalCents).toBe(125_050);
+  });
+
+  it("never invents a budget for a project it starts", async () => {
+    /* The value on a deal drives the pipeline and the forecast. A number the
+       agent estimated would read there exactly like one somebody was told. */
+    await tool("start_project", { client: "Amara Dube", title: "No budget given" });
+    const started = (await inA((q) => deals.listDeals(q))).find((d) => d.title === "No budget given");
+    expect(started?.valueCents).toBe(0);
+
+    await tool("start_project", { client: "Amara Dube", title: "Budget stated", valueHint: 25000 });
+    const withBudget = (await inA((q) => deals.listDeals(q))).find((d) => d.title === "Budget stated");
+    expect(withBudget?.valueCents).toBe(2_500_000);
+  });
+
+  it("refuses to start a project for somebody who is not a contact", async () => {
+    /* Adding a person from a half-remembered name is how duplicate records
+       start, and the agent cannot check an email or a number. */
+    const before = (await inA((q) => deals.listDeals(q))).length;
+    const { text } = await tool("start_project", { client: "Someone Nobody Knows", title: "A job" });
+    expect(text).toMatch(/Add them to Contacts first/);
+    expect((await inA((q) => deals.listDeals(q))).length, "a project was created anyway").toBe(before);
+  });
+
+  it("QUOTES A JOB THAT IS ALREADY BEING DELIVERED", async () => {
+    /*
+       The defect this replaced. The agent filtered on `wonAt === null`, and
+       `won_at` is stamped at the close and deliberately preserved through
+       Delivery and Referral — so a job somebody was on site delivering
+       vanished from the agent's list at exactly the moment a variation is
+       most likely to be asked for. Meanwhile the Projects page counted the
+       same job as live: two screens, two definitions of "the current jobs".
+    */
+    for (const stage of ["won", "delivery"] as const) {
+      await db.seed(`UPDATE deals SET stage = '${stage}', won_at = now() WHERE id = '${JOB}'`);
+      const { quote, text } = await tool("draft_quotation", {
+        project: "Rebuild warehouse",
+        lines: [{ item: "Site survey", quantity: 1 }],
+      });
+      expect(quote, `a job in ${stage} could not be quoted: ${text}`).toBeTruthy();
+      await db.seed(`DELETE FROM document_lines; DELETE FROM documents;`);
+    }
+  });
+
+  it("leaves finished and lost work out of it", async () => {
+    /* `referral` and `lost` are terminal — the same line the Projects page
+       draws. Offering to quote a job that is over is a different kind of
+       wrong from hiding one that is running. */
+    for (const stage of ["referral", "lost"] as const) {
+      await db.seed(`UPDATE deals SET stage = '${stage}' WHERE id = '${JOB}'`);
+      const { quote, text } = await tool("draft_quotation", {
+        project: "Rebuild warehouse",
+        lines: [{ item: "Site survey", quantity: 1 }],
+      });
+      expect(quote, `a ${stage} job was quotable`).toBeUndefined();
+      expect(text).toMatch(/Current projects are/);
+    }
   });
 
   it("refuses an item nobody has priced, and writes nothing", async () => {
