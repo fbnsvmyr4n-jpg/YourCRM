@@ -69,7 +69,13 @@ afterAll(async () => {
 
 beforeEach(() =>
   db.seed(`
+    /* Meetings and documents are cleared here too. They were not, and because
+       deleting a contact only NULLs their meeting rather than removing it, one
+       test's booking survived into the next and the availability check counted
+       two. A fixture that leaks makes a suite order-dependent, which is the
+       kind of failure that gets re-run rather than read. */
     DELETE FROM agent_tool_executions; DELETE FROM activities;
+    DELETE FROM document_lines; DELETE FROM documents; DELETE FROM meetings;
     DELETE FROM deals; DELETE FROM contacts; DELETE FROM companies;
 
     INSERT INTO companies (id, sub_account_id, name) VALUES
@@ -80,6 +86,19 @@ beforeEach(() =>
       ('ct_ben',   '${TENANT_A}', 'Ben',   'Cole',  NULL,                 '+27 21 555 0199', NULL),
       ('ct_theirs','${TENANT_B}', 'Rival', 'Person', NULL,                '021 555 0142',    NULL);`)
 );
+
+/**
+ * Give this workspace a real time zone.
+ *
+ * An UPDATE would do nothing: `settings` is keyed by sub-account and a
+ * workspace that has never opened Settings has no row, so the zone silently
+ * stayed UTC and the first version of these tests asserted against a booking
+ * made in the wrong zone.
+ */
+const inJohannesburg = () =>
+  db.seed(`
+    INSERT INTO settings (sub_account_id, time_zone) VALUES ('${TENANT_A}', 'Africa/Johannesburg')
+    ON CONFLICT (sub_account_id) DO UPDATE SET time_zone = EXCLUDED.time_zone;`);
 
 describe("who the agent is allowed to be", () => {
   it("refuses a tool the agent has not been granted", async () => {
@@ -325,5 +344,196 @@ describe("phone normalisation", () => {
 
   it("keeps different numbers different", () => {
     expect(tools.phoneTail("021 555 0142")).not.toBe(tools.phoneTail("021 555 0143"));
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Following up, and quoting                                           */
+/* ------------------------------------------------------------------ */
+
+describe("turning a call into work on the board", () => {
+  it("records an enquiry as a deal the sales team already sees", async () => {
+    const out = await run({
+      tool: "log_enquiry",
+      input: { contactId: "ct_amara", wants: "crane hire for the Stellenbosch job" },
+    });
+    expect(out.status).toBe("succeeded");
+
+    const deal = await inA((q) =>
+      q.one<{ title: string; stage: string; source: string; value_cents: string }>(
+        `SELECT title, stage, source, value_cents::text FROM deals WHERE sub_account_id = $1`,
+        [TENANT_A]
+      )
+    );
+    expect(deal?.title).toBe("Amara Dube — crane hire for the Stellenbosch job");
+    /* Real enum values, not ones invented for the agent — a stage no screen
+       renders is how a record becomes invisible. */
+    expect(deal?.stage).toBe("prospect");
+    expect(deal?.source).toBe("phone_call");
+    /* No budget stated means no number, not a guess. */
+    expect(deal?.value_cents).toBe("0");
+  });
+
+  it("records a stated budget in exact cents", async () => {
+    await run({
+      tool: "log_enquiry",
+      input: { contactId: "ct_amara", wants: "survey", valueHint: 1250.5 },
+    });
+    const deal = await inA((q) =>
+      q.one<{ value_cents: string }>(`SELECT value_cents::text FROM deals WHERE sub_account_id = $1`, [TENANT_A])
+    );
+    expect(deal?.value_cents).toBe("125050");
+  });
+
+  it("refuses a budget it cannot read rather than storing zero", async () => {
+    const out = await run({
+      tool: "log_enquiry",
+      input: { contactId: "ct_amara", wants: "survey", valueHint: "a few grand" },
+    });
+    expect(out.status).toBe("refused");
+  });
+});
+
+describe("booking a time", () => {
+  it("refuses a slot the caller has not agreed to", async () => {
+    const out = await run({
+      tool: "create_meeting",
+      input: { contactId: "ct_amara", date: "2026-09-21", time: "10:00", topic: "Site walk" },
+    });
+    expect(out.status).toBe("refused");
+    if (out.status === "refused") expect(out.error).toMatch(/confirm/i);
+  });
+
+  it("books in the business's own time zone, not the server's", async () => {
+    await inJohannesburg();
+    const out = await run({
+      tool: "create_meeting",
+      input: { contactId: "ct_amara", date: "2026-09-21", time: "10:00", topic: "Site walk" },
+      confirmed: true,
+    });
+    expect(out.status).toBe("succeeded");
+
+    const row = await inA((q) =>
+      q.one<{ at: string }>(
+        /* Rendered in UTC on purpose: `::text` alone uses the session's zone,
+           which made the first failure read as though the booking were four
+           hours out when it was two. */
+        `SELECT to_char(scheduled_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI') AS at
+           FROM meetings WHERE sub_account_id = $1`,
+        [TENANT_A]
+      )
+    );
+    /* 10:00 in Johannesburg is 08:00 UTC. Stored as an instant, resolved once. */
+    expect(row?.at).toBe("2026-09-21 08:00");
+  });
+
+  it("refuses a time it cannot read rather than booking the wrong one", async () => {
+    for (const bad of [
+      { date: "tomorrow", time: "10:00" },
+      { date: "2026-09-21", time: "half past ten" },
+    ]) {
+      const out = await run({
+        tool: "create_meeting",
+        input: { contactId: "ct_amara", topic: "x", ...bad },
+        confirmed: true,
+      });
+      expect(out.status, JSON.stringify(bad)).toBe("refused");
+    }
+  });
+
+  it("reports the day's existing meetings in local time", async () => {
+    await inJohannesburg();
+    await run({
+      tool: "create_meeting",
+      input: { contactId: "ct_amara", date: "2026-09-21", time: "10:00", topic: "Site walk" },
+      confirmed: true,
+    });
+    const out = await run({ tool: "check_availability", input: { date: "2026-09-21" } });
+    if (out.status !== "succeeded") throw new Error("expected success");
+    const v = out.value as { busy: { from: string; to: string }[] };
+    expect(v.busy).toHaveLength(1);
+    expect(v.busy[0].from).toBe("10:00");
+    expect(v.busy[0].to).toBe("10:30");
+  });
+});
+
+describe("quoting over the phone", () => {
+  beforeEach(() =>
+    db.seed(`
+      DELETE FROM document_lines; DELETE FROM documents; DELETE FROM price_items;
+      INSERT INTO price_items (id, sub_account_id, name, unit, unit_cents) VALUES
+        ('pi_crane',  '${TENANT_A}', 'Mobile crane hire', 'per day', 1200000),
+        ('pi_survey', '${TENANT_A}', 'Site survey',       'each',     125050);`)
+  );
+
+  const anEnquiry = async () => {
+    const out = await run({
+      tool: "log_enquiry",
+      input: { contactId: "ct_amara", wants: "crane" },
+    });
+    if (out.status !== "succeeded") throw new Error("enquiry failed");
+    return (out.value as { dealId: string }).dealId;
+  };
+
+  it("prices every line from the price list and leaves it awaiting approval", async () => {
+    const dealId = await anEnquiry();
+    const out = await run({
+      tool: "create_quote_draft",
+      input: { dealId, items: [{ item: "Mobile crane hire", quantity: 3 }, { item: "Site survey", quantity: 2 }] },
+    });
+    expect(out.status).toBe("succeeded");
+    if (out.status === "succeeded") {
+      // 3 x 12,000 + 2 x 1,250.50 = 38,501.00
+      expect((out.value as { total: string }).total).toBe("38501.00");
+      expect((out.value as { status: string }).status).toMatch(/not sent/i);
+    }
+
+    const doc = await inA((q) =>
+      q.one<{ status: string; drafted_by_agent: string; sent_at: string | null }>(
+        `SELECT status, drafted_by_agent, sent_at::text FROM documents WHERE sub_account_id = $1`,
+        [TENANT_A]
+      )
+    );
+    expect(doc?.status).toBe("awaiting_approval");
+    expect(doc?.drafted_by_agent).toBe("voice");
+    expect(doc?.sent_at).toBeNull();
+  });
+
+  it("refuses to quote something that is not on the price list", async () => {
+    const dealId = await anEnquiry();
+    const out = await run({
+      tool: "create_quote_draft",
+      input: { dealId, items: [{ item: "Helicopter lift", quantity: 1 }] },
+    });
+    expect(out.status).toBe("failed");
+    if (out.status === "failed") {
+      expect(out.error).toMatch(/not one thing on the price list/i);
+      /* And it is told what IS available, so it can offer a real one. */
+      expect(out.error).toMatch(/Mobile crane hire/);
+    }
+    const count = await inA((q) =>
+      q.one<{ n: number }>(`SELECT count(*)::int AS n FROM documents WHERE sub_account_id = $1`, [TENANT_A])
+    );
+    expect(count?.n).toBe(0);
+  });
+
+  it("gives the agent no way to send one", () => {
+    /* The safety property, expressed where a model would meet it: there is no
+       vocabulary for despatch anywhere in the registry. */
+    const names = [...tools.CRM_TOOL_REGISTRY.keys()];
+    expect(names.some((n) => /send|email|approve|dispatch/i.test(n))).toBe(false);
+  });
+
+  it("reports a pending quote rather than guessing its status", async () => {
+    const dealId = await anEnquiry();
+    await run({
+      tool: "create_quote_draft",
+      input: { dealId, items: [{ item: "Site survey", quantity: 1 }] },
+    });
+    const out = await run({ tool: "list_quotes_awaiting_approval", input: {} });
+    if (out.status !== "succeeded") throw new Error("expected success");
+    const v = out.value as { waiting: { number: string; total: string }[] };
+    expect(v.waiting).toHaveLength(1);
+    expect(v.waiting[0].total).toBe("1250.50");
   });
 });
