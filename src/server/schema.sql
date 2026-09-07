@@ -1594,3 +1594,68 @@ DROP POLICY IF EXISTS workspace_holidays_tenant_isolation ON workspace_holidays;
 CREATE POLICY workspace_holidays_tenant_isolation ON workspace_holidays
   USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
   WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
+
+-- ---------------------------------------------------------------------------
+-- Every tool an agent ran, and the reason a retry cannot run it twice.
+--
+-- One table for the audit trail AND the idempotency record, deliberately. They
+-- answer the same question — "did this already happen, and what came of it" —
+-- and two tables would be two places to write and one place to forget, with the
+-- failure showing up as a duplicate meeting in somebody's calendar.
+--
+-- `idempotency_key` is composed by the caller from tenant + call + tool + a
+-- logical action id, so the same intent retried after a dropped WebSocket or a
+-- redelivered webhook resolves to this row instead of acting again. The unique
+-- index is what actually enforces it; the code turns the collision into a
+-- replay of `result`.
+--
+-- `result` holds the authoritative answer so a replay returns what the first
+-- execution returned rather than a fresh guess. It can contain customer data
+-- and so lives here, inside row-level security, and never in the application
+-- log — the log records that a tool ran, never what it said.
+--
+-- `refused` is a first-class outcome, not a failure. An agent asking for
+-- something it has no permission to do is a thing we want counted and
+-- reviewable, and lumping it in with 'failed' would hide an attack behind a
+-- column of timeouts.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS agent_tool_executions (
+  id               TEXT PRIMARY KEY,
+  sub_account_id   TEXT NOT NULL REFERENCES sub_accounts(id) ON DELETE CASCADE,
+
+  -- Which conversation asked. Null when a tool is run outside a call.
+  call_id          TEXT,
+
+  tool_name        TEXT NOT NULL,
+
+  -- The human the agent acted as. An agent is never its own authority: its
+  -- permissions are a subset of a real person's, and this is that person.
+  actor_user_id    TEXT REFERENCES users(id) ON DELETE SET NULL,
+
+  -- Which agent surface asked — 'voice' or 'chat'.
+  agent            TEXT NOT NULL DEFAULT 'voice',
+
+  status           TEXT NOT NULL
+                     CHECK (status IN ('succeeded', 'failed', 'refused')),
+
+  -- Why, in one line, for a person reading the trail. Never record contents.
+  detail           TEXT,
+
+  result           JSONB,
+
+  idempotency_key  TEXT NOT NULL,
+
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- The guarantee. A second attempt at the same logical action collides here and
+-- is answered from the first one's result.
+CREATE UNIQUE INDEX IF NOT EXISTS agent_tool_executions_once ON agent_tool_executions (sub_account_id, idempotency_key);
+CREATE INDEX IF NOT EXISTS agent_tool_executions_call_idx ON agent_tool_executions (sub_account_id, call_id, created_at);
+
+ALTER TABLE agent_tool_executions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE agent_tool_executions FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS agent_tool_executions_tenant_isolation ON agent_tool_executions;
+CREATE POLICY agent_tool_executions_tenant_isolation ON agent_tool_executions
+  USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
+  WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
