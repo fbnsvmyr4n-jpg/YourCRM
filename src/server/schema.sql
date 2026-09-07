@@ -1052,6 +1052,66 @@ CREATE TRIGGER contacts_company_in_tenant
   FOR EACH ROW EXECUTE FUNCTION assert_company_in_tenant();
 
 -- ---------------------------------------------------------------------------
+-- A deal's company FOLLOWS its contact's.
+--
+-- The design says a deal's company is derived from its contact — no form asks
+-- for it, because an answer that can disagree with the contact is worse than
+-- no answer. That derivation was only ever applied ONCE, at the moment the
+-- deal was created, and nothing applied it again.
+--
+-- The consequence was the shape of a bug rather than the look of one. Somebody
+-- files a contact under a client, correctly, and their existing work stays
+-- attached to nobody: the Projects page keeps omitting a deal whose contact
+-- plainly has a company now, and no screen anywhere explains why. The only
+-- remedy was to delete the deal and make it again.
+--
+-- So the derivation is enforced where it is stated, rather than remembered at
+-- each of the several call sites that can move a contact — the edit form, the
+-- bulk action on the list, an import, and whatever is added next.
+--
+-- `updated_at` is deliberately NOT touched. Projects orders clients by when
+-- anything last happened to their work, and re-filing is bookkeeping, not
+-- activity: bumping it would float a dormant client to the top for a change
+-- nobody made to the job itself.
+--
+-- `sub_account_id` in the UPDATE below is redundant, and kept deliberately.
+-- Mutation testing says so plainly: removing it breaks no test, because a
+-- contact id is unique across the platform and no deal in another workspace
+-- can reference this one. It stays because it costs nothing, it lets the
+-- tenant index serve the statement, and a reader should not have to re-derive
+-- that argument every time. Nothing rests on it — so nothing should be added
+-- that does.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION deals_follow_contact_company() RETURNS trigger AS $$
+BEGIN
+  UPDATE deals SET company_id = NEW.company_id
+   WHERE contact_id = NEW.id
+     AND sub_account_id = NEW.sub_account_id
+     AND deleted_at IS NULL
+     AND company_id IS DISTINCT FROM NEW.company_id;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS contacts_company_flows_to_deals ON contacts;
+CREATE TRIGGER contacts_company_flows_to_deals
+  AFTER UPDATE OF company_id ON contacts
+  FOR EACH ROW
+  WHEN (OLD.company_id IS DISTINCT FROM NEW.company_id)
+  EXECUTE FUNCTION deals_follow_contact_company();
+
+-- Existing rows, once. Every deal whose contact is filed but which is not:
+-- exactly the work that was stranded before the trigger existed.
+UPDATE deals d SET company_id = c.company_id
+  FROM contacts c
+ WHERE c.id = d.contact_id
+   AND c.sub_account_id = d.sub_account_id
+   AND c.deleted_at IS NULL
+   AND d.deleted_at IS NULL
+   AND d.company_id IS NULL
+   AND c.company_id IS NOT NULL;
+
+-- ---------------------------------------------------------------------------
 -- A project is a job at a place, on a timescale.
 --
 -- "Heineken — rebuild warehouse" was enough to list the work. "Heineken

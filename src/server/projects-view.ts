@@ -114,6 +114,28 @@ export async function listProjects(q: TenantQuery): Promise<Row[]> {
 }
 
 /**
+ * Work that is filed under nobody yet.
+ *
+ * The join above is an INNER one, and that part is right: this page groups work
+ * by client, and a deal with no client has no group to sit in. What was wrong
+ * was the silence. A deal takes its company FROM ITS CONTACT, so a contact
+ * whose company was never linked produces a deal with no company — and the page
+ * said "No projects yet" while that work sat in the pipeline, with nothing to
+ * suggest it existed or what to do about it.
+ *
+ * So the rows the join drops are counted and said out loud: a number the screen
+ * can act on, instead of an absence it cannot explain.
+ */
+export async function countUnfiled(q: TenantQuery): Promise<number> {
+  const row = await q.one<{ n: string }>(
+    `SELECT count(*)::text AS n FROM deals d
+      WHERE d.sub_account_id = $1 AND d.deleted_at IS NULL AND d.company_id IS NULL`,
+    [q.ctx.subAccountId]
+  );
+  return Number(row?.n ?? 0);
+}
+
+/**
  * Group the projects under their companies.
  *
  * Pure, and separate from the SQL so the ordering can be checked against a

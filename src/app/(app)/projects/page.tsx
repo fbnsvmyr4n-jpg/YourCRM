@@ -1,4 +1,4 @@
-import { groupByCompany, listProjects } from "@/server/projects-view";
+import { countUnfiled, groupByCompany, listProjects } from "@/server/projects-view";
 import { withTenantPage } from "@/server/tenant-session";
 import { ProjectsView } from "./ProjectsView";
 
@@ -8,6 +8,11 @@ import { ProjectsView } from "./ProjectsView";
 export const dynamic = "force-dynamic";
 
 export default async function ProjectsPage() {
-  const rows = await withTenantPage((q) => listProjects(q));
-  return <ProjectsView companies={groupByCompany(rows)} />;
+  /* Both in one pass. Read separately, the page could report "nothing here"
+     and "nothing unfiled" from two different moments and be wrong about both. */
+  const { rows, unfiled } = await withTenantPage(async (q) => ({
+    rows: await listProjects(q),
+    unfiled: await countUnfiled(q),
+  }));
+  return <ProjectsView companies={groupByCompany(rows)} unfiled={unfiled} />;
 }

@@ -12,6 +12,8 @@ import {
 } from "@/server/repos/contacts";
 import { logActivity } from "@/server/repos/activity";
 import { withCurrentTenant } from "@/server/tenant-session";
+import { findOrCreateCompany } from "@/server/repos/companies";
+import type { TenantQuery } from "@/server/tenant";
 import { email as validEmail, id as validId, multiline, text } from "@/server/validate";
 import { logWrite } from "@/server/log";
 import { importContacts, previewImport } from "@/server/import-contacts";
@@ -57,6 +59,38 @@ function parseContact(formData: FormData): NewContact | null {
   };
 }
 
+/**
+ * Turn the company somebody typed into the company record it names.
+ *
+ * This field used to be a label and nothing else. The name went into `info`,
+ * `company_id` stayed null, and the contact was filed under nobody — which was
+ * invisible on the contact card, since the card cheerfully showed the name, and
+ * surfaced two screens away instead. A deal takes its company FROM ITS CONTACT,
+ * so a real deal, for a real person, at a company that already existed under
+ * that exact name, never appeared on Projects at all: the page said "No
+ * projects yet" while the work sat in the pipeline.
+ *
+ * Resolved case-insensitively against the companies that exist and created when
+ * nothing matches — the same rule the Add company dialog already promises, so
+ * typing a name that exists files the contact there instead of making a second
+ * company with different capitals.
+ *
+ * ONLY the short `company` field feeds this. `info` also carries free-form
+ * notes for contacts written before those two were separated, and creating a
+ * company named after a paragraph is precisely the mess the companies entity
+ * was introduced to clear up.
+ *
+ * An empty field clears the link: somebody deleting a company name means the
+ * person no longer works there, and leaving them filed under the old client
+ * would keep their work showing on that client's page.
+ */
+async function companyIdFrom(q: TenantQuery, formData: FormData): Promise<string | null> {
+  const name = text(formData.get("company"), 80);
+  if (!name) return null;
+  const company = await findOrCreateCompany(q, name);
+  return company?.id ?? null;
+}
+
 export async function addContactAction(formData: FormData) {
   return withCurrentTenant(async (q) => {
     const input = parseContact(formData);
@@ -65,7 +99,11 @@ export async function addContactAction(formData: FormData) {
     // Ownership comes from the session, never the form. A client could
     // otherwise claim any owner it liked — and the database now refuses an
     // owner from outside this tenant regardless.
-    const created = await createContact(q, { ...input, ownerUserId: q.ctx.userId });
+    const created = await createContact(q, {
+      ...input,
+      companyId: await companyIdFrom(q, formData),
+      ownerUserId: q.ctx.userId,
+    });
 
     await logActivity(q, {
       entityType: "contact",
@@ -150,7 +188,10 @@ export async function updateContactAction(id: string, formData: FormData) {
     const before = await getContact(q, contactId);
     if (!before) return;
 
-    await updateContact(q, contactId, input);
+    await updateContact(q, contactId, {
+      ...input,
+      companyId: await companyIdFrom(q, formData),
+    });
 
     // Name the fields that changed rather than logging a bare "updated" — the
     // point of a history is being able to see what somebody actually did.

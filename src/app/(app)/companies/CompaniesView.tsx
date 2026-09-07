@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Building2, Check, Pencil, Plus, Search, Trash2, X } from "lucide-react";
+import Link from "next/link";
+import { ArrowLeft, Building2, Check, Pencil, Plus, Search, Trash2, X } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Overlay } from "@/components/ui/Overlay";
 import { clsx } from "@/lib/clsx";
@@ -68,6 +69,17 @@ export function CompaniesView({ companies }: { companies: CompanyRollup[] }) {
     <div className="mx-auto max-w-[900px] animate-fade-up">
       <div className="flex flex-wrap items-end justify-between gap-3 pb-5 pt-1">
         <div>
+          {/* The way back. Almost everybody arrives here from Projects, via a
+              link that offered no return — so the only route out was the
+              sidebar, and after adding a company nothing said where to go
+              next. */}
+          <Link
+            href="/projects"
+            className="focus-ring -ml-1 mb-1 inline-flex items-center gap-1 rounded px-1 py-0.5 text-xs font-medium text-muted transition-colors hover:text-[var(--text)]"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" />
+            Projects
+          </Link>
           <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Companies</h1>
           <p className="mt-1 text-sm text-muted">
             Every deal for one company, across everyone who works there.
@@ -108,8 +120,11 @@ export function CompaniesView({ companies }: { companies: CompanyRollup[] }) {
               style={{ background: "var(--amber-soft)", color: "var(--amber)" }}
             >
               {empties.length} {empties.length === 1 ? "company has" : "companies have"} nobody at
-              them and no deals. If they came from an old notes field, remove them — the contacts
-              keep everything.
+              them and no deals, so {empties.length === 1 ? "it does" : "they do"} not appear on
+              Projects yet. Put a contact at {empties.length === 1 ? "it" : "them"} to start filing
+              work there — or, if {empties.length === 1 ? "it came" : "they came"} from an old
+              notes field, remove {empties.length === 1 ? "it" : "them"}; the contacts keep
+              everything.
             </p>
           )}
 

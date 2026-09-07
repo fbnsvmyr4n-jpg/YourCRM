@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Briefcase, Building2, ChevronDown, Search, Settings2 } from "lucide-react";
+import { Briefcase, Building2, ChevronDown, Search, Settings2, Users } from "lucide-react";
 import { Card, CardHeader, CardMeta } from "@/components/ui/Card";
 import { clsx } from "@/lib/clsx";
 import { stageMeta } from "@/data/pipeline";
@@ -34,7 +34,14 @@ const money = (cents: number) => {
   return `$${n}`;
 };
 
-export function ProjectsView({ companies }: { companies: CompanyProjects[] }) {
+export function ProjectsView({
+  companies,
+  unfiled,
+}: {
+  companies: CompanyProjects[];
+  /** Deals with no company — see `countUnfiled` for why they are counted. */
+  unfiled: number;
+}) {
   const [query, setQuery] = useState("");
 
   /**
@@ -99,11 +106,58 @@ export function ProjectsView({ companies }: { companies: CompanyProjects[] }) {
 
       {shown.length === 0 ? (
         <Card>
-          <p className="text-sm text-muted">
-            {query.trim()
-              ? "No client or project matches that."
-              : "No projects yet. A deal filed against a company appears here as that client's work."}
-          </p>
+          {query.trim() ? (
+            <p className="text-sm text-muted">No client or project matches that.</p>
+          ) : (
+            /*
+               The empty state used to be a dead end AND, often, untrue.
+
+               It said "No projects yet" whether or not there was work, because
+               a deal only lands here once its contact is filed under a company
+               — and it offered one link, Manage companies, which cannot
+               produce a project. Somebody following it added a company, came
+               back, and found the same sentence.
+
+               So it now says which of the two situations this actually is, and
+               each one names the step that resolves it.
+            */
+            <div className="flex flex-col items-start gap-3">
+              <p className="text-sm text-muted">
+                {unfiled > 0 ? (
+                  <>
+                    <span className="font-semibold text-[var(--text)]">
+                      {unfiled} {unfiled === 1 ? "deal is" : "deals are"} not filed under a client
+                      yet.
+                    </span>{" "}
+                    Work appears here once its contact has a company — set one on the contact and
+                    it will show up as that client&rsquo;s project.
+                  </>
+                ) : (
+                  <>
+                    No projects yet. A project is a deal for a client: add the contact with their
+                    company, then open a deal for them, and it appears here as that
+                    client&rsquo;s work.
+                  </>
+                )}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Link
+                  href="/contacts"
+                  className="btn-accent focus-ring flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold"
+                >
+                  <Users className="h-4 w-4" />
+                  {unfiled > 0 ? "Set a company on the contact" : "Add a contact"}
+                </Link>
+                <Link
+                  href="/deals"
+                  className="btn-soft focus-ring flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-medium text-muted"
+                >
+                  <Briefcase className="h-4 w-4" />
+                  {unfiled > 0 ? "See the deals" : "Open a deal"}
+                </Link>
+              </div>
+            </div>
+          )}
         </Card>
       ) : (
         <div className="flex flex-col gap-4">
@@ -113,6 +167,18 @@ export function ProjectsView({ companies }: { companies: CompanyProjects[] }) {
               {liveCount === 1 ? "project is" : "projects are"} live across{" "}
               <span className="font-semibold text-[var(--text)]">{companies.length}</span>{" "}
               {companies.length === 1 ? "client" : "clients"}.
+              {/* Said here too, not only on the empty state. A page that lists
+                  four clients while three deals are missing looks complete,
+                  and the reader has no way to know it is not. */}
+              {unfiled > 0 && (
+                <>
+                  {" "}
+                  <Link href="/contacts" className="focus-ring rounded underline text-accent">
+                    {unfiled} {unfiled === 1 ? "deal is" : "deals are"} not filed under a client
+                  </Link>
+                  .
+                </>
+              )}
             </p>
           )}
           {shown.map((company) => (
