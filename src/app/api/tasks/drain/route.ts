@@ -23,8 +23,24 @@ export const maxDuration = 60;
  *
  * Serverless is why this is an HTTP endpoint rather than a worker: there is no
  * process to leave running. Anything that can make an authenticated request
- * can drive it — Vercel Cron, an external scheduler, or a person with the
- * secret when something needs pushing along.
+ * can drive it — a scheduler, or a person with the secret when something needs
+ * pushing along.
+ *
+ * ── Nothing schedules this yet, and that is deliberate ───────────────────
+ *
+ * A `vercel.json` declaring a cron shipped with this endpoint and production
+ * stopped deploying at that exact commit — two pushes built nothing, while the
+ * commit before it, which had no such file, had deployed cleanly. It was
+ * removed rather than debugged blind, because the cron was doing nothing
+ * anyway: without `CRON_SECRET` set in the project, Vercel's own trigger gets
+ * the 401 below.
+ *
+ * So the retry ladder currently rests on the opportunistic drains — every
+ * place that queues a job also drains it in the same request — and this
+ * endpoint waits for a scheduler. To connect one: set `CRON_SECRET`, then
+ * either add `vercel.json` back (Pro plan; Hobby triggers crons once a day
+ * whatever the expression says) or point any external scheduler at
+ * `POST /api/tasks/drain` with `Authorization: Bearer $CRON_SECRET`.
  *
  * ── Authentication ───────────────────────────────────────────────────────
  *
