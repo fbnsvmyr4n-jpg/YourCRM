@@ -1,6 +1,6 @@
 import { listCalls } from "./repos/calls";
 import { deadJobs } from "./repos/outbox";
-import { CALL_ANALYSIS, QUOTE_EMAIL } from "./outbox-handlers";
+import { CALL_ANALYSIS, INVITE_EMAIL, QUOTE_EMAIL } from "./outbox-handlers";
 import { listDeals } from "./repos/deals";
 import { listMeetings } from "./repos/meetings";
 import { listContacts } from "./repos/contacts";
@@ -63,6 +63,11 @@ const STUCK_META: Record<string, { noun: (n: number) => string; verb: string; hr
     verb: "could not be read",
     href: "/voice-agents",
   },
+  [INVITE_EMAIL]: {
+    noun: (n) => (n === 1 ? "invitation" : "invitations"),
+    verb: "could not be sent",
+    href: "/settings?s=team",
+  },
 };
 
 /* Worded to agree with either count — "could not be completed" reads correctly
@@ -94,7 +99,12 @@ function groupByHandler(jobs: { handler: string; lastError: string | null }[]) {
  */
 export function shortenError(raw: string | null): string {
   if (!raw) return "";
-  const message = raw.match(/"message"\s*:\s*"([^"]+)"/)?.[1];
+  /* The closing quote is optional on purpose. `last_error` is stored truncated
+     at 500 characters, and a long provider error gets cut off MID-MESSAGE — so
+     insisting on a closing quote made the extraction fail exactly on the
+     longest, most-truncated errors and put raw JSON in front of a person.
+     Driving a real 403 was what showed it. */
+  const message = raw.match(/"message"\s*:\s*"([^"]*)/)?.[1];
   const text = (message ?? raw).replace(/\s+/g, " ").trim();
   return text.length > 120 ? `${text.slice(0, 117)}…` : text;
 }

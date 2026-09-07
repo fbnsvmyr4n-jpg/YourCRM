@@ -113,6 +113,32 @@ describe("a job we gave up on reaches the person who needed it", () => {
     expect(stuck.find((s) => s.href === "/voice-agents")?.title).toBe("1 call could not be read");
   });
 
+  it("names a failed invitation, rather than falling back to generic wording", async () => {
+    /*
+       Found by driving it, one commit after the fallback was written: the
+       invite handler was added and nobody registered it here, so a real failed
+       invitation read "1 background task could not be completed". The fallback
+       did its job — it surfaced — but a person cannot act on that sentence.
+    */
+    await db.seed(deadJob(TENANT_A, "j1", "invite_email", q("mail refused")));
+    const stuck = (await feed()).filter((i) => i.kind === "stuck");
+    expect(stuck[0].title).toBe("1 invitation could not be sent");
+    expect(stuck[0].href).toBe("/settings?s=team");
+  });
+
+  it("every handler the app ships has wording of its own", async () => {
+    /* The fallback is a safety net for a handler somebody forgot, not the
+       normal case. If this fails, a handler was added without a label. */
+    const { OUTBOX_HANDLERS } = await import("../src/server/outbox-handlers");
+    for (const handler of OUTBOX_HANDLERS) {
+      await db.seed(`DELETE FROM outbox;` + deadJob(TENANT_A, "j1", handler.name, q("failed")));
+      const stuck = (await feed()).filter((i) => i.kind === "stuck");
+      expect(stuck[0].title, `${handler.name} has no wording of its own`).not.toMatch(
+        /background task/
+      );
+    }
+  });
+
   it("SURFACES a handler nobody wrote a label for", async () => {
     /*
        The way this feature would quietly die. Somebody adds a handler next
@@ -172,6 +198,18 @@ describe("cutting a provider error down to what a person can act on", () => {
 
   it("keeps a plain error as it is", () => {
     expect(shortenError("socket hang up")).toBe("socket hang up");
+  });
+
+  it("still finds the message when the stored error was cut off mid-sentence", () => {
+    /*
+       `last_error` is stored truncated at 500 characters, so a long provider
+       error loses its closing quote. Insisting on one made the extraction fail
+       precisely on the longest errors and put raw JSON in front of a person —
+       which is what a real 403 looked like on screen.
+    */
+    const cut = 'Resend returned 403 {"statusCode":403,"name":"validation_error","message":"You can only send testing emails to your own address (someone@example.com). To send to other recipients, please veri';
+    expect(shortenError(cut)).toMatch(/^You can only send testing emails/);
+    expect(shortenError(cut)).not.toMatch(/statusCode/);
   });
 
   it("trims one too long to read in a popover", () => {

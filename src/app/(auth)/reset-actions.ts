@@ -11,6 +11,7 @@ import {
 import { findUserByEmail, setPassword } from "@/server/repos/users";
 import { withSystem } from "@/server/tenant";
 import { email as validEmail, text } from "@/server/validate";
+import { logAuth } from "@/server/log";
 
 export type ResetState = { ok?: string; error?: string; devLink?: string } | undefined;
 
@@ -62,8 +63,32 @@ export async function requestResetAction(_prev: ResetState, formData: FormData):
   if (!result.sent && !emailConfigured() && process.env.NODE_ENV !== "production") {
     return { ...generic, devLink: link };
   }
-  if (!result.sent && process.env.NODE_ENV === "production") {
-    return { error: "Couldn't send the email just now. Please try again shortly." };
+  /*
+     A FAILED SEND ANSWERS THE SAME WAY AS A SUCCESSFUL ONE. That is the whole
+     purpose of this function, and it was being given away right here.
+
+     The previous version returned "Couldn't send the email just now" when the
+     send failed and the generic line otherwise — but a send is only ever
+     attempted for an address that HAS an account, because the function returns
+     early above when it does not. So the two answers meant exactly: error =
+     this address is registered, generic = it is not.
+
+     That is the account-enumeration oracle the generic message exists to
+     prevent, and it was not hypothetical. With no mail provider configured
+     every send fails, so every registered address returned the error and every
+     unknown one returned the generic line — which is precisely the state
+     production has been in.
+
+     The person asking is told nothing different. The operator is told
+     everything, in the log, where a stranger cannot read it off a form. The
+     user id goes in rather than the address: it identifies the account for
+     somebody with database access and discloses nothing to anybody else.
+  */
+  if (!result.sent) {
+    logAuth("reset.failed", {
+      userId: user.id,
+      reason: `reset email not sent: ${result.reason ?? "unknown"}`,
+    });
   }
   return generic;
 }

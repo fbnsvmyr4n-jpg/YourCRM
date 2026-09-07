@@ -2,14 +2,17 @@
 
 import { randomBytes } from "node:crypto";
 import { headers } from "next/headers";
-import { emailConfigured, inviteEmail, sendEmail } from "@/server/email";
+import { emailConfigured } from "@/server/email";
 import { outranks, roleCan } from "@/server/permissions";
 import { createResetToken } from "@/server/repos/auth";
 import { createUser, removeTeamMember, setUserRole, updateProfile } from "@/server/repos/users";
 import { requireActivePlan } from "@/server/plan-gate";
 import { revalidateApp } from "@/server/revalidate";
 import { ROLES, withSystem } from "@/server/tenant";
-import { requireTenant } from "@/server/tenant-session";
+import { requireTenant, withCurrentTenant } from "@/server/tenant-session";
+import { drain, queueJob } from "@/server/outbox";
+import { INVITE_EMAIL, inviteEmailKey, OUTBOX_REGISTRY } from "@/server/outbox-handlers";
+import { findJob } from "@/server/repos/outbox";
 import { email as validEmail, id as validId, multiline, pick, text } from "@/server/validate";
 import type { FormState } from "./actions";
 
@@ -100,68 +103,99 @@ export async function inviteMemberAction(_prev: FormState, formData: FormData): 
   }
   const invited = created.user;
 
-  const { token, agencyName, inviterName } = await withSystem(async (q) => {
-    const agency = await q.one<{ name: string }>(`SELECT name FROM agencies WHERE id = $1`, [
-      me.agencyId,
-    ]);
-    const inviter = await q.one<{ name: string }>(`SELECT name FROM users WHERE id = $1`, [
-      me.userId,
-    ]);
-    return {
-      token: await createResetToken(q, invited.id, invited.email),
-      agencyName: agency?.name ?? "YourCRM",
-      inviterName: inviter?.name ?? "",
-    };
-  });
+  /*
+     The invitation is QUEUED, in the same transaction as nothing else — and
+     that is the point of the change.
 
-  const link = `${await origin()}/reset-password?token=${encodeURIComponent(token)}`;
-  const sent = await sendEmail({ to: invited.email, ...inviteEmail(link, inviterName, agencyName) });
+     It used to be sent right here. The colleague is created either way, so a
+     failed send left somebody on the team with no way in, and the only trace
+     was an error on the inviter's screen that vanished on the next page load.
+     Nobody was watching afterwards.
+
+     Now it is retried until it lands, and if it is finally given up on it
+     appears in the notification feed with the provider's reason. The origin
+     goes in the payload because a background drain has no request to read a
+     host from, and an env var would put the wrong host in the link for a
+     workspace on a custom domain.
+  */
+  const here = await origin();
+  await withCurrentTenant((q) =>
+    queueJob(q, OUTBOX_REGISTRY, {
+      handler: INVITE_EMAIL,
+      payload: { userId: invited.id, origin: here },
+      dedupeKey: inviteEmailKey(invited.id),
+    })
+  );
+
+  /* Then try it immediately, so the common case is done before the inviter has
+     looked away. The queue is the guarantee; this is the speed. */
+  await drain(me, OUTBOX_REGISTRY, 5).catch(() => {
+    /* Swallowed: the job is durable and the read below tells the truth about
+       where it got to. */
+  });
 
   revalidateApp();
 
   /*
-     What the inviter is told is the truth about what happened, not a cheerful
-     default. Four genuinely different outcomes:
+     What the inviter is told is the truth about what happened, read back
+     rather than assumed. Three genuinely different outcomes:
 
-       - mail went out;
+       - it went;
        - there is no mail provider and this is development, so the link is
          handed over directly rather than going nowhere silently;
-       - there is no mail provider in PRODUCTION, which is not a failure to
-         retry but a setting nobody has filled in;
-       - mail was configured and the send failed, which is worth retrying.
+       - it has not gone yet, which is now a promise rather than a dead end,
+         because something will keep trying and the failure is visible if it
+         never does.
   */
-  if (sent.sent) return { ok: `${name} has been invited — the email is on its way.` };
+  const job = await withCurrentTenant((q) =>
+    findJob(q, INVITE_EMAIL, inviteEmailKey(invited.id))
+  );
+  if (job?.status === "done") return { ok: `${name} has been invited — the email is on its way.` };
+
+  /*
+     A job that has already STOPPED must not be described as one still being
+     tried. This was written as "we will keep trying" for every outcome and was
+     wrong within a minute of driving it: the first real invitation was refused
+     permanently by the provider, the job was dead before the page re-rendered,
+     and the inviter was told to wait for something that would never happen.
+
+     The same mistake, in the same words, was fixed in the quotation path
+     earlier — carried across here only because this was driven rather than
+     assumed to match.
+  */
+  if (job?.status === "dead") {
+    return {
+      error:
+        `${name} was added, but the invitation could not be sent: ${job.lastError ?? "unknown error"} ` +
+        `They can still get in with "Forgot your password?" once email is working.`,
+    };
+  }
+
   if (!emailConfigured() && process.env.NODE_ENV !== "production") {
-    return { ok: `${name} was added. Email is not configured here, so send them this link: ${link}` };
+    const token = await withSystem((q) => createResetToken(q, invited.id, invited.email));
+    return {
+      ok: `${name} was added. Email is not configured here, so send them this link: ${here}/reset-password?token=${encodeURIComponent(token)}`,
+    };
   }
 
   /*
-     Not configured is its own answer, and it used to be folded into the one
-     below — which sent the inviter to a dead end.
-
-     "Ask them to use Forgot your password?" is sound advice when a single send
-     failed. It is useless when there is no mail provider at all, because that
-     page cannot send either: the colleague would be told to use a button that
-     silently cannot work, and the inviter would have no idea why. Production
-     currently has no RESEND_API_KEY, so this is the branch a real invitation
-     takes today, not a hypothetical one.
-
-     The link is deliberately NOT handed over here the way it is in
+     The link is deliberately NOT handed over in production the way it is in
      development. It sets a password on somebody else's account, and putting
      one on a screen — where it will be copied into a chat message — is a
-     decision to take deliberately rather than as a fallback, so this says what
-     is wrong and who can fix it instead.
+     decision to take deliberately rather than as a fallback.
   */
   if (!emailConfigured()) {
     return {
-      error:
-        `${name} was added, but nothing could be emailed — this workspace has no mail provider configured, ` +
-        `so no invitation was sent and "Forgot your password?" cannot reach them either. An owner needs to set RESEND_API_KEY.`,
+      ok:
+        `${name} was added, but this workspace has no mail provider configured, so nothing has been sent yet. ` +
+        `The invitation is queued and will go out once an owner sets RESEND_API_KEY.`,
     };
   }
 
   return {
-    error: `${name} was added, but the invitation email could not be sent. Ask them to use "Forgot your password?" on the sign-in page.`,
+    ok:
+      `${name} was added. The invitation has not gone out yet — we will keep trying, ` +
+      `and it will show in your notifications if it cannot be sent.`,
   };
 }
 

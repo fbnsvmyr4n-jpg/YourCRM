@@ -58,7 +58,19 @@ function emit(level: Level, event: string, fields: Record<string, unknown> = {})
  * which is the one place that outweighs keeping the address out of the log.
  */
 export function logAuth(
-  event: "signin.ok" | "signin.failed" | "signup.ok" | "signup.failed" | "signout" | "ratelimited",
+  // `reset.failed` is its own event rather than a reused `signin.failed`.
+  // Failed sign-ins are counted to spot an attack in progress; a mail provider
+  // refusing a reset email is an operational fault with nobody attacking
+  // anything, and folding it in would make that count lie exactly when it
+  // matters — every broken send would read as somebody trying passwords.
+  event:
+    | "signin.ok"
+    | "signin.failed"
+    | "signup.ok"
+    | "signup.failed"
+    | "signout"
+    | "ratelimited"
+    | "reset.failed",
   fields: { email?: string; userId?: string; reason?: string } = {}
 ): void {
   emit(event.endsWith(".failed") || event === "ratelimited" ? "warn" : "info", `auth.${event}`, fields);

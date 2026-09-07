@@ -1,8 +1,9 @@
 import { buildRegistry, type JobOutcome, type OutboxHandler } from "./outbox";
 import { withSystem, withTenant } from "./tenant";
-import { emailConfigured, quotationEmail, sendEmail } from "./email";
+import { emailConfigured, inviteEmail, quotationEmail, sendEmail } from "./email";
 import { findQuote, markQuoteSent } from "./repos/quotes";
 import { findUserById } from "./repos/users";
+import { createResetToken } from "./repos/auth";
 import { getCall } from "./repos/calls";
 import { analyseCall, ANALYSIS_MODEL } from "./agent/call-analysis";
 import { saveAnalysis } from "./repos/call-analysis";
@@ -185,6 +186,86 @@ const callAnalysisHandler: OutboxHandler = {
 };
 
 /* ------------------------------------------------------------------ */
+/* Inviting a colleague                                                */
+/* ------------------------------------------------------------------ */
 
-export const OUTBOX_HANDLERS = [quoteEmailHandler, callAnalysisHandler] as const;
+export const INVITE_EMAIL = "invite_email";
+
+/** One job per invited person, so inviting twice cannot email them twice. */
+export const inviteEmailKey = (userId: string) => `${INVITE_EMAIL}:${userId}`;
+
+/**
+ * Send somebody the link that lets them into the account.
+ *
+ * This ran inline, and its failure was the quietest of the three. The
+ * colleague is CREATED either way — they exist on the team, they simply have
+ * no way in — and the only trace of the failure was an error message on the
+ * inviter's screen that vanished on the next page load. Nobody was watching
+ * afterwards, which is the exact shape the queue exists for.
+ *
+ * ── Why the token is minted here rather than carried in the payload ──────
+ *
+ * It sets a password on somebody's account. Storing one in a table that exists
+ * to be read by a background worker would put a live credential somewhere it
+ * has no business being, and an hour later it would be expired anyway.
+ *
+ * The cost is a real edge worth naming: minting invalidates the previous token
+ * for that user, so if a send was accepted by the provider but recorded as
+ * failed, a retry kills the link in the email that actually arrived. That
+ * degrades to "Forgot your password?", which does the same job and is the
+ * fallback the invitation already recommends — a dead link, not a dead end.
+ */
+const inviteEmailHandler: OutboxHandler = {
+  name: INVITE_EMAIL,
+  run: async (payload, job): Promise<JobOutcome> => {
+    const userId = payload.userId;
+    /* The public base URL, captured when the invitation was made. Not customer
+       data, and not derivable here: a background drain has no request to read
+       a host from, and an env var would produce links on the wrong host for a
+       workspace using a custom domain. */
+    const origin = payload.origin;
+    if (!userId || !origin) return { ok: false, retry: false, error: "Incomplete invitation job" };
+
+    if (!emailConfigured()) {
+      /* Transient: a workspace that switches email on this afternoon should
+         find its invitations go out rather than find them dead. */
+      return { ok: false, retry: true, error: "email is not configured for this workspace" };
+    }
+
+    const details = await withSystem(async (sys) => {
+      const invited = await findUserById(sys, userId);
+      if (!invited) return null;
+      const agency = await sys.one<{ name: string }>(`SELECT name FROM agencies WHERE id = $1`, [
+        job.ctx.agencyId,
+      ]);
+      const inviter = await findUserById(sys, job.ctx.userId);
+      return {
+        email: invited.email,
+        agencyName: agency?.name ?? "YourCRM",
+        inviterName: inviter?.name ?? "",
+        token: await createResetToken(sys, invited.id, invited.email),
+      };
+    });
+
+    /* Removed from the team since the invitation was queued. Nothing to do,
+       and nothing wrong — a retry would keep asking about somebody who is
+       deliberately gone. */
+    if (!details) return { ok: true, note: "the invited person no longer exists" };
+
+    const link = `${origin}/reset-password?token=${encodeURIComponent(details.token)}`;
+    const sent = await sendEmail({
+      to: details.email,
+      ...inviteEmail(link, details.inviterName, details.agencyName),
+      idempotencyKey: job.id,
+    });
+    if (!sent.sent) {
+      return { ok: false, retry: !sent.permanent, error: sent.reason ?? "the email did not go" };
+    }
+    return { ok: true };
+  },
+};
+
+/* ------------------------------------------------------------------ */
+
+export const OUTBOX_HANDLERS = [quoteEmailHandler, callAnalysisHandler, inviteEmailHandler] as const;
 export const OUTBOX_REGISTRY = buildRegistry(OUTBOX_HANDLERS);
