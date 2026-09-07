@@ -1,3 +1,5 @@
+import { speak } from "@/server/agent/voice-brain";
+import { voicePrincipal } from "@/server/agent/principal";
 import { logCall } from "@/server/repos/calls";
 import { getSettings } from "@/server/repos/settings";
 import { processCall } from "@/server/process-call";
@@ -41,6 +43,37 @@ function signedUrl(req: Request): string {
   const host = req.headers.get("x-forwarded-host") ?? url.host;
   const proto = req.headers.get("x-forwarded-proto") ?? url.protocol.replace(":", "");
   return `${proto}://${host}${url.pathname}`;
+}
+
+/**
+ * One turn answered by the model, or null to fall back to the script.
+ *
+ * Everything that can go wrong here — no tenant for the dialled number, no
+ * member whose authority the agent could borrow, no API key, a timeout, a
+ * refusal to produce text — returns null. The caller on the phone never learns
+ * which of those it was, and the call continues.
+ */
+async function liveTurn(
+  params: Record<string, string>,
+  session: VoiceSession,
+  heard: string
+): Promise<{ say: string; done: boolean } | null> {
+  try {
+    /* The dialled number is the only thing that says whose CRM this is, and it
+       is resolved per turn because a webhook carries no session. */
+    const ctx = await tenantForDialledNumber(params.To ?? null);
+    if (!ctx) return null;
+
+    const principal = await voicePrincipal(ctx, session.id);
+    /* No member of this workspace can see customer records, so there is nobody
+       whose authority a customer-facing agent could honestly borrow. */
+    if (!principal) return null;
+
+    return await withTenant(ctx, (q) => speak(q, principal, session, heard));
+  } catch (err) {
+    console.error("[voice] live turn failed, falling back to the script:", err);
+    return null;
+  }
 }
 
 export async function POST(req: Request, ctx: { params: Promise<{ action: string }> }) {
@@ -93,7 +126,34 @@ export async function POST(req: Request, ctx: { params: Promise<{ action: string
         return twiml(sayAndGather(GREETING, "/api/voice/turn"));
       }
 
-      const { session: updated, say, done } = nextTurn(session, params.SpeechResult ?? "");
+      const heard = params.SpeechResult ?? "";
+
+      /*
+         Claude answers the turn when it can, and the script answers when it
+         cannot.
+
+         The fallback is not a nicety. A caller is on the line: a missing key,
+         a slow model, a provider outage or a malformed reply must all produce
+         a sentence rather than silence, and the scripted machine is a working
+         receptionist that needs nothing external to run. It is kept for
+         exactly this, not as dead code.
+
+         Every failure path below is deliberately silent to the caller — they
+         hear a slightly more mechanical question and nothing else. The reason
+         goes to the log, where somebody can act on it.
+      */
+      const live = await liveTurn(params, session, heard);
+      if (live) {
+        const spoken = { ...session, transcript: [...session.transcript] };
+        spoken.transcript.push({ speaker: "Caller", text: heard });
+        spoken.transcript.push({ speaker: "Agent", text: live.say });
+        await saveSession(spoken);
+        return twiml(
+          live.done ? sayAndHangUp(live.say) : sayAndGather(live.say, "/api/voice/turn")
+        );
+      }
+
+      const { session: updated, say, done } = nextTurn(session, heard);
       await saveSession(updated);
       return twiml(done ? sayAndHangUp(say) : sayAndGather(say, "/api/voice/turn"));
     }

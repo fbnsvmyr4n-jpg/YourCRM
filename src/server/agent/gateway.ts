@@ -98,6 +98,22 @@ export type ToolCapability = (typeof TOOL_CAPABILITIES)[number];
  */
 export type ToolRisk = "auto" | "confirm" | "approve";
 
+/**
+ * The shape advertised to a model, as JSON Schema.
+ *
+ * Written out here rather than imported from a provider SDK: the specification
+ * requires that providers sit behind adapters, and a tool definition that
+ * imports Anthropic's types could not be handed to anything else. It is
+ * structurally what every tool-calling API expects, so it satisfies theirs
+ * without depending on it.
+ */
+export type ToolInputSchema = {
+  type: "object";
+  properties?: Record<string, unknown>;
+  required?: string[];
+  additionalProperties?: boolean;
+};
+
 export type ToolResult<T> = { ok: true; value: T } | { ok: false; error: string };
 
 export type ToolDefinition<I, O> = {
@@ -107,7 +123,7 @@ export type ToolDefinition<I, O> = {
   /** Written for a person reading an audit trail. */
   purpose: string;
   /** Advertised to the model. A hint, never the guarantee. */
-  inputSchema: Record<string, unknown>;
+  inputSchema: ToolInputSchema;
   /**
    * OUR validation, run on whatever the model actually sent.
    *
@@ -363,7 +379,7 @@ export function buildRegistry(tools: AnyTool[]): ReadonlyMap<string, AnyTool> {
 export function toolsFor(
   registry: ReadonlyMap<string, AnyTool>,
   principal: AgentPrincipal
-): { name: string; description: string; input_schema: Record<string, unknown> }[] {
+): { name: string; description: string; input_schema: ToolInputSchema }[] {
   return [...registry.values()]
     .filter((tool) => principal.capabilities.has(tool.capability))
     .map((tool) => ({
