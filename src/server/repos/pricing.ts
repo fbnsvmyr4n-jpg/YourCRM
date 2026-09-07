@@ -99,20 +99,25 @@ export async function savePriceItem(
   const description = (input.description ?? "").trim() || null;
 
   try {
-    const row = input.id
-      ? await q.one<Row>(
+    /* Inside a savepoint: the catch below turns a duplicate name into a
+       message and carries on, and a constraint violation would otherwise
+       leave the transaction — and everything the caller does next — broken. */
+    const row = await q.attempt(() =>
+      input.id
+      ? q.one<Row>(
           `UPDATE price_items
               SET name = $3, description = $4, unit = $5, unit_cents = $6, updated_at = now()
             WHERE id = $2 AND sub_account_id = $1 AND deleted_at IS NULL
             RETURNING id, name, description, unit, unit_cents::text, active`,
           [q.ctx.subAccountId, input.id, name, description, unit, input.unitCents]
         )
-      : await q.one<Row>(
+      : q.one<Row>(
           `INSERT INTO price_items (id, sub_account_id, name, description, unit, unit_cents)
            VALUES ($2, $1, $3, $4, $5, $6)
            RETURNING id, name, description, unit, unit_cents::text, active`,
           [q.ctx.subAccountId, newId(name), name, description, unit, input.unitCents]
-        );
+        )
+    );
     return row ? { item: toItem(row) } : { error: "That item no longer exists." };
   } catch (err) {
     if (String(err).includes("price_items_name_once")) {

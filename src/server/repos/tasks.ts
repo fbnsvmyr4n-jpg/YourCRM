@@ -444,11 +444,19 @@ export async function addDependency(
   }
 
   try {
-    await q.rows(
-      `INSERT INTO project_task_dependencies (id, sub_account_id, task_id, depends_on_id, lag_days)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [`dep-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-       q.ctx.subAccountId, taskId, dependsOnId, Math.max(0, Math.round(lagDays))]
+    /* Inside a savepoint, because the whole point of the catch below is to
+       keep going afterwards — and a constraint violation invalidates the
+       entire transaction, not just the statement that caused it. Without one,
+       "that task already waits for this one" was reported while every later
+       statement on the same connection answered "current transaction is
+       aborted", including `cascade` and whatever the caller read next. */
+    await q.attempt(() =>
+      q.rows(
+        `INSERT INTO project_task_dependencies (id, sub_account_id, task_id, depends_on_id, lag_days)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [`dep-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+         q.ctx.subAccountId, taskId, dependsOnId, Math.max(0, Math.round(lagDays))]
+      )
     );
   } catch (err) {
     const message = String(err);

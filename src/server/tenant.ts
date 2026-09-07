@@ -63,9 +63,29 @@ export interface TenantQuery {
   rows<T extends QueryResultRow>(sql: string, params?: readonly unknown[]): Promise<T[]>;
   /** Run a query expected to return exactly one row; `null` if it returns none. */
   one<T extends QueryResultRow>(sql: string, params?: readonly unknown[]): Promise<T | null>;
+  /**
+   * Run something that MIGHT be refused, without losing the transaction.
+   *
+   * Catching a Postgres error is not enough. Once a statement fails, the whole
+   * transaction is invalid — every later statement answers "current
+   * transaction is aborted, commands ignored until end of transaction block",
+   * and only a rollback clears it. So a repository that expects a constraint
+   * violation and turns it into a friendly message leaves everything after it
+   * broken, including the reads its own caller is about to do.
+   *
+   * A SAVEPOINT is the only thing that contains a failure. This takes one,
+   * releases it on success, and rolls back to it on failure before rethrowing
+   * — so the caught error really is caught, rather than merely reported while
+   * the connection carries on unusable.
+   */
+  attempt<T>(fn: () => Promise<T>): Promise<T>;
 }
 
 function querier(client: PoolClient, ctx: TenantContext): TenantQuery {
+  /* Savepoint names are identifiers and cannot be parameterised, so they are
+     generated here and never built from anything a caller supplies. */
+  let savepoints = 0;
+
   const q = {
     ctx,
     async rows<T extends QueryResultRow>(sql: string, params: readonly unknown[] = []): Promise<T[]> {
@@ -75,6 +95,22 @@ function querier(client: PoolClient, ctx: TenantContext): TenantQuery {
     async one<T extends QueryResultRow>(sql: string, params: readonly unknown[] = []): Promise<T | null> {
       const { rows } = await client.query<T>(sql, params as unknown[]);
       return rows[0] ?? null;
+    },
+    async attempt<T>(fn: () => Promise<T>): Promise<T> {
+      const name = `sp_${++savepoints}`;
+      await client.query(`SAVEPOINT ${name}`);
+      try {
+        const out = await fn();
+        await client.query(`RELEASE SAVEPOINT ${name}`);
+        return out;
+      } catch (err) {
+        /* Best-effort: if the rollback itself fails the transaction is beyond
+           saving and `withTenant`'s own catch will roll the whole thing back.
+           Swallowing here would hide the original error, which is the one
+           worth seeing. */
+        await client.query(`ROLLBACK TO SAVEPOINT ${name}`).catch(() => {});
+        throw err;
+      }
     },
   };
   return q as TenantQuery;
