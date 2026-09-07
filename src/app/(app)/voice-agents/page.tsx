@@ -1,3 +1,4 @@
+import { analysesFor } from "@/server/repos/call-analysis";
 import { listCalls } from "@/server/repos/calls";
 import { listContacts } from "@/server/repos/contacts";
 import { getSettings } from "@/server/repos/settings";
@@ -13,12 +14,14 @@ export default async function VoiceAgentsPage() {
     const settings = await getSettings(q);
     const rows = await listCalls(q);
     const contacts = await listContacts(q);
+    // One query for the whole list, not one per card.
+    const analyses = await analysesFor(q, rows.map((c) => c.id));
     const people = contacts.map((c) => ({
       id: c.id,
       name: `${c.firstName} ${c.lastName}`.trim(),
       info: c.info,
     }));
-    return rows.map((c) => decorateCall(c, people, settings.timeZone));
+    return rows.map((c) => decorateCall(c, people, settings.timeZone, analyses.get(c.id)));
   });
 
   // Read at request time, not build time — the number can be connected by

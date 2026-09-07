@@ -1659,3 +1659,55 @@ DROP POLICY IF EXISTS agent_tool_executions_tenant_isolation ON agent_tool_execu
 CREATE POLICY agent_tool_executions_tenant_isolation ON agent_tool_executions
   USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
   WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
+
+-- ---------------------------------------------------------------------------
+-- What a model concluded from a call, and the words it concluded it from.
+--
+-- Separate from `calls` on purpose. The call row is the FACT — it happened, it
+-- lasted this long, this was said. The analysis is an INTERPRETATION, produced
+-- by a model, revisable, and occasionally wrong. Storing a machine's opinion in
+-- the same columns as the record of the event makes the two indistinguishable
+-- six months later, which is exactly when somebody asks "did the customer
+-- actually say that".
+--
+-- `findings` holds the extracted items, and every one of them carries the
+-- transcript line it came from. That is the spec's evidence-linking
+-- requirement, and it is what makes an AI-made CRM change reviewable rather
+-- than merely auditable: you can read the sentence the claim rests on.
+--
+-- One analysis per call. Re-running replaces it rather than accumulating
+-- opinions, which keeps the post-call pipeline safely retryable — the spec's
+-- requirement that analysing twice must not produce two of anything.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS call_analysis (
+  call_id          TEXT PRIMARY KEY REFERENCES calls(id) ON DELETE CASCADE,
+  sub_account_id   TEXT NOT NULL REFERENCES sub_accounts(id) ON DELETE CASCADE,
+
+  -- What the caller wanted, in the vocabulary the CRM already uses.
+  intent           TEXT,
+  -- A sentence a person can read without opening the transcript.
+  summary          TEXT NOT NULL DEFAULT '',
+
+  -- Extracted items, each with the quoted line it rests on.
+  findings         JSONB NOT NULL DEFAULT '[]'::jsonb,
+
+  -- How much of what the model claimed survived verification against the
+  -- transcript, 0-100. Low means it was inventing, and the screen says so.
+  grounding        INTEGER NOT NULL DEFAULT 0
+                     CHECK (grounding BETWEEN 0 AND 100),
+
+  -- Advisory only, per the specification. Never used to drive a decision.
+  sentiment        TEXT,
+
+  model            TEXT,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS call_analysis_tenant_idx ON call_analysis (sub_account_id, created_at);
+
+ALTER TABLE call_analysis ENABLE ROW LEVEL SECURITY;
+ALTER TABLE call_analysis FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS call_analysis_tenant_isolation ON call_analysis;
+CREATE POLICY call_analysis_tenant_isolation ON call_analysis
+  USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
+  WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));

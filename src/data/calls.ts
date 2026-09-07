@@ -1,4 +1,5 @@
 import type { AvatarColor } from "@/components/ui/Avatar";
+import type { FindingKind } from "@/server/agent/call-analysis";
 import type { MeetingWhen } from "./meetings";
 
 /** Allowed values first, types derived — see the note in `data/contacts.ts`. */
@@ -45,6 +46,46 @@ export type Call = {
   requestedWhen?: MeetingWhen;
   requestedTime?: string;
   topic?: string;
+  /**
+   * What a model read out of the call, and how much of it held up.
+   *
+   * Absent on every call recorded before the analysis existed, on calls too
+   * short to analyse, and whenever the analysis failed — all of which are
+   * ordinary. The panel simply shows nothing rather than an empty section
+   * implying something went wrong.
+   */
+  analysis?: CallAnalysisView;
+};
+
+/**
+ * The analysis as the screen needs it.
+ *
+ * Each finding carries the transcript line it rests on and the index of the
+ * turn it came from, because a claim about a customer that cannot be traced
+ * back to a sentence they said is exactly the thing this feature exists to
+ * prevent. The reader gets to check the machine, not take its word.
+ */
+export type CallAnalysisView = {
+  intent: string | null;
+  findings: { kind: FindingKind; detail: string; evidence: string; turn: number }[];
+  /** 0-100: how much of what the model claimed was actually in the transcript. */
+  grounding: number;
+  sentiment: string | null;
+};
+
+/**
+ * Labels for the extracted kinds.
+ *
+ * Typed as a complete record so adding a kind to `FINDING_KINDS` fails the
+ * build here rather than rendering an unlabelled badge in production.
+ */
+export const FINDING_META: Record<FindingKind, { label: string; color: string; soft: string }> = {
+  requirement: { label: "Requirement", color: "var(--accent)", soft: "var(--accent-soft)" },
+  commitment: { label: "We promised", color: "var(--green)", soft: "var(--green-soft)" },
+  objection: { label: "Objection", color: "var(--red)", soft: "var(--red-soft)" },
+  next_action: { label: "Next action", color: "var(--amber)", soft: "var(--amber-soft)" },
+  budget: { label: "Budget", color: "var(--green)", soft: "var(--green-soft)" },
+  timeline: { label: "Timeline", color: "var(--purple)", soft: "var(--purple-soft)" },
 };
 
 export const OUTCOME_META: Record<

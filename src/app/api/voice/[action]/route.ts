@@ -1,3 +1,5 @@
+import { ANALYSIS_MODEL, analyseCall } from "@/server/agent/call-analysis";
+import { saveAnalysis } from "@/server/repos/call-analysis";
 import { speak } from "@/server/agent/voice-brain";
 import { voicePrincipal } from "@/server/agent/principal";
 import { logCall } from "@/server/repos/calls";
@@ -233,6 +235,26 @@ export async function POST(req: Request, ctx: { params: Promise<{ action: string
         });
 
         await processCall(q, call.id);
+
+        /*
+           Reading the call, after the call.
+
+           Last, and deliberately non-fatal. Everything above is the RECORD —
+           that this happened, what was said, the lead it produced — and it must
+           not be lost because a model was slow or a key was wrong. The analysis
+           is an interpretation layered on top, and a call without one is an
+           ordinary state that a re-run can fix.
+
+           Idempotent, so the pipeline stays retryable as the specification
+           requires: one row per call, replaced rather than appended, so
+           analysing twice produces one opinion rather than two.
+        */
+        try {
+          const analysis = await analyseCall(call.transcript);
+          if (analysis) await saveAnalysis(q, call.id, analysis, ANALYSIS_MODEL);
+        } catch (err) {
+          console.error("[voice] post-call analysis failed:", err);
+        }
       });
 
       await endSession(callSid);

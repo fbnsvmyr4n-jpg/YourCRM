@@ -10,6 +10,8 @@ import {
   Clock,
   PhoneCall,
   PhoneIncoming,
+  Quote,
+  ShieldCheck,
   Sparkles,
   Target,
   Trash2,
@@ -17,7 +19,7 @@ import {
 } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Card } from "@/components/ui/Card";
-import { agentConfig, OUTCOME_META, type Call } from "@/data/calls";
+import { agentConfig, FINDING_META, OUTCOME_META, type Call } from "@/data/calls";
 import { clsx } from "@/lib/clsx";
 import { deleteCallAction, processCallAction, simulateCallAction } from "./actions";
 
@@ -35,6 +37,49 @@ function timeAgo(iso: string) {
   const hrs = Math.round(mins / 60);
   if (hrs < 24) return `${hrs}h ago`;
   return `${Math.round(hrs / 24)}d ago`;
+}
+
+/**
+ * Bring a cited transcript line into view.
+ *
+ * A callback ref rather than an effect: it fires exactly when the node becomes
+ * the cited one, and never on an unrelated re-render. `nearest` scrolls the
+ * panel the shortest distance that reveals the line, rather than yanking the
+ * whole page to it.
+ *
+ * Deliberately instant. Smooth scrolling is driven by animation frames, which a
+ * panel that is offscreen, backgrounded or mid-transition may not be producing
+ * — and a jump that silently does nothing is worse than one with no animation.
+ * The distance here is a few centimetres inside one card.
+ */
+const scrollIntoView = (node: HTMLDivElement | null) => {
+  node?.scrollIntoView({ block: "nearest" });
+};
+
+/**
+ * How much of what the model claimed was actually in the transcript.
+ *
+ * Shown, not hidden. The number exists because a model reading a phone call
+ * will occasionally assert something nobody said; anything it could not
+ * support was already dropped, and this says how often it tried. A reader who
+ * cannot see that has no way to calibrate how much to trust the rest.
+ */
+function GroundingChip({ score }: { score: number }) {
+  const tone = score >= 90 ? "var(--green)" : score >= 70 ? "var(--amber)" : "var(--red)";
+  const soft = score >= 90 ? "var(--green-soft)" : score >= 70 ? "var(--amber-soft)" : "var(--red-soft)";
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-[10px] font-semibold uppercase tracking-wide tabular-nums"
+      style={{ background: soft, color: tone }}
+      title={
+        score === 100
+          ? "Every claim was traced to a line of the transcript."
+          : `${100 - score}% of what the model claimed could not be found in the transcript and was discarded.`
+      }
+    >
+      <ShieldCheck className="h-3 w-3" /> {score}% evidenced
+    </span>
+  );
 }
 
 type Toast = { lead: boolean; leadMatched: boolean; meeting: boolean; name: string } | null;
@@ -311,6 +356,15 @@ function CallDetail({
   onDelete: () => void;
 }) {
   const meta = OUTCOME_META[call.outcome];
+  /*
+     Which transcript turn the reader asked to see.
+
+     Showing evidence is only worth anything if a person can check it, and
+     checking means reading the line where it was said — with what came before
+     and after it. So a finding is a control that reveals its own turn in the
+     transcript, not a static blockquote sitting next to one.
+  */
+  const [shownTurn, setShownTurn] = useState<number | null>(null);
   return (
     <Card className="card-q flex flex-col">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--border)] pb-4">
@@ -354,12 +408,86 @@ function CallDetail({
         <p className="border-l-2 pl-3 text-[15px] font-medium leading-relaxed text-[var(--text)]" style={{ borderColor: "var(--accent)" }}>
           {call.summary}
         </p>
-        {call.topic && (
+        {(call.topic || call.analysis?.intent) && (
           <p className="mt-3 text-xs text-muted">
-            <span className="font-semibold text-[var(--text)]">Topic:</span> {call.topic}
+            <span className="font-semibold text-[var(--text)]">
+              {call.topic ? "Topic:" : "Caller wanted:"}
+            </span>{" "}
+            {call.topic ?? call.analysis?.intent}
           </p>
         )}
       </div>
+
+      {/* What the call established, and the line each claim rests on.
+
+          Every finding here survived a check: its quotation was located in the
+          transcript before it was stored, and anything the model asserted
+          without support was dropped. `grounding` is what fraction survived —
+          shown rather than hidden, because a low score is a real signal about
+          the call (a bad line, a rambling caller) and a summary nobody can
+          calibrate is a summary nobody should trust. */}
+      {call.analysis && call.analysis.findings.length > 0 && (
+        <div className="mb-4">
+          <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-faint">
+              What the call established
+            </p>
+            <GroundingChip score={call.analysis.grounding} />
+          </div>
+          <ul className="flex flex-col gap-2">
+            {call.analysis.findings.map((f, i) => {
+              const kind = FINDING_META[f.kind];
+              const open = shownTurn === f.turn;
+              return (
+                <li key={i}>
+                  <button
+                    type="button"
+                    onClick={() => setShownTurn(open ? null : f.turn)}
+                    aria-expanded={open}
+                    className={clsx(
+                      "focus-ring flex w-full items-start gap-2.5 rounded-xl border p-3 text-left transition-colors",
+                      open
+                        ? "border-[var(--accent)] bg-[var(--raise)]"
+                        : "border-[var(--border)] hover:bg-[var(--raise)]"
+                    )}
+                  >
+                    <span
+                      className="mt-px shrink-0 rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+                      style={{ background: kind.soft, color: kind.color }}
+                    >
+                      {kind.label}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm leading-snug text-[var(--text)]">{f.detail}</span>
+                      {/* The transcript's own words, not the model's tidied
+                          version of them — the stored evidence is the turn
+                          text itself. */}
+                      <span
+                        className={clsx(
+                          "mt-1.5 border-l-2 pl-2.5 text-xs italic leading-snug text-muted",
+                          /* `line-clamp` sets its own display; letting `block`
+                             also apply leaves which one wins to stylesheet
+                             order rather than intent. */
+                          open ? "block" : "line-clamp-1"
+                        )}
+                        style={{ borderColor: kind.color }}
+                      >
+                        “{f.evidence}”
+                      </span>
+                    </span>
+                    <Quote
+                      className={clsx(
+                        "mt-0.5 h-3.5 w-3.5 shrink-0 transition-colors",
+                        open ? "text-accent" : "text-faint"
+                      )}
+                    />
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
 
       {/* What the automation produced.
           A processed call with no link means the record it created was deleted
@@ -426,10 +554,20 @@ function CallDetail({
           <div className="flex flex-col gap-3">
             {call.transcript.map((line, i) => {
               const isAgent = line.speaker === "Agent";
+              /* The turn a finding was traced to. Ringed rather than
+                 recoloured, so the speaker's own colour still reads. */
+              const cited = shownTurn === i;
               return (
-                <div key={i} className={clsx("flex", isAgent ? "justify-start" : "justify-end")}>
+                <div
+                  key={i}
+                  ref={cited ? scrollIntoView : undefined}
+                  className={clsx("flex", isAgent ? "justify-start" : "justify-end")}
+                >
                   <div
-                    className="max-w-[80%] rounded-2xl px-3.5 py-2.5"
+                    className={clsx(
+                      "max-w-[80%] rounded-2xl px-3.5 py-2.5 transition-shadow",
+                      cited && "ring-2 ring-[var(--accent)]"
+                    )}
                     style={{
                       background: isAgent ? "var(--raise)" : "var(--accent-soft)",
                     }}

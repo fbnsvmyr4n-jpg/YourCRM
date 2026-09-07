@@ -1,4 +1,5 @@
 import type { CallRecord } from "./repos/calls";
+import type { StoredAnalysis } from "./repos/call-analysis";
 import type { Call, CallOutcome } from "@/data/calls";
 import { CALL_OUTCOMES } from "@/data/calls";
 import { instantToWallClock } from "@/lib/zoned";
@@ -30,7 +31,8 @@ function paletteFor(id: string): AvatarColor {
 export function decorateCall(
   c: CallRecord,
   people: { id: string; name: string; info: string | null }[],
-  timeZone: string
+  timeZone: string,
+  analysis?: StoredAnalysis | null
 ): Call {
   const person = people.find((p) => p.id === c.contactId);
   const name = c.callerName || person?.name || "Unknown caller";
@@ -66,5 +68,23 @@ export function decorateCall(
     requestedWhen: undefined,
     requestedTime: requested ? `${requested.date} ${requested.time}` : undefined,
     topic: c.topic ?? undefined,
+    /*
+       Only carried when there is something to show.
+
+       An analysis with no findings is one the model read and found nothing
+       assertable in — a wrong number, a two-line enquiry. Sending an empty
+       one would render a heading over blank space, which reads as a broken
+       feature rather than a quiet call. The intent line is the exception: it
+       is worth showing on its own.
+    */
+    analysis:
+      analysis && (analysis.findings.length > 0 || analysis.intent)
+        ? {
+            intent: analysis.intent,
+            findings: analysis.findings,
+            grounding: analysis.grounding,
+            sentiment: analysis.sentiment,
+          }
+        : undefined,
   };
 }
