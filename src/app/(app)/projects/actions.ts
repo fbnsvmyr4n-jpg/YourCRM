@@ -489,3 +489,32 @@ export async function removeDependencyAction(
     return { ok: "No longer waiting on it." };
   });
 }
+
+/**
+ * Lay the schedule out from the quotation somebody already approved.
+ *
+ * The Timeline asked for five fields per task and a real job has fifteen of
+ * them — seventy-five inputs to retype work that was itemised when it was
+ * quoted for. This reads those lines instead.
+ */
+export async function buildPlanAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  return withCurrentTenant(async (q) => {
+    const dealId = validId(formData.get("dealId"));
+    if (!dealId) return { error: "That project could not be identified." };
+
+    const { buildPlanFromQuote } = await import("@/server/plan-from-quote");
+    const result = await buildPlanFromQuote(q, dealId);
+    if (result.error) return { error: result.error };
+
+    revalidateApp();
+    /* The assumption is named rather than buried. A plan whose shape is right
+       and whose lengths need checking is worth having; one mistaken for a
+       considered estimate is not. */
+    const assumed = result.assumed
+      ? ` ${result.assumed} of them defaulted to a day because the quote does not say how long they take — check those.`
+      : "";
+    return {
+      ok: `${result.created} tasks laid out from ${result.quoteNumber}, each waiting on the one before it.${assumed}`,
+    };
+  });
+}

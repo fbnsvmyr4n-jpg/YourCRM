@@ -9,6 +9,7 @@ import {
   Link2 as LinkIcon,
   Pencil,
   Plus,
+  Sparkles,
   Trash2,
   X,
 } from "lucide-react";
@@ -20,6 +21,7 @@ import type { Dependency, ProjectTask, ScheduleSummary } from "@/server/repos/ta
 import {
   addDependencyAction,
   addTaskAction,
+  buildPlanAction,
   deleteTaskAction,
   removeDependencyAction,
   moveTaskAction,
@@ -92,6 +94,10 @@ export function ProjectSchedule({
   const nameOf = useMemo(() => new Map(tasks.map((t) => [t.id, t.name])), [tasks]);
 
   const [addState, add, adding] = useActionState<FormState, FormData>(addTaskAction, undefined);
+  const [planState, buildPlan, planning] = useActionState<FormState, FormData>(
+    buildPlanAction,
+    undefined
+  );
   const [editState, edit, editingBusy] = useActionState<FormState, FormData>(
     updateTaskAction,
     undefined
@@ -269,6 +275,7 @@ export function ProjectSchedule({
       </Card>
 
       <div className="flex flex-col gap-2 empty:hidden">
+        <Banner state={planState} />
         <Banner state={completeState} />
         <Banner state={moveState} />
         <Banner state={removeState} />
@@ -526,7 +533,27 @@ export function ProjectSchedule({
         )}
 
         {tasks.length === 0 ? (
-          <p className="text-xs text-faint">No tasks yet.</p>
+          /* The empty plan is where the manual work used to start: five fields
+             a task, fifteen tasks, for work that was already itemised on the
+             quotation somebody approved. Offer that first, and keep typing one
+             out as the other option rather than the only one. */
+          <div className="flex flex-col items-start gap-2.5">
+            <p className="text-xs text-faint">
+              No tasks yet. If this job has an approved quotation, its lines can lay the plan
+              out — in order, on working days, each waiting on the one before it.
+            </p>
+            <form action={buildPlan}>
+              <input type="hidden" name="dealId" value={dealId} />
+              <button
+                type="submit"
+                disabled={planning}
+                className="btn-accent focus-ring flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold disabled:opacity-60"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                {planning ? "Laying it out…" : "Build the plan from the quotation"}
+              </button>
+            </form>
+          </div>
         ) : (
           <ul className="flex flex-col gap-2">
             {tasks.map((task, i) => {
