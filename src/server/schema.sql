@@ -1862,3 +1862,77 @@ DROP POLICY IF EXISTS outbox_tenant_isolation ON outbox;
 CREATE POLICY outbox_tenant_isolation ON outbox
   USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
   WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
+
+-- ---------------------------------------------------------------------------
+-- Which stage of the job a document line is for.
+--
+-- A project had documents and it had a timeline, and nothing joined them. The
+-- Documents tab was one flat list for the whole job, so "what paperwork covers
+-- the crane hire" had no answer, and a stage could not show what had been
+-- quoted for it or ordered against it.
+--
+-- The link is on the LINE rather than the document, and that is the whole
+-- design. A client quotation covers every stage at once — five lines, five
+-- stages — so a document-level link could only ever describe purchase orders.
+-- A line is the smallest thing that belongs to exactly one piece of work, and
+-- from it everything else is derived: a document belongs to the stages its
+-- lines point at, and a stage's margin is what its quote lines charge minus
+-- what its order lines commit.
+--
+-- One column also carries PROVENANCE for free. When a plan is built from a
+-- quotation each line records the task it became, so a stage can say where it
+-- came from without a second link pointing the other way.
+--
+-- `ON DELETE SET NULL`, never CASCADE: a quote line is a financial record of
+-- what a client was charged. Deleting a task from a plan must not delete the
+-- money it was quoted at.
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE document_lines ADD COLUMN IF NOT EXISTS project_task_id TEXT
+  REFERENCES project_tasks(id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS document_lines_task_idx
+  ON document_lines (sub_account_id, project_task_id) WHERE project_task_id IS NOT NULL;
+
+-- A line may only point at a task on the SAME project, in the same workspace.
+--
+-- Row-level security does not catch this and could not: the write targets a row
+-- in this tenant and is legitimately allowed — only the VALUE is wrong. The
+-- result would be one project's costs counted against another's margin, or one
+-- customer's stage names appearing in another's document list. The same shape
+-- as the company guard above, for the same reason.
+CREATE OR REPLACE FUNCTION assert_line_task_in_project() RETURNS TRIGGER AS $$
+DECLARE
+  line_deal TEXT;
+  task_deal TEXT;
+BEGIN
+  IF NEW.project_task_id IS NULL THEN
+    RETURN NEW;  -- a line that belongs to no stage is always valid
+  END IF;
+
+  SELECT d.deal_id INTO line_deal FROM documents d
+   WHERE d.id = NEW.document_id AND d.sub_account_id = NEW.sub_account_id;
+
+  SELECT t.deal_id INTO task_deal FROM project_tasks t
+   WHERE t.id = NEW.project_task_id AND t.sub_account_id = NEW.sub_account_id;
+
+  IF task_deal IS NULL THEN
+    RAISE EXCEPTION 'task % does not belong to sub-account %',
+      NEW.project_task_id, NEW.sub_account_id
+      USING ERRCODE = 'check_violation';
+  END IF;
+
+  IF line_deal IS DISTINCT FROM task_deal THEN
+    RAISE EXCEPTION 'task % is on a different project from document %',
+      NEW.project_task_id, NEW.document_id
+      USING ERRCODE = 'check_violation';
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS document_lines_task_in_project ON document_lines;
+CREATE TRIGGER document_lines_task_in_project
+  BEFORE INSERT OR UPDATE OF project_task_id, document_id, sub_account_id ON document_lines
+  FOR EACH ROW EXECUTE FUNCTION assert_line_task_in_project();

@@ -34,6 +34,8 @@ import type { TenantQuery } from "./tenant";
 
 /** A task the quotation implies, before anything is written down. */
 export type PlannedTask = {
+  /** The quote line this came from, so it can be filed against the task. */
+  lineId?: string;
   name: string;
   /** Working days, always at least one. */
   workingDays: number;
@@ -43,7 +45,7 @@ export type PlannedTask = {
   durationKnown: boolean;
 };
 
-export type QuoteLine = { description: string; quantity: number };
+export type QuoteLine = { id?: string; description: string; quantity: number };
 
 /**
  * The longest a single inferred task may be.
@@ -109,7 +111,7 @@ export function planFromLines(
 
     const { workingDays, durationKnown } = daysForLine(line.quantity, opts.unitFor(name));
     const dueOn = finishAfter(cursor, workingDays, opts.holidays);
-    out.push({ name, workingDays, startsOn: cursor, dueOn, durationKnown });
+    out.push({ lineId: line.id, name, workingDays, startsOn: cursor, dueOn, durationKnown });
 
     // Finish to start: the next task begins the working day after this one ends.
     cursor = nextWorkingDay(addDay(dueOn), opts.holidays);
@@ -207,8 +209,8 @@ export async function buildPlanFromQuote(
     };
   }
 
-  const lines = await q.rows<{ description: string; quantity: string }>(
-    `SELECT description, quantity::text AS quantity FROM document_lines
+  const lines = await q.rows<{ id: string; description: string; quantity: string }>(
+    `SELECT id, description, quantity::text AS quantity FROM document_lines
       WHERE sub_account_id = $1 AND document_id = $2
       ORDER BY position ASC`,
     [q.ctx.subAccountId, doc.id]
@@ -224,7 +226,7 @@ export async function buildPlanFromQuote(
   const from = doc.starts_on && doc.starts_on > today ? doc.starts_on : today;
 
   const planned = planFromLines(
-    lines.map((l) => ({ description: l.description, quantity: Number(l.quantity) })),
+    lines.map((l) => ({ id: l.id, description: l.description, quantity: Number(l.quantity) })),
     { startsOn: from, unitFor: unitLookup(items), holidays: closed }
   );
   if (planned.length === 0) return { error: `${doc.number} has no lines that could become tasks.` };
@@ -245,6 +247,22 @@ export async function buildPlanFromQuote(
     });
     if (result.error || !result.task) continue;
     created += 1;
+
+    /*
+       The line remembers the stage it became.
+
+       This is the provenance half of the link, and it costs nothing here: the
+       quotation already said what the work is, so filing its line against the
+       task it produced means the stage can show what the client was charged
+       for it without anybody typing that twice.
+    */
+    if (task.lineId) {
+      await q.rows(
+        `UPDATE document_lines SET project_task_id = $3
+          WHERE sub_account_id = $1 AND id = $2`,
+        [q.ctx.subAccountId, task.lineId, result.task.id]
+      );
+    }
 
     if (previousId) await addDependency(q, dealId, result.task.id, previousId);
     previousId = result.task.id;

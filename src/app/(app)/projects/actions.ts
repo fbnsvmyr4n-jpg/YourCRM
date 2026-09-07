@@ -518,3 +518,49 @@ export async function buildPlanAction(_prev: FormState, formData: FormData): Pro
     };
   });
 }
+
+/**
+ * File a document line against a stage of the job, or take it off one.
+ *
+ * The plan builder does this automatically for a quotation it laid out, but
+ * most paperwork arrives the other way round: a supplier's purchase order,
+ * typed in later, that somebody knows belongs to the crane hire. Without this
+ * the link would only ever exist for documents the app generated itself, which
+ * would make every stage's margin quietly wrong for every job run normally.
+ *
+ * An empty `projectTaskId` unfiles the line. The database refuses a task on a
+ * different project, so a hand-edited form matches nothing rather than
+ * counting one job's costs against another's margin.
+ */
+export async function fileLineAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  return withCurrentTenant(async (q) => {
+    const lineId = validId(formData.get("lineId"));
+    if (!lineId) return { error: "That line could not be identified." };
+
+    const raw = String(formData.get("projectTaskId") ?? "").trim();
+    const taskId = raw ? validId(raw) : null;
+    if (raw && !taskId) return { error: "That stage could not be identified." };
+
+    try {
+      const row = await q.one<{ id: string }>(
+        `UPDATE document_lines SET project_task_id = $3
+          WHERE sub_account_id = $1 AND id = $2
+          RETURNING id`,
+        [q.ctx.subAccountId, lineId, taskId]
+      );
+      if (!row) return { error: "That line no longer exists." };
+    } catch (err) {
+      /* The guard trigger, surfaced as something a person can read rather than
+         a constraint name. It fires when a form names a task from another
+         project — which is the case worth refusing, since it would put one
+         job's costs in another job's margin. */
+      if (String(err).includes("different project")) {
+        return { error: "That stage belongs to a different project." };
+      }
+      throw err;
+    }
+
+    revalidateApp();
+    return { ok: taskId ? "Filed against that stage." : "Taken off the stage." };
+  });
+}

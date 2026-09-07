@@ -192,6 +192,15 @@ export type DocumentLine = {
   unitCents: number;
   /** Rounded to whole cents in the database, never multiplied in JavaScript. */
   totalCents: number;
+  /**
+   * The stage of the job this line is for, when it has been filed against one.
+   *
+   * On the line rather than the document because a client quotation covers
+   * every stage at once — a document-level link could only ever describe
+   * purchase orders. Null is ordinary: most lines on a hand-typed document
+   * have not been filed against anything.
+   */
+  projectTaskId: string | null;
 };
 
 export type ProjectDocument = {
@@ -226,6 +235,7 @@ type LineRow = {
   quantity: string;
   unit_cents: string;
   total_cents: string;
+  project_task_id: string | null;
 };
 
 /**
@@ -254,6 +264,7 @@ export async function projectDocuments(
 
   const lines = await q.rows<LineRow>(
     `SELECT l.id, l.document_id, l.description, l.quantity::text, l.unit_cents::text,
+            l.project_task_id,
             ROUND(l.quantity * l.unit_cents)::bigint::text AS total_cents
        FROM document_lines l
        JOIN documents d ON d.id = l.document_id AND d.deleted_at IS NULL
@@ -270,6 +281,7 @@ export async function projectDocuments(
       quantity: Number(l.quantity),
       unitCents: Number(l.unit_cents),
       totalCents: Number(l.total_cents),
+      projectTaskId: l.project_task_id,
     };
     const bucket = byDoc.get(l.document_id);
     if (bucket) bucket.push(line);

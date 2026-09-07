@@ -18,6 +18,18 @@ import { Card, CardHeader, CardMeta } from "@/components/ui/Card";
 import { clsx } from "@/lib/clsx";
 import { useFormDisclosure } from "@/lib/form-disclosure";
 import type { Dependency, ProjectTask, ScheduleSummary } from "@/server/repos/tasks";
+import type { ProjectDocument } from "@/server/repos/projects";
+import { documentsForStage, type StageMoney } from "@/server/stage-money";
+
+/**
+ * Money for a stage row, in the same shape the rest of the project uses.
+ *
+ * Whole units with separators: these sit inline in a dense list, and cents
+ * would add four characters to every figure for a precision nobody reads at
+ * this size. The document itself shows the exact number.
+ */
+const money$ = (cents: number) =>
+  `${cents < 0 ? "-" : ""}$${Math.round(Math.abs(cents) / 100).toLocaleString()}`;
 import {
   addDependencyAction,
   addTaskAction,
@@ -59,6 +71,8 @@ const isoFor = (day: number) => new Date(day * MS_PER_DAY).toISOString().slice(0
 
 export function ProjectSchedule({
   dealId,
+  money,
+  documents,
   tasks,
   dependencies,
   summary,
@@ -66,6 +80,9 @@ export function ProjectSchedule({
   staff,
 }: {
   dealId: string;
+  /** What each stage was charged for and what it has cost. Absent = nothing filed. */
+  money: Map<string, StageMoney>;
+  documents: ProjectDocument[];
   tasks: ProjectTask[];
   dependencies: { taskId: string; links: Dependency[] }[];
   summary: ScheduleSummary;
@@ -601,6 +618,62 @@ export function ProjectSchedule({
                         .join(" · ")}
                       {late && <span style={{ color: "var(--red)" }}> · overdue</span>}
                     </p>
+
+                    {/*
+                        The paperwork that belongs to this stage, and what it
+                        comes to.
+
+                        This is the question the Documents tab could not answer:
+                        it held one flat list for the whole job, so "what covers
+                        the crane hire" had no home. A stage now shows what the
+                        client was charged for it and what has been ordered
+                        against it — and the difference, which is the number
+                        somebody acts on. A job at 22% says worry; a stage at
+                        −4% says what to do.
+
+                        Absent, not zeroed, when nothing is filed: a stage with
+                        no paperwork has no margin, and "0%" would be an
+                        assertion nobody made.
+                    */}
+                    {(() => {
+                      const stage = money.get(task.id);
+                      if (!stage) return null;
+                      const loss = stage.marginCents < 0;
+                      return (
+                        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px]">
+                          {stage.quotedCents > 0 && (
+                            <span className="text-muted">
+                              Quoted{" "}
+                              <span className="font-semibold tabular-nums text-[var(--text)]">
+                                {money$(stage.quotedCents)}
+                              </span>
+                            </span>
+                          )}
+                          {stage.committedCents > 0 && (
+                            <span className="text-muted">
+                              Committed{" "}
+                              <span className="font-semibold tabular-nums text-[var(--text)]">
+                                {money$(stage.committedCents)}
+                              </span>
+                            </span>
+                          )}
+                          {stage.quotedCents > 0 && stage.committedCents > 0 && (
+                            <span
+                              className="font-semibold tabular-nums"
+                              style={{ color: loss ? "var(--red)" : "var(--green)" }}
+                            >
+                              {loss ? "" : "+"}
+                              {money$(stage.marginCents)}
+                            </span>
+                          )}
+                          {documentsForStage(documents, task.id).map(({ document }) => (
+                            <span key={document.id} className="text-faint">
+                              {document.number}
+                            </span>
+                          ))}
+                        </div>
+                      );
+                    })()}
 
                     {/*
                         What it waits for, named rather than drawn as an id.

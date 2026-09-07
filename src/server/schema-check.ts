@@ -59,6 +59,7 @@ export const EXPECTED_TABLES = [
 /** Columns added by `ALTER TABLE … ADD COLUMN IF NOT EXISTS`, which a stale
  *  database is most likely to be missing while still having the table. */
 export const EXPECTED_COLUMNS: ReadonlyArray<[string, string]> = [
+  ["document_lines", "project_task_id"],
   ["agencies", "billing_synced_at"],
   ["agencies", "referral_code"],
   ["agencies", "referred_by_agency_id"],

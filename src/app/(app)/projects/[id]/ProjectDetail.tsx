@@ -34,6 +34,7 @@ import type {
 } from "@/server/repos/projects";
 import type { Dependency, ProjectTask, ScheduleSummary } from "@/server/repos/tasks";
 import { ProjectSchedule } from "./ProjectSchedule";
+import { stageMoney } from "@/server/stage-money";
 import {
   addProjectPersonAction,
   createDocumentAction,
@@ -253,6 +254,10 @@ export function ProjectDetail({
             summary={scheduleSummary}
             today={today}
             staff={candidates.staff}
+            /* Derived here, from the documents this page already loaded, so a
+               stage's margin and the header's cannot disagree. */
+            money={stageMoney(documents)}
+            documents={documents}
           />
         )}
         {tab === "history" && <TimelineTab events={timeline} />}
