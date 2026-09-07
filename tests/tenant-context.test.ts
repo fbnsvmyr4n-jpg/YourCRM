@@ -362,9 +362,22 @@ describe("every repository scopes itself, without relying on the database", () =
      */
     const NUMBER_LOOKUP = "telephony-tenant.ts";
 
+    /**
+     * And one legitimately looks up EVERY workspace.
+     *
+     * Row-level security is forced on the outbox, so no single query can see
+     * across workspaces — a scheduled sweep has to know which exist and then
+     * enter each one properly scoped. There is no agency to filter by because
+     * it is not acting for one; it is acting for the platform.
+     *
+     * Its exemption rests on selecting ids and nothing readable, which is
+     * checked below rather than trusted.
+     */
+    const SWEEP = "outbox-drain.ts";
+
     let checked = 0;
     for (const path of files) {
-      if (path.endsWith(NUMBER_LOOKUP)) continue;
+      if (path.endsWith(NUMBER_LOOKUP) || path.endsWith(SWEEP)) continue;
       const src = readFileSync(path, "utf8")
         .replace(/\/\*[\s\S]*?\*\//g, "")
         .replace(/^\s*\/\/.*$/gm, "");
@@ -395,6 +408,34 @@ describe("every repository scopes itself, without relying on the database", () =
       /LIMIT 2/
     );
     expect(code, "the ambiguous case no longer refuses").toMatch(/return null/);
+  });
+
+  it("the outbox sweep reads workspace IDS and nothing a person could read", () => {
+    /**
+     * Its exemption rests entirely on this.
+     *
+     * The sweep lists every workspace on the platform, which is exactly the
+     * query the guard above exists to stop — so what makes it safe has to be
+     * that there is nothing in the result worth leaking. It selects `id` and
+     * `agency_id`, uses them only to open a scoped drain, and never reads a
+     * name. Add `name` to that SELECT and the sweep becomes a module holding
+     * every customer's workspace list in memory, so this fails if it appears.
+     */
+    const code = readFileSync(join(SERVER, "outbox-drain.ts"), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^\s*\/\/.*$/gm, "");
+
+    const queries = [...code.matchAll(/`([^`]*FROM sub_accounts[^`]*)`/gi)].map((m) => m[1]);
+    expect(queries.length, "the sweep no longer reads sub_accounts — check this guard").toBe(1);
+
+    const columns = queries[0].match(/SELECT\s+([\s\S]*?)\s+FROM/i)?.[1] ?? "";
+    expect(
+      columns.split(",").map((c) => c.trim()),
+      "the sweep selects something other than ids"
+    ).toEqual(["id", "agency_id"]);
+
+    // And every row it touches is reached the ordinary way, under the policies.
+    expect(code, "the sweep no longer scopes its work to a tenant").toMatch(/withTenant|drain\(/);
   });
 
   for (const path of repoFiles()) {

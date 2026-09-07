@@ -11,7 +11,16 @@
  * attachments, batching or webhooks.
  */
 
-export type SendResult = { sent: boolean; reason?: string };
+/**
+ * `permanent` says whether trying again could ever help.
+ *
+ * A refused address is refused for ever, and retrying it for two hours only
+ * delays the moment somebody finds out. A timeout is the opposite. The caller
+ * cannot tell these apart from a message, and the queue's decision to keep or
+ * abandon a job turns on exactly this — so the distinction is made here, where
+ * the status code is.
+ */
+export type SendResult = { sent: boolean; reason?: string; permanent?: boolean };
 
 export function emailConfigured(): boolean {
   return Boolean(process.env.RESEND_API_KEY?.trim());
@@ -27,6 +36,15 @@ export async function sendEmail(opts: {
   subject: string;
   html: string;
   text: string;
+  /**
+   * Passed to Resend as `Idempotency-Key`, which they honour for 24 hours.
+   *
+   * This is what makes a retried send exactly once at the far end. Delivery
+   * from our queue is at least once and cannot be otherwise — a process that
+   * dies after the provider accepted the request has no way to know it did —
+   * so the only place the duplicate can be stopped is theirs.
+   */
+  idempotencyKey?: string;
 }): Promise<SendResult> {
   const key = process.env.RESEND_API_KEY?.trim();
 
@@ -48,6 +66,8 @@ export async function sendEmail(opts: {
       headers: {
         Authorization: `Bearer ${key}`,
         "Content-Type": "application/json",
+        // Resend caps this at 256 characters and ignores the header when absent.
+        ...(opts.idempotencyKey ? { "Idempotency-Key": opts.idempotencyKey.slice(0, 256) } : {}),
       },
       body: JSON.stringify({
         from: fromAddress(),
@@ -60,10 +80,21 @@ export async function sendEmail(opts: {
 
     if (!res.ok) {
       const detail = await res.text().catch(() => "");
-      return { sent: false, reason: `Resend returned ${res.status} ${detail.slice(0, 200)}` };
+      return {
+        sent: false,
+        reason: `Resend returned ${res.status} ${detail.slice(0, 200)}`,
+        /* A rejected request — a malformed address, an unverified sender —
+           will be rejected identically for ever. The two exceptions are the
+           ones that describe a moment rather than the request: a timeout and
+           a rate limit both mean "not now". Everything from 500 up is theirs
+           and is worth waiting out. */
+        permanent: res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429,
+      };
     }
     return { sent: true };
   } catch (err) {
+    /* A thrown fetch is a network fault or our own 10s timeout — never a
+       verdict on the message. Always worth another go. */
     return { sent: false, reason: err instanceof Error ? err.message : String(err) };
   }
 }

@@ -6,18 +6,19 @@ import { appendChat, clearChat, listChat } from "@/server/repos/chat";
 import { id as validId, multiline } from "@/server/validate";
 import { requireTenant, withCurrentTenant } from "@/server/tenant-session";
 import { requireActivePlan } from "@/server/plan-gate";
-import { withSystem } from "@/server/tenant";
+import { withSystem, withTenant, type TenantContext, type TenantQuery } from "@/server/tenant";
 import { findUserById } from "@/server/repos/users";
-import { withTenant, type TenantQuery } from "@/server/tenant";
+import { drain, queueJob } from "@/server/outbox";
+import { findJob } from "@/server/repos/outbox";
+import { OUTBOX_REGISTRY, QUOTE_EMAIL, quoteEmailKey } from "@/server/outbox-handlers";
 import {
   approveQuote,
   discardQuote,
   findQuote,
-  markQuoteSent,
   quotesNeedingUser,
   type Quote,
 } from "@/server/repos/quotes";
-import { emailConfigured, quotationEmail, sendEmail } from "@/server/email";
+import { emailConfigured } from "@/server/email";
 import { logWrite } from "@/server/log";
 
 /**
@@ -80,24 +81,33 @@ export async function sendChatAction(text: string) {
 export type QuoteResult = { ok?: string; error?: string; quotes: Quote[] };
 
 /**
- * Put an approved quotation in the client's inbox.
+ * Promise to put an approved quotation in the client's inbox.
  *
- * Shared by approving and by retrying, and it re-reads the quote rather than
- * taking one as an argument: this is the last gate before a price reaches a
- * customer, and it must read the approval from the database rather than trust
- * that its caller just wrote one.
+ * Queues the send; it does not perform it. That is the whole change, and it
+ * closes a real hole: this used to POST to the mail provider and then mark the
+ * quote sent, which are two systems with a gap between them. A crash in that
+ * gap left a customer holding a price the CRM believed was never quoted — with
+ * the Send button still on screen, so the natural next move was to send it
+ * again.
+ *
+ * The job now goes in inside the caller's transaction, so the approval and the
+ * promise to deliver it commit together or not at all, and the one job per
+ * document means pressing twice cannot email twice.
+ *
+ * It still re-reads the quote rather than taking one as an argument: this is
+ * the last gate before a price reaches a customer, and the handler will read it
+ * again for the same reason.
  */
-async function deliver(
-  q: TenantQuery,
-  documentId: string,
-  who: { workspace: string; approver: string }
-): Promise<string> {
+async function promiseDelivery(q: TenantQuery, documentId: string): Promise<string | null> {
   const quote = await findQuote(q, documentId);
   if (!quote) return "That quotation no longer exists.";
   if (!quote.approvedAt || quote.status !== "approved") {
     return `${quote.number} has not been approved, so nothing was sent.`;
   }
 
+  /* Said here as well as in the handler, because these two are worth a person
+     knowing NOW rather than finding a dead job later — both need somebody to
+     go and change something before any amount of retrying can help. */
   if (!quote.partyEmail) {
     return `${quote.number} is approved, but ${quote.party ?? "that contact"} has no email address on file. Add one and send it again.`;
   }
@@ -105,52 +115,52 @@ async function deliver(
     return `${quote.number} is approved. Email isn't switched on for this workspace yet, so nothing has been sent.`;
   }
 
-  const { subject, text, html } = quotationEmail({
-    number: quote.number,
-    project: quote.projectTitle,
-    from: who.workspace,
-    approvedBy: who.approver,
-    notes: quote.notes,
-    lines: quote.lines,
-    totalCents: quote.totalCents,
+  await queueJob(q, OUTBOX_REGISTRY, {
+    handler: QUOTE_EMAIL,
+    payload: { documentId: quote.id },
+    dedupeKey: quoteEmailKey(quote.id),
   });
-
-  const sent = await sendEmail({ to: quote.partyEmail, subject, text, html });
-  if (!sent.sent) {
-    /* The approval survives a failed send. Throwing it away would mean asking
-       somebody to approve the same figures twice because a mail server was
-       briefly down. */
-    return `${quote.number} is approved, but the email didn't go: ${sent.reason ?? "unknown error"}. Try again.`;
-  }
-
-  await markQuoteSent(q, quote.id);
-  logWrite("send", "quote", { id: quote.id, actor: q.ctx.userId });
-  return `${quote.number} approved and emailed to ${quote.partyEmail}.`;
+  return null;
 }
 
 /**
- * The names that go on the email, resolved BEFORE the tenant transaction opens.
+ * Queue the send, then try it at once and report what actually happened.
  *
- * `withSystem` takes a second connection out of the pool, and the tenant
- * transaction is holding the first. Nested, that is a deadlock waiting for a
- * busy pool — and immediately a hang under test, where the pool is deliberately
- * one connection deep. Every other caller in this file resolves its system-level
- * reads first for the same reason.
+ * The queue is the guarantee, this is the immediacy — and the immediacy
+ * matters here more than anywhere else in the app, because a person has just
+ * pressed Approve and is owed a straight answer about whether their client has
+ * the price. So the drain runs in the same request and the quote is re-read
+ * afterwards: the message says what is true, not what was asked for.
+ *
+ * When the send has not gone yet the message says so plainly. That is a real
+ * improvement on the old "try again", which was the only option when a failed
+ * send left nothing behind to retry.
  */
-async function signatories(agencyId: string, subAccountId: string, userId: string) {
-  return withSystem(async (sys) => {
-    /* `agency_id` as well as the id, though the id came from a session the
-       server resolved. A system query carries no row-level security, so the
-       agency filter is the only thing standing between a lookup by id and
-       another customer's workspace name — and the guard suite treats an
-       unfiltered read of this table as a defect wherever it appears, which is
-       why it is here rather than argued about. */
-    const row = await sys.one<{ name: string }>(
-      `SELECT name FROM sub_accounts WHERE id = $1 AND agency_id = $2 AND deleted_at IS NULL`,
-      [subAccountId, agencyId]
-    );
-    const user = await findUserById(sys, userId);
-    return { workspace: row?.name ?? "YourCRM", approver: user?.name ?? "YourCRM" };
+async function deliver(ctx: TenantContext, documentId: string): Promise<string> {
+  const refusal = await withTenant(ctx, (q) => promiseDelivery(q, documentId));
+  if (refusal) return refusal;
+
+  await drain(ctx, OUTBOX_REGISTRY, 5).catch(() => {
+    /* Swallowed: the job is durable, and the re-read below tells the truth
+       about where it got to. */
+  });
+
+  return withTenant(ctx, async (q) => {
+    const quote = await findQuote(q, documentId);
+    if (!quote) return "That quotation no longer exists.";
+    if (quote.status === "sent" || quote.sentAt) {
+      logWrite("send", "quote", { id: quote.id, actor: ctx.userId });
+      return `${quote.number} approved and emailed to ${quote.partyEmail}.`;
+    }
+
+    /* Three different truths hide behind "queued", and saying "we'll keep
+       trying" about a job that has already stopped is worse than saying
+       nothing. So the job itself is read, not assumed. */
+    const job = await findJob(q, QUOTE_EMAIL, quoteEmailKey(documentId));
+    if (job?.status === "dead") {
+      return `${quote.number} is approved, but it couldn't be sent: ${job.lastError ?? "unknown error"}. Fix that and send it again.`;
+    }
+    return `${quote.number} is approved and queued to send. It hasn't gone out yet — we'll keep trying, and you can send it again yourself.`;
   });
 }
 
@@ -163,36 +173,46 @@ async function signatories(agencyId: string, subAccountId: string, userId: strin
  */
 export async function approveQuoteAction(documentId: string): Promise<QuoteResult> {
   const ctx = await requireTenant();
-  const who = await signatories(ctx.agencyId, ctx.subAccountId, ctx.userId);
+  const id = validId(documentId);
+  if (!id) {
+    return {
+      error: "That quotation could not be identified.",
+      quotes: await withCurrentTenant((q) => quotesNeedingUser(q)),
+    };
+  }
 
-  return withCurrentTenant(async (q) => {
-    const id = validId(documentId);
-    if (!id) return { error: "That quotation could not be identified.", quotes: await quotesNeedingUser(q) };
-
+  /* Approving and queueing the send commit together — that pairing is the
+     point. Everything after runs outside, because the delivery talks to a mail
+     provider and must not hold this transaction open while it does. */
+  const approval = await withCurrentTenant(async (q) => {
     const { quote, error } = await approveQuote(q, id);
-    if (!quote) return { error, quotes: await quotesNeedingUser(q) };
-
+    if (!quote) return { error };
     logWrite("approve", "quote", { id: quote.id, actor: q.ctx.userId });
-    const message = await deliver(q, quote.id, who);
-
-    revalidateApp();
-    return { ok: message, quotes: await quotesNeedingUser(q) };
+    return { quote };
   });
+  if (!approval.quote) {
+    return { error: approval.error, quotes: await withCurrentTenant((q) => quotesNeedingUser(q)) };
+  }
+
+  const message = await deliver(ctx, approval.quote.id);
+  revalidateApp();
+  return { ok: message, quotes: await withCurrentTenant((q) => quotesNeedingUser(q)) };
 }
 
 /** Try the email again on a quotation somebody already approved. */
 export async function sendQuoteAction(documentId: string): Promise<QuoteResult> {
   const ctx = await requireTenant();
-  const who = await signatories(ctx.agencyId, ctx.subAccountId, ctx.userId);
+  const id = validId(documentId);
+  if (!id) {
+    return {
+      error: "That quotation could not be identified.",
+      quotes: await withCurrentTenant((q) => quotesNeedingUser(q)),
+    };
+  }
 
-  return withCurrentTenant(async (q) => {
-    const id = validId(documentId);
-    if (!id) return { error: "That quotation could not be identified.", quotes: await quotesNeedingUser(q) };
-
-    const message = await deliver(q, id, who);
-    revalidateApp();
-    return { ok: message, quotes: await quotesNeedingUser(q) };
-  });
+  const message = await deliver(ctx, id);
+  revalidateApp();
+  return { ok: message, quotes: await withCurrentTenant((q) => quotesNeedingUser(q)) };
 }
 
 /**

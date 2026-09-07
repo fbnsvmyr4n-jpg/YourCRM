@@ -97,6 +97,11 @@ const PUBLIC_ROUTES: Record<string, string> = {
     "a Stripe webhook: no session exists, and the request is authorised by its " +
     "signature instead. See the block below, which checks exactly that — this " +
     "is the only unauthenticated endpoint in the app that WRITES.",
+  "src/app/api/tasks/drain/route.ts":
+    "the scheduled job runner: a cron trigger carries no session, so it is " +
+    "authorised by a shared secret instead. See the block below, which checks " +
+    "that the secret is compared in constant time and that the endpoint " +
+    "REFUSES when none is configured rather than running openly.",
 };
 
 /**

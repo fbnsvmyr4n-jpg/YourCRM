@@ -176,7 +176,12 @@ describe("every CRM table is tenant-scoped", () => {
     it(`${name} indexes the tenant column`, () => {
       // Without this the tenant predicate is a sequential scan under a filter,
       // so one large customer degrades every other customer's queries.
-      const re = new RegExp(`CREATE INDEX IF NOT EXISTS \\w+ ON ${name} \\(sub_account_id`);
+      // Whitespace-tolerant. A long definition wrapped onto a second line is
+      // the same index, and a guard that reports "no index" because of a
+      // newline sends somebody looking for a problem that is not there.
+      const re = new RegExp(
+        `CREATE INDEX IF NOT EXISTS\\s+\\w+\\s+ON\\s+${name}\\s*\\(sub_account_id`
+      );
       expect(re.test(SCHEMA), `${name} has no index leading with sub_account_id`).toBe(true);
     });
   }

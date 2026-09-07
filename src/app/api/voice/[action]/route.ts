@@ -1,5 +1,5 @@
-import { ANALYSIS_MODEL, analyseCall } from "@/server/agent/call-analysis";
-import { saveAnalysis } from "@/server/repos/call-analysis";
+import { drain, queueJob } from "@/server/outbox";
+import { CALL_ANALYSIS, callAnalysisKey, OUTBOX_REGISTRY } from "@/server/outbox-handlers";
 import { speak } from "@/server/agent/voice-brain";
 import { voicePrincipal } from "@/server/agent/principal";
 import { logCall } from "@/server/repos/calls";
@@ -237,24 +237,39 @@ export async function POST(req: Request, ctx: { params: Promise<{ action: string
         await processCall(q, call.id);
 
         /*
-           Reading the call, after the call.
+           Reading the call, after the call — QUEUED, not run.
 
-           Last, and deliberately non-fatal. Everything above is the RECORD —
-           that this happened, what was said, the lead it produced — and it must
-           not be lost because a model was slow or a key was wrong. The analysis
-           is an interpretation layered on top, and a call without one is an
-           ordinary state that a re-run can fix.
+           This used to happen right here, inside a try/catch that swallowed
+           everything, and that was wrong in a way worth naming: one timeout
+           from the model lost the analysis permanently, leaving no trace that
+           it had ever been attempted. The specification requires post-call
+           processing to be retryable, and a fire-and-forget call inside a
+           serverless function that is about to be frozen is the opposite.
 
-           Idempotent, so the pipeline stays retryable as the specification
-           requires: one row per call, replaced rather than appended, so
-           analysing twice produces one opinion rather than two.
+           The job is written in the SAME transaction as the call record, so
+           there is never a call whose analysis was promised and lost, nor a
+           promise for a call that failed to save. The dedupe key is the call,
+           so a redelivered status webhook queues nothing new.
         */
-        try {
-          const analysis = await analyseCall(call.transcript);
-          if (analysis) await saveAnalysis(q, call.id, analysis, ANALYSIS_MODEL);
-        } catch (err) {
-          console.error("[voice] post-call analysis failed:", err);
-        }
+        await queueJob(q, OUTBOX_REGISTRY, {
+          handler: CALL_ANALYSIS,
+          payload: { callId: call.id },
+          dedupeKey: callAnalysisKey(call.id),
+        });
+
+      });
+
+      /*
+         Then try it immediately, outside the transaction.
+
+         The queue is the guarantee; this is the speed. Draining here means the
+         analysis is usually ready before anybody opens the console, and the
+         retry ladder catches only what genuinely failed. A drain that throws is
+         logged and swallowed on purpose — the work is already durable, and this
+         request's job was to record the call.
+      */
+      await drain(ctx, OUTBOX_REGISTRY, 5).catch((err) => {
+        console.error("[voice] outbox drain failed; the job stays queued:", err);
       });
 
       await endSession(callSid);

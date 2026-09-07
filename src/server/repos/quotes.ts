@@ -46,6 +46,17 @@ export type Quote = {
   /** How many times it has been sent back for changes. */
   revision: number;
   approvedAt: string | null;
+  /**
+   * Who said yes.
+   *
+   * The email names the approver, and that name must come from the document
+   * rather than from whoever happens to be sending it. Once delivery moved to
+   * a queue, "whoever is sending it" became a scheduled sweep with no person
+   * behind it at all — so a quotation drained by the sweep would have been
+   * signed by nobody, while the same quotation drained by the request that
+   * approved it was signed correctly. Same document, two different emails.
+   */
+  approvedByUserId: string | null;
   sentAt: string | null;
   lines: QuoteLine[];
   totalCents: number;
@@ -64,6 +75,7 @@ type DocRow = {
   drafted_by_agent: string | null;
   revision: number;
   approved_at: Date | null;
+  approved_by_user_id: string | null;
   sent_at: Date | null;
 };
 
@@ -96,7 +108,7 @@ function newId(prefix: string): string {
 const DOC_SELECT = `
   SELECT d.id, d.deal_id, deal.title AS project_title, d.number, d.status, d.party,
          c.email AS party_email, d.party_contact_id, d.notes,
-         d.drafted_by_agent, d.revision, d.approved_at, d.sent_at
+         d.drafted_by_agent, d.revision, d.approved_at, d.approved_by_user_id, d.sent_at
     FROM documents d
     JOIN deals deal ON deal.id = d.deal_id
     LEFT JOIN contacts c ON c.id = d.party_contact_id AND c.deleted_at IS NULL
@@ -144,6 +156,7 @@ async function hydrate(q: TenantQuery, docs: DocRow[]): Promise<Quote[]> {
       draftedByAgent: d.drafted_by_agent,
       revision: d.revision,
       approvedAt: d.approved_at?.toISOString() ?? null,
+      approvedByUserId: d.approved_by_user_id,
       sentAt: d.sent_at?.toISOString() ?? null,
       lines: docLines,
       totalCents: docLines.reduce((sum, l) => sum + l.totalCents, 0),

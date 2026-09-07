@@ -1711,3 +1711,94 @@ DROP POLICY IF EXISTS call_analysis_tenant_isolation ON call_analysis;
 CREATE POLICY call_analysis_tenant_isolation ON call_analysis
   USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
   WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
+
+-- ---------------------------------------------------------------------------
+-- The transactional outbox
+--
+-- Work that must happen AFTER a change is committed, exactly once, and must
+-- survive the process dying in between.
+--
+-- The problem it solves is specific. Sending a quotation used to be: POST to
+-- the mail provider, then mark the quote sent. Those are two systems and one
+-- of them can fail after the other succeeded — so a crash in the gap left a
+-- customer holding a quotation the CRM still believed was unsent, and the
+-- button to send it still on screen. Enqueueing here instead makes the row and
+-- the mutation part of the SAME transaction: either both happened or neither
+-- did, and the delivery is retried until it lands.
+--
+-- Delivery is AT LEAST ONCE, never exactly once — a worker that dies between
+-- the provider accepting the request and this row being settled will try
+-- again. So every handler must be idempotent, and the ones that talk to an
+-- external service pass this row's id as the provider's idempotency key.
+--
+-- It holds IDS AND A HANDLER NAME, never content: no addresses, no prices, no
+-- transcripts. The handler re-reads the record inside a tenant-scoped
+-- transaction when it runs, which is both safer and more correct — the row it
+-- acts on is the one that exists now, not a copy of what was true when the
+-- job was queued.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS outbox (
+  id               TEXT PRIMARY KEY,
+  sub_account_id   TEXT NOT NULL REFERENCES sub_accounts(id) ON DELETE CASCADE,
+
+  -- Which handler runs this. Not a CHECK constraint: a handler added in a new
+  -- deployment must not fail a write against a database migrated a minute
+  -- earlier, and an unknown name is already refused in application code where
+  -- rejecting is cheap. Same reasoning as `activities.kind`.
+  handler          TEXT NOT NULL,
+
+  -- Ids only. See the note above.
+  payload          JSONB NOT NULL DEFAULT '{}'::jsonb,
+
+  -- Optional. Two enqueues sharing one means the second is the same job, not a
+  -- second copy of it — which is what stops a double-pressed button, a retried
+  -- webhook or a replayed call from queueing the same email twice.
+  dedupe_key       TEXT,
+
+  -- `dead` rather than `failed`: a failed ATTEMPT is not terminal and leaves
+  -- the row pending. This status means we have stopped trying and a person has
+  -- to look.
+  status           TEXT NOT NULL DEFAULT 'pending'
+                     CHECK (status IN ('pending', 'done', 'dead')),
+
+  attempts         INTEGER NOT NULL DEFAULT 0,
+
+  -- When it may next be tried. Backoff is written here rather than computed at
+  -- read time so a stuck job cannot be picked up in a tight loop by two
+  -- workers disagreeing about the current time.
+  run_after        TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  -- The last failure, for the person who has to look at a dead row. Never the
+  -- payload of the request, which is how error logs end up holding the data
+  -- the table was careful not to store.
+  last_error       TEXT,
+
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  settled_at       TIMESTAMPTZ
+);
+
+-- Dedupe within a workspace and handler. Partial, because most jobs have no
+-- natural key and must not collide with each other on NULL.
+CREATE UNIQUE INDEX IF NOT EXISTS outbox_dedupe_key
+  ON outbox (sub_account_id, handler, dedupe_key) WHERE dedupe_key IS NOT NULL;
+
+-- The claim query's index: pending work that is due, oldest first. Partial, so
+-- it stays small as settled rows accumulate.
+CREATE INDEX IF NOT EXISTS outbox_ready_idx
+  ON outbox (sub_account_id, run_after) WHERE status = 'pending';
+
+-- And a plain one for every other read.
+--
+-- The partial index above covers the hot path and, by definition, nothing else:
+-- listing the jobs that were given up on filters `status = 'dead'`, which that
+-- index excludes. Without this, the one query a person runs when something has
+-- gone wrong is the one doing a sequential scan.
+CREATE INDEX IF NOT EXISTS outbox_tenant_idx ON outbox (sub_account_id, created_at DESC);
+
+ALTER TABLE outbox ENABLE ROW LEVEL SECURITY;
+ALTER TABLE outbox FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS outbox_tenant_isolation ON outbox;
+CREATE POLICY outbox_tenant_isolation ON outbox
+  USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
+  WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));

@@ -1,0 +1,10 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "crons": [
+    {
+      "path": "/api/tasks/drain",
+      "//": "Once a day, because that is what a Hobby plan actually does — it triggers crons daily whatever the expression says, and a more frequent expression is rejected outright on some plans, which would fail the deployment rather than the feature. Almost nothing waits for this: every place that queues a job also drains it in the same request, so this catches only what genuinely failed. On a Pro plan change it to */15 * * * * and the retry ladder runs at the pace it was designed for.",
+      "schedule": "0 3 * * *"
+    }
+  ]
+}
