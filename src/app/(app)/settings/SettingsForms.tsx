@@ -5,6 +5,7 @@ import { useFormDisclosure } from "@/lib/form-disclosure";
 import {
   Building2,
   CalendarOff,
+  Clock,
   KeyRound,
   LogOut,
   Plus,
@@ -18,6 +19,13 @@ import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { useTheme } from "@/components/theme/ThemeProvider";
 import { Banner } from "@/components/ui/Banner";
 import type { Settings } from "@/server/repos/settings";
+import {
+  formatClock,
+  hoursFor,
+  SUGGESTED_WEEK,
+  WEEKDAYS,
+  type OpenDay,
+} from "@/server/repos/working-hours";
 import type { SafeUser } from "@/server/repos/users";
 import type { WorkspaceRow } from "@/server/sub-accounts";
 import {
@@ -29,6 +37,7 @@ import {
   switchWorkspaceAction,
   updateProfileAction,
   updateTargetsAction,
+  updateWorkingHoursAction,
   type FormState,
 } from "./actions";
 
@@ -454,6 +463,120 @@ export function WorkspacesCard({
 export { BillingCard, type BillingView } from "@/components/billing/BillingCard";
 
 /* ---------------- bits ---------------- */
+
+/**
+ * The hours this workspace is open, which is what a booking page offers.
+ *
+ * Two decisions worth stating, because both are about not inventing anything.
+ *
+ * A day with its checkbox off is CLOSED and stores no row — an absent row and a
+ * row saying "open: false" would be two ways to say one thing, and they would
+ * eventually disagree. So turning a day off is the same act as never turning it
+ * on, which is why the times stay on screen, greyed, rather than vanishing: the
+ * person can see what Saturday would be if they switched it back.
+ *
+ * And a workspace that has set nothing shows nothing set. The form OPENS on a
+ * suggested Monday-to-Friday because seven empty rows is a worse starting
+ * point, but the notice above it says plainly that nothing is stored yet —
+ * until Save is pressed, the suggestion is ours, not theirs, and nothing reads
+ * it when deciding what is bookable.
+ */
+export function WorkingHoursCard({
+  week,
+  timeZone,
+}: {
+  week: OpenDay[];
+  timeZone: string;
+}) {
+  const [state, action, pending] = useActionState<FormState, FormData>(
+    updateWorkingHoursAction,
+    undefined
+  );
+
+  const configured = week.length > 0;
+  /* The suggestion fills the FORM, never the store. `configured` above is what
+     everything else keys off. */
+  const shown = configured ? week : SUGGESTED_WEEK;
+
+  return (
+    <Card className="card-q">
+      <CardHeader
+        title="Opening hours"
+        icon={<Clock className="h-[18px] w-[18px] text-accent" />}
+      />
+      <form action={action} className="space-y-4">
+        <Banner state={state} />
+
+        {!configured && (
+          <p
+            className="rounded-xl px-3.5 py-2.5 text-xs"
+            style={{ background: "var(--amber-soft)", color: "var(--amber)" }}
+          >
+            No hours are set yet, so nothing can be booked. Below is a suggested
+            week — change it to yours and press Save.
+          </p>
+        )}
+
+        <div className="flex flex-col gap-1.5">
+          {WEEKDAYS.map((name, weekday) => {
+            const day = hoursFor(shown, weekday);
+            const open = Boolean(day);
+            return (
+              <div
+                key={name}
+                className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-xl px-2.5 py-2 @min-[420px]:grid-cols-[minmax(0,7rem)_auto_auto]"
+                style={{ background: "var(--sunken)" }}
+              >
+                <label className="flex min-w-0 items-center gap-2.5">
+                  <input
+                    type="checkbox"
+                    name={`open-${weekday}`}
+                    defaultChecked={open}
+                    className="focus-ring h-4 w-4 shrink-0 accent-[var(--accent)]"
+                  />
+                  <span className="truncate text-sm font-medium">{name}</span>
+                </label>
+                <div className="col-span-2 flex items-center gap-2 @min-[420px]:col-span-1 @min-[420px]:justify-end">
+                  <input
+                    type="time"
+                    name={`opens-${weekday}`}
+                    defaultValue={formatClock(day?.opensMinute ?? 8 * 60)}
+                    aria-label={`${name} opens`}
+                    className="field-input w-full max-w-[7.5rem] tabular-nums"
+                  />
+                  <span className="text-xs text-faint">to</span>
+                  <input
+                    type="time"
+                    name={`closes-${weekday}`}
+                    defaultValue={formatClock(day?.closesMinute ?? 17 * 60)}
+                    aria-label={`${name} closes`}
+                    className="field-input w-full max-w-[7.5rem] tabular-nums"
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <p className="text-xs text-faint">
+          Times are local to {timeZone.replace(/_/g, " ")}, the zone set under Targets &amp;
+          capacity. Unticked days are closed. Public holidays are set separately below and close a
+          day whatever these say.
+        </p>
+
+        <div className="flex justify-end">
+          <button
+            type="submit"
+            disabled={pending}
+            className="btn-accent focus-ring rounded-xl px-5 py-2.5 text-sm font-semibold disabled:opacity-60"
+          >
+            {pending ? "Saving…" : "Save hours"}
+          </button>
+        </div>
+      </form>
+    </Card>
+  );
+}
 
 function Field({
   label,

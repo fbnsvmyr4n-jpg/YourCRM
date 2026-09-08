@@ -1667,6 +1667,66 @@ CREATE POLICY workspace_holidays_tenant_isolation ON workspace_holidays
   WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
 
 -- ---------------------------------------------------------------------------
+-- The hours this workspace is open.
+--
+-- The first half of public booking. `workspace_holidays` above says which DAYS
+-- are closed; this says which part of an open day can be booked into. Without
+-- it a booking page has no honest answer to "when are you free" — it would
+-- either offer every hour of the night or invent a nine-to-five nobody chose,
+-- and a client booking a site visit for 03:00 is a support call at best.
+--
+-- ONE ROW PER OPEN WEEKDAY. A weekday with no row is closed, in the same way a
+-- feature with no row in `plan_entitlements` is simply not granted: an absent
+-- row and a row saying `open = false` would be two ways to say one thing, and
+-- they would eventually disagree. It also means a workspace that has set
+-- nothing has NO bookable time, which is the safe direction — nothing is
+-- offered until somebody says what to offer.
+--
+-- MINUTES FROM MIDNIGHT, not a TIME. Slot generation is arithmetic — step from
+-- open to close in increments, subtract what is already booked — and integers
+-- do that without a date attached to give the arithmetic a timezone it should
+-- not have. `closes_minute` reaches 1440 so a workspace open until midnight
+-- can say so.
+--
+-- These are WALL-CLOCK times in `settings.time_zone`, never UTC. 08:00 means
+-- eight in the morning where the business is, on both sides of a daylight
+-- saving change — which is the whole reason the zone is stored rather than the
+-- offset.
+--
+-- WEEKDAY 0 IS SUNDAY, matching both JavaScript's `getDay()` and Postgres's
+-- `EXTRACT(DOW)`, so no code on either side has to renumber. ISO's 1 = Monday
+-- is the other convention and mixing the two is a silent one-day shift, so it
+-- is written here rather than left to be inferred.
+--
+-- One range per day. A business that shuts for lunch cannot yet say so; that
+-- is a unique index instead of this primary key when somebody asks for it, and
+-- a range-list UI nobody has needed yet is not worth building on a guess.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS working_hours (
+  sub_account_id  TEXT NOT NULL REFERENCES sub_accounts(id) ON DELETE CASCADE,
+
+  weekday         SMALLINT NOT NULL CHECK (weekday BETWEEN 0 AND 6),
+  opens_minute    SMALLINT NOT NULL CHECK (opens_minute  BETWEEN 0 AND 1439),
+  closes_minute   SMALLINT NOT NULL CHECK (closes_minute BETWEEN 1 AND 1440),
+
+  -- A day that closes before it opens is not a short day, it is a negative one:
+  -- every slot generator would produce an empty list and nobody would know why.
+  CONSTRAINT working_hours_ordered CHECK (closes_minute > opens_minute),
+
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  PRIMARY KEY (sub_account_id, weekday)
+);
+
+ALTER TABLE working_hours ENABLE ROW LEVEL SECURITY;
+ALTER TABLE working_hours FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS working_hours_tenant_isolation ON working_hours;
+CREATE POLICY working_hours_tenant_isolation ON working_hours
+  USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
+  WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
+
+-- ---------------------------------------------------------------------------
 -- Every tool an agent ran, and the reason a retry cannot run it twice.
 --
 -- One table for the audit trail AND the idempotency record, deliberately. They

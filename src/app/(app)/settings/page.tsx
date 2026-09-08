@@ -14,6 +14,7 @@ import { entitlementsFor, limitOf } from "@/server/entitlements";
 import { canAccessCrm, outranks, roleCan } from "@/server/permissions";
 import { instantToWallClock } from "@/lib/zoned";
 import { listHolidays } from "@/server/repos/holidays";
+import { listWorkingHours } from "@/server/repos/working-hours";
 import { getSettings } from "@/server/repos/settings";
 import { listUsers } from "@/server/repos/users";
 import { clientBook, groupByOwner } from "@/server/clients-view";
@@ -30,6 +31,7 @@ import { TeamCard } from "./TeamCard";
 import {
   AppearanceCard,
   HolidaysCard,
+  WorkingHoursCard,
   PasswordForm,
   ProfileForm,
   SignOutCard,
@@ -86,12 +88,15 @@ export default async function SettingsPage({
      still read the records.
   */
   const crmAccess = canAccessCrm(user.role);
-  const { settings, usage, trash, book, holidays } = await withTenantPage(
+  const { settings, usage, trash, book, holidays, workingHours } = await withTenantPage(
     async (q) => ({
       settings: await getSettings(q),
       /* Not customer data — it is when this business is closed — so it loads
          for IT and accounts too, alongside the rest of Preferences. */
       holidays: await listHolidays(q),
+      /* Same reasoning as holidays: when the business is open is a fact about
+         the business, not a record about a customer. */
+      workingHours: await listWorkingHours(q),
       usage: await usageThisMonth(q),
       // Recovery lives here because this is where somebody looks after deleting
       // the wrong thing, and it costs one more query on a page already open.
@@ -255,6 +260,9 @@ export default async function SettingsPage({
       content: (
         <>
           <TargetsForm settings={settings} />
+          {/* Directly after the zone that gives these times their meaning, and
+              directly before the holidays that override them. */}
+          <WorkingHoursCard week={workingHours} timeZone={settings.timeZone} />
           <HolidaysCard holidays={holidays} thisYear={thisYear} />
           <AppearanceCard />
         </>

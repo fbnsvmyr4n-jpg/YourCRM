@@ -2,6 +2,14 @@
 
 import { revalidateApp } from "@/server/revalidate";
 import { isValidTimeZone, updateSettings } from "@/server/repos/settings";
+import {
+  parseClock,
+  replaceWorkingHours,
+  validateWeek,
+  WEEKDAYS,
+  type OpenDay,
+  type Weekday,
+} from "@/server/repos/working-hours";
 import { changePassword, updateProfile } from "@/server/repos/users";
 import { agencyBilling, applyCreditToStripe, billingPortal, startCheckout } from "@/server/billing/checkout";
 import { PLAN_INFO } from "@/server/billing/plans";
@@ -67,6 +75,54 @@ export async function updateTargetsAction(_prev: FormState, formData: FormData):
     // Several pages read these, so refresh the group rather than just Settings.
     revalidateApp();
     return { ok: "Targets updated." };
+  }, { crmData: false });
+}
+
+/**
+ * Set the hours this workspace is open.
+ *
+ * The form posts, for each of the seven days, whether it is open and the two
+ * times. A day whose checkbox is absent is simply not included — which is how
+ * a day gets CLOSED, and why this reads the checkbox rather than trusting a
+ * pair of times to be blank.
+ *
+ * The whole week goes in one call because it is saved as a set: half a week is
+ * a business quietly closed on the days that failed.
+ */
+export async function updateWorkingHoursAction(
+  _prev: FormState,
+  formData: FormData
+): Promise<FormState> {
+  return withCurrentTenant(async (q) => {
+    const week: OpenDay[] = [];
+
+    for (let weekday = 0; weekday < 7; weekday++) {
+      /* A checkbox that is off posts nothing at all, so absence IS the answer
+         here rather than a value to be parsed. */
+      if (formData.get(`open-${weekday}`) === null) continue;
+
+      const opens = parseClock(formData.get(`opens-${weekday}`));
+      const closes = parseClock(formData.get(`closes-${weekday}`));
+      if (opens === null || closes === null) {
+        return { error: `${WEEKDAYS[weekday]} needs an opening and a closing time.` };
+      }
+      week.push({ weekday: weekday as Weekday, opensMinute: opens, closesMinute: closes });
+    }
+
+    /* Checked here as well as in the repo so the person gets the sentence
+       naming the day, rather than whichever error the write happens to raise
+       first. */
+    const problems = validateWeek(week);
+    if (problems.length > 0) return { error: problems[0].message };
+
+    await replaceWorkingHours(q, week);
+
+    revalidateApp();
+    return {
+      ok: week.length
+        ? `Open ${week.length} ${week.length === 1 ? "day" : "days"} a week.`
+        : "Hours cleared. Nothing can be booked until you set them.",
+    };
   }, { crmData: false });
 }
 

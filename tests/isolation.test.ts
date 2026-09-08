@@ -179,10 +179,22 @@ describe("every CRM table is tenant-scoped", () => {
       // Whitespace-tolerant. A long definition wrapped onto a second line is
       // the same index, and a guard that reports "no index" because of a
       // newline sends somebody looking for a problem that is not there.
-      const re = new RegExp(
-        `CREATE INDEX IF NOT EXISTS\\s+\\w+\\s+ON\\s+${name}\\s*\\(sub_account_id`
+      const explicit = new RegExp(
+        `CREATE (?:UNIQUE )?INDEX IF NOT EXISTS\\s+\\w+\\s+ON\\s+${name}\\s*\\(sub_account_id`
       );
-      expect(re.test(SCHEMA), `${name} has no index leading with sub_account_id`).toBe(true);
+      /* A composite PRIMARY KEY leading with the tenant column is a btree
+         leading with the tenant column — Postgres builds one for every primary
+         key — so it answers the question this guard is actually asking. It used
+         to demand a CREATE INDEX statement specifically, which would have been
+         satisfied by adding a second, redundant index to a table that already
+         had the right one. Fixing the guard beats padding the schema to please
+         it. */
+      const pk = new RegExp(`PRIMARY KEY\\s*\\(\\s*sub_account_id`);
+      const covered = explicit.test(SCHEMA) || pk.test(tableBody(SCHEMA, name));
+      expect(
+        covered,
+        `${name} has neither an index nor a primary key leading with sub_account_id`
+      ).toBe(true);
     });
   }
 });
