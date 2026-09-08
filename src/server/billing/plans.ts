@@ -37,7 +37,11 @@ export const PLAN_INFO: Record<Plan, PlanInfo> = {
     plan: "unlimited",
     name: "Unlimited",
     priceCents: 29700,
-    blurb: "Unlimited workspaces, the API, and your own branding.",
+    /* Was "Unlimited workspaces, the API, and your own branding." Neither the
+       API nor the branding exists, and this line is rendered in Settings →
+       Billing next to a button that takes money — which makes it the most
+       expensive place in the product to be wrong. */
+    blurb: "Unlimited client workspaces, with the full CRM, calendar and reporting.",
   },
   saas_pro: {
     plan: "saas_pro",

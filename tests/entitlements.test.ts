@@ -57,20 +57,123 @@ describe("the plans grant what the pricing says", () => {
 
   it("Starter does not include the things it does not sell", async () => {
     const e = await get();
-    for (const feature of ["api_access", "white_label", "saas_mode", "rebilling"]) {
+    for (const feature of ["saas_mode", "rebilling"]) {
       expect(ent.can(e, feature), `Starter should not include ${feature}`).toBe(false);
     }
   });
 
-  it("Unlimited lifts the sub-account cap and adds API and white label", async () => {
+  it("Unlimited lifts the sub-account cap", async () => {
     await setPlan("unlimited", "active");
     const e = await get();
     expect(ent.limitOf(e, "sub_accounts"), "still capped").toBeNull();
-    expect(ent.can(e, "api_access")).toBe(true);
-    expect(ent.can(e, "white_label")).toBe(true);
     // But not the SaaS Pro features — that is what the next tier is for.
     expect(ent.can(e, "saas_mode")).toBe(false);
     expect(ent.can(e, "rebilling")).toBe(false);
+  });
+
+  it("NO PLAN GRANTS A FEATURE THAT DOES NOT EXIST", async () => {
+    /*
+       `api_access` and `white_label` were seeded on Unlimited and SaaS Pro and
+       sold in the tier's blurb. Neither existed: there is no public API, no key
+       issuing, and every screen is hardcoded YourCRM. A customer paying $297 a
+       month for two of them was paying for nothing.
+
+       Checked on every plan, and against the seed text as well as the granted
+       set, because omitting a row from the INSERT does not remove it from a
+       database that has already been seeded — the seed runs ON CONFLICT DO
+       UPDATE, which leaves rows it stops naming exactly where they are. The
+       DELETE is the part that does the work, and this is what proves it ran.
+    */
+    for (const plan of ["starter", "unlimited", "saas_pro"]) {
+      await setPlan(plan, "active");
+      const e = await get();
+      for (const feature of ["api_access", "white_label"]) {
+        expect(ent.can(e, feature), `${plan} still grants ${feature}, which does not exist`).toBe(
+          false
+        );
+      }
+    }
+    /* Seed ROWS only — matching the whole file would also hit the DELETE that
+       removes them, and a test that passes because of its own fix is no test. */
+    const seedRows = SCHEMA.split("\n").filter((l) => /^\s*\('(starter|unlimited|saas_pro)',/.test(l));
+    expect(seedRows.length, "the seed rows were not found — this assertion checks nothing")
+      .toBeGreaterThan(10);
+    for (const row of seedRows) {
+      expect(row, "the seed still grants a feature nothing implements").not.toMatch(
+        /'(api_access|white_label)'/
+      );
+    }
+  });
+
+  it("REMOVES THEM FROM A DATABASE THAT WAS ALREADY SEEDED WITH THEM", async () => {
+    /*
+       The one the other test cannot see, and the one production is actually in.
+
+       A fresh database built from `schema.sql` never had these rows, so simply
+       deleting them from the INSERT makes every assertion above pass — while
+       every EXISTING database keeps granting them for ever. The seed runs
+       `ON CONFLICT (plan, feature) DO UPDATE`, which corrects rows it names and
+       is silent about rows it stops naming.
+
+       So: put the rows back, the way a real seeded database holds them, then
+       re-apply the whole schema exactly as `npm run db:migrate` does, and check
+       they are gone. This tests the MIGRATION, not the seed. Dropping the
+       DELETE from `schema.sql` fails here and nowhere else.
+    */
+    await db.seed(`
+      INSERT INTO plan_entitlements (plan, feature, limit_value) VALUES
+        ('unlimited', 'api_access',  NULL),
+        ('unlimited', 'white_label', NULL),
+        ('saas_pro',  'api_access',  NULL),
+        ('saas_pro',  'white_label', NULL)
+      ON CONFLICT (plan, feature) DO NOTHING;`);
+
+    await setPlan("unlimited", "active");
+    expect(
+      ent.can(await get(), "api_access"),
+      "the fixture did not reproduce the state production is in"
+    ).toBe(true);
+
+    // The migration, run the way it is run for real.
+    await db.seed(SCHEMA);
+
+    for (const plan of ["unlimited", "saas_pro"]) {
+      await setPlan(plan, "active");
+      const e = await get();
+      for (const feature of ["api_access", "white_label"]) {
+        expect(
+          ent.can(e, feature),
+          `migrating an already-seeded database left ${plan} granting ${feature}`
+        ).toBe(false);
+      }
+    }
+
+    // And the migration did not take anything real with it.
+    await setPlan("saas_pro", "active");
+    const after = await get();
+    expect(after.active).toBe(true);
+    expect(ent.can(after, "crm")).toBe(true);
+    expect(ent.can(after, "saas_mode")).toBe(true);
+    expect(ent.limitOf(after, "sub_accounts")).toBeNull();
+  });
+
+  it("every feature the upgrade prompt names is a feature some plan grants", async () => {
+    /*
+       FEATURE_TIER is a hand-written literal and the seed is the other copy of
+       the same fact; its comment used to claim it was derived from the seed,
+       which was never true of the code. This is the check that comment was
+       promising. Without it, removing a feature from the seed leaves the
+       prompt offering an upgrade to something nobody can buy.
+    */
+    const granted = new Set<string>();
+    for (const plan of ["starter", "unlimited", "saas_pro"]) {
+      await setPlan(plan, "active");
+      for (const f of (await get()).grants.keys()) granted.add(f);
+    }
+    for (const [feature, tier] of Object.entries(ent.FEATURE_TIER)) {
+      expect(granted.has(feature), `FEATURE_TIER offers ${feature} (${tier}), which no plan grants`)
+        .toBe(true);
+    }
   });
 
   it("SaaS Pro adds SaaS mode and rebilling", async () => {
@@ -135,7 +238,7 @@ describe("a plan has to be in force, not merely chosen", () => {
     const e = await get();
     expect(e.active).toBe(true);
     expect(e.inGrace).toBe(true);
-    expect(ent.can(e, "api_access")).toBe(true);
+    expect(ent.limitOf(e, "sub_accounts"), "the plan stopped applying mid-grace").toBeNull();
   });
 
   it("grants nothing once cancelled", async () => {

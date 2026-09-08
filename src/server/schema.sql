@@ -661,8 +661,6 @@ INSERT INTO plan_entitlements (plan, feature, limit_value) VALUES
   ('unlimited', 'contacts',         NULL),
   ('unlimited', 'users',            NULL),
   ('unlimited', 'sub_accounts',     NULL),
-  ('unlimited', 'api_access',       NULL),
-  ('unlimited', 'white_label',      NULL),
 
   -- SaaS Pro, $497/mo
   ('saas_pro',  'crm',              NULL),
@@ -671,11 +669,24 @@ INSERT INTO plan_entitlements (plan, feature, limit_value) VALUES
   ('saas_pro',  'contacts',         NULL),
   ('saas_pro',  'users',            NULL),
   ('saas_pro',  'sub_accounts',     NULL),
-  ('saas_pro',  'api_access',       NULL),
-  ('saas_pro',  'white_label',      NULL),
   ('saas_pro',  'saas_mode',        NULL),
   ('saas_pro',  'rebilling',        NULL)
 ON CONFLICT (plan, feature) DO UPDATE SET limit_value = EXCLUDED.limit_value;
+
+-- Entitlements that were sold and do not exist.
+--
+-- `api_access` promised a public API. There is none: no key issuing, no
+-- authentication for one, no documented surface. `white_label` promised an
+-- agency its own branding, and every screen is hardcoded YourCRM.
+--
+-- Omitting them from the INSERT above would not have been enough. That seed
+-- runs `ON CONFLICT DO UPDATE`, which corrects rows it names and leaves rows
+-- it stops naming exactly where they are — so both would have survived on
+-- every database that has already been seeded, which is all of them. The row
+-- has to be deleted, by name.
+--
+-- They go back when the feature does, priced on what it turns out to cost.
+DELETE FROM plan_entitlements WHERE feature IN ('api_access', 'white_label');
 
 -- ---------------------------------------------------------------------------
 -- Billing events

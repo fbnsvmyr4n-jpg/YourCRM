@@ -317,6 +317,7 @@ let db: TestDb;
 let withSystem: typeof import("../src/server/tenant").withSystem;
 let handleStripeEvent: typeof import("../src/server/billing/webhook").handleStripeEvent;
 let entitlementsFor: typeof import("../src/server/entitlements").entitlementsFor;
+let limitOf: typeof import("../src/server/entitlements").limitOf;
 let signUpNewTenant: typeof import("../src/server/signup").signUpNewTenant;
 let closePool: typeof import("../src/server/db").closePool;
 
@@ -324,7 +325,7 @@ beforeAll(async () => {
   db = await startTestDb();
   ({ withSystem } = await import("../src/server/tenant"));
   ({ handleStripeEvent } = await import("../src/server/billing/webhook"));
-  ({ entitlementsFor } = await import("../src/server/entitlements"));
+  ({ entitlementsFor, limitOf } = await import("../src/server/entitlements"));
   ({ signUpNewTenant } = await import("../src/server/signup"));
   ({ closePool } = await import("../src/server/db"));
 });
@@ -397,7 +398,13 @@ describe("a subscription event moves the agency onto its plan", () => {
     await send(event("customer.subscription.created", subscription()));
     const e = await withSystem((q) => entitlementsFor(q, AGENCY));
     expect(e.active).toBe(true);
-    expect(e.grants.has("api_access"), "the paid plan's features were not granted").toBe(true);
+    /* Asserted on the sub-account cap rather than on a feature flag, because
+       this one is actually enforced somewhere (`sub-accounts.ts` refuses past
+       the limit). It used to check `api_access`, which nothing in the product
+       ever consulted — so the test could have passed on a build where paying
+       changed nothing at all. */
+    expect(e.grants.has("sub_accounts"), "the paid plan's features were not granted").toBe(true);
+    expect(limitOf(e, "sub_accounts"), "Unlimited did not lift the Starter cap of 3").toBeNull();
   });
 
   it("keeps access while a payment is being retried", async () => {

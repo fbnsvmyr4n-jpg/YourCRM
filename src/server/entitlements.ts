@@ -184,12 +184,16 @@ export function explain(e: Entitlements, feature: string): Denial | Allowance {
 /**
  * The cheapest tier that includes each feature, for the upgrade prompt.
  *
- * Derived from the seeded entitlements rather than written twice — a feature
- * that moves between tiers must not leave the prompt naming the old one.
+ * Hand-written, and it has to stay in step with the seed in `schema.sql` by
+ * hand. The comment here used to claim it was "derived from the seeded
+ * entitlements rather than written twice", which was not true of this code at
+ * any point — it is a literal, and the seed is the other copy. A test pins the
+ * two together, which is the part the comment was promising.
+ *
+ * `api_access` and `white_label` are gone from both: neither existed. See the
+ * DELETE in `schema.sql`.
  */
 export const FEATURE_TIER: Record<string, string> = {
-  api_access: "Unlimited",
-  white_label: "Unlimited",
   saas_mode: "SaaS Pro",
   rebilling: "SaaS Pro",
 };
