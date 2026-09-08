@@ -212,6 +212,8 @@ export type ProjectDocument = {
   issuedOn: string | null;
   dueOn: string | null;
   notes: string | null;
+  /** When it left for the client. Only invoices are sent from this screen. */
+  sentAt: string | null;
   lines: DocumentLine[];
   totalCents: number;
 };
@@ -224,6 +226,7 @@ type DocRow = {
   party: string | null;
   issued_on: string | null;
   due_on: string | null;
+  sent_at: Date | null;
   notes: string | null;
   created_at: Date;
 };
@@ -254,7 +257,7 @@ export async function projectDocuments(
   const docs = await q.rows<DocRow>(
     `SELECT id, kind, number, status, party,
             issued_on::text AS issued_on, due_on::text AS due_on,
-            notes, created_at
+            sent_at, notes, created_at
        FROM documents
       WHERE sub_account_id = $1 AND deal_id = $2 AND deleted_at IS NULL
       ORDER BY issued_on DESC NULLS LAST, created_at DESC`,
@@ -299,6 +302,7 @@ export async function projectDocuments(
       issuedOn: day(d.issued_on),
       dueOn: day(d.due_on),
       notes: d.notes,
+      sentAt: d.sent_at ? d.sent_at.toISOString() : null,
       lines: docLines,
       totalCents: docLines.reduce((sum, l) => sum + l.totalCents, 0),
     };

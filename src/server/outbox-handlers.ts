@@ -1,7 +1,8 @@
 import { buildRegistry, type JobOutcome, type OutboxHandler } from "./outbox";
 import { withSystem, withTenant } from "./tenant";
-import { emailConfigured, inviteEmail, quotationEmail, sendEmail } from "./email";
+import { emailConfigured, inviteEmail, invoiceEmail, quotationEmail, sendEmail } from "./email";
 import { findQuote, markQuoteSent } from "./repos/quotes";
+import { findInvoice, markInvoiceSent } from "./repos/invoices";
 import { findUserById } from "./repos/users";
 import { createResetToken } from "./repos/auth";
 import { getCall } from "./repos/calls";
@@ -186,6 +187,83 @@ const callAnalysisHandler: OutboxHandler = {
 };
 
 /* ------------------------------------------------------------------ */
+/* Sending an invoice                                                  */
+/* ------------------------------------------------------------------ */
+
+export const INVOICE_EMAIL = "invoice_email";
+
+/** One job per invoice, so pressing Send twice cannot bill a client twice. */
+export const invoiceEmailKey = (documentId: string) => `${INVOICE_EMAIL}:${documentId}`;
+
+/**
+ * Put an invoice in the client's inbox.
+ *
+ * The same shape as the quotation handler and for the same reasons — it
+ * re-reads the document, refuses one already sent, and passes the job id as
+ * the provider's idempotency key — but the stakes are different enough to say
+ * out loud: this is a demand for money. Sending one twice is not an
+ * embarrassment, it is a client ringing up about a bill they have already
+ * paid.
+ *
+ * There is no separate approval step, and that is a decision rather than an
+ * omission. The approval gate in this product exists because an AI wrote the
+ * figures: a quotation drafted by the agent cannot leave without a named human
+ * saying yes. An invoice raised from a quotation the client ALREADY accepted
+ * carries figures a person approved and a client agreed to — the money has
+ * been through the gate twice. Pressing Send is the human decision, and it is
+ * recorded as one: `sent_at` and the person who pressed it.
+ */
+const invoiceEmailHandler: OutboxHandler = {
+  name: INVOICE_EMAIL,
+  run: async (payload, job): Promise<JobOutcome> => {
+    const documentId = payload.documentId;
+    if (!documentId) return { ok: false, retry: false, error: "No documentId in the job" };
+
+    const invoice = await withTenant(job.ctx, (q) => findInvoice(q, documentId));
+    if (!invoice) return { ok: true, note: "the invoice no longer exists" };
+    if (invoice.sentAt) return { ok: true, note: "already sent" };
+    if (!invoice.partyEmail) {
+      return { ok: false, retry: false, error: `${invoice.number} has no address on file` };
+    }
+    if (!emailConfigured()) {
+      return { ok: false, retry: true, error: "email is not configured for this workspace" };
+    }
+
+    const who = await withSystem(async (sys) => {
+      const row = await sys.one<{ name: string }>(
+        `SELECT name FROM sub_accounts WHERE id = $2 AND agency_id = $1 AND deleted_at IS NULL`,
+        [job.ctx.agencyId, job.ctx.subAccountId]
+      );
+      const sender = await findUserById(sys, job.ctx.userId);
+      return { workspace: row?.name ?? "YourCRM", sentBy: sender?.name ?? "YourCRM" };
+    });
+
+    const sent = await sendEmail({
+      to: invoice.partyEmail,
+      ...invoiceEmail({
+        number: invoice.number,
+        project: invoice.projectTitle,
+        from: who.workspace,
+        sentBy: who.sentBy,
+        dueOn: invoice.dueOn,
+        payTo: invoice.payTo,
+        notes: invoice.notes,
+        lines: invoice.lines,
+        totalCents: invoice.totalCents,
+      }),
+      idempotencyKey: job.id,
+    });
+    if (!sent.sent) {
+      return { ok: false, retry: !sent.permanent, error: sent.reason ?? "the email did not go" };
+    }
+
+    await withTenant(job.ctx, (q) => markInvoiceSent(q, invoice.id));
+    logWrite("send", "invoice", { id: invoice.id, actor: job.ctx.userId });
+    return { ok: true };
+  },
+};
+
+/* ------------------------------------------------------------------ */
 /* Inviting a colleague                                                */
 /* ------------------------------------------------------------------ */
 
@@ -267,5 +345,10 @@ const inviteEmailHandler: OutboxHandler = {
 
 /* ------------------------------------------------------------------ */
 
-export const OUTBOX_HANDLERS = [quoteEmailHandler, callAnalysisHandler, inviteEmailHandler] as const;
+export const OUTBOX_HANDLERS = [
+  quoteEmailHandler,
+  callAnalysisHandler,
+  inviteEmailHandler,
+  invoiceEmailHandler,
+] as const;
 export const OUTBOX_REGISTRY = buildRegistry(OUTBOX_HANDLERS);

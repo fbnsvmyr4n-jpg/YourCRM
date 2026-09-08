@@ -47,6 +47,7 @@ const doc = (
   issuedOn: null,
   dueOn: null,
   notes: null,
+  sentAt: null,
   lines,
   totalCents: lines.reduce((n, l) => n + l.totalCents, 0),
 });

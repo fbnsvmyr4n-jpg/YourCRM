@@ -218,6 +218,85 @@ ${rows}
   return { subject, text, html };
 }
 
+/**
+ * An invoice going to a client.
+ *
+ * The same lines as the quotation they accepted, and deliberately so — an
+ * invoice that restates the agreed figures is one nobody has to reconcile.
+ * What it adds is the two things a quotation has no business carrying: WHEN
+ * the money is due, and HOW to pay it.
+ *
+ * `dueOn` and `payTo` are both optional and both simply omitted when absent,
+ * rather than printed as a blank row or an invented default. An invoice that
+ * shows "Due: —" is worse than one that does not mention it: a client reads a
+ * blank date as "whenever", and inventing thirty days would be this app making
+ * up somebody's payment terms.
+ */
+export function invoiceEmail(invoice: {
+  number: string;
+  project: string;
+  from: string;
+  sentBy: string;
+  dueOn: string | null;
+  payTo: string | null;
+  notes: string | null;
+  lines: { description: string; quantity: number; unitCents: number; totalCents: number }[];
+  totalCents: number;
+}) {
+  const money = (cents: number) =>
+    `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const qty = (n: number) => String(Number(n.toFixed(3)));
+
+  const subject = `Invoice ${invoice.number} — ${invoice.project}`;
+
+  const text = [
+    `Invoice ${invoice.number}`,
+    invoice.project,
+    "",
+    ...invoice.lines.map(
+      (l) => `${l.description}\n  ${qty(l.quantity)} × ${money(l.unitCents)} = ${money(l.totalCents)}`
+    ),
+    "",
+    `Total due: ${money(invoice.totalCents)}`,
+    ...(invoice.dueOn ? [`Payment due by ${invoice.dueOn}`] : []),
+    ...(invoice.payTo ? ["", "Payment details:", invoice.payTo] : []),
+    ...(invoice.notes ? ["", invoice.notes] : []),
+    "",
+    `Sent by ${invoice.sentBy}, ${invoice.from}.`,
+  ].join("\n");
+
+  const rows = invoice.lines
+    .map(
+      (l) => `    <tr>
+      <td style="padding:8px 0;border-bottom:1px solid #e6e9f0">${escapeHtml(l.description)}</td>
+      <td style="padding:8px 0;border-bottom:1px solid #e6e9f0;text-align:right;white-space:nowrap;color:#55617a">${qty(l.quantity)} &times; ${money(l.unitCents)}</td>
+      <td style="padding:8px 0 8px 16px;border-bottom:1px solid #e6e9f0;text-align:right;white-space:nowrap;font-weight:600">${money(l.totalCents)}</td>
+    </tr>`
+    )
+    .join("\n");
+
+  const html = `<div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:560px;margin:0 auto;padding:32px 24px;color:#0b1220">
+  <h1 style="margin:0 0 4px;font-size:20px;font-weight:600">Invoice ${escapeHtml(invoice.number)}</h1>
+  <p style="margin:0 0 24px;color:#55617a">${escapeHtml(invoice.project)}</p>
+  <table style="width:100%;border-collapse:collapse;font-size:14px">
+${rows}
+    <tr>
+      <td style="padding:12px 0;font-weight:600">Total due</td>
+      <td></td>
+      <td style="padding:12px 0 12px 16px;text-align:right;font-weight:700;font-size:16px">${money(invoice.totalCents)}</td>
+    </tr>
+  </table>
+  ${invoice.dueOn ? `<p style="margin:16px 0 0;font-weight:600">Payment due by ${escapeHtml(invoice.dueOn)}</p>` : ""}
+  ${invoice.payTo ? `<p style="margin:20px 0 0;line-height:1.6;color:#55617a;white-space:pre-line"><strong style="color:#0b1220">Payment details</strong><br>${escapeHtml(invoice.payTo)}</p>` : ""}
+  ${invoice.notes ? `<p style="margin:20px 0 0;line-height:1.6;color:#55617a;white-space:pre-line">${escapeHtml(invoice.notes)}</p>` : ""}
+  <p style="margin:28px 0 0;font-size:13px;color:#8a94a8">
+    Sent by ${escapeHtml(invoice.sentBy)}, ${escapeHtml(invoice.from)}.
+  </p>
+</div>`;
+
+  return { subject, text, html };
+}
+
 /** The reset email. Plain and legible — this is a security message, not a newsletter. */
 export function resetEmail(link: string) {
   return {

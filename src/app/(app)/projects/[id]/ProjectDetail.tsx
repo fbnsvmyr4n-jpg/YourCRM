@@ -38,6 +38,8 @@ import { stageMoney } from "@/server/stage-money";
 import {
   addProjectPersonAction,
   createDocumentAction,
+  raiseInvoiceAction,
+  sendInvoiceAction,
   removeProjectPersonAction,
   setDocumentStatusAction,
   updateProjectAction,
@@ -645,14 +647,33 @@ function DocumentsTab({
     undefined
   );
   const [open, openForm, closeForm] = useFormDisclosure(createState, (s) => Boolean(s?.ok));
+  const [raiseState, raise, raising] = useActionState<FormState, FormData>(
+    raiseInvoiceAction,
+    undefined
+  );
+  const [sendState, send, sending] = useActionState<FormState, FormData>(
+    sendInvoiceAction,
+    undefined
+  );
 
   const quotes = documents.filter((d) => d.kind === "quote");
-  const orders = documents.filter((d) => d.kind !== "quote");
+  const orders = documents.filter((d) => d.kind === "purchase_order");
+  /* Its own group. An invoice is money coming IN and a purchase order is money
+     going out; filing them together under "orders" put the two opposite
+     directions of the job's cash in one list. */
+  const invoices = documents.filter((d) => d.kind === "invoice");
+
+  /* Offered only when there is something to bill and nothing billed yet.
+     A button that appears when it cannot work is a button that teaches people
+     to ignore buttons — and one that stays after invoicing is an invitation to
+     bill the same job twice. */
+  const acceptedQuote = quotes.find((d) => d.status === "accepted" || d.status === "paid");
+  const canInvoice = Boolean(acceptedQuote) && invoices.length === 0;
 
   return (
     <Card>
       <CardHeader
-        title="Quotations & orders"
+        title="Quotations, orders & invoices"
         icon={<Receipt className="h-[18px] w-[18px] text-accent" />}
         action={
           !open && (
@@ -670,6 +691,8 @@ function DocumentsTab({
 
       <div className="flex flex-col gap-2 empty:hidden">
         <Banner state={statusState} />
+        <Banner state={raiseState} />
+        <Banner state={sendState} />
         {!open && <Banner state={createState} />}
       </div>
 
@@ -684,14 +707,44 @@ function DocumentsTab({
         />
       )}
 
+      {/* Billing the work, in one press.
+
+          An invoice restates the lines the client already accepted, so raising
+          one is a transition rather than a retype — and a figure re-typed is a
+          figure that can drift between what was sold and what was billed. The
+          offer only appears when there is an accepted quotation and nothing
+          has been billed yet, so it cannot become a way to bill twice. */}
+      {canInvoice && (
+        <form action={raise} className="mb-3">
+          <input type="hidden" name="dealId" value={dealId} />
+          <button
+            type="submit"
+            disabled={raising}
+            className="btn-accent focus-ring flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold disabled:opacity-60"
+          >
+            <Receipt className="h-3.5 w-3.5" />
+            {raising ? "Raising…" : `Raise an invoice from ${acceptedQuote!.number}`}
+          </button>
+        </form>
+      )}
+
       {documents.length === 0 && !open ? (
         <p className="text-xs text-faint">
-          Nothing raised yet. A quotation goes to the client; a purchase order records what you
-          have committed to spend. Both add up from their lines.
+          Nothing raised yet. A quotation goes to the client, a purchase order records what you
+          have committed to spend, and an invoice bills the work once they accept. All three add
+          up from their lines.
         </p>
       ) : (
         <div className="flex flex-col gap-4">
           <DocumentGroup label="Quotations" docs={quotes} onStatus={setStatus} busy={settingStatus} />
+          <DocumentGroup
+            label="Invoices"
+            docs={invoices}
+            onStatus={setStatus}
+            busy={settingStatus}
+            onSend={send}
+            sending={sending}
+          />
           <DocumentGroup label="Purchase orders" docs={orders} onStatus={setStatus} busy={settingStatus} />
         </div>
       )}
@@ -704,11 +757,16 @@ function DocumentGroup({
   docs,
   onStatus,
   busy,
+  onSend,
+  sending,
 }: {
   label: string;
   docs: ProjectDocument[];
   onStatus: (formData: FormData) => void;
   busy: boolean;
+  /** Only invoices can be sent from here, so only they are given this. */
+  onSend?: (formData: FormData) => void;
+  sending?: boolean;
 }) {
   if (docs.length === 0) return null;
   return (
@@ -718,7 +776,14 @@ function DocumentGroup({
       </p>
       <ul className="flex flex-col gap-2">
         {docs.map((d) => (
-          <DocumentRow key={d.id} doc={d} onStatus={onStatus} busy={busy} />
+          <DocumentRow
+            key={d.id}
+            doc={d}
+            onStatus={onStatus}
+            busy={busy}
+            onSend={onSend}
+            sending={sending}
+          />
         ))}
       </ul>
     </section>
@@ -729,10 +794,14 @@ function DocumentRow({
   doc,
   onStatus,
   busy,
+  onSend,
+  sending,
 }: {
   doc: ProjectDocument;
   onStatus: (formData: FormData) => void;
   busy: boolean;
+  onSend?: (formData: FormData) => void;
+  sending?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const tone = DOC_STATUS_TONE[doc.status] ?? DOC_STATUS_TONE.draft;
@@ -783,6 +852,34 @@ function DocumentRow({
             ))}
           </ul>
           {doc.notes && <p className="mt-3 whitespace-pre-line text-xs text-muted">{doc.notes}</p>}
+
+          {/* Sending it.
+
+              Only invoices get this — a quotation leaves through the approval
+              flow in Chat, and a purchase order is something you place with a
+              supplier yourself. Pressing this IS the decision: there is no
+              second approval, because the figures were approved by a person
+              and accepted by the client before the invoice existed.
+
+              It disappears once the invoice has gone, rather than staying and
+              relying on the handler to refuse. A live button that does nothing
+              is how somebody ends up pressing it three times wondering why. */}
+          {onSend && !doc.sentAt && (
+            <form action={onSend} className="mt-3">
+              <input type="hidden" name="documentId" value={doc.id} />
+              <button
+                type="submit"
+                disabled={sending}
+                className="btn-accent focus-ring flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold disabled:opacity-60"
+              >
+                <Mail className="h-3.5 w-3.5" />
+                {sending ? "Sending…" : `Send ${doc.number} to ${doc.party ?? "the client"}`}
+              </button>
+            </form>
+          )}
+          {onSend && doc.sentAt && (
+            <p className="mt-3 text-xs text-faint">Sent {readableDay(doc.sentAt.slice(0, 10))}.</p>
+          )}
 
           {/* A quotation waiting on an approval is not moved along from here:
               the decision belongs where the lines and the recipient are, and a
@@ -855,6 +952,7 @@ function DocumentForm({
           <select name="kind" className="field-input" defaultValue="quote">
             <option value="quote">Quotation</option>
             <option value="purchase_order">Purchase order</option>
+            <option value="invoice">Invoice</option>
           </select>
         </label>
         <Field label="Number" name="number" placeholder="Q-1042" required />

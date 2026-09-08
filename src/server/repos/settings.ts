@@ -28,6 +28,8 @@ export type Settings = {
    * happened to handle the request.
    */
   timeZone: string;
+  /** How clients are told to pay, printed at the foot of every invoice. */
+  invoicePayTo: string | null;
   updatedAt: string | null;
 };
 
@@ -45,6 +47,9 @@ export const DEFAULT_SETTINGS: Settings = {
   // UTC until somebody says otherwise. Guessing from the server's clock is
   // exactly the mistake this field exists to prevent.
   timeZone: "UTC",
+  /* Null, never a placeholder. An invoice printing "Bank: your bank here" is
+     worse than one that omits payment details entirely. */
+  invoicePayTo: null,
   updatedAt: null,
 };
 
@@ -52,6 +57,7 @@ type Row = {
   monthly_target_cents: string;
   weekly_capacity: number;
   time_zone: string;
+  invoice_pay_to: string | null;
   updated_at: Date;
 };
 
@@ -70,6 +76,7 @@ function toSettings(r: Row): Settings {
     monthlyTargetCents: Number(r.monthly_target_cents),
     weeklyCapacity: r.weekly_capacity,
     timeZone: r.time_zone,
+    invoicePayTo: r.invoice_pay_to,
     updatedAt: r.updated_at.toISOString(),
   };
 }
@@ -77,7 +84,7 @@ function toSettings(r: Row): Settings {
 /** Never throws for a sub-account that has not saved anything; returns defaults. */
 export async function getSettings(q: TenantQuery): Promise<Settings> {
   const row = await q.one<Row>(
-    `SELECT monthly_target_cents, weekly_capacity, time_zone, updated_at
+    `SELECT monthly_target_cents, weekly_capacity, time_zone, invoice_pay_to, updated_at
      FROM settings WHERE sub_account_id = $1`,
     [q.ctx.subAccountId]
   );
@@ -86,7 +93,7 @@ export async function getSettings(q: TenantQuery): Promise<Settings> {
 
 export async function updateSettings(
   q: TenantQuery,
-  patch: { monthlyTargetCents?: number; weeklyCapacity?: number; timeZone?: string }
+  patch: { monthlyTargetCents?: number; weeklyCapacity?: number; timeZone?: string; invoicePayTo?: string | null }
 ): Promise<Settings> {
   if (patch.monthlyTargetCents !== undefined) {
     if (!Number.isSafeInteger(patch.monthlyTargetCents) || patch.monthlyTargetCents < 0) {
@@ -108,15 +115,27 @@ export async function updateSettings(
   // Upsert: the first save for a sub-account must not require a separate
   // "create settings" step that something has to remember to run.
   const row = await q.one<Row>(
-    `INSERT INTO settings (sub_account_id, monthly_target_cents, weekly_capacity, time_zone)
-     VALUES ($1, COALESCE($2, 0), COALESCE($3, ${DEFAULT_SETTINGS.weeklyCapacity}), COALESCE($4, 'UTC'))
+    `INSERT INTO settings (sub_account_id, monthly_target_cents, weekly_capacity, time_zone, invoice_pay_to)
+     VALUES ($1, COALESCE($2, 0), COALESCE($3, ${DEFAULT_SETTINGS.weeklyCapacity}), COALESCE($4, 'UTC'), $5)
      ON CONFLICT (sub_account_id) DO UPDATE SET
        monthly_target_cents = COALESCE($2, settings.monthly_target_cents),
        weekly_capacity      = COALESCE($3, settings.weekly_capacity),
        time_zone            = COALESCE($4, settings.time_zone),
+       -- $6 says whether the caller mentioned it at all, so an empty box
+       -- CLEARS the details rather than being mistaken for "leave as they
+       -- were", which is what COALESCE alone would do and would make removing
+       -- bank details impossible.
+       invoice_pay_to       = CASE WHEN $6::boolean THEN $5 ELSE settings.invoice_pay_to END,
        updated_at           = now()
-     RETURNING monthly_target_cents, weekly_capacity, time_zone, updated_at`,
-    [q.ctx.subAccountId, patch.monthlyTargetCents ?? null, patch.weeklyCapacity ?? null, patch.timeZone ?? null]
+     RETURNING monthly_target_cents, weekly_capacity, time_zone, invoice_pay_to, updated_at`,
+    [
+      q.ctx.subAccountId,
+      patch.monthlyTargetCents ?? null,
+      patch.weeklyCapacity ?? null,
+      patch.timeZone ?? null,
+      patch.invoicePayTo ?? null,
+      patch.invoicePayTo !== undefined,
+    ]
   );
   if (!row) throw new Error("Settings were not saved.");
   return toSettings(row);

@@ -3,7 +3,7 @@
 import { logWrite } from "@/server/log";
 import { cascade } from "@/server/repos/tasks";
 import { revalidateApp } from "@/server/revalidate";
-import { withCurrentTenant } from "@/server/tenant-session";
+import { requireTenant, withCurrentTenant } from "@/server/tenant-session";
 import { count, decimal, id as validId, multiline, pick, text } from "@/server/validate";
 
 /**
@@ -563,4 +563,91 @@ export async function fileLineAction(_prev: FormState, formData: FormData): Prom
     revalidateApp();
     return { ok: taskId ? "Filed against that stage." : "Taken off the stage." };
   });
+}
+
+/**
+ * Raise an invoice for work the client has agreed to.
+ *
+ * Invoicing has been in the data model since documents were built — the kind
+ * is allowed, `paid` is a status, the id prefix exists — and none of it was
+ * reachable from the product. This is the transition the schema's own note
+ * promised.
+ */
+export async function raiseInvoiceAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  return withCurrentTenant(async (q) => {
+    const dealId = validId(formData.get("dealId"));
+    if (!dealId) return { error: "That project could not be identified." };
+
+    const { raiseInvoiceFromQuote } = await import("@/server/invoice-from-quote");
+    const result = await raiseInvoiceFromQuote(q, dealId);
+    if (result.error) return { error: result.error };
+
+    logWrite("create", "invoice", { id: result.invoiceId, actor: q.ctx.userId });
+    revalidateApp();
+    return {
+      ok: `${result.number} raised from ${result.fromQuote}, same lines and same figures. Check it, then send it.`,
+    };
+  });
+}
+
+/**
+ * Send an invoice to the client.
+ *
+ * Queued rather than sent inline, like a quotation: a demand for payment that
+ * vanishes because a mail server hiccuped is worse than one that arrives late.
+ * The job is deduplicated per invoice, so pressing Send twice cannot bill a
+ * client twice.
+ *
+ * Pressing this IS the human decision — there is no separate approval step,
+ * because the approval gate in this product exists for figures an AI wrote,
+ * and these were approved by a person and accepted by the client already.
+ */
+export async function sendInvoiceAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  const ctx = await requireTenant();
+  const documentId = validId(formData.get("documentId"));
+  if (!documentId) return { error: "That invoice could not be identified." };
+
+  const { findInvoice } = await import("@/server/repos/invoices");
+  const { INVOICE_EMAIL, invoiceEmailKey, OUTBOX_REGISTRY } = await import("@/server/outbox-handlers");
+  const { drain, queueJob } = await import("@/server/outbox");
+  const { findJob } = await import("@/server/repos/outbox");
+
+  const refusal = await withCurrentTenant(async (q) => {
+    const invoice = await findInvoice(q, documentId);
+    if (!invoice) return "That invoice no longer exists.";
+    if (invoice.sentAt) return `${invoice.number} has already been sent.`;
+    /* Said here as well as in the handler, because both need somebody to go and
+       change something before any amount of retrying can help. */
+    if (!invoice.partyEmail) {
+      return `${invoice.number} has no email address for ${invoice.party ?? "that client"}. Add one to their contact and send it again.`;
+    }
+    await queueJob(q, OUTBOX_REGISTRY, {
+      handler: INVOICE_EMAIL,
+      payload: { documentId },
+      dedupeKey: invoiceEmailKey(documentId),
+    });
+    return null;
+  });
+  if (refusal) return { error: refusal };
+
+  /* Drained here so the common case is done before the user looks away; the
+     queue is what guarantees it happens at all. */
+  await drain(ctx, OUTBOX_REGISTRY, 5).catch(() => {});
+
+  const after = await withCurrentTenant(async (q) => ({
+    invoice: await findInvoice(q, documentId),
+    job: await findJob(q, INVOICE_EMAIL, invoiceEmailKey(documentId)),
+  }));
+
+  if (after.invoice?.sentAt) {
+    return { ok: `${after.invoice.number} sent to ${after.invoice.partyEmail}.` };
+  }
+  if (after.job?.status === "dead") {
+    return {
+      error: `${after.invoice?.number ?? "That invoice"} could not be sent: ${after.job.lastError ?? "unknown error"}`,
+    };
+  }
+  return {
+    ok: `${after.invoice?.number ?? "The invoice"} is queued to send. It hasn't gone out yet — we'll keep trying, and it will show in your notifications if it cannot be sent.`,
+  };
 }

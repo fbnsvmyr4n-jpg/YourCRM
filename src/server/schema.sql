@@ -1936,3 +1936,23 @@ DROP TRIGGER IF EXISTS document_lines_task_in_project ON document_lines;
 CREATE TRIGGER document_lines_task_in_project
   BEFORE INSERT OR UPDATE OF project_task_id, document_id, sub_account_id ON document_lines
   FOR EACH ROW EXECUTE FUNCTION assert_line_task_in_project();
+
+-- ---------------------------------------------------------------------------
+-- How a client is meant to pay.
+--
+-- An invoice without payment details is a demand with no way to satisfy it —
+-- the recipient has to ring up and ask, which is exactly the friction an
+-- invoice exists to remove. Bank details, a reference format, terms: whatever
+-- this business actually puts at the foot of theirs.
+--
+-- Free text on purpose. Every country and every bank names these fields
+-- differently — sort code, routing number, IBAN, branch code — and a structured
+-- form would either be wrong for most of the world or so general that it is a
+-- text box with extra steps. It is printed as typed, so it is also the one
+-- place a business can put its VAT number or its terms.
+--
+-- On `settings`, not on the document: it is the same for every invoice this
+-- workspace raises, and copying it onto each one would mean changing bank
+-- accounts required editing history.
+-- ---------------------------------------------------------------------------
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS invoice_pay_to TEXT;

@@ -1,6 +1,6 @@
 import { listCalls } from "./repos/calls";
 import { deadJobs } from "./repos/outbox";
-import { CALL_ANALYSIS, INVITE_EMAIL, QUOTE_EMAIL } from "./outbox-handlers";
+import { CALL_ANALYSIS, INVITE_EMAIL, INVOICE_EMAIL, QUOTE_EMAIL } from "./outbox-handlers";
 import { listDeals } from "./repos/deals";
 import { listMeetings } from "./repos/meetings";
 import { listContacts } from "./repos/contacts";
@@ -62,6 +62,11 @@ const STUCK_META: Record<string, { noun: (n: number) => string; verb: string; hr
     noun: (n) => (n === 1 ? "call" : "calls"),
     verb: "could not be read",
     href: "/voice-agents",
+  },
+  [INVOICE_EMAIL]: {
+    noun: (n) => (n === 1 ? "invoice" : "invoices"),
+    verb: "could not be sent",
+    href: "/projects",
   },
   [INVITE_EMAIL]: {
     noun: (n) => (n === 1 ? "invitation" : "invitations"),
