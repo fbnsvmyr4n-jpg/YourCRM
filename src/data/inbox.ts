@@ -1,4 +1,4 @@
-import type { Channel } from "@/server/repos/inbox";
+import type { Channel, Delivery } from "@/server/repos/inbox";
 import type { AvatarColor } from "@/components/ui/Avatar";
 
 export type MsgFolder = "unread" | "assigned" | "sent" | "received" | "trash";
@@ -39,6 +39,17 @@ export type Message = {
   dealId: string | null;
   /** How it arrived — email, WhatsApp or SMS. Not the sender's lead source. */
   channel: Channel;
+  /**
+   * For an outgoing message, whether it actually left. Null on anything
+   * inbound, where the question does not apply.
+   *
+   * `logged` is the honest state for a message this product recorded but did
+   * not transmit: a WhatsApp sent from somebody's own phone, or — for every
+   * row written before the composer could send — a message that only ever
+   * looked sent.
+   */
+  delivery: Delivery | null;
+  deliveryError: string | null;
   /**
    * The contact this message belongs to, by id.
    *

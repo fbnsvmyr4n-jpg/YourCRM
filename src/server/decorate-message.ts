@@ -45,6 +45,8 @@ export function decorateMessage(m: MessageRecord, people: MessagePerson[]): Mess
     threadId: m.threadId,
     dealId: m.dealId,
     channel: m.channel,
+    delivery: m.delivery,
+    deliveryError: m.deliveryError,
     initials: ((parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "")).toUpperCase() || "?",
     color: paletteFor(m.id),
     name,

@@ -61,6 +61,8 @@ export const EXPECTED_TABLES = [
 export const EXPECTED_COLUMNS: ReadonlyArray<[string, string]> = [
   ["document_lines", "project_task_id"],
   ["settings", "invoice_pay_to"],
+  ["messages", "delivery"],
+  ["messages", "delivery_error"],
   ["agencies", "billing_synced_at"],
   ["agencies", "referral_code"],
   ["agencies", "referred_by_agency_id"],

@@ -1956,3 +1956,42 @@ CREATE TRIGGER document_lines_task_in_project
 -- accounts required editing history.
 -- ---------------------------------------------------------------------------
 ALTER TABLE settings ADD COLUMN IF NOT EXISTS invoice_pay_to TEXT;
+
+-- ---------------------------------------------------------------------------
+-- Whether an outgoing message was actually transmitted.
+--
+-- The Inbox composer wrote a row with `direction = 'sent'` and transmitted
+-- nothing. There was no mail provider anywhere in the feature: somebody typed
+-- a message, pressed send, watched it appear in Sent, and the recipient
+-- received nothing. That is the worst thing this product has done, because
+-- every Call / Text / Email control across Contacts and Projects funnels into
+-- that composer.
+--
+-- `direction` says which way a message went. This says whether WE sent it, and
+-- the two are not the same question:
+--
+--   NULL      inbound — the question does not apply
+--   logged    recorded, never transmitted by us. A phone call, a WhatsApp sent
+--             from somebody's own handset, or anything written before this
+--             column existed.
+--   queued    handed to the outbox and not yet away
+--   sent      the provider accepted it
+--   failed    it was tried and given up on; `delivery_error` says why
+--
+-- EVERY EXISTING OUTBOUND ROW BECOMES `logged`, because that is the truth
+-- about them: they were records of correspondence, not correspondence. Marking
+-- them `sent` would be the same lie in a new column.
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS delivery       TEXT;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS delivery_error TEXT;
+
+ALTER TABLE messages DROP CONSTRAINT IF EXISTS messages_delivery_known;
+ALTER TABLE messages ADD CONSTRAINT messages_delivery_known
+  CHECK (delivery IS NULL OR delivery IN ('logged', 'queued', 'sent', 'failed'));
+
+UPDATE messages SET delivery = 'logged'
+ WHERE direction = 'sent' AND delivery IS NULL;
+
+CREATE INDEX IF NOT EXISTS messages_delivery_idx
+  ON messages (sub_account_id, delivery) WHERE delivery IS NOT NULL;

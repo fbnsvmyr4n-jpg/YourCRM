@@ -210,7 +210,8 @@ describe("emailing an approved quotation", () => {
 
     expect(await outbox.drain(CTX, handlers.OUTBOX_REGISTRY)).toMatchObject({ dead: 1 });
     const dead = await inA((q) => repo.deadJobs(q));
-    expect(dead[0].lastError).toMatch(/422/);
+    expect(dead[0].lastError).toMatch(/address was refused/i);
+    expect(dead[0].lastError).not.toMatch(/[{}"]/);
   });
 
   it("waits out a provider that is down", async () => {

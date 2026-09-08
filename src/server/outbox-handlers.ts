@@ -1,8 +1,17 @@
-import { buildRegistry, type JobOutcome, type OutboxHandler } from "./outbox";
+import { buildRegistry, queueJob, type JobOutcome, type OutboxHandler } from "./outbox";
+import type { TenantQuery } from "./tenant";
 import { withSystem, withTenant } from "./tenant";
-import { emailConfigured, inviteEmail, invoiceEmail, quotationEmail, sendEmail } from "./email";
+import {
+  emailConfigured,
+  inviteEmail,
+  invoiceEmail,
+  messageEmail,
+  quotationEmail,
+  sendEmail,
+} from "./email";
 import { findQuote, markQuoteSent } from "./repos/quotes";
 import { findInvoice, markInvoiceSent } from "./repos/invoices";
+import { canSendOn, findOutgoing, setDelivery } from "./repos/inbox";
 import { findUserById } from "./repos/users";
 import { createResetToken } from "./repos/auth";
 import { getCall } from "./repos/calls";
@@ -264,6 +273,111 @@ const invoiceEmailHandler: OutboxHandler = {
 };
 
 /* ------------------------------------------------------------------ */
+/* Sending a message somebody wrote in the Inbox                       */
+/* ------------------------------------------------------------------ */
+
+export const MESSAGE_EMAIL = "message_email";
+
+/** One job per message. A double-pressed Send is one email. */
+export const messageEmailKey = (messageId: string) => `${MESSAGE_EMAIL}:${messageId}`;
+
+/**
+ * Queue a written message for sending, and say on the message that it is queued.
+ *
+ * Both halves live here because a caller that does one without the other
+ * produces a wrong screen either way round: a job with no `queued` on the
+ * message leaves the reader told "recorded here only" about something that is
+ * on its way out, and a `queued` with no job is a message that will never
+ * move. They are one act, so there is one place to perform it.
+ *
+ * Returns the job id, which is also what the provider receives as its
+ * idempotency key.
+ */
+export async function queueMessageEmail(q: TenantQuery, messageId: string): Promise<string> {
+  await setDelivery(q, messageId, "queued");
+  return queueJob(q, OUTBOX_REGISTRY, {
+    handler: MESSAGE_EMAIL,
+    payload: { messageId },
+    dedupeKey: messageEmailKey(messageId),
+  });
+}
+
+/**
+ * Actually send what somebody wrote in the Inbox.
+ *
+ * The composer used to write a row saying `direction = 'sent'` and transmit
+ * nothing — no provider, no queue, no send of any kind anywhere in the
+ * feature. Somebody typed a message, pressed send, watched it appear in Sent,
+ * and the recipient received nothing. Every Call / Text / Email control across
+ * Contacts and Projects leads here, so it was the largest untruth in the
+ * product.
+ *
+ * The message's own `delivery` column now carries the answer, and this handler
+ * is what moves it from `queued` to `sent` or `failed`. Nothing marks itself
+ * sent on the way in.
+ */
+const messageEmailHandler: OutboxHandler = {
+  name: MESSAGE_EMAIL,
+  run: async (payload, job): Promise<JobOutcome> => {
+    const messageId = payload.messageId;
+    if (!messageId) return { ok: false, retry: false, error: "No messageId in the job" };
+
+    const message = await withTenant(job.ctx, (q) => findOutgoing(q, messageId));
+    if (!message) return { ok: true, note: "the message no longer exists" };
+    if (message.delivery === "sent") return { ok: true, note: "already sent" };
+
+    const fail = async (reason: string, retry: boolean): Promise<JobOutcome> => {
+      /* The ledger is corrected whichever way this goes. A message left saying
+         `queued` after we stopped trying would be the same lie in a quieter
+         font. */
+      if (!retry) await withTenant(job.ctx, (q) => setDelivery(q, messageId, "failed", reason));
+      return { ok: false, retry, error: reason };
+    };
+
+    if (!canSendOn(message.channel)) {
+      /* WhatsApp and SMS have no sending path in this product. Such a message
+         should never have been queued, so this is a bug rather than a
+         condition to wait out. */
+      return fail(`${message.channel} cannot be sent from here`, false);
+    }
+    if (!message.toEmail) {
+      return fail("that contact has no email address on file", false);
+    }
+    if (!emailConfigured()) {
+      /* Transient: a workspace that switches email on this afternoon should
+         find its queued messages go out rather than find them dead. */
+      return { ok: false, retry: true, error: "email is not configured for this workspace" };
+    }
+
+    const who = await withSystem(async (sys) => {
+      const row = await sys.one<{ name: string }>(
+        `SELECT name FROM sub_accounts WHERE id = $2 AND agency_id = $1 AND deleted_at IS NULL`,
+        [job.ctx.agencyId, job.ctx.subAccountId]
+      );
+      const sender = await findUserById(sys, job.ctx.userId);
+      return { workspace: row?.name ?? "YourCRM", fromName: sender?.name ?? "YourCRM" };
+    });
+
+    const sent = await sendEmail({
+      to: message.toEmail,
+      ...messageEmail({
+        subject: message.subject,
+        body: message.body,
+        fromName: who.fromName,
+        workspace: who.workspace,
+      }),
+      idempotencyKey: job.id,
+    });
+    if (!sent.sent) {
+      return fail(sent.reason ?? "the email did not go", !sent.permanent);
+    }
+
+    await withTenant(job.ctx, (q) => setDelivery(q, messageId, "sent", null));
+    return { ok: true };
+  },
+};
+
+/* ------------------------------------------------------------------ */
 /* Inviting a colleague                                                */
 /* ------------------------------------------------------------------ */
 
@@ -350,5 +464,6 @@ export const OUTBOX_HANDLERS = [
   callAnalysisHandler,
   inviteEmailHandler,
   invoiceEmailHandler,
+  messageEmailHandler,
 ] as const;
 export const OUTBOX_REGISTRY = buildRegistry(OUTBOX_HANDLERS);

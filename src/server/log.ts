@@ -107,3 +107,18 @@ export function logWrite(
 export function logDenied(surface: string, reason: string): void {
   emit("warn", "access.denied", { surface, reason });
 }
+
+/**
+ * Something outside us refused or broke, in its own words.
+ *
+ * The person who wrote the message gets a sentence they can act on; whoever
+ * has to diagnose it needs the provider's actual reply, and that is this. It
+ * exists because moving the raw text off the screen would otherwise have
+ * thrown it away — a readable screen bought with a blind server is not a
+ * trade worth making.
+ *
+ * `detail` is a provider's error text, never a record's contents.
+ */
+export function logFailure(surface: string, detail: string): void {
+  emit("warn", "external.failed", { surface, detail });
+}

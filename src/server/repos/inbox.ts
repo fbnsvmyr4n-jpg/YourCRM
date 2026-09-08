@@ -34,6 +34,34 @@ export type Direction = (typeof DIRECTIONS)[number];
 export const CHANNELS = ["email", "whatsapp", "sms"] as const;
 export type Channel = (typeof CHANNELS)[number];
 
+/**
+ * Which channels this product can actually transmit on.
+ *
+ * Email goes through the mail provider. WhatsApp and SMS have no sending path
+ * at all — there is no messaging provider wired for either — so a message on
+ * those channels is a RECORD of something somebody sent from their own phone,
+ * and the screen says so rather than implying we sent it.
+ *
+ * Add a channel here only when something can genuinely put a message on the
+ * wire. That is the whole reason this list is separate from `CHANNELS`.
+ */
+export const SENDABLE_CHANNELS: readonly Channel[] = ["email"];
+
+export function canSendOn(channel: Channel): boolean {
+  return SENDABLE_CHANNELS.includes(channel);
+}
+
+/**
+ * Whether WE transmitted an outgoing message, which is a different question
+ * from which way it went.
+ *
+ * `logged` is the honest state for a message nobody sent from here: a phone
+ * call, a WhatsApp from somebody's handset, or anything written before the
+ * composer could send.
+ */
+export const DELIVERY_STATES = ["logged", "queued", "sent", "failed"] as const;
+export type Delivery = (typeof DELIVERY_STATES)[number];
+
 export type MessageRecord = {
   id: string;
   contactId: string | null;
@@ -56,6 +84,13 @@ export type MessageRecord = {
    * the contact and this stays on the message.
    */
   channel: Channel;
+  /**
+   * Whether this actually went, for an outgoing message. Null on anything
+   * inbound, where the question does not apply.
+   */
+  delivery: Delivery | null;
+  /** Why it did not go, when it did not. */
+  deliveryError: string | null;
   direction: Direction;
   subject: string;
   body: string;
@@ -83,8 +118,16 @@ export type NewMessage = {
   threadId?: string | null;
   /** The project it belongs to. Inherited by a reply from what it answers. */
   dealId?: string | null;
-  /** Defaults to email, which is what this app's composer sends. */
+  /** Defaults to email, the one channel this product can transmit on. */
   channel?: Channel;
+  /**
+   * Whether we transmitted it. Omit on anything inbound.
+   *
+   * There is no default for outbound on purpose: a caller creating a sent
+   * message has to say whether it went, which is exactly the decision that was
+   * missing when the composer recorded sends nobody made.
+   */
+  delivery?: Delivery | null;
   sentAt?: string | Date;
   /** Only set when a human chooses one; leave undefined to let the classifier decide. */
   category?: MsgCategory | null;
@@ -103,11 +146,14 @@ type Row = {
   category: MsgCategory | null;
   unread: boolean;
   sent_at: Date;
+  delivery: Delivery | null;
+  delivery_error: string | null;
   deleted_at: Date | null;
 };
 
 const COLUMNS = `m.id, m.contact_id, m.thread_id, m.deal_id, m.channel, m.direction,
-                 m.subject, m.body, m.category, m.unread, m.sent_at, m.deleted_at`;
+                 m.subject, m.body, m.category, m.unread, m.sent_at, m.delivery,
+                 m.delivery_error, m.deleted_at`;
 
 function toRecord(r: Row): MessageRecord {
   // The classifier takes paragraphs, which is how the body was modelled before
@@ -120,6 +166,8 @@ function toRecord(r: Row): MessageRecord {
     threadId: r.thread_id,
     dealId: r.deal_id,
     channel: r.channel,
+    delivery: r.delivery,
+    deliveryError: r.delivery_error,
     direction: r.direction,
     subject: r.subject,
     body: r.body,
@@ -199,9 +247,9 @@ export async function createMessage(q: TenantQuery, input: NewMessage): Promise<
     `WITH inserted AS (
        INSERT INTO messages
          (id, sub_account_id, contact_id, thread_id, deal_id, channel, direction,
-          subject, body, category, unread, sent_at)
+          subject, body, category, unread, sent_at, delivery)
        VALUES ($2, $1, $3, COALESCE($10, 'th-' || $2), $11, COALESCE($12, 'email'),
-               $4, $5, $6, $7, $8, COALESCE($9, now()))
+               $4, $5, $6, $7, $8, COALESCE($9, now()), $13)
        RETURNING *
      )
      SELECT ${COLUMNS} FROM inserted m WHERE m.sub_account_id = $1`,
@@ -220,6 +268,9 @@ export async function createMessage(q: TenantQuery, input: NewMessage): Promise<
       input.threadId ?? null,
       input.dealId ?? null,
       input.channel ?? null,
+      /* Inbound messages carry no delivery state — we did not send them, so
+         the question does not apply and NULL says exactly that. */
+      input.direction === "sent" ? (input.delivery ?? "logged") : null,
     ]
   );
   if (!row) throw new Error("Message was not created.");
@@ -414,4 +465,81 @@ export async function projectOptions(q: TenantQuery): Promise<ProjectOption[]> {
     companyId: r.company_id,
     companyName: r.company_name,
   }));
+}
+
+/**
+ * One outgoing message, with everything needed to actually send it.
+ *
+ * The recipient's address comes from the CONTACT, never from a copy stored on
+ * the message: an address frozen at compose time goes stale the first time
+ * somebody corrects an email, and a message nobody receives is worse than one
+ * never written.
+ */
+export type Outgoing = {
+  id: string;
+  channel: Channel;
+  subject: string;
+  body: string;
+  delivery: Delivery | null;
+  deliveryError: string | null;
+  toEmail: string | null;
+  toName: string | null;
+};
+
+export async function findOutgoing(q: TenantQuery, messageId: string): Promise<Outgoing | null> {
+  const row = await q.one<{
+    id: string;
+    channel: Channel;
+    subject: string;
+    body: string;
+    delivery: Delivery | null;
+    delivery_error: string | null;
+    to_email: string | null;
+    to_name: string | null;
+  }>(
+    `SELECT m.id, m.channel, m.subject, m.body, m.delivery, m.delivery_error,
+            c.email AS to_email,
+            NULLIF(TRIM(CONCAT(c.first_name, ' ', c.last_name)), '') AS to_name
+       FROM messages m
+       LEFT JOIN contacts c
+              ON c.id = m.contact_id AND c.sub_account_id = m.sub_account_id
+             AND c.deleted_at IS NULL
+      WHERE m.sub_account_id = $1 AND m.id = $2
+        AND m.direction = 'sent' AND m.deleted_at IS NULL`,
+    [q.ctx.subAccountId, messageId]
+  );
+  if (!row) return null;
+  return {
+    id: row.id,
+    channel: row.channel,
+    subject: row.subject,
+    body: row.body,
+    delivery: row.delivery,
+    deliveryError: row.delivery_error,
+    toEmail: row.to_email,
+    toName: row.to_name,
+  };
+}
+
+/**
+ * Record what became of an outgoing message.
+ *
+ * `sent` is guarded on not already being sent, so two deliveries arriving
+ * together record one — the queue promises at-least-once, and the ledger must
+ * not show a message twice because of it.
+ */
+export async function setDelivery(
+  q: TenantQuery,
+  messageId: string,
+  delivery: Delivery,
+  error?: string | null
+): Promise<void> {
+  await q.rows(
+    `UPDATE messages
+        SET delivery = $3,
+            delivery_error = $4
+      WHERE sub_account_id = $1 AND id = $2 AND direction = 'sent'
+        AND delivery IS DISTINCT FROM 'sent'`,
+    [q.ctx.subAccountId, messageId, delivery, error?.slice(0, 500) ?? null]
+  );
 }

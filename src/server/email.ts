@@ -1,3 +1,5 @@
+import { logFailure } from "./log";
+
 /**
  * Outbound email.
  *
@@ -20,7 +22,52 @@
  * abandon a job turns on exactly this — so the distinction is made here, where
  * the status code is.
  */
-export type SendResult = { sent: boolean; reason?: string; permanent?: boolean };
+export type SendResult = {
+  sent: boolean;
+  /** A sentence for the person who wrote the message. See `explainFailure`. */
+  reason?: string;
+  /** The provider's own words, for the log. Never put in front of anybody. */
+  detail?: string;
+  permanent?: boolean;
+};
+
+/**
+ * What to tell the person whose message did not go.
+ *
+ * The first version put the provider's JSON on the screen, and the Inbox duly
+ * showed a client-facing failure as `Resend returned 403 {"statusCode":403,
+ * "name":"validation_error","message":"You can only send testing emails to
+ * your own email address (…). To send emails to other recipients, please veri`
+ * — cut off mid-word, naming a vendor the user has never heard of, and not
+ * saying the one thing they need to know, which is whether this is their fault
+ * and what fixes it.
+ *
+ * The raw text is kept, in `detail`, for the log. This is the version a person
+ * reads.
+ */
+function explainFailure(status: number, detail: string): string {
+  const d = detail.toLowerCase();
+
+  if (status === 403 && d.includes("your own email address")) {
+    return "sending is in test mode until this workspace's email domain is verified — for now it can only email the account owner";
+  }
+  if (status === 401 || status === 403) {
+    return "the email service rejected this workspace's credentials — check the email settings";
+  }
+  if (status === 422 && (d.includes("`to`") || d.includes("invalid_to") || d.includes("recipient"))) {
+    return "the recipient's address was refused as invalid — check the email address on that contact";
+  }
+  if (status === 422 && d.includes("from")) {
+    return "the sending address was refused — the workspace's email domain is not verified yet";
+  }
+  if (status === 413 || d.includes("too large")) return "the message was too large to send";
+  if (status === 429) return "the email service is rate limiting us — it will go shortly";
+  if (status >= 500) return "the email service is having trouble — it will be tried again";
+
+  /* Unknown, so say what is true and no more: it was refused, we do not know
+     why, and here is the code somebody can quote when they ask. */
+  return `the email service refused it (error ${status})`;
+}
 
 export function emailConfigured(): boolean {
   return Boolean(process.env.RESEND_API_KEY?.trim());
@@ -54,7 +101,11 @@ export async function sendEmail(opts: {
         `\n[email:not-configured] would send to ${opts.to}\n  ${opts.subject}\n  ${opts.text}\n`
       );
     }
-    return { sent: false, reason: "RESEND_API_KEY is not set" };
+    return {
+      sent: false,
+      reason: "email is not set up for this workspace yet",
+      detail: "RESEND_API_KEY is not set",
+    };
   }
 
   try {
@@ -80,9 +131,12 @@ export async function sendEmail(opts: {
 
     if (!res.ok) {
       const detail = await res.text().catch(() => "");
+      const raw = `Resend returned ${res.status} ${detail.slice(0, 200)}`;
+      logFailure("email", raw);
       return {
         sent: false,
-        reason: `Resend returned ${res.status} ${detail.slice(0, 200)}`,
+        reason: explainFailure(res.status, detail),
+        detail: raw,
         /* A rejected request — a malformed address, an unverified sender —
            will be rejected identically for ever. The two exceptions are the
            ones that describe a moment rather than the request: a timeout and
@@ -95,7 +149,13 @@ export async function sendEmail(opts: {
   } catch (err) {
     /* A thrown fetch is a network fault or our own 10s timeout — never a
        verdict on the message. Always worth another go. */
-    return { sent: false, reason: err instanceof Error ? err.message : String(err) };
+    const raw = err instanceof Error ? err.message : String(err);
+    logFailure("email", raw);
+    return {
+      sent: false,
+      reason: "we could not reach the email service — it will be tried again",
+      detail: raw,
+    };
   }
 }
 
@@ -291,6 +351,39 @@ ${rows}
   ${invoice.notes ? `<p style="margin:20px 0 0;line-height:1.6;color:#55617a;white-space:pre-line">${escapeHtml(invoice.notes)}</p>` : ""}
   <p style="margin:28px 0 0;font-size:13px;color:#8a94a8">
     Sent by ${escapeHtml(invoice.sentBy)}, ${escapeHtml(invoice.from)}.
+  </p>
+</div>`;
+
+  return { subject, text, html };
+}
+
+/**
+ * A message somebody wrote in the Inbox, on its way to a contact.
+ *
+ * Deliberately plain. A quotation and an invoice are documents and are laid
+ * out as such; this is correspondence, and wrapping somebody's own words in a
+ * branded template would change what they wrote. The only addition is the
+ * sender's name and workspace at the foot, so the recipient knows who this is
+ * and can reply to a person.
+ *
+ * The body is escaped and its line breaks preserved rather than parsed as
+ * markup: whatever was typed is what arrives, and a stray angle bracket in a
+ * sentence must not become a tag.
+ */
+export function messageEmail(message: {
+  subject: string;
+  body: string;
+  fromName: string;
+  workspace: string;
+}) {
+  const subject = message.subject.trim() || `Message from ${message.workspace}`;
+
+  const text = [message.body, "", `— ${message.fromName}, ${message.workspace}`].join("\n");
+
+  const html = `<div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:560px;margin:0 auto;padding:32px 24px;color:#0b1220;font-size:15px;line-height:1.6">
+  <div style="white-space:pre-line">${escapeHtml(message.body)}</div>
+  <p style="margin:28px 0 0;font-size:13px;color:#8a94a8">
+    ${escapeHtml(message.fromName)}, ${escapeHtml(message.workspace)}
   </p>
 </div>`;
 

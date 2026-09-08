@@ -219,6 +219,16 @@ export function InboxView({
     ["to"]
   );
   const [busy, setBusy] = useState(false);
+  /**
+   * What to tell the writer about a message that did not simply go.
+   *
+   * Null when it went, and nothing is shown — the point of this whole change
+   * is that "sent" is a fact rather than a default, so it needs no
+   * announcement. A notice appears only when something is true and unexpected:
+   * a channel this product records rather than transmits, a contact with no
+   * address, a provider that refused.
+   */
+  const [notice, setNotice] = useState<string | null>(null);
 
   /**
    * How the inbox can be ordered.
@@ -284,12 +294,15 @@ export function InboxView({
   async function handleCompose(formData: FormData) {
     setBusy(true);
     try {
-      const id = await addMessageAction(formData);
+      const result = await addMessageAction(formData);
       setComposeOpen(false);
-      if (id) {
+      if (result) {
         setFilter("Sent");
         setCategory(null);
-        setSelectedId(id);
+        setSelectedId(result.id);
+        /* Silence means it went. A screen that says "sent" every time is the
+           screen that said it while nothing was being sent. */
+        setNotice(result.notice);
       }
     } finally {
       setBusy(false);
@@ -318,6 +331,27 @@ export function InboxView({
 
   return (
     <div className="mx-auto flex h-auto max-w-[1500px] animate-fade-up flex-col gap-4 @min-[1100px]:h-full">
+      {/* Said once, at the top, and dismissible. This is the only place the
+          Inbox tells you something went differently from how it looked — and
+          before this change there was nothing it could have told you, because
+          nothing was ever sent. */}
+      {notice && (
+        <div
+          className="flex items-start gap-3 rounded-xl px-4 py-3 text-sm"
+          style={{ background: "var(--amber-soft)", color: "var(--amber)" }}
+          role="status"
+        >
+          <span className="flex-1">{notice}</span>
+          <button
+            type="button"
+            onClick={() => setNotice(null)}
+            className="focus-ring shrink-0 rounded px-1 font-semibold"
+            aria-label="Dismiss"
+          >
+            ×
+          </button>
+        </div>
+      )}
       {/* Chips and folder tabs stick to the top of the scroller.
           These are controls, not headings: letting them scroll away meant they
           were sliced in half at the scroller's top edge on the way out, which
@@ -482,10 +516,11 @@ export function InboxView({
             busy={busy}
             onTrash={() => handleTrash(selected.id)}
             onRestore={() => handleRestore(selected.id)}
-            onSent={(id) => {
+            onSent={(id, notice) => {
               setFilter("Sent");
               setCategory(null);
               setSelectedId(id);
+              setNotice(notice);
             }}
           />
         ) : (
@@ -737,7 +772,13 @@ function MessageList({
                     </p>
                     <TimeAgoShort at={m.at} />
                   </div>
-                  <p className="truncate text-xs text-muted">{m.subject}</p>
+                  <div className="flex items-baseline gap-1.5">
+                    <p className="truncate text-xs text-muted">{m.subject}</p>
+                    {/* A message that did not go must not look, in the list,
+                        exactly like every message that did. Opening it says so
+                        in full — but nobody opens the one they believe went. */}
+                    <DeliveryFlag message={m} />
+                  </div>
                 </div>
               </div>
               <p className="mt-2 line-clamp-2 text-xs text-faint">{m.preview}</p>
@@ -758,6 +799,68 @@ function MessageList({
 }
 
 /** The list is dense, so only the relative half fits. */
+/**
+ * One line saying whether a message we show as "sent" actually went.
+ *
+ * Worded for the reader, not the schema: "Not sent — recorded here only" is
+ * what `logged` means to somebody looking at their own Sent folder, and it is
+ * the sentence this product owed them all along.
+ */
+/**
+ * The list's version of the same truth, in two or three words.
+ *
+ * `sent` gets nothing. A Sent folder where every row is stamped "Sent" says
+ * only that the developer knew about the field; the rows worth marking are the
+ * ones where what happened differs from what the folder implies.
+ */
+function DeliveryFlag({ message }: { message: Message }) {
+  const flag = {
+    sent: null,
+    queued: { text: "Sending", tone: "var(--muted)" },
+    logged: { text: "Not sent", tone: "var(--muted)" },
+    failed: { text: "Not sent", tone: "var(--red)" },
+  }[message.delivery ?? "sent"];
+  if (!flag) return null;
+
+  return (
+    <span
+      className="shrink-0 whitespace-nowrap text-[11px] font-medium"
+      style={{ color: flag.tone }}
+    >
+      {flag.text}
+    </span>
+  );
+}
+
+function DeliveryNote({ message }: { message: Message }) {
+  const note = {
+    sent: { text: "Sent", tone: "var(--green)", soft: "var(--green-soft)" },
+    queued: { text: "Queued to send", tone: "var(--accent)", soft: "var(--accent-soft)" },
+    logged: {
+      text:
+        message.channel === "email"
+          ? "Not sent — recorded here only"
+          : `Recorded, not sent. ${message.channel === "sms" ? "SMS" : "WhatsApp"} messages are logged here and sent from your phone.`,
+      tone: "var(--muted)",
+      soft: "var(--surface-2)",
+    },
+    failed: {
+      text: `Could not be sent: ${message.deliveryError ?? "unknown error"}`,
+      tone: "var(--red)",
+      soft: "var(--red-soft)",
+    },
+  }[message.delivery!];
+
+  return (
+    <p
+      className="mt-2 inline-block rounded-lg px-2.5 py-1 text-xs font-medium"
+      style={{ background: note.soft, color: note.tone }}
+    >
+      {note.text}
+    </p>
+  );
+}
+
 function TimeAgoShort({ at }: { at: string }) {
   if (!at) return <span className="shrink-0 text-xs text-faint">—</span>;
   return <TimeAgo at={at} mode="relative" className="shrink-0 whitespace-nowrap text-xs text-faint" />;
@@ -787,7 +890,7 @@ function Reader({
   busy: boolean;
   onTrash: () => void;
   onRestore: () => void;
-  onSent: (id: string) => void;
+  onSent: (id: string, notice: string | null) => void;
   className?: string;
 }) {
   // Reset on message change is handled by the `key` the parent passes, which
@@ -805,9 +908,12 @@ function Reader({
   async function submit(formData: FormData) {
     setSending(true);
     try {
-      const id = mode === "reply" ? await replyAction(message.id, formData) : await forwardAction(message.id, formData);
+      const result =
+        mode === "reply"
+          ? await replyAction(message.id, formData)
+          : await forwardAction(message.id, formData);
       setMode(null);
-      if (id) onSent(id);
+      if (result) onSent(result.id, result.notice);
     } finally {
       setSending(false);
     }
@@ -878,6 +984,13 @@ function Reader({
           </span>
         )}
         <h2 className="text-xl font-semibold tracking-tight">{message.subject}</h2>
+
+        {/* What actually became of an outgoing message.
+            Every row written before the composer could send says `logged`,
+            which is the truth about them: they were records of correspondence,
+            not correspondence. Showing nothing here would let them keep
+            passing as sent. */}
+        {message.delivery && <DeliveryNote message={message} />}
         <div className="mt-4 space-y-4 text-sm leading-relaxed text-muted">
           {message.body.map((p, i) => (
             <p key={i} className="whitespace-pre-line">

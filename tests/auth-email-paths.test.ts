@@ -173,7 +173,10 @@ describe("inviting a colleague", () => {
     expect(await outbox.drain(CTX, handlers.OUTBOX_REGISTRY)).toMatchObject({ dead: 1 });
     const dead = await inA((q) => repo.deadJobs(q));
     expect(dead[0].handler).toBe(handlers.INVITE_EMAIL);
-    expect(dead[0].lastError).toMatch(/422/);
+    /* The status code lives in the log now. What the ledger keeps — and what
+       the notification feed shows a person — is the sentence they can act on. */
+    expect(dead[0].lastError).toMatch(/address was refused/i);
+    expect(dead[0].lastError).not.toMatch(/[{}"]/);
   });
 
   it("settles quietly when the person was removed from the team since", async () => {

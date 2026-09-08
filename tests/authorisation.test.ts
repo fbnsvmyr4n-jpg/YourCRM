@@ -55,6 +55,34 @@ function bodyOf(src: string, name: string): string {
 }
 
 /**
+ * Where the function's BODY starts — not the first `{` in the text.
+ *
+ * A return type can contain braces of its own, and one that does used to send
+ * this suite reading a type annotation as the first statement and reporting
+ * three properly guarded Inbox actions as unguarded. A guard that cries wolf on
+ * correct code gets loosened, so it has to read the code the way the compiler
+ * does: skip the parameter list, ignore anything inside `<…>`, and take the
+ * next brace.
+ */
+function bodyBrace(body: string): number {
+  let parens = 0;
+  let angles = 0;
+  let seenParams = false;
+  for (let i = 0; i < body.length; i++) {
+    const c = body[i];
+    if (c === "(") { parens++; seenParams = true; }
+    else if (c === ")") parens--;
+    else if (parens === 0 && seenParams) {
+      if (c === "<") angles++;
+      // `=>` inside a type is not a closing angle bracket.
+      else if (c === ">" && body[i - 1] !== "=") angles = Math.max(0, angles - 1);
+      else if (c === "{" && angles === 0) return i;
+    }
+  }
+  return body.indexOf("{");
+}
+
+/**
  * Actions that are unauthenticated *by design* — the endpoints you must be able
  * to reach precisely because you are not signed in yet. Anything not on this
  * list must be guarded.
@@ -135,7 +163,7 @@ describe("every server action is authorised", () => {
         // The guard must be the FIRST statement. A check that runs after a
         // write has already happened is not a guard.
         const firstStatement = body
-          .slice(body.indexOf("{") + 1)
+          .slice(bodyBrace(body) + 1)
           .split("\n")
           .map((l) => l.trim())
           .find((l) => l && !l.startsWith("//") && !l.startsWith("*") && !l.startsWith("/*"));
