@@ -30,24 +30,12 @@ export function parseWallTime(time: string): { hour: number; minute: number } | 
 }
 
 /**
- * Combine a date and a wall-clock time in `zone` into an ISO instant.
+ * How far `zone` is from UTC at one particular instant, in milliseconds.
  *
- * Works by reading the wall-clock as if it were UTC, asking what that instant
- * looks like in the target zone, and shifting by the difference. The offset is
- * computed for that specific date, so daylight saving is handled rather than
- * assumed away.
- *
- * Returns null when the date or time cannot be parsed — never a guess.
+ * Null for a zone `Intl` does not know, which the callers below turn into a
+ * refusal rather than a guess.
  */
-export function wallClockToInstant(date: string, time: string, zone: string): string | null {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date.trim())) return null;
-  const t = parseWallTime(time);
-  if (!t) return null;
-
-  const wall = `${date.trim()}T${String(t.hour).padStart(2, "0")}:${String(t.minute).padStart(2, "0")}:00`;
-  const asUtc = Date.parse(`${wall}Z`);
-  if (Number.isNaN(asUtc)) return null;
-
+function offsetAt(instantMs: number, zone: string): number | null {
   let parts: Intl.DateTimeFormatPart[];
   try {
     parts = new Intl.DateTimeFormat("en-US", {
@@ -59,13 +47,10 @@ export function wallClockToInstant(date: string, time: string, zone: string): st
       hour: "2-digit",
       minute: "2-digit",
       second: "2-digit",
-    }).formatToParts(new Date(asUtc));
+    }).formatToParts(new Date(instantMs));
   } catch {
-    // An unrecognised zone is a configuration error, not something to paper
-    // over by falling back to UTC and storing a time nobody meant.
     return null;
   }
-
   const part = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? 0);
   const asZone = Date.UTC(
     part("year"),
@@ -75,7 +60,60 @@ export function wallClockToInstant(date: string, time: string, zone: string): st
     part("minute"),
     part("second")
   );
-  return new Date(asUtc - (asZone - asUtc)).toISOString();
+  return asZone - instantMs;
+}
+
+/**
+ * Combine a date and a wall-clock time in `zone` into an ISO instant.
+ *
+ * TWO PASSES, and the second one is not a refinement — it is the fix for a
+ * defect this function shipped with.
+ *
+ * The idea is to read the wall-clock as if it were UTC, ask how far the zone is
+ * from UTC, and shift by that. The trap is *when* you ask. The first version
+ * measured the offset at the pretend-UTC instant, which is a different moment
+ * from the answer — usually the same side of a daylight-saving boundary, and
+ * near a transition, not.
+ *
+ * On 8 March 2026 in New York, that made every local time after 02:00 an hour
+ * wrong: 03:00 came back as 08:00Z, which is 04:00 in New York. A meeting
+ * booked for three in the afternoon was stored as four, and nothing on any
+ * screen would have disagreed — the calendar would render the stored instant
+ * back as 04:00 and look entirely consistent with itself. The person who found
+ * out was whoever turned up an hour early.
+ *
+ * So: estimate with the offset at the pretend instant, then re-measure the
+ * offset AT THAT ESTIMATE and use it. One correction is enough for every real
+ * zone, because transitions are an hour or two and never adjacent.
+ *
+ * Returns null when the date, time or zone cannot be read — never a guess.
+ *
+ * Note what this deliberately does NOT do: a local time that does not exist
+ * (the hour a clock skips) still returns an instant, and one that happens twice
+ * returns one of the two. Detecting those needs the caller to round-trip the
+ * answer and compare — `localToInstant` in `server/booking/slots.ts` is what
+ * does that, because only a caller knows whether a missing hour is an error or
+ * simply a time not to offer.
+ */
+export function wallClockToInstant(date: string, time: string, zone: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date.trim())) return null;
+  const t = parseWallTime(time);
+  if (!t) return null;
+
+  const wall = `${date.trim()}T${String(t.hour).padStart(2, "0")}:${String(t.minute).padStart(2, "0")}:00`;
+  const asUtc = Date.parse(`${wall}Z`);
+  if (Number.isNaN(asUtc)) return null;
+
+  // An unrecognised zone is a configuration error, not something to paper over
+  // by falling back to UTC and storing a time nobody meant.
+  const rough = offsetAt(asUtc, zone);
+  if (rough === null) return null;
+
+  const estimate = asUtc - rough;
+  const actual = offsetAt(estimate, zone);
+  if (actual === null) return null;
+
+  return new Date(asUtc - actual).toISOString();
 }
 
 /** The other direction: an instant → the date and time a person sees. */

@@ -187,6 +187,35 @@ export async function listBetween(
   return rows.map(toRecord);
 }
 
+/**
+ * Every meeting that OVERLAPS the window, not merely every one that starts in it.
+ *
+ * `listBetween` above filters on `scheduled_at` alone, which is right for "what
+ * is on the calendar this week" and wrong for "is this time free": a 90-minute
+ * meeting starting at 08:30 occupies 09:00, but a window opening at 09:00 does
+ * not contain its start and would not return it. Availability built on that
+ * would offer a slot straight over the top of an existing appointment — a
+ * double-booking that looks, from the calendar, like it was never checked.
+ *
+ * The predicate is the standard half-open interval overlap: it starts before we
+ * end, and it ends after we start. Half-open on purpose, so a meeting finishing
+ * exactly at 09:00 does not block a 09:00 slot.
+ */
+export async function listOverlapping(
+  q: TenantQuery,
+  from: string | Date,
+  to: string | Date
+): Promise<MeetingRecord[]> {
+  const rows = await q.rows<Row>(
+    `${SELECT}
+       AND m.scheduled_at < $3
+       AND m.scheduled_at + (m.duration_min * INTERVAL '1 minute') > $2
+     ORDER BY m.scheduled_at ASC, m.id`,
+    [q.ctx.subAccountId, checkWhen(from), checkWhen(to)]
+  );
+  return rows.map(toRecord);
+}
+
 export async function createMeeting(q: TenantQuery, input: NewMeeting): Promise<MeetingRecord> {
   const row = await q.one<Row>(
     `WITH inserted AS (
