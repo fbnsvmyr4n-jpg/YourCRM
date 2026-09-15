@@ -227,10 +227,18 @@ export async function createDocumentAction(
 
     const documentId = newId(kind === "quote" ? "q" : kind === "purchase_order" ? "po" : "inv");
     try {
-      await q.rows(
-        `INSERT INTO documents (id, sub_account_id, deal_id, kind, number, status, party, issued_on, notes)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::date, $9)`,
-        [documentId, q.ctx.subAccountId, dealId, kind, number, status, party || null, issuedOn, notes || null]
+      /* Inside a savepoint. A duplicate number is refused by the unique index,
+         and catching that error without one leaves the whole transaction
+         aborted — every statement after it answers "current transaction is
+         aborted". Nothing runs after this catch today, so it was harmless by
+         luck rather than by design; the next line anyone adds here would have
+         failed on exactly the input a person is most likely to retry. */
+      await q.attempt(() =>
+        q.rows(
+          `INSERT INTO documents (id, sub_account_id, deal_id, kind, number, status, party, issued_on, notes)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8::date, $9)`,
+          [documentId, q.ctx.subAccountId, dealId, kind, number, status, party || null, issuedOn, notes || null]
+        )
       );
     } catch (err) {
       if (String(err).includes("documents_number_once")) {

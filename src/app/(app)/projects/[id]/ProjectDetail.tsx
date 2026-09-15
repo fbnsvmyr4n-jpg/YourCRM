@@ -34,7 +34,7 @@ import type {
 } from "@/server/repos/projects";
 import type { Dependency, ProjectTask, ScheduleSummary } from "@/server/repos/tasks";
 import { ProjectSchedule } from "./ProjectSchedule";
-import { stageMoney } from "@/server/stage-money";
+import { projectMoney, stageMoney, type ProjectMoney } from "@/server/stage-money";
 import {
   addProjectPersonAction,
   createDocumentAction,
@@ -178,18 +178,13 @@ export function ProjectDetail({
   const stage = stageMeta(header.stage);
 
   /*
-     The three money questions, answered from the documents rather than from a
-     stored figure. Quoted is what has been put to the client and accepted;
-     committed is what has been ordered from suppliers. The difference between
-     them is the margin, which is the number this page exists to make visible —
-     and it is derived, so it cannot go stale.
+     The money questions, answered from the documents rather than from a stored
+     figure, so they cannot go stale — and through the same rules the per-stage
+     figures use. This used to carry its own inline copy of "which quotes and
+     orders count", which is how a screen ends up with two definitions of
+     committed.
   */
-  const quoted = documents
-    .filter((d) => d.kind === "quote" && (d.status === "accepted" || d.status === "paid"))
-    .reduce((sum, d) => sum + d.totalCents, 0);
-  const committed = documents
-    .filter((d) => d.kind === "purchase_order" && d.status !== "cancelled" && d.status !== "declined")
-    .reduce((sum, d) => sum + d.totalCents, 0);
+  const figures = projectMoney(documents);
 
   const unread = threads.reduce((n, t) => n + t.unread, 0);
 
@@ -205,7 +200,7 @@ export function ProjectDetail({
 
       <ProjectHeaderCard header={header} stage={stage} />
 
-      <MoneyStrip value={header.valueCents} quoted={quoted} committed={committed} />
+      <MoneyStrip value={header.valueCents} figures={figures} />
 
       {/* A grid, not a wrapping row: labels of different lengths let the width
           decide where the breaks fall, which is how a tab row ends up ragged on
@@ -381,23 +376,28 @@ function ProjectHeaderCard({
 }
 
 /**
- * Value, quoted, committed — and the margin between the last two.
+ * Value, quoted, committed, the margin between the last two — and what has been
+ * billed and received.
  *
  * Margin is shown only once there is something to compare. A margin of "$0"
  * against a job with no purchase orders yet is not a fact about the job, it is
  * a fact about the data being incomplete, and putting it on screen invites
  * somebody to act on it.
+ *
+ * Invoiced follows the same idea from the other side: it appears once there is
+ * something to bill or something billed. On a job with nothing agreed, "$0
+ * invoiced" is noise; on a job with an accepted quote it is the fact somebody
+ * needs — nothing has been asked for yet.
  */
-function MoneyStrip({
-  value,
-  quoted,
-  committed,
-}: {
-  value: number;
-  quoted: number;
-  committed: number;
-}) {
-  const margin = quoted - committed;
+function MoneyStrip({ value, figures }: { value: number; figures: ProjectMoney }) {
+  const {
+    quotedCents: quoted,
+    committedCents: committed,
+    marginCents: margin,
+    invoicedCents: invoiced,
+    paidCents: paid,
+    outstandingCents: outstanding,
+  } = figures;
   /*
      Full figures, not the compact ones used everywhere else.
 
@@ -407,23 +407,53 @@ function MoneyStrip({
      impression; it is not fine in a row somebody reads across, and these are
      the numbers a customer checks against their own accounts.
   */
-  const cells: { label: string; value: string; tone?: string }[] = [
+  const cells: { label: string; value: string; tone?: string; note?: string }[] = [
     { label: "Project value", value: money(value) },
     { label: "Quoted & accepted", value: money(quoted), tone: quoted > 0 ? "var(--green)" : undefined },
     { label: "Committed", value: money(committed), tone: committed > 0 ? "var(--amber)" : undefined },
   ];
-  if (quoted > 0 && committed > 0) {
+  if (margin !== null) {
     cells.push({
       label: "Margin",
       value: money(margin),
       tone: margin >= 0 ? "var(--green)" : "var(--red)",
     });
   }
+  if (quoted > 0 || invoiced > 0) {
+    cells.push({
+      label: "Invoiced",
+      value: money(invoiced),
+      /* The two figures a business chases, in one line under the total. Stated
+         as words for the two ends of the range, because "$0 paid · $0 due"
+         reads like a calculation rather than an answer. */
+      note:
+        invoiced === 0
+          ? "Nothing billed yet"
+          : outstanding === 0
+            ? "Paid in full"
+            : `${money(paid)} paid · ${money(outstanding)} due`,
+      tone: invoiced > 0 && outstanding === 0 ? "var(--green)" : undefined,
+    });
+  }
+
+  /* Four cells keep the grid this strip always had, so a project with nothing
+     billed looks exactly as it did. A fifth goes full width on narrow screens
+     rather than leaving a hole beside it, and joins the row once there is room
+     for five figures side by side. */
+  const five = cells.length === 5;
 
   return (
-    <div className="mt-3 grid grid-cols-2 gap-2 @min-[560px]:grid-cols-4">
-      {cells.map((c) => (
-        <div key={c.label} className="card px-3.5 py-3">
+    <div
+      className={clsx(
+        "mt-3 grid grid-cols-2 gap-2",
+        five ? "@min-[820px]:grid-cols-5" : "@min-[560px]:grid-cols-4"
+      )}
+    >
+      {cells.map((c, i) => (
+        <div
+          key={c.label}
+          className={clsx("card min-w-0 px-3.5 py-3", five && i === 4 && "col-span-2 @min-[820px]:col-span-1")}
+        >
           <p className="text-[11px] uppercase tracking-[0.1em] text-faint">{c.label}</p>
           <p
             className="mt-1 text-base font-bold tabular-nums @min-[560px]:text-lg"
@@ -431,6 +461,7 @@ function MoneyStrip({
           >
             {c.value}
           </p>
+          {c.note && <p className="mt-0.5 truncate text-xs tabular-nums text-muted">{c.note}</p>}
         </div>
       ))}
     </div>

@@ -63,6 +63,79 @@ const counts = (kind: DocumentKind, status: DocumentStatus): "quote" | "order" |
   return null;
 };
 
+/**
+ * An invoice has been billed once it has left for the client.
+ *
+ * `sent`, and the states that can only come after it. A draft, or one approved
+ * whose email never went, has not been billed — counting it would tell somebody
+ * money is on its way that nobody has asked for. `declined` and `cancelled`
+ * were billed and then withdrawn, so they are not owed.
+ */
+export function invoiceBilled(status: DocumentStatus): boolean {
+  return status === "sent" || status === "accepted" || status === "paid";
+}
+
+/** An invoice has been paid when it says so. Nothing is inferred from dates. */
+export function invoicePaid(status: DocumentStatus): boolean {
+  return status === "paid";
+}
+
+export type ProjectMoney = {
+  /** Agreed with the client. */
+  quotedCents: number;
+  /** Ordered from suppliers and not called off. */
+  committedCents: number;
+  /**
+   * Quoted minus committed — null until there is something on BOTH sides. A
+   * margin of "$0" on a job with no purchase orders yet is not a fact about the
+   * job, it is a fact about the data being incomplete.
+   */
+  marginCents: number | null;
+  /** Billed to the client. */
+  invoicedCents: number;
+  /** Received. */
+  paidCents: number;
+  /** Billed and not yet received. */
+  outstandingCents: number;
+};
+
+/**
+ * The whole job's money, by the same rules the stages use.
+ *
+ * The project header computed quoted and committed inline, with its own copy
+ * of those rules. Two definitions of "committed" on one screen is the thing
+ * this module exists to prevent, so the header asks here too.
+ *
+ * Invoices are counted SEPARATELY from quoted and committed, never added to
+ * them: an invoice is the same money as the quotation it bills, seen later.
+ * What it answers is a different question — how much of what was agreed has
+ * been asked for, and how much has arrived.
+ */
+export function projectMoney(documents: readonly ProjectDocument[]): ProjectMoney {
+  let quotedCents = 0;
+  let committedCents = 0;
+  let invoicedCents = 0;
+  let paidCents = 0;
+
+  for (const d of documents) {
+    if (d.kind === "quote" && quoteCounts(d.status)) quotedCents += d.totalCents;
+    else if (d.kind === "purchase_order" && orderCounts(d.status)) committedCents += d.totalCents;
+    else if (d.kind === "invoice" && invoiceBilled(d.status)) {
+      invoicedCents += d.totalCents;
+      if (invoicePaid(d.status)) paidCents += d.totalCents;
+    }
+  }
+
+  return {
+    quotedCents,
+    committedCents,
+    marginCents: quotedCents > 0 && committedCents > 0 ? quotedCents - committedCents : null,
+    invoicedCents,
+    paidCents,
+    outstandingCents: invoicedCents - paidCents,
+  };
+}
+
 /** Every stage's money, keyed by task id. Stages with nothing filed are absent. */
 export function stageMoney(documents: readonly ProjectDocument[]): Map<string, StageMoney> {
   const out = new Map<string, StageMoney>();

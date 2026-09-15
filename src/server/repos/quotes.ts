@@ -232,11 +232,8 @@ export async function nextQuoteNumber(q: TenantQuery): Promise<string> {
   );
 
   for (const row of rows) {
-    const match = /^(.*?)(\d+)$/.exec(row.number);
-    if (!match) continue;
-    const [, prefix, digits] = match;
-    const next = String(Number(digits) + 1).padStart(digits.length, "0");
-    const candidate = `${prefix}${next}`;
+    const candidate = followingNumber(row.number);
+    if (!candidate) continue;
     // A collision means somebody numbered out of order. Fall through to the
     // next candidate rather than writing a duplicate the index would refuse.
     const taken = rows.some((r) => r.number.toLowerCase() === candidate.toLowerCase());
@@ -244,6 +241,20 @@ export async function nextQuoteNumber(q: TenantQuery): Promise<string> {
   }
 
   return "Q-1001";
+}
+
+/**
+ * "Q-1041" → "Q-1042", keeping the prefix and any zero padding.
+ *
+ * Null when the number has no numeric tail to count on from. Shared by the
+ * suggestion above and by the retry in `draftQuote`, so both mean the same
+ * thing by "the next one".
+ */
+export function followingNumber(number: string): string | null {
+  const match = /^(.*?)(\d+)$/.exec(number);
+  if (!match) return null;
+  const [, prefix, digits] = match;
+  return `${prefix}${String(Number(digits) + 1).padStart(digits.length, "0")}`;
 }
 
 export type DraftResult = { quote?: Quote; error?: string };
@@ -279,31 +290,69 @@ export async function draftQuote(
   if (!deal) return { error: "That project no longer exists." };
 
   const documentId = newId("q");
-  const number = await nextQuoteNumber(q);
+  let number = await nextQuoteNumber(q);
 
-  try {
-    await q.rows(
-      `INSERT INTO documents
-         (id, sub_account_id, deal_id, kind, number, status, party, party_contact_id,
-          issued_on, notes, drafted_by_agent, revision)
-       VALUES ($1, $2, $3, 'quote', $4, 'awaiting_approval', $5, $6,
-               CURRENT_DATE, $7, $8, 0)`,
-      [
-        documentId,
-        q.ctx.subAccountId,
-        input.dealId,
-        number,
-        input.party,
-        input.partyContactId,
-        input.notes,
-        input.agent,
-      ]
-    );
-  } catch (err) {
-    if (String(err).includes("documents_number_once")) {
-      return { error: `A quotation numbered ${number} already exists.` };
+  /*
+     Two things were wrong here, and they compounded.
+
+     The catch had no savepoint. When the unique index refused a number, the
+     whole transaction was left aborted — and on a live call the gateway then
+     writes its audit row IN THAT SAME TRANSACTION, so recording the refusal
+     itself failed and the tool call crashed instead of saying "that did not
+     happen".
+
+     And the refusal was permanent. `nextQuoteNumber` only reads the 25 most
+     recent quotations, so an older quote already holding the next number is
+     invisible to it: every retry picks the same taken number and fails the
+     same way. That is not a race; it is a business that once numbered out of
+     order.
+
+     So each attempt runs in its own savepoint, and a taken number moves on to
+     the one after it — bounded, because a run of taken numbers longer than
+     this is a numbering scheme a person should look at, not one to loop over.
+  */
+  const MAX_NUMBER_TRIES = 5;
+  const firstTried = number;
+  let lastTried = number;
+  let inserted = false;
+  for (let attempt = 0; attempt < MAX_NUMBER_TRIES && !inserted; attempt++) {
+    lastTried = number;
+    try {
+      await q.attempt(() =>
+        q.rows(
+          `INSERT INTO documents
+             (id, sub_account_id, deal_id, kind, number, status, party, party_contact_id,
+              issued_on, notes, drafted_by_agent, revision)
+           VALUES ($1, $2, $3, 'quote', $4, 'awaiting_approval', $5, $6,
+                   CURRENT_DATE, $7, $8, 0)`,
+          [
+            documentId,
+            q.ctx.subAccountId,
+            input.dealId,
+            number,
+            input.party,
+            input.partyContactId,
+            input.notes,
+            input.agent,
+          ]
+        )
+      );
+      inserted = true;
+    } catch (err) {
+      if (!String(err).includes("documents_number_once")) throw err;
+      const next = followingNumber(number);
+      if (!next) {
+        return { error: `A quotation numbered ${number} already exists. Number this one by hand.` };
+      }
+      number = next;
     }
-    throw err;
+  }
+  if (!inserted) {
+    /* The range actually TRIED. `number` has already moved one past the last
+       attempt, so naming it would report a number nobody checked. */
+    return {
+      error: `Quotation numbers ${firstTried} to ${lastTried} are already taken. Number this one by hand.`,
+    };
   }
 
   await writeLines(q, documentId, input.lines);
