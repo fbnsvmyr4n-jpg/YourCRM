@@ -62,6 +62,9 @@ export const EXPECTED_TABLES = [
  *  database is most likely to be missing while still having the table. */
 export const EXPECTED_COLUMNS: ReadonlyArray<[string, string]> = [
   ["document_lines", "project_task_id"],
+  /* Read by every Settings load and every public link lookup, so a database
+     without it breaks the Preferences screen and both public pages at once. */
+  ["booking_links", "enquiries_enabled"],
   ["settings", "invoice_pay_to"],
   ["messages", "delivery"],
   ["messages", "delivery_error"],

@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState, useSyncExternalStore } from "react";
 import { useFormDisclosure } from "@/lib/form-disclosure";
 import {
   Building2,
@@ -590,11 +590,13 @@ const NOTICE_LABELS: Record<string, string> = {
 };
 
 /**
- * The public booking page, from the owner's side.
+ * The pages this business puts in front of strangers.
  *
- * The state that matters most is stated first and in words: whether the page
- * is live. A booking link is the one thing in Settings that faces strangers, so
- * "published" is never something to infer from a checkbox further down.
+ * Two doors on one address: bookings at /book/<link>, enquiries at
+ * /enquire/<link>. Each is switched on separately, because a business can want
+ * to hear from anyone without letting anyone into its diary. Whether each is
+ * live is stated first and in words — these are the only things in Settings
+ * that face the public, so it is never left to a checkbox further down.
  */
 export function BookingLinkCard({
   link,
@@ -607,7 +609,17 @@ export function BookingLinkCard({
     saveBookingLinkAction,
     undefined
   );
-  const live = Boolean(link?.enabled);
+  const bookingsLive = Boolean(link?.enabled);
+  const enquiriesLive = Boolean(link?.enquiriesEnabled);
+  /* The site's own address, for code pasted into ANOTHER site — a relative
+     path there would point at the wrong domain. Read on the client, with an
+     empty server value, so the first render matches and nothing mismatches. */
+  const origin = useSyncExternalStore(noSubscribe, () => window.location.origin, () => "");
+  const [copied, setCopied] = useState(false);
+  const embed =
+    link && origin
+      ? `<iframe src="${origin}/enquire/${link.slug}" title="Enquiry form" width="100%" height="640" style="border:0"></iframe>`
+      : "";
   /* `--sunken` is not a token this theme defines, so it rendered as no
      background at all. These match the text inputs beside them instead. */
   const select =
@@ -615,22 +627,60 @@ export function BookingLinkCard({
 
   return (
     <Card className="card-q">
-      <CardHeader title="Booking page" icon={<Link2 className="h-[18px] w-[18px] text-accent" />} />
+      <CardHeader title="Public pages" icon={<Link2 className="h-[18px] w-[18px] text-accent" />} />
       <form action={action} className="space-y-4">
         <Banner state={state} />
 
-        {live && link ? (
-          <p className="rounded-xl px-3.5 py-2.5 text-sm" style={{ background: "var(--green-soft)", color: "var(--green)" }}>
-            Live. Anyone with the link can book:{" "}
-            <a href={`/book/${link.slug}`} target="_blank" rel="noreferrer" className="font-semibold underline">
-              /book/{link.slug}
-            </a>
-          </p>
-        ) : (
-          <p className="rounded-xl px-3.5 py-2.5 text-xs" style={{ background: "var(--amber-soft)", color: "var(--amber)" }}>
-            Not published. Nobody can book until you tick Published and save.
-            {!hasHours && " Set your opening hours above first — the page needs them to offer times."}
-          </p>
+        <div className="grid grid-cols-1 gap-2 @min-[560px]:grid-cols-2">
+          <LiveNote
+            live={bookingsLive}
+            href={link ? `/book/${link.slug}` : null}
+            liveText="Taking bookings"
+            offText={
+              hasHours
+                ? "Not taking bookings."
+                : "Not taking bookings. Set your opening hours above first."
+            }
+          />
+          <LiveNote
+            live={enquiriesLive}
+            href={link ? `/enquire/${link.slug}` : null}
+            liveText="Taking enquiries"
+            offText="Not taking enquiries."
+          />
+        </div>
+
+        {enquiriesLive && embed && (
+          <div>
+            <span className="mb-1.5 block text-xs font-medium text-muted">
+              Put the enquiry form on your own website
+            </span>
+            <div className="flex gap-2">
+              <input
+                readOnly
+                value={embed}
+                onFocus={(e) => e.currentTarget.select()}
+                aria-label="Code to paste into your website"
+                className="field-input min-w-0 flex-1 font-mono text-xs"
+              />
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(embed);
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 2000);
+                  } catch {
+                    /* Clipboard blocked by the browser. The field selects on
+                       focus, so the code can still be copied by hand. */
+                  }
+                }}
+                className="btn-soft focus-ring shrink-0 rounded-xl px-3 py-2 text-xs font-medium"
+              >
+                {copied ? "Copied" : "Copy"}
+              </button>
+            </div>
+          </div>
         )}
 
         <div className="grid grid-cols-1 gap-4 @min-[440px]:grid-cols-2">
@@ -688,27 +738,75 @@ export function BookingLinkCard({
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <label className="flex items-center gap-2.5 text-sm font-medium">
-            <input
-              type="checkbox"
-              name="enabled"
-              defaultChecked={live}
-              className="focus-ring h-4 w-4 accent-[var(--accent)]"
-            />
-            Published
-          </label>
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+            <label className="flex items-center gap-2.5 text-sm font-medium">
+              <input
+                type="checkbox"
+                name="enabled"
+                defaultChecked={bookingsLive}
+                className="focus-ring h-4 w-4 accent-[var(--accent)]"
+              />
+              Take bookings
+            </label>
+            <label className="flex items-center gap-2.5 text-sm font-medium">
+              <input
+                type="checkbox"
+                name="enquiries"
+                defaultChecked={enquiriesLive}
+                className="focus-ring h-4 w-4 accent-[var(--accent)]"
+              />
+              Take enquiries
+            </label>
+          </div>
           <button
             type="submit"
             disabled={pending}
             className="btn-accent focus-ring rounded-xl px-5 py-2.5 text-sm font-semibold disabled:opacity-60"
           >
-            {pending ? "Saving…" : "Save booking page"}
+            {pending ? "Saving…" : "Save"}
           </button>
         </div>
       </form>
     </Card>
   );
 }
+
+/** Whether one public page is live, in a sentence, with the link when it is. */
+function LiveNote({
+  live,
+  href,
+  liveText,
+  offText,
+}: {
+  live: boolean;
+  href: string | null;
+  liveText: string;
+  offText: string;
+}) {
+  return live && href ? (
+    <p
+      className="min-w-0 rounded-xl px-3.5 py-2.5 text-sm"
+      style={{ background: "var(--green-soft)", color: "var(--green)" }}
+    >
+      {liveText}:{" "}
+      <a href={href} target="_blank" rel="noreferrer" className="break-all font-semibold underline">
+        {href}
+      </a>
+    </p>
+  ) : (
+    <p
+      className="rounded-xl px-3.5 py-2.5 text-xs"
+      style={{ background: "var(--amber-soft)", color: "var(--amber)" }}
+    >
+      {offText}
+    </p>
+  );
+}
+
+/* The page's origin never changes while it is open, so there is nothing to
+   subscribe to — the store exists only to give the server an honest empty
+   value and the client the real one without a hydration mismatch. */
+const noSubscribe = () => () => {};
 
 function Field({
   label,

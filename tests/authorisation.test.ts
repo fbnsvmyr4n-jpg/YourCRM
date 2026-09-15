@@ -98,6 +98,11 @@ const PUBLIC_ACTIONS = new Set([
   // only when its owner published it, and a posted time re-checked against the
   // diary under a lock. See server/booking/book.ts.
   "bookAction",
+  // The public enquiry form. Same standing as bookings: rate limited per
+  // address before any work, a slug that resolves only when its owner
+  // published enquiries, bounded inputs and a trap field. See
+  // server/enquiry/enquire.ts.
+  "enquireAction",
 ]);
 
 /**

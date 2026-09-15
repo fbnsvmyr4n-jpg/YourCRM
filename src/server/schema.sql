@@ -1785,6 +1785,15 @@ CREATE POLICY booking_links_tenant_isolation ON booking_links
   USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
   WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
 
+-- The enquiry page, at /enquire/<slug>, on the same public address.
+--
+-- Its own switch rather than riding on `enabled`, because the two answer
+-- different questions: a business can want to hear from anyone without letting
+-- anyone into its diary, and the other way round. Off by default for the same
+-- reason `enabled` is — a public form that creates contacts and leads has to be
+-- somebody's decision.
+ALTER TABLE booking_links ADD COLUMN IF NOT EXISTS enquiries_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+
 -- ---------------------------------------------------------------------------
 -- Every tool an agent ran, and the reason a retry cannot run it twice.
 --

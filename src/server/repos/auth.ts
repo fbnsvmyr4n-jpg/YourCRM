@@ -117,14 +117,26 @@ export const signupKey = (ip: string) => `signup:${ip}`;
  */
 export const bookingKey = (ip: string) => `book:${ip}`;
 
+/**
+ * Enquiries sent from a public form, counted per address.
+ *
+ * Same reasoning as bookings: a write with no password in front of it, where the
+ * abuse is volume — somebody filling the Leads screen with rubbish — so every
+ * attempt counts, success or not.
+ */
+export const enquiryKey = (ip: string) => `enquire:${ip}`;
+
 /* Enough for a person who mistypes their email and tries again, nowhere near
    enough to fill a week. */
 const MAX_BOOKINGS_PER_IP = 6;
+/* A real person sends one enquiry and perhaps a correction. Five is generous. */
+const MAX_ENQUIRIES_PER_IP = 5;
 
 function limitFor(key: string): number {
   if (key.startsWith("email:")) return MAX_PER_EMAIL;
   if (key.startsWith("signup:")) return MAX_SIGNUPS_PER_IP;
   if (key.startsWith("book:")) return MAX_BOOKINGS_PER_IP;
+  if (key.startsWith("enquire:")) return MAX_ENQUIRIES_PER_IP;
   return MAX_PER_IP;
 }
 

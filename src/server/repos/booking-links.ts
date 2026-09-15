@@ -19,12 +19,17 @@ import type { SystemQuery, TenantQuery } from "../tenant";
  * the workspace it just found, so the unscoped read is one row wide and one row
  * deep.
  *
- * It also refuses a link that is not `enabled`, which is what makes publishing
- * a decision rather than a default.
+ * One address serves two pages — bookings at /book/<slug>, enquiries at
+ * /enquire/<slug> — each published separately. It refuses a link for a purpose
+ * that is not switched on, which is what makes publishing a decision rather
+ * than a default.
  */
 
 export const BOOKING_KINDS = ["online", "in_person"] as const;
 export type BookingKind = (typeof BOOKING_KINDS)[number];
+
+/** Which public page a visitor is asking for. */
+export type LinkPurpose = "booking" | "enquiry";
 
 export type BookingLink = {
   id: string;
@@ -34,7 +39,10 @@ export type BookingLink = {
   noticeMinutes: number;
   daysAhead: number;
   kind: BookingKind;
+  /** Whether the booking page at /book/<slug> is published. */
   enabled: boolean;
+  /** Whether the enquiry page at /enquire/<slug> is published. Independent of bookings. */
+  enquiriesEnabled: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -70,12 +78,13 @@ type Row = {
   days_ahead: number;
   kind: string;
   enabled: boolean;
+  enquiries_enabled: boolean;
   created_at: Date;
   updated_at: Date;
 };
 
 const COLUMNS = `id, slug, title, slot_minutes, notice_minutes, days_ahead, kind, enabled,
-                 created_at, updated_at`;
+                 enquiries_enabled, created_at, updated_at`;
 
 const toLink = (r: Row): BookingLink => ({
   id: r.id,
@@ -86,6 +95,7 @@ const toLink = (r: Row): BookingLink => ({
   daysAhead: r.days_ahead,
   kind: (BOOKING_KINDS as readonly string[]).includes(r.kind) ? (r.kind as BookingKind) : "online",
   enabled: r.enabled,
+  enquiriesEnabled: r.enquiries_enabled,
   createdAt: r.created_at.toISOString(),
   updatedAt: r.updated_at.toISOString(),
 });
@@ -134,6 +144,7 @@ export type SaveLink = {
   daysAhead: number;
   kind: BookingKind;
   enabled: boolean;
+  enquiriesEnabled: boolean;
 };
 
 export type SaveResult = { link: BookingLink } | { error: string };
@@ -163,17 +174,19 @@ export async function saveBookingLink(
     const row = await q.attempt(() =>
       q.one<Row>(
         `INSERT INTO booking_links
-           (id, sub_account_id, slug, title, slot_minutes, notice_minutes, days_ahead, kind, enabled)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+           (id, sub_account_id, slug, title, slot_minutes, notice_minutes, days_ahead, kind, enabled,
+            enquiries_enabled)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          ON CONFLICT (id) DO UPDATE SET
-           slug           = EXCLUDED.slug,
-           title          = EXCLUDED.title,
-           slot_minutes   = EXCLUDED.slot_minutes,
-           notice_minutes = EXCLUDED.notice_minutes,
-           days_ahead     = EXCLUDED.days_ahead,
-           kind           = EXCLUDED.kind,
-           enabled        = EXCLUDED.enabled,
-           updated_at     = now()
+           slug              = EXCLUDED.slug,
+           title             = EXCLUDED.title,
+           slot_minutes      = EXCLUDED.slot_minutes,
+           notice_minutes    = EXCLUDED.notice_minutes,
+           days_ahead        = EXCLUDED.days_ahead,
+           kind              = EXCLUDED.kind,
+           enabled           = EXCLUDED.enabled,
+           enquiries_enabled = EXCLUDED.enquiries_enabled,
+           updated_at        = now()
          RETURNING ${COLUMNS}`,
         [
           id,
@@ -185,17 +198,22 @@ export async function saveBookingLink(
           input.daysAhead,
           input.kind,
           input.enabled,
+          input.enquiriesEnabled,
         ]
       )
     );
     if (!row) return { error: "That link could not be saved." };
     return { link: toLink(row) };
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (/booking_links_slug/.test(message)) {
+    /* By error CODE, not by matching the constraint name in the message: the
+       unique index is `booking_links_slug` and the shape check is
+       `booking_links_slug_check`, and a pattern for the first also matches the
+       second. */
+    const code = (err as { code?: string }).code;
+    if (code === "23505") {
       return { error: `“${input.slug}” is already taken. Try another.` };
     }
-    if (/booking_links_slug_check|violates check constraint/.test(message)) {
+    if (code === "23514") {
       return { error: "Those booking settings are outside what a link allows." };
     }
     throw err;
@@ -215,23 +233,31 @@ export async function deleteBookingLink(q: TenantQuery, id: string): Promise<boo
 /* ------------------------------------------------------------------ */
 
 /**
- * Find the workspace a public slug belongs to.
+ * Find the workspace a public slug belongs to, for one purpose.
  *
  * Unscoped because a visitor has no tenant and finding one is the entire job.
  * Everything about this is deliberately narrow:
  *
  *   • one row, matched on an indexed lowercase slug;
- *   • `enabled` must be true, so an unpublished link does not exist as far as
- *     the internet is concerned;
+ *   • the page being asked for must be switched on — bookings and enquiries
+ *     each have their own flag, so a link published only for enquiries does
+ *     not exist as a booking page, and the other way round;
  *   • the workspace must not be deleted;
  *   • it returns the booking terms and the workspace's NAME, because the
  *     visitor has to see whose diary they are looking at, and nothing else.
+ *
+ * The purpose is a BOUND PARAMETER chosen inside the SQL, not text spliced into
+ * it, so there is no string a caller could pass that changes the query.
  *
  * Null for anything not found, never a partial answer — the page turns that
  * into a 404, so a disabled link and a nonexistent one are indistinguishable
  * from outside.
  */
-export async function resolveSlug(sys: SystemQuery, raw: string): Promise<PublicLink | null> {
+export async function resolveSlug(
+  sys: SystemQuery,
+  raw: string,
+  purpose: LinkPurpose = "booking"
+): Promise<PublicLink | null> {
   /* A link read down a phone gets typed in capitals. Slugs are stored
      lowercase (the table's CHECK insists), so the URL is normalised to match —
      otherwise /book/Acme-Cranes is a 404 for the same page, which is what the
@@ -242,6 +268,7 @@ export async function resolveSlug(sys: SystemQuery, raw: string): Promise<Public
      guard for the day somebody relaxes the CHECK. */
   const slug = typeof raw === "string" ? raw.trim().toLowerCase() : "";
   if (!isSlug(slug)) return null;
+  if (purpose !== "booking" && purpose !== "enquiry") return null;
 
   const row = await sys.one<{
     sub_account_id: string;
@@ -281,14 +308,14 @@ export async function resolveSlug(sys: SystemQuery, raw: string): Promise<Public
        FROM booking_links b
        JOIN sub_accounts s ON s.id = b.sub_account_id
       WHERE lower(b.slug) = lower($1)
-        AND b.enabled
+        AND (CASE WHEN $2 = 'enquiry' THEN b.enquiries_enabled ELSE b.enabled END)
         AND s.deleted_at IS NULL`,
-    [slug]
+    [slug, purpose]
   );
   if (!row) return null;
-  /* A workspace with nobody left in it cannot take a booking: there would be no
-     one to own the meeting and no one to turn up to it. Treated as not found,
-     because that is what it is from outside. */
+  /* A workspace with nobody left in it cannot take a booking or an enquiry:
+     there would be no one to own it and no one to answer it. Treated as not
+     found, because that is what it is from outside. */
   if (!row.owner_user_id) return null;
 
   return {

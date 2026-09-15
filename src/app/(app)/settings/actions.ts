@@ -161,13 +161,16 @@ export async function saveBookingLinkAction(
     const kind = pick(formData.get("kind"), BOOKING_KINDS);
     // A checkbox that is off posts nothing, so presence IS the value.
     const enabled = formData.get("enabled") !== null;
+    const enquiriesEnabled = formData.get("enquiries") !== null;
 
     if (!slotMinutes || !noticeMinutes || !daysAhead || !kind) {
       return { error: "Those booking settings are not ones this page offers." };
     }
+    /* Bookings need opening hours; enquiries do not. A business can take
+       messages before it has decided when it is free. */
     if (enabled && (await listWorkingHours(q)).length === 0) {
       return {
-        error: "Set your opening hours before publishing — without them the page has no times to offer.",
+        error: "Set your opening hours before taking bookings — without them the page has no times to offer.",
       };
     }
 
@@ -182,14 +185,15 @@ export async function saveBookingLinkAction(
         daysAhead: Number(daysAhead),
         kind,
         enabled,
+        enquiriesEnabled,
       }
     );
     if ("error" in result) return { error: result.error };
 
     revalidateApp();
-    /* Short, because the card states the live/not-live position itself right
-       underneath. Repeating it here printed the same sentence twice. */
-    return { ok: result.link.enabled ? "Booking page saved." : "Saved. Not published." };
+    /* Short, because the card states what is live itself, right underneath.
+       Repeating it here printed the same sentence twice. */
+    return { ok: "Saved." };
   });
 }
 
