@@ -116,6 +116,39 @@ async function main() {
   );
   console.log(`Applied. ${after.rows[0].n} tables now present.`);
 
+  /*
+     Can the application actually use what was just applied?
+
+     A table the app role cannot read looks exactly like a working migration
+     until somebody opens the screen that reads it. Checked from the database's
+     own answer, per table, rather than inferred from the GRANT having run.
+  */
+  const role = await client.query<{ bypass: boolean }>(
+    `SELECT (rolsuper OR rolbypassrls) AS bypass FROM pg_roles WHERE rolname = 'yourcrm_app'`
+  );
+  if (role.rowCount === 0) {
+    console.log(
+      "No yourcrm_app role in this database, so no application grants were applied. " +
+        "Create it (LOGIN, NOSUPERUSER, NOBYPASSRLS) and run this again before pointing the app here."
+    );
+  } else {
+    const blocked = await client.query<{ table_name: string }>(
+      `SELECT c.relname AS table_name FROM pg_class c
+        WHERE c.relnamespace = 'public'::regnamespace AND c.relkind = 'r'
+          AND NOT (has_table_privilege('yourcrm_app', c.oid, 'SELECT')
+               AND has_table_privilege('yourcrm_app', c.oid, 'INSERT')
+               AND has_table_privilege('yourcrm_app', c.oid, 'UPDATE')
+               AND has_table_privilege('yourcrm_app', c.oid, 'DELETE'))
+        ORDER BY 1`
+    );
+    if (blocked.rowCount) {
+      console.error(`yourcrm_app cannot fully use: ${blocked.rows.map((r) => r.table_name).join(", ")}`);
+      await client.end();
+      process.exit(1);
+    }
+    console.log("yourcrm_app can read and write every table, and cannot bypass row-level security.");
+  }
+
   await client.end();
 }
 
