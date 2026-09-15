@@ -225,6 +225,29 @@ export async function createDocumentAction(
     );
     if (!deal) return { error: "That project no longer exists." };
 
+    /*
+       Raised from a stage of the job: every line is filed there.
+
+       Checked against THIS project, and before anything is written. The trigger
+       on document_lines would refuse a stage from another project too — but only
+       at the first line, after the document itself had been saved, which would
+       leave a document with no lines behind. The trigger stays as the guarantee;
+       this is what keeps a refusal clean.
+    */
+    const rawStage = String(formData.get("projectTaskId") ?? "").trim();
+    const stageId = rawStage ? validId(rawStage) : null;
+    if (rawStage && !stageId) return { error: "That stage could not be identified." };
+    let stageName: string | null = null;
+    if (stageId) {
+      const stage = await q.one<{ name: string }>(
+        `SELECT name FROM project_tasks
+          WHERE sub_account_id = $1 AND id = $2 AND deal_id = $3 AND deleted_at IS NULL`,
+        [q.ctx.subAccountId, stageId, dealId]
+      );
+      if (!stage) return { error: "That stage is not part of this project." };
+      stageName = stage.name;
+    }
+
     const documentId = newId(kind === "quote" ? "q" : kind === "purchase_order" ? "po" : "inv");
     try {
       /* Inside a savepoint. A duplicate number is refused by the unique index,
@@ -250,14 +273,15 @@ export async function createDocumentAction(
     for (const [position, line] of lines.entries()) {
       await q.rows(
         `INSERT INTO document_lines
-           (id, sub_account_id, document_id, description, quantity, unit_cents, position)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [newId("l"), q.ctx.subAccountId, documentId, line.description, line.quantity, line.unitCents, position]
+           (id, sub_account_id, document_id, description, quantity, unit_cents, position, project_task_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [newId("l"), q.ctx.subAccountId, documentId, line.description, line.quantity, line.unitCents, position, stageId]
       );
     }
 
     revalidateApp();
-    return { ok: `${number} saved with ${lines.length} ${lines.length === 1 ? "line" : "lines"}.` };
+    const saved = `${number} saved with ${lines.length} ${lines.length === 1 ? "line" : "lines"}`;
+    return { ok: stageName ? `${saved}, filed to ${stageName}.` : `${saved}.` };
   });
 }
 

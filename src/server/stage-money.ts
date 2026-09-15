@@ -189,6 +189,68 @@ export function documentsForStage(
   return out;
 }
 
+/** What the Documents tab needs to know about a stage. A task carries more; this is the part used. */
+export type StageTask = { id: string; name: string; position: number };
+
+export type StageEntry = {
+  document: ProjectDocument;
+  /** Only the lines that belong in this group — filed to this stage, or to none. */
+  lines: ProjectDocument["lines"];
+  /** Those lines' total: this stage's share of the document, not the whole of it. */
+  totalCents: number;
+};
+
+export type DocumentsByStage = {
+  /** Every stage in plan order, including the ones with nothing filed yet. */
+  stages: { task: StageTask; entries: StageEntry[]; money: StageMoney | null }[];
+  /** Documents with at least one line filed nowhere, showing only those lines. */
+  unfiled: StageEntry[];
+};
+
+/**
+ * The Documents tab, arranged the way a job is run.
+ *
+ * Grouped by the LINE's stage, not the document's, because a client quotation
+ * covers the whole job and a purchase order covers one piece of it. The same
+ * quotation therefore appears under several stages, each time showing only the
+ * part that stage owns — and each entry says so, rather than printing a
+ * partial total beside a document number as if it were the whole.
+ *
+ * Empty stages are kept. A stage with nothing filed is where somebody raises the
+ * purchase order for it, so hiding it would remove the place to start.
+ *
+ * A line pointing at a stage that is no longer in the plan is treated as
+ * unfiled, so it lands somewhere visible instead of disappearing from the tab.
+ */
+export function documentsByStage(
+  documents: readonly ProjectDocument[],
+  tasks: readonly StageTask[]
+): DocumentsByStage {
+  const money = stageMoney(documents);
+  const known = new Set(tasks.map((t) => t.id));
+  const entry = (document: ProjectDocument, lines: ProjectDocument["lines"]): StageEntry => ({
+    document,
+    lines,
+    totalCents: lines.reduce((n, l) => n + l.totalCents, 0),
+  });
+
+  const stages = [...tasks]
+    .sort((a, b) => a.position - b.position || a.name.localeCompare(b.name))
+    .map((task) => ({
+      task,
+      entries: documentsForStage(documents, task.id).map(({ document, lines }) => entry(document, lines)),
+      money: money.get(task.id) ?? null,
+    }));
+
+  const unfiled: StageEntry[] = [];
+  for (const document of documents) {
+    const lines = document.lines.filter((l) => !l.projectTaskId || !known.has(l.projectTaskId));
+    if (lines.length > 0) unfiled.push(entry(document, lines));
+  }
+
+  return { stages, unfiled };
+}
+
 /** Lines filed against no stage at all, so the Documents tab can say so. */
 export function unfiledLineCount(documents: readonly ProjectDocument[]): number {
   return documents.reduce(

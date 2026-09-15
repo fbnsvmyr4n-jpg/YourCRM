@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -25,7 +25,9 @@ import { TimeAgo } from "@/components/ui/TimeAgo";
 import { stageMeta } from "@/data/pipeline";
 import { clsx } from "@/lib/clsx";
 import { useFormDisclosure } from "@/lib/form-disclosure";
+import { useRememberedToggle } from "@/lib/remembered-toggle";
 import type {
+  DocumentLine,
   ProjectDocument,
   ProjectEvent,
   ProjectHeader,
@@ -34,10 +36,18 @@ import type {
 } from "@/server/repos/projects";
 import type { Dependency, ProjectTask, ScheduleSummary } from "@/server/repos/tasks";
 import { ProjectSchedule } from "./ProjectSchedule";
-import { projectMoney, stageMoney, type ProjectMoney } from "@/server/stage-money";
+import {
+  documentsByStage,
+  projectMoney,
+  stageMoney,
+  type DocumentsByStage,
+  type ProjectMoney,
+  type StageEntry,
+} from "@/server/stage-money";
 import {
   addProjectPersonAction,
   createDocumentAction,
+  fileLineAction,
   raiseInvoiceAction,
   sendInvoiceAction,
   removeProjectPersonAction,
@@ -245,7 +255,7 @@ export function ProjectDetail({
       <div className="mt-4 flex flex-col gap-4">
         {tab === "team" && <TeamTab dealId={header.id} people={people} candidates={candidates} />}
         {tab === "documents" && (
-          <DocumentsTab dealId={header.id} documents={documents} priceItems={priceItems} />
+          <DocumentsTab dealId={header.id} documents={documents} priceItems={priceItems} tasks={tasks} />
         )}
         {tab === "threads" && <ThreadsTab threads={threads} />}
         {tab === "timeline" && (
@@ -664,10 +674,13 @@ function DocumentsTab({
   dealId,
   documents,
   priceItems,
+  tasks,
 }: {
   dealId: string;
   documents: ProjectDocument[];
   priceItems: PriceItem[];
+  /** The job's plan, so documents can be arranged and filed by stage. */
+  tasks: ProjectTask[];
 }) {
   const [createState, create, creating] = useActionState<FormState, FormData>(
     createDocumentAction,
@@ -687,6 +700,17 @@ function DocumentsTab({
     undefined
   );
 
+  /* The stage a new document is being raised for, when it was opened from a
+     stage rather than from New. */
+  const [formStage, setFormStage] = useState<{ id: string; name: string } | null>(null);
+  const formRef = useRef<HTMLDivElement>(null);
+
+  /* By stage once the job has a plan, because that is how a job is run and
+     paid for. Remembered per person: somebody who prefers the list by type
+     should not have to choose it again every visit. */
+  const [byStage, toggleByStage] = useRememberedToggle("project-documents:by-stage", true);
+  const showStages = tasks.length > 0 && byStage;
+
   const quotes = documents.filter((d) => d.kind === "quote");
   const orders = documents.filter((d) => d.kind === "purchase_order");
   /* Its own group. An invoice is money coming IN and a purchase order is money
@@ -701,6 +725,29 @@ function DocumentsTab({
   const acceptedQuote = quotes.find((d) => d.status === "accepted" || d.status === "paid");
   const canInvoice = Boolean(acceptedQuote) && invoices.length === 0;
 
+  /* Bumped each time the form is deliberately opened, so it starts fresh then
+     and only then — never when the stage is merely cleared. */
+  const [formKey, setFormKey] = useState(0);
+  const startNew = () => {
+    setFormStage(null);
+    setFormKey((k) => k + 1);
+    openForm();
+  };
+  const raiseForStage = (task: { id: string; name: string }) => {
+    setFormStage({ id: task.id, name: task.name });
+    setFormKey((k) => k + 1);
+    openForm();
+    /* The form opens at the top of the card and the button pressed may be a
+       long way below it. Without this the press appears to do nothing. Instant,
+       not smooth: a smooth scroll silently does nothing when the pane is not
+       painting frames. */
+    requestAnimationFrame(() => formRef.current?.scrollIntoView({ block: "nearest" }));
+  };
+  const cancelForm = () => {
+    closeForm();
+    setFormStage(null);
+  };
+
   return (
     <Card>
       <CardHeader
@@ -708,14 +755,43 @@ function DocumentsTab({
         icon={<Receipt className="h-[18px] w-[18px] text-accent" />}
         action={
           !open && (
-            <button
-              type="button"
-              onClick={openForm}
-              className="btn-accent focus-ring flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-semibold"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              New
-            </button>
+            <div className="flex items-center gap-2">
+              {tasks.length > 0 && (
+                <div
+                  role="group"
+                  aria-label="Arrange documents"
+                  className="flex rounded-xl p-0.5"
+                  style={{ background: "var(--sunken)" }}
+                >
+                  {[
+                    { label: "By stage", active: byStage },
+                    { label: "By type", active: !byStage },
+                  ].map((o) => (
+                    <button
+                      key={o.label}
+                      type="button"
+                      aria-pressed={o.active}
+                      onClick={() => !o.active && toggleByStage()}
+                      className={clsx(
+                        "focus-ring rounded-[10px] px-2.5 py-1.5 text-xs font-medium transition-colors",
+                        o.active ? "text-accent" : "text-muted"
+                      )}
+                      style={o.active ? { background: "var(--accent-soft)" } : undefined}
+                    >
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={startNew}
+                className="btn-accent focus-ring flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-semibold"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                New
+              </button>
+            </div>
           )
         }
       />
@@ -728,14 +804,23 @@ function DocumentsTab({
       </div>
 
       {open && (
-        <DocumentForm
-          dealId={dealId}
-          priceItems={priceItems}
-          action={create}
-          pending={creating}
-          state={createState}
-          onCancel={closeForm}
-        />
+        <div ref={formRef}>
+          <DocumentForm
+            /* A fresh form each time one is deliberately opened — from New or
+               from a stage — so the type starts right for how it was opened.
+               NOT keyed on the stage itself: clearing the stage mid-way must
+               not throw away lines somebody has already typed. */
+            key={formKey}
+            dealId={dealId}
+            priceItems={priceItems}
+            action={create}
+            pending={creating}
+            state={createState}
+            onCancel={cancelForm}
+            stage={formStage}
+            onClearStage={() => setFormStage(null)}
+          />
+        </div>
       )}
 
       {/* Billing the work, in one press.
@@ -759,33 +844,163 @@ function DocumentsTab({
         </form>
       )}
 
-      {documents.length === 0 && !open ? (
-        <p className="text-xs text-faint">
+      {documents.length === 0 && !open && (
+        <p className="mb-3 text-xs text-faint">
           Nothing raised yet. A quotation goes to the client, a purchase order records what you
           have committed to spend, and an invoice bills the work once they accept. All three add
           up from their lines.
         </p>
+      )}
+
+      {showStages ? (
+        <StageView
+          grouped={documentsByStage(documents, tasks)}
+          tasks={tasks}
+          onStatus={setStatus}
+          busy={settingStatus}
+          onSend={send}
+          sending={sending}
+          onRaiseForStage={raiseForStage}
+        />
       ) : (
-        <div className="flex flex-col gap-4">
-          <DocumentGroup label="Quotations" docs={quotes} onStatus={setStatus} busy={settingStatus} />
-          <DocumentGroup
-            label="Invoices"
-            docs={invoices}
-            onStatus={setStatus}
-            busy={settingStatus}
-            onSend={send}
-            sending={sending}
-          />
-          <DocumentGroup label="Purchase orders" docs={orders} onStatus={setStatus} busy={settingStatus} />
-        </div>
+        documents.length > 0 && (
+          <div className="flex flex-col gap-4">
+            <DocumentGroup label="Quotations" docs={quotes} tasks={tasks} onStatus={setStatus} busy={settingStatus} />
+            <DocumentGroup
+              label="Invoices"
+              docs={invoices}
+              tasks={tasks}
+              onStatus={setStatus}
+              busy={settingStatus}
+              onSend={send}
+              sending={sending}
+            />
+            <DocumentGroup label="Purchase orders" docs={orders} tasks={tasks} onStatus={setStatus} busy={settingStatus} />
+          </div>
+        )
       )}
     </Card>
+  );
+}
+
+/**
+ * Documents under the stage of the job they pay for.
+ *
+ * Anything not yet filed comes FIRST, in amber, because it is the part asking
+ * for something: an unfiled supplier order is a cost no stage's margin counts.
+ * Each stage then shows its own figures and a way to raise a purchase order for
+ * it, including the stages with nothing filed yet — that is exactly where the
+ * first order for a stage gets raised.
+ */
+function StageView({
+  grouped,
+  tasks,
+  onStatus,
+  busy,
+  onSend,
+  sending,
+  onRaiseForStage,
+}: {
+  grouped: DocumentsByStage;
+  tasks: ProjectTask[];
+  onStatus: (formData: FormData) => void;
+  busy: boolean;
+  onSend: (formData: FormData) => void;
+  sending: boolean;
+  onRaiseForStage: (task: { id: string; name: string }) => void;
+}) {
+  const { stages, unfiled } = grouped;
+  const unfiledLines = unfiled.reduce((n, e) => n + e.lines.length, 0);
+
+  const rowFor = (groupKey: string, e: StageEntry) => (
+    <DocumentRow
+      key={`${groupKey}-${e.document.id}`}
+      groupKey={groupKey}
+      doc={e.document}
+      lines={e.lines}
+      /* Only when this group holds part of the document. A whole document
+         shows its own total, exactly as it does by type. */
+      shareCents={e.lines.length === e.document.lines.length ? undefined : e.totalCents}
+      tasks={tasks}
+      onStatus={onStatus}
+      busy={busy}
+      onSend={e.document.kind === "invoice" ? onSend : undefined}
+      sending={sending}
+    />
+  );
+
+  return (
+    <div className="flex flex-col gap-4">
+      {unfiled.length > 0 && (
+        <section>
+          <p
+            className="mb-1 px-0.5 text-[11px] font-semibold uppercase tracking-[0.14em]"
+            style={{ color: "var(--amber)" }}
+          >
+            Not filed to a stage{" "}
+            <span className="font-normal tracking-normal">
+              ({unfiledLines} {unfiledLines === 1 ? "line" : "lines"})
+            </span>
+          </p>
+          <p className="mb-2 px-0.5 text-xs text-faint">
+            Open a document and choose a stage for each line, so that stage&apos;s margin counts it.
+          </p>
+          <ul className="flex flex-col gap-2">{unfiled.map((e) => rowFor("unfiled", e))}</ul>
+        </section>
+      )}
+
+      {stages.map(({ task, entries, money: figures }) => (
+        <section key={task.id}>
+          <div className="mb-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 px-0.5">
+            <p className="min-w-0 flex-1 truncate text-[11px] font-semibold uppercase tracking-[0.14em] text-faint">
+              {task.name}
+            </p>
+            {figures && figures.quotedCents > 0 && (
+              <span className="text-[11px] text-muted">
+                Quoted{" "}
+                <span className="font-semibold tabular-nums text-[var(--text)]">{money(figures.quotedCents)}</span>
+              </span>
+            )}
+            {figures && figures.committedCents > 0 && (
+              <span className="text-[11px] text-muted">
+                Committed{" "}
+                <span className="font-semibold tabular-nums text-[var(--text)]">{money(figures.committedCents)}</span>
+              </span>
+            )}
+            {figures && figures.quotedCents > 0 && figures.committedCents > 0 && (
+              <span
+                className="text-[11px] font-semibold tabular-nums"
+                style={{ color: figures.marginCents < 0 ? "var(--red)" : "var(--green)" }}
+              >
+                {figures.marginCents < 0 ? "" : "+"}
+                {money(figures.marginCents)}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => onRaiseForStage(task)}
+              aria-label={`Raise a purchase order for ${task.name}`}
+              className="btn-soft focus-ring flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium"
+            >
+              <Plus className="h-3 w-3" />
+              Purchase order
+            </button>
+          </div>
+          {entries.length === 0 ? (
+            <p className="px-0.5 text-xs text-faint">Nothing filed to this stage yet.</p>
+          ) : (
+            <ul className="flex flex-col gap-2">{entries.map((e) => rowFor(task.id, e))}</ul>
+          )}
+        </section>
+      ))}
+    </div>
   );
 }
 
 function DocumentGroup({
   label,
   docs,
+  tasks,
   onStatus,
   busy,
   onSend,
@@ -793,6 +1008,7 @@ function DocumentGroup({
 }: {
   label: string;
   docs: ProjectDocument[];
+  tasks: ProjectTask[];
   onStatus: (formData: FormData) => void;
   busy: boolean;
   /** Only invoices can be sent from here, so only they are given this. */
@@ -809,7 +1025,9 @@ function DocumentGroup({
         {docs.map((d) => (
           <DocumentRow
             key={d.id}
+            groupKey={label}
             doc={d}
+            tasks={tasks}
             onStatus={onStatus}
             busy={busy}
             onSend={onSend}
@@ -823,12 +1041,25 @@ function DocumentGroup({
 
 function DocumentRow({
   doc,
+  groupKey,
+  lines,
+  shareCents,
+  tasks,
   onStatus,
   busy,
   onSend,
   sending,
 }: {
   doc: ProjectDocument;
+  /** The group this row sits in. The same document can appear under several
+   *  stages, and ids on the page must still be unique. */
+  groupKey?: string;
+  /** The lines to show, when this row holds only part of the document. */
+  lines?: DocumentLine[];
+  /** This group's share of the total, when it holds only part of the document. */
+  shareCents?: number;
+  /** The job's stages, for filing each line. */
+  tasks?: ProjectTask[];
   onStatus: (formData: FormData) => void;
   busy: boolean;
   onSend?: (formData: FormData) => void;
@@ -836,7 +1067,13 @@ function DocumentRow({
 }) {
   const [open, setOpen] = useState(false);
   const tone = DOC_STATUS_TONE[doc.status] ?? DOC_STATUS_TONE.draft;
-  const linesId = `lines-${doc.id}`;
+  const scope = groupKey ? `${groupKey}-${doc.id}`.replace(/[^A-Za-z0-9_-]/g, "_") : doc.id;
+  const linesId = `lines-${scope}`;
+  const shown = lines ?? doc.lines;
+  const lineCount =
+    lines && lines.length !== doc.lines.length
+      ? `${lines.length} of ${doc.lines.length} lines here`
+      : `${doc.lines.length} ${doc.lines.length === 1 ? "line" : "lines"}`;
 
   return (
     <li className="overflow-hidden rounded-xl" style={{ background: "var(--surface-2)" }}>
@@ -850,13 +1087,23 @@ function DocumentRow({
         <span className="min-w-0 flex-1 leading-tight">
           <span className="block truncate text-sm font-medium">{doc.number}</span>
           <span className="mt-0.5 block truncate text-xs text-faint">
-            {[doc.party, readableDay(doc.issuedOn), `${doc.lines.length} ${doc.lines.length === 1 ? "line" : "lines"}`]
-              .filter(Boolean)
-              .join(" · ")}
+            {[doc.party, readableDay(doc.issuedOn), lineCount].filter(Boolean).join(" · ")}
           </span>
         </span>
         <span className="flex w-full items-center justify-end gap-2 @min-[440px]:w-auto">
-          <span className="shrink-0 text-sm font-semibold tabular-nums">{money(doc.totalCents)}</span>
+          <span className="shrink-0 text-sm font-semibold tabular-nums">
+            {money(shareCents ?? doc.totalCents)}
+            {/* A partial figure beside a document number reads as the whole
+                document unless it says otherwise. */}
+            {/* A real space, not only margin: margin is invisible to a screen
+                reader, which read the two figures as one ("$1,100,000of"). */}
+            {shareCents !== undefined && (
+              <>
+                {" "}
+                <span className="text-xs font-normal text-faint">of {money(doc.totalCents)}</span>
+              </>
+            )}
+          </span>
           <span
             className="shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold capitalize"
             style={{ background: tone.soft, color: tone.color }}
@@ -870,9 +1117,10 @@ function DocumentRow({
       {open && (
         <div id={linesId} className="border-t border-[var(--border)] px-3.5 py-3">
           <ul className="flex flex-col gap-1.5">
-            {doc.lines.map((l) => (
-              <li key={l.id} className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-xs">
+            {shown.map((l) => (
+              <li key={l.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
                 <span className="min-w-0 flex-1 truncate">{l.description}</span>
+                {tasks && tasks.length > 0 && <LineStageSelect line={l} tasks={tasks} scope={scope} />}
                 <span className="shrink-0 text-faint tabular-nums">
                   {l.quantity} × {money(l.unitCents)}
                 </span>
@@ -927,11 +1175,11 @@ function DocumentRow({
              it is one control here rather than an edit screen. */
           <form action={onStatus} className="mt-3 flex items-center justify-end gap-2">
             <input type="hidden" name="documentId" value={doc.id} />
-            <label className="sr-only" htmlFor={`status-${doc.id}`}>
+            <label className="sr-only" htmlFor={`status-${scope}`}>
               Status for {doc.number}
             </label>
             <select
-              id={`status-${doc.id}`}
+              id={`status-${scope}`}
               name="status"
               defaultValue={doc.status}
               disabled={busy}
@@ -955,6 +1203,56 @@ function DocumentRow({
   );
 }
 
+/**
+ * Which stage of the job a line belongs to, changed where the line is.
+ *
+ * The action behind this existed with nothing a person could press to reach
+ * it, so the only lines ever filed were the ones the app generated itself — a
+ * supplier's order typed in by hand never counted against the stage it paid
+ * for. It saves on change rather than behind a button: it is one small choice,
+ * and a second press to confirm it is how the choice gets forgotten.
+ */
+function LineStageSelect({
+  line,
+  tasks,
+  scope,
+}: {
+  line: DocumentLine;
+  tasks: ProjectTask[];
+  scope: string;
+}) {
+  const [state, action, pending] = useActionState<FormState, FormData>(fileLineAction, undefined);
+  const id = `stage-${scope}-${line.id}`.replace(/[^A-Za-z0-9_-]/g, "_");
+  return (
+    <form action={action} className="flex shrink-0 items-center gap-1.5">
+      <input type="hidden" name="lineId" value={line.id} />
+      <label className="sr-only" htmlFor={id}>
+        Stage for {line.description}
+      </label>
+      <select
+        id={id}
+        name="projectTaskId"
+        defaultValue={line.projectTaskId ?? ""}
+        disabled={pending}
+        onChange={(e) => e.currentTarget.form?.requestSubmit()}
+        className="focus-ring max-w-[11rem] truncate rounded-md border border-[var(--border)] bg-[var(--panel-solid)] px-1.5 py-1 text-[11px] text-muted disabled:opacity-60"
+      >
+        <option value="">No stage</option>
+        {tasks.map((t) => (
+          <option key={t.id} value={t.id}>
+            {t.name}
+          </option>
+        ))}
+      </select>
+      {state?.error && (
+        <span role="alert" className="text-[11px]" style={{ color: "var(--red)" }}>
+          {state.error}
+        </span>
+      )}
+    </form>
+  );
+}
+
 /** Four blank lines. Enough for most quotes, and blanks are dropped on save. */
 const BLANK_LINES = [0, 1, 2, 3];
 
@@ -965,6 +1263,8 @@ function DocumentForm({
   pending,
   state,
   onCancel,
+  stage,
+  onClearStage,
 }: {
   dealId: string;
   priceItems: PriceItem[];
@@ -972,15 +1272,38 @@ function DocumentForm({
   pending: boolean;
   state: FormState;
   onCancel: () => void;
+  /** The stage this document is being raised for, when it was opened from one. */
+  stage?: { id: string; name: string } | null;
+  onClearStage?: () => void;
 }) {
   return (
     <form action={action} className="mb-4 space-y-3 border-b border-[var(--border)] pb-4">
       <Banner state={state} />
       <input type="hidden" name="dealId" value={dealId} />
+      {stage && (
+        <div
+          className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl px-3 py-2 text-xs"
+          style={{ background: "var(--accent-soft)" }}
+        >
+          <input type="hidden" name="projectTaskId" value={stage.id} />
+          <span className="text-muted">For stage</span>
+          <span className="font-semibold text-accent">{stage.name}</span>
+          <span className="text-faint">· every line is filed there</span>
+          {onClearStage && (
+            <button
+              type="button"
+              onClick={onClearStage}
+              className="focus-ring ml-auto rounded-md px-1.5 py-0.5 text-muted transition-colors hover:text-[var(--text)]"
+            >
+              Not for a stage
+            </button>
+          )}
+        </div>
+      )}
       <div className="grid grid-cols-1 gap-3 @min-[560px]:grid-cols-4">
         <label className="block">
           <span className="mb-1.5 block text-xs font-medium text-muted">Type</span>
-          <select name="kind" className="field-input" defaultValue="quote">
+          <select name="kind" className="field-input" defaultValue={stage ? "purchase_order" : "quote"}>
             <option value="quote">Quotation</option>
             <option value="purchase_order">Purchase order</option>
             <option value="invoice">Invoice</option>
