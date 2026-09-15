@@ -1,6 +1,13 @@
 import { listCalls } from "./repos/calls";
 import { deadJobs } from "./repos/outbox";
-import { CALL_ANALYSIS, INVITE_EMAIL, INVOICE_EMAIL, MESSAGE_EMAIL, QUOTE_EMAIL } from "./outbox-handlers";
+import {
+  BOOKING_EMAIL,
+  CALL_ANALYSIS,
+  INVITE_EMAIL,
+  INVOICE_EMAIL,
+  MESSAGE_EMAIL,
+  QUOTE_EMAIL,
+} from "./outbox-handlers";
 import { listDeals } from "./repos/deals";
 import { listMeetings } from "./repos/meetings";
 import { listContacts } from "./repos/contacts";
@@ -72,6 +79,13 @@ const STUCK_META: Record<string, { noun: (n: number) => string; verb: string; hr
     noun: (n) => (n === 1 ? "message" : "messages"),
     verb: "could not be sent",
     href: "/inbox",
+  },
+  /* The visitor has no account to check and no other proof they are booked, so
+     a confirmation that died is worth somebody picking up the phone for. */
+  [BOOKING_EMAIL]: {
+    noun: (n) => (n === 1 ? "booking confirmation" : "booking confirmations"),
+    verb: "could not be emailed",
+    href: "/meetings",
   },
   [INVITE_EMAIL]: {
     noun: (n) => (n === 1 ? "invitation" : "invitations"),

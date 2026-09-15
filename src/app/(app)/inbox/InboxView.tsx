@@ -816,8 +816,8 @@ function MessageList({
 function DeliveryFlag({ message }: { message: Message }) {
   const flag = {
     sent: null,
-    queued: { text: "Sending", tone: "var(--muted)" },
-    logged: { text: "Not sent", tone: "var(--muted)" },
+    queued: { text: "Sending", tone: "var(--text-muted)" },
+    logged: { text: "Not sent", tone: "var(--text-muted)" },
     failed: { text: "Not sent", tone: "var(--red)" },
   }[message.delivery ?? "sent"];
   if (!flag) return null;
@@ -841,8 +841,8 @@ function DeliveryNote({ message }: { message: Message }) {
         message.channel === "email"
           ? "Not sent — recorded here only"
           : `Recorded, not sent. ${message.channel === "sms" ? "SMS" : "WhatsApp"} messages are logged here and sent from your phone.`,
-      tone: "var(--muted)",
-      soft: "var(--surface-2)",
+      tone: "var(--text-muted)",
+      soft: "var(--panel-2)",
     },
     failed: {
       text: `Could not be sent: ${message.deliveryError ?? "unknown error"}`,

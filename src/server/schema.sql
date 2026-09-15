@@ -1727,6 +1727,65 @@ CREATE POLICY working_hours_tenant_isolation ON working_hours
   WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
 
 -- ---------------------------------------------------------------------------
+-- A link a stranger can open.
+--
+-- Everything else in this database is reached by somebody who signed in. This
+-- row is the one exception: it names a page on the public internet, and the
+-- visitor has no session, no tenant, and no reason to be trusted.
+--
+-- So it is OFF until somebody turns it on. `enabled` defaults to FALSE, which
+-- means creating a workspace does not quietly publish its diary — a booking
+-- page has to be a decision, and the safe direction for a decision nobody has
+-- made is "not published".
+--
+-- The slug is globally unique because it is a URL, not a per-tenant name. That
+-- does let one customer discover that a slug is taken by trying to claim it,
+-- which is the same small oracle every username system has and is the price of
+-- a link somebody can read down a phone.
+--
+-- The booking terms live here rather than in `settings` because they belong to
+-- the LINK: a business may want a 20-minute phone call and a 2-hour site visit,
+-- and those are two links with two sets of rules, not one workspace with an
+-- argument about which.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS booking_links (
+  id              TEXT PRIMARY KEY,
+  sub_account_id  TEXT NOT NULL REFERENCES sub_accounts(id) ON DELETE CASCADE,
+
+  -- The public path segment: /book/<slug>. Lowercase letters, digits, hyphens.
+  slug            TEXT NOT NULL CHECK (slug ~ '^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$'),
+  -- What the visitor is booking, in the business's own words.
+  title           TEXT NOT NULL DEFAULT '',
+
+  slot_minutes    INTEGER NOT NULL DEFAULT 30
+                    CHECK (slot_minutes BETWEEN 5 AND 480),
+  -- How much warning the business needs. Zero is allowed and means "any time
+  -- still in the future", which is a real choice for a phone call.
+  notice_minutes  INTEGER NOT NULL DEFAULT 120 CHECK (notice_minutes >= 0),
+  days_ahead      INTEGER NOT NULL DEFAULT 14 CHECK (days_ahead BETWEEN 1 AND 90),
+  kind            TEXT NOT NULL DEFAULT 'online' CHECK (kind IN ('online', 'in_person')),
+
+  -- Nothing is public until this is true.
+  enabled         BOOLEAN NOT NULL DEFAULT FALSE,
+
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Case-insensitive, because a URL typed in capitals is the same page and two
+-- customers owning "Acme" and "acme" would be a support call about whose link
+-- somebody clicked.
+CREATE UNIQUE INDEX IF NOT EXISTS booking_links_slug ON booking_links (lower(slug));
+CREATE INDEX IF NOT EXISTS booking_links_tenant_idx ON booking_links (sub_account_id);
+
+ALTER TABLE booking_links ENABLE ROW LEVEL SECURITY;
+ALTER TABLE booking_links FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS booking_links_tenant_isolation ON booking_links;
+CREATE POLICY booking_links_tenant_isolation ON booking_links
+  USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
+  WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
+
+-- ---------------------------------------------------------------------------
 -- Every tool an agent ran, and the reason a retry cannot run it twice.
 --
 -- One table for the audit trail AND the idempotency record, deliberately. They

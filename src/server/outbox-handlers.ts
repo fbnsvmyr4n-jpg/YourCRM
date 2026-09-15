@@ -2,6 +2,7 @@ import { buildRegistry, queueJob, type JobOutcome, type OutboxHandler } from "./
 import type { TenantQuery } from "./tenant";
 import { withSystem, withTenant } from "./tenant";
 import {
+  bookingEmail,
   emailConfigured,
   inviteEmail,
   invoiceEmail,
@@ -15,6 +16,8 @@ import { canSendOn, findOutgoing, setDelivery } from "./repos/inbox";
 import { findUserById } from "./repos/users";
 import { createResetToken } from "./repos/auth";
 import { getCall } from "./repos/calls";
+import { getContact } from "./repos/contacts";
+import { getMeeting } from "./repos/meetings";
 import { analyseCall, ANALYSIS_MODEL } from "./agent/call-analysis";
 import { saveAnalysis } from "./repos/call-analysis";
 import { logWrite } from "./log";
@@ -458,6 +461,80 @@ const inviteEmailHandler: OutboxHandler = {
 };
 
 /* ------------------------------------------------------------------ */
+/* Telling somebody their booking is in the diary                      */
+/* ------------------------------------------------------------------ */
+
+export const BOOKING_EMAIL = "booking_email";
+
+/** One job per meeting, so a retried submission cannot confirm twice. */
+export const bookingEmailKey = (meetingId: string) => `${BOOKING_EMAIL}:${meetingId}`;
+
+/**
+ * Confirm a booking somebody made on the public page.
+ *
+ * The one email in this product sent to a person who has never signed in, which
+ * changes what it may contain: the time, the business, and nothing about the
+ * workspace's other work. It is also the only proof the visitor gets that
+ * anything happened — the page says so, but a page is not something you can
+ * find again on a Tuesday.
+ *
+ * Queued rather than sent inline, like every other send here, so a slow or
+ * unconfigured provider cannot fail the booking itself. A meeting in the diary
+ * with no confirmation is a smaller problem than a confirmation with no
+ * meeting.
+ */
+const bookingEmailHandler: OutboxHandler = {
+  name: BOOKING_EMAIL,
+  run: async (payload, job): Promise<JobOutcome> => {
+    const meetingId = payload.meetingId;
+    if (!meetingId) return { ok: false, retry: false, error: "No meetingId in the job" };
+
+    const meeting = await withTenant(job.ctx, (q) => getMeeting(q, meetingId));
+    if (!meeting) return { ok: true, note: "the meeting no longer exists" };
+    if (!meeting.contactId) {
+      return { ok: false, retry: false, error: "that booking has nobody to confirm to" };
+    }
+
+    const contact = await withTenant(job.ctx, (q) => getContact(q, meeting.contactId!));
+    if (!contact?.email) {
+      return { ok: false, retry: false, error: "that booking has no email address to confirm to" };
+    }
+    if (!emailConfigured()) {
+      return { ok: false, retry: true, error: "email is not configured for this workspace" };
+    }
+
+    const who = await withSystem(async (sys) => {
+      const row = await sys.one<{ name: string; time_zone: string | null }>(
+        `SELECT s.name, st.time_zone
+           FROM sub_accounts s
+           LEFT JOIN settings st ON st.sub_account_id = s.id
+          WHERE s.id = $2 AND s.agency_id = $1 AND s.deleted_at IS NULL`,
+        [job.ctx.agencyId, job.ctx.subAccountId]
+      );
+      return { workspace: row?.name ?? "YourCRM", timeZone: row?.time_zone ?? "UTC" };
+    });
+
+    const sent = await sendEmail({
+      to: contact.email,
+      ...bookingEmail({
+        name: `${contact.firstName} ${contact.lastName}`.trim(),
+        topic: meeting.topic,
+        scheduledAt: meeting.scheduledAt,
+        durationMin: meeting.durationMin,
+        kind: meeting.kind,
+        workspace: who.workspace,
+        timeZone: who.timeZone,
+      }),
+      idempotencyKey: job.id,
+    });
+    if (!sent.sent) {
+      return { ok: false, retry: !sent.permanent, error: sent.reason ?? "the email did not go" };
+    }
+    return { ok: true };
+  },
+};
+
+/* ------------------------------------------------------------------ */
 
 export const OUTBOX_HANDLERS = [
   quoteEmailHandler,
@@ -465,5 +542,6 @@ export const OUTBOX_HANDLERS = [
   inviteEmailHandler,
   invoiceEmailHandler,
   messageEmailHandler,
+  bookingEmailHandler,
 ] as const;
 export const OUTBOX_REGISTRY = buildRegistry(OUTBOX_HANDLERS);

@@ -1,4 +1,5 @@
 import { logFailure } from "./log";
+import { utcOffsetLabel } from "@/lib/zoned";
 
 /**
  * Outbound email.
@@ -388,6 +389,99 @@ export function messageEmail(message: {
 </div>`;
 
   return { subject, text, html };
+}
+
+/**
+ * The confirmation a visitor gets after booking on the public page.
+ *
+ * Written for somebody who has never signed in and may never do so. It says
+ * WHEN, in their host's own time zone with the zone named — a bare "10:00" is
+ * ambiguous the moment two countries are involved, and this is the one email
+ * here that routinely crosses one.
+ *
+ * It carries nothing about the workspace beyond its name and this appointment.
+ * A confirmation is not a place to leak who else is in the diary.
+ */
+export function bookingEmail(booking: {
+  name: string;
+  topic: string;
+  scheduledAt: string;
+  durationMin: number;
+  kind: "online" | "in_person";
+  workspace: string;
+  timeZone: string;
+}) {
+  const when = formatInZone(booking.scheduledAt, booking.timeZone);
+  const where = booking.kind === "online" ? "Online" : "In person";
+  const greeting = booking.name ? `Hello ${booking.name},` : "Hello,";
+  const what = booking.topic.trim() || "your appointment";
+
+  const subject = `Confirmed: ${what} — ${when}`;
+
+  const text = [
+    greeting,
+    "",
+    `Your booking with ${booking.workspace} is confirmed.`,
+    "",
+    `What:  ${what}`,
+    `When:  ${when}`,
+    `How long: ${booking.durationMin} minutes`,
+    `Where: ${where}`,
+    "",
+    "If you need to change or cancel it, reply to this email and we will sort it out.",
+    "",
+    `— ${booking.workspace}`,
+  ].join("\n");
+
+  const row = (label: string, value: string) =>
+    `<tr><td style="padding:6px 16px 6px 0;color:#8a94a8;font-size:13px">${escapeHtml(label)}</td>` +
+    `<td style="padding:6px 0;font-size:15px;font-weight:600">${escapeHtml(value)}</td></tr>`;
+
+  const html = `<div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:520px;margin:0 auto;padding:32px 24px;color:#0b1220;font-size:15px;line-height:1.6">
+  <p style="margin:0 0 16px">${escapeHtml(greeting)}</p>
+  <p style="margin:0 0 20px">Your booking with ${escapeHtml(booking.workspace)} is confirmed.</p>
+  <table style="border-collapse:collapse;margin:0 0 24px">
+    ${row("What", what)}
+    ${row("When", when)}
+    ${row("How long", `${booking.durationMin} minutes`)}
+    ${row("Where", where)}
+  </table>
+  <p style="margin:0;font-size:13px;color:#8a94a8">
+    Need to change or cancel? Reply to this email and we will sort it out.
+  </p>
+  <p style="margin:24px 0 0;font-size:13px;color:#8a94a8">${escapeHtml(booking.workspace)}</p>
+</div>`;
+
+  return { subject, text, html };
+}
+
+/**
+ * An instant, written out in a named zone.
+ *
+ * The zone is NAMED in the output rather than assumed. "Tuesday 10 March at
+ * 10:00" means two different moments to two people in two countries, and the
+ * one reading this email is by definition not sitting in the office.
+ */
+function formatInZone(iso: string, timeZone: string): string {
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return iso;
+  try {
+    const stamp = new Intl.DateTimeFormat("en-GB", {
+      timeZone,
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(at);
+    const zone = utcOffsetLabel(timeZone, at);
+    return zone ? `${stamp} (${zone})` : stamp;
+  } catch {
+    // An unknown zone is not worth failing a confirmation over; UTC is at
+    // least unambiguous, and saying so is better than silently pretending.
+    return `${at.toISOString().slice(0, 16).replace("T", " ")} (UTC)`;
+  }
 }
 
 /** The reset email. Plain and legible — this is a security message, not a newsletter. */

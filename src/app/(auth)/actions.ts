@@ -1,7 +1,8 @@
 "use server";
 
-import { cookies, headers } from "next/headers";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { clientIp } from "@/server/client-ip";
 import {
   createSessionToken,
   readSessionToken,
@@ -27,21 +28,8 @@ const MAX_PASSWORD = 200;
 
 export type AuthState = { error?: string } | undefined;
 
-/**
- * The caller's IP, for rate limiting.
- *
- * Behind Vercel the socket address is always the proxy, so the real client
- * comes from `x-forwarded-for` — first entry, since downstream proxies append.
- * A spoofed header can only ever *shift* an attacker between IP buckets; it
- * can't help them past the per-email limit, which is the one that actually
- * guards a known account.
- */
-async function clientIp(): Promise<string> {
-  const h = await headers();
-  const fwd = h.get("x-forwarded-for");
-  if (fwd) return fwd.split(",")[0]!.trim();
-  return h.get("x-real-ip")?.trim() || "unknown";
-}
+// The caller's IP now lives in `@/server/client-ip`, shared with the public
+// booking page. The per-email limit is still the one that guards an account.
 
 function lockoutMessage(retryAfterSec: number) {
   const mins = Math.max(1, Math.ceil(retryAfterSec / 60));

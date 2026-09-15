@@ -4,12 +4,14 @@ import { revalidateApp } from "@/server/revalidate";
 import { isValidTimeZone, updateSettings } from "@/server/repos/settings";
 import {
   parseClock,
+  listWorkingHours,
   replaceWorkingHours,
   validateWeek,
   WEEKDAYS,
   type OpenDay,
   type Weekday,
 } from "@/server/repos/working-hours";
+import { BOOKING_KINDS, listBookingLinks, saveBookingLink } from "@/server/repos/booking-links";
 import { changePassword, updateProfile } from "@/server/repos/users";
 import { agencyBilling, applyCreditToStripe, billingPortal, startCheckout } from "@/server/billing/checkout";
 import { PLAN_INFO } from "@/server/billing/plans";
@@ -124,6 +126,71 @@ export async function updateWorkingHoursAction(
         : "Hours cleared. Nothing can be booked until you set them.",
     };
   }, { crmData: false });
+}
+
+/* The choices the booking card offers. Posted values are picked from these
+   lists rather than parsed as numbers, so a forged form cannot set a 7-minute
+   meeting or a 900-day horizon the database would then have to refuse. */
+const SLOT_CHOICES = ["15", "20", "30", "45", "60", "90", "120"] as const;
+const NOTICE_CHOICES = ["0", "60", "120", "240", "1440"] as const;
+const DAYS_CHOICES = ["7", "14", "30", "60"] as const;
+
+/**
+ * Publish, change, or unpublish this workspace's booking page.
+ *
+ * One link per workspace for now — the table allows several, and a business
+ * wanting a phone call and a site visit as two pages is a real case, but a list
+ * editor nobody has asked for yet is not worth building on a guess.
+ *
+ * Publishing is refused until opening hours exist. The page would otherwise go
+ * live and tell every visitor it is not taking bookings, which is a public link
+ * that exists only to disappoint.
+ */
+export async function saveBookingLinkAction(
+  _prev: FormState,
+  formData: FormData
+): Promise<FormState> {
+  return withCurrentTenant(async (q) => {
+    const existing = (await listBookingLinks(q))[0] ?? null;
+
+    const slug = (text(formData.get("slug"), 50) ?? "").toLowerCase();
+    const title = text(formData.get("title"), 80) ?? "";
+    const slotMinutes = pick(formData.get("slotMinutes"), SLOT_CHOICES);
+    const noticeMinutes = pick(formData.get("noticeMinutes"), NOTICE_CHOICES);
+    const daysAhead = pick(formData.get("daysAhead"), DAYS_CHOICES);
+    const kind = pick(formData.get("kind"), BOOKING_KINDS);
+    // A checkbox that is off posts nothing, so presence IS the value.
+    const enabled = formData.get("enabled") !== null;
+
+    if (!slotMinutes || !noticeMinutes || !daysAhead || !kind) {
+      return { error: "Those booking settings are not ones this page offers." };
+    }
+    if (enabled && (await listWorkingHours(q)).length === 0) {
+      return {
+        error: "Set your opening hours before publishing — without them the page has no times to offer.",
+      };
+    }
+
+    const result = await saveBookingLink(
+      q,
+      existing?.id ?? `bl_${crypto.randomUUID().replace(/-/g, "")}`,
+      {
+        slug,
+        title,
+        slotMinutes: Number(slotMinutes),
+        noticeMinutes: Number(noticeMinutes),
+        daysAhead: Number(daysAhead),
+        kind,
+        enabled,
+      }
+    );
+    if ("error" in result) return { error: result.error };
+
+    revalidateApp();
+    /* Short, because the card states the live/not-live position itself right
+       underneath. Repeating it here printed the same sentence twice. */
+    return { ok: result.link.enabled ? "Booking page saved." : "Saved. Not published." };
+  });
 }
 
 export async function updateProfileAction(_prev: FormState, formData: FormData): Promise<FormState> {

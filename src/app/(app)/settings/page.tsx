@@ -15,6 +15,7 @@ import { canAccessCrm, outranks, roleCan } from "@/server/permissions";
 import { instantToWallClock } from "@/lib/zoned";
 import { listHolidays } from "@/server/repos/holidays";
 import { listWorkingHours } from "@/server/repos/working-hours";
+import { listBookingLinks } from "@/server/repos/booking-links";
 import { getSettings } from "@/server/repos/settings";
 import { listUsers } from "@/server/repos/users";
 import { clientBook, groupByOwner } from "@/server/clients-view";
@@ -30,6 +31,7 @@ import { sectionFromParam, type SettingsSectionId } from "./sections";
 import { TeamCard } from "./TeamCard";
 import {
   AppearanceCard,
+  BookingLinkCard,
   HolidaysCard,
   WorkingHoursCard,
   PasswordForm,
@@ -88,9 +90,13 @@ export default async function SettingsPage({
      still read the records.
   */
   const crmAccess = canAccessCrm(user.role);
-  const { settings, usage, trash, book, holidays, workingHours } = await withTenantPage(
+  const { settings, usage, trash, book, holidays, workingHours, bookingLinks } = await withTenantPage(
     async (q) => ({
       settings: await getSettings(q),
+      /* Loaded for CRM users only, like the address book: publishing a page
+         that creates contacts and meetings is CRM work, and the save action is
+         gated the same way. */
+      bookingLinks: crmAccess ? await listBookingLinks(q) : [],
       /* Not customer data — it is when this business is closed — so it loads
          for IT and accounts too, alongside the rest of Preferences. */
       holidays: await listHolidays(q),
@@ -264,6 +270,11 @@ export default async function SettingsPage({
               directly before the holidays that override them. */}
           <WorkingHoursCard week={workingHours} timeZone={settings.timeZone} />
           <HolidaysCard holidays={holidays} thisYear={thisYear} />
+          {/* After the hours and holidays it is built from, so the order on the
+              page is the order the page itself depends on. */}
+          {crmAccess && (
+            <BookingLinkCard link={bookingLinks[0] ?? null} hasHours={workingHours.length > 0} />
+          )}
           <AppearanceCard />
         </>
       ),

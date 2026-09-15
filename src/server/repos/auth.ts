@@ -107,9 +107,24 @@ export const emailKey = (email: string) => `email:${email.trim().toLowerCase()}`
 export const ipKey = (ip: string) => `ip:${ip}`;
 export const signupKey = (ip: string) => `signup:${ip}`;
 
+/**
+ * Attempts to book on a public page, counted per address.
+ *
+ * Counted whether the booking succeeds or not, like signups and for the same
+ * reason: the abuse here is volume. A booking page is a write endpoint with no
+ * password in front of it, so the thing to stop is somebody filling a diary
+ * with fifty appointments, not somebody guessing at something.
+ */
+export const bookingKey = (ip: string) => `book:${ip}`;
+
+/* Enough for a person who mistypes their email and tries again, nowhere near
+   enough to fill a week. */
+const MAX_BOOKINGS_PER_IP = 6;
+
 function limitFor(key: string): number {
   if (key.startsWith("email:")) return MAX_PER_EMAIL;
   if (key.startsWith("signup:")) return MAX_SIGNUPS_PER_IP;
+  if (key.startsWith("book:")) return MAX_BOOKINGS_PER_IP;
   return MAX_PER_IP;
 }
 
@@ -194,3 +209,17 @@ export async function loginAttemptState(
     lockedUntil: row.locked_until ? row.locked_until.toISOString() : null,
   };
 }
+
+/* ------------------------------------------------------------------ */
+
+/**
+ * The same two functions, under names that do not say "login".
+ *
+ * `login_attempts` is a general keyed counter and always was — the signup limit
+ * has used it since it was written. The public booking page uses it too, and
+ * calling `registerFailedLogin` after a SUCCESSFUL booking would read as a bug
+ * to the next person to open that file. Aliases rather than a rename, so the
+ * well-tested login path is not disturbed to improve a name.
+ */
+export const checkRate = checkLoginRate;
+export const registerAttempt = registerFailedLogin;

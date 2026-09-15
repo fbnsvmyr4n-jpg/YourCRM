@@ -93,6 +93,11 @@ const PUBLIC_ACTIONS = new Set([
   "signOutAction",
   "requestResetAction",
   "resetPasswordAction",
+  // The public booking page. A visitor has no session by definition; what stands
+  // in for one is a per-address rate limit checked first, a slug that resolves
+  // only when its owner published it, and a posted time re-checked against the
+  // diary under a lock. See server/booking/book.ts.
+  "bookAction",
 ]);
 
 /**

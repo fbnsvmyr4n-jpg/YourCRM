@@ -205,7 +205,14 @@ describe("the plans grant what the pricing says", () => {
     const e = await get();
     expect(ent.can(e, "time_travel")).toBe(false);
     expect(ent.limitOf(e, "time_travel")).toBe(0);
-    expect(SCHEMA).not.toMatch(/enabled\s+BOOLEAN/);
+    /* Scoped to the entitlements table. This used to scan the whole schema and
+       fired on `booking_links.enabled`, which is a different thing: a link that
+       exists unpublished is a real draft state — its slug and terms kept while
+       it is off — not a second way of saying "no grant". The rule is about
+       grants, so the check reads the grants table. */
+    const grants = SCHEMA.match(/CREATE TABLE IF NOT EXISTS plan_entitlements \(([\s\S]*?)\);/)?.[1];
+    expect(grants, "the plan_entitlements table was not found — this checks nothing").toBeTruthy();
+    expect(grants).not.toMatch(/enabled\s+BOOLEAN/);
   });
 });
 

@@ -7,6 +7,7 @@ import {
   CalendarOff,
   Clock,
   KeyRound,
+  Link2,
   LogOut,
   Plus,
   Target,
@@ -19,6 +20,7 @@ import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { useTheme } from "@/components/theme/ThemeProvider";
 import { Banner } from "@/components/ui/Banner";
 import type { Settings } from "@/server/repos/settings";
+import type { BookingLink } from "@/server/repos/booking-links";
 import {
   formatClock,
   hoursFor,
@@ -34,6 +36,7 @@ import {
   createWorkspaceAction,
   importHolidaysAction,
   removeHolidayAction,
+  saveBookingLinkAction,
   switchWorkspaceAction,
   updateProfileAction,
   updateTargetsAction,
@@ -525,7 +528,7 @@ export function WorkingHoursCard({
               <div
                 key={name}
                 className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-xl px-2.5 py-2 @min-[420px]:grid-cols-[minmax(0,7rem)_auto_auto]"
-                style={{ background: "var(--sunken)" }}
+                style={{ background: "var(--panel-2)" }}
               >
                 <label className="flex min-w-0 items-center gap-2.5">
                   <input
@@ -571,6 +574,135 @@ export function WorkingHoursCard({
             className="btn-accent focus-ring rounded-xl px-5 py-2.5 text-sm font-semibold disabled:opacity-60"
           >
             {pending ? "Saving…" : "Save hours"}
+          </button>
+        </div>
+      </form>
+    </Card>
+  );
+}
+
+const NOTICE_LABELS: Record<string, string> = {
+  "0": "No notice",
+  "60": "1 hour",
+  "120": "2 hours",
+  "240": "4 hours",
+  "1440": "1 day",
+};
+
+/**
+ * The public booking page, from the owner's side.
+ *
+ * The state that matters most is stated first and in words: whether the page
+ * is live. A booking link is the one thing in Settings that faces strangers, so
+ * "published" is never something to infer from a checkbox further down.
+ */
+export function BookingLinkCard({
+  link,
+  hasHours,
+}: {
+  link: BookingLink | null;
+  hasHours: boolean;
+}) {
+  const [state, action, pending] = useActionState<FormState, FormData>(
+    saveBookingLinkAction,
+    undefined
+  );
+  const live = Boolean(link?.enabled);
+  /* `--sunken` is not a token this theme defines, so it rendered as no
+     background at all. These match the text inputs beside them instead. */
+  const select =
+    "focus-ring w-full rounded-lg border border-[var(--border)] bg-[var(--panel-solid)] px-3 py-2 text-sm";
+
+  return (
+    <Card className="card-q">
+      <CardHeader title="Booking page" icon={<Link2 className="h-[18px] w-[18px] text-accent" />} />
+      <form action={action} className="space-y-4">
+        <Banner state={state} />
+
+        {live && link ? (
+          <p className="rounded-xl px-3.5 py-2.5 text-sm" style={{ background: "var(--green-soft)", color: "var(--green)" }}>
+            Live. Anyone with the link can book:{" "}
+            <a href={`/book/${link.slug}`} target="_blank" rel="noreferrer" className="font-semibold underline">
+              /book/{link.slug}
+            </a>
+          </p>
+        ) : (
+          <p className="rounded-xl px-3.5 py-2.5 text-xs" style={{ background: "var(--amber-soft)", color: "var(--amber)" }}>
+            Not published. Nobody can book until you tick Published and save.
+            {!hasHours && " Set your opening hours above first — the page needs them to offer times."}
+          </p>
+        )}
+
+        <div className="grid grid-cols-1 gap-4 @min-[440px]:grid-cols-2">
+          <label className="block">
+            <span className="mb-1.5 block text-xs font-medium text-muted">Link</span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-sm text-faint">/book/</span>
+              <input
+                name="slug"
+                defaultValue={link?.slug ?? ""}
+                required
+                maxLength={50}
+                placeholder="your-business"
+                autoCapitalize="none"
+                spellCheck={false}
+                className="field-input min-w-0 flex-1"
+              />
+            </div>
+          </label>
+          <Field label="What people are booking" name="title" defaultValue={link?.title ?? ""} />
+        </div>
+
+        <div className="grid grid-cols-2 gap-4 @min-[560px]:grid-cols-4">
+          <label className="block">
+            <span className="mb-1.5 block text-xs font-medium text-muted">Length</span>
+            <select name="slotMinutes" defaultValue={String(link?.slotMinutes ?? 30)} className={select}>
+              {["15", "20", "30", "45", "60", "90", "120"].map((m) => (
+                <option key={m} value={m}>{m} min</option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="mb-1.5 block text-xs font-medium text-muted">Notice</span>
+            <select name="noticeMinutes" defaultValue={String(link?.noticeMinutes ?? 120)} className={select}>
+              {Object.entries(NOTICE_LABELS).map(([m, label]) => (
+                <option key={m} value={m}>{label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="mb-1.5 block text-xs font-medium text-muted">Book ahead</span>
+            <select name="daysAhead" defaultValue={String(link?.daysAhead ?? 14)} className={select}>
+              {["7", "14", "30", "60"].map((d) => (
+                <option key={d} value={d}>{d} days</option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="mb-1.5 block text-xs font-medium text-muted">Where</span>
+            <select name="kind" defaultValue={link?.kind ?? "online"} className={select}>
+              <option value="online">Online</option>
+              <option value="in_person">In person</option>
+            </select>
+          </label>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <label className="flex items-center gap-2.5 text-sm font-medium">
+            <input
+              type="checkbox"
+              name="enabled"
+              defaultChecked={live}
+              className="focus-ring h-4 w-4 accent-[var(--accent)]"
+            />
+            Published
+          </label>
+          <button
+            type="submit"
+            disabled={pending}
+            className="btn-accent focus-ring rounded-xl px-5 py-2.5 text-sm font-semibold disabled:opacity-60"
+          >
+            {pending ? "Saving…" : "Save booking page"}
           </button>
         </div>
       </form>
