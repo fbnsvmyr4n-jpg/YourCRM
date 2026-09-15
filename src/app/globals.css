@@ -156,6 +156,50 @@
   --ring: rgba(111, 155, 255, 0.4);
 }
 
+/* ---------- Tokens the screens were already using ----------
+   These names were written into about two dozen components — team rows,
+   billing plan cards, pricing items, project tasks, holiday rows, the chat
+   composer, a contact's status pill — and never defined here. An undefined
+   custom property does not fall back to anything sensible: `background:
+   var(--surface-2)` computes to transparent, so every one of those surfaces
+   silently rendered as bare text on the card behind it. Nothing errors when
+   that happens, which is how it survived.
+
+   The surfaces are defined per theme, in the same order as the blocks above
+   so the later theme still wins on <html>. A tint over a card has to go
+   DARKER in the light theme and LIGHTER in the dark ones — a single shared
+   value would disappear in one of them. */
+:root,
+[data-theme="light"] {
+  /* A row or tile sitting inside a card. */
+  --surface-2: rgba(15, 23, 42, 0.04);
+  /* A control recessed into a card, such as a select. */
+  --sunken: rgba(15, 23, 42, 0.05);
+  /* The neutral counterpart to --green-soft and --accent-soft. */
+  --rule-soft: rgba(15, 23, 42, 0.06);
+}
+
+[data-theme="dark"] {
+  --surface-2: rgba(255, 255, 255, 0.05);
+  --sunken: rgba(0, 0, 0, 0.22);
+  --rule-soft: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="midnight"] {
+  --surface-2: rgba(255, 255, 255, 0.04);
+  --sunken: rgba(0, 0, 0, 0.3);
+  --rule-soft: rgba(255, 255, 255, 0.07);
+}
+
+/* Shorthand names three screens use for the text colours that already exist.
+   Declared on every themed element, so each resolves against that element's
+   own theme rather than a value fixed once at the root. */
+:root,
+[data-theme] {
+  --muted: var(--text-muted);
+  --faint: var(--text-faint);
+}
+
 * {
   box-sizing: border-box;
 }
