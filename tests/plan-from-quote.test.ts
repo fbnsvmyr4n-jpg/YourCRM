@@ -329,6 +329,26 @@ describe("what the plan looks like once written", () => {
     expect(written[0].startsOn! >= new Date().toISOString().slice(0, 10)).toBe(true);
   });
 
+  it("STARTS ON THE BUSINESS'S OWN TODAY, not the server's", async () => {
+    /* Zones 25 hours apart, so at any hour one of them is on a different date
+       from UTC and a UTC "today" cannot pass. */
+    const { nextWorkingDay } = await import("../src/server/schedule");
+    for (const zone of ["Pacific/Kiritimati", "Pacific/Pago_Pago"]) {
+      await db.seed(`
+        DELETE FROM project_task_dependencies; DELETE FROM project_tasks;
+        DELETE FROM document_lines; DELETE FROM documents;
+        UPDATE deals SET starts_on = '2020-01-01' WHERE id = '${JOB}';
+        INSERT INTO settings (sub_account_id, time_zone) VALUES ('${TENANT_A}', '${zone}')
+        ON CONFLICT (sub_account_id) DO UPDATE SET time_zone = EXCLUDED.time_zone;`);
+      await quote("accepted");
+      await inA((q) => plan.buildPlanFromQuote(q, JOB));
+      const today = new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+      const written = await inA((q) => tasks.listTasks(q, JOB));
+      expect(written[0].startsOn, `a plan in ${zone} started on the wrong day`).toBe(nextWorkingDay(today));
+    }
+    await db.seed(`DELETE FROM settings WHERE sub_account_id = '${TENANT_A}'`);
+  });
+
   it("says so when the quotation has nothing on it", async () => {
     await quote("accepted", []);
     const result = await inA((q) => plan.buildPlanFromQuote(q, JOB));

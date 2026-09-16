@@ -53,6 +53,7 @@ import { useCanDial } from "@/lib/useCanDial";
 import type { ProjectOption } from "@/server/repos/inbox";
 import { useDraft, hasContent, type Draft } from "@/lib/use-draft";
 import { SwipeToDelete } from "@/components/ui/SwipeToDelete";
+import { useMoney } from "@/components/money/CurrencyProvider";
 import {
   addMessageAction,
   forwardAction,
@@ -79,11 +80,6 @@ const INBOX_SORTS = [
 ] as const;
 type InboxSort = (typeof INBOX_SORTS)[number]["id"];
 
-/* Whole figures, because a contact card has room for them and an abbreviated
-   "$4.5K" beside "Won" invites the reader to wonder what got rounded away. */
-function money(n: number) {
-  return `$${n.toLocaleString()}`;
-}
 
 function sortMessages(rows: Message[], sort: InboxSort): Message[] {
   // Copied before sorting: `sort` mutates, and this array comes from props.
@@ -1206,6 +1202,11 @@ function ContactCard({
   revenue?: ContactRevenue;
   className?: string;
 }) {
+  /* Whole figures in whole units: a contact card has room for them, and an
+     abbreviated "4.5K" beside "Won" invites the reader to wonder what got
+     rounded away. */
+  const { format } = useMoney();
+  const money = (units: number) => format(Math.round(units * 100), "whole");
   /*
      Which of the two in-place actions is open, if either.
 

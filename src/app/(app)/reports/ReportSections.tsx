@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { Fragment, useCallback, useRef, useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { clsx } from "@/lib/clsx";
 
@@ -212,7 +212,11 @@ function Section({
           folded && showBody ? { background: `linear-gradient(180deg, ${section.tone.soft}, transparent 60%)` } : undefined
         }
       >
-        {section.content}
+        {/* Its own keyed slot. The content is built by the server page and can
+            arrive as a separately streamed chunk, which React then finds
+            unkeyed beside the close button in this element's children — the
+            same "unique key" warning Settings had, and the same cure. */}
+        <Fragment key="content">{section.content}</Fragment>
 
         {/*
             A way out at the bottom, matching the one on Contact Activity.

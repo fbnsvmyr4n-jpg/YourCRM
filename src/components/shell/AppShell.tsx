@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { CurrencyProvider } from "@/components/money/CurrencyProvider";
+import type { CurrencyCode } from "@/lib/money";
 import type { NavCounts } from "@/server/nav-counts";
 import type { Notification } from "@/server/notifications";
 import { CommandPalette } from "./CommandPalette";
@@ -15,6 +17,7 @@ export function AppShell({
   notifications,
   counts,
   crmAccess,
+  currency,
 }: {
   children: React.ReactNode;
   user: ShellUser;
@@ -22,11 +25,14 @@ export function AppShell({
   counts: NavCounts;
   /** Decided on the server; false for IT and accounts. Presentation only. */
   crmAccess: boolean;
+  /** The workspace's currency, for every amount on every page below. */
+  currency: CurrencyCode;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
+    <CurrencyProvider currency={currency}>
     <div className="relative z-[1] flex h-screen overflow-hidden">
       <Sidebar
         user={user}
@@ -73,5 +79,6 @@ export function AppShell({
 
       <CommandPalette />
     </div>
+    </CurrencyProvider>
   );
 }

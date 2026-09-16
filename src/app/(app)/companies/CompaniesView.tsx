@@ -6,6 +6,7 @@ import { ArrowLeft, Building2, Check, Pencil, Plus, Search, Trash2, X } from "lu
 import { Card } from "@/components/ui/Card";
 import { Overlay } from "@/components/ui/Overlay";
 import { clsx } from "@/lib/clsx";
+import { useMoney } from "@/components/money/CurrencyProvider";
 import type { CompanyRollup } from "@/server/repos/companies";
 import {
   addCompanyAction,
@@ -30,9 +31,8 @@ import {
  * "I removed the wrong one" has to be survivable.
  */
 
-const money = (cents: number) => `$${Math.round(cents / 100).toLocaleString()}`;
-
 export function CompaniesView({ companies }: { companies: CompanyRollup[] }) {
+  const { format: money } = useMoney();
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<CompanyRollup | null>(null);

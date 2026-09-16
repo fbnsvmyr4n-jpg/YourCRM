@@ -101,6 +101,29 @@ const draft = (lines: { description: string; quantity: number; unitCents: number
 
 const oneCraneDay = [{ description: "Mobile crane hire", quantity: 1, unitCents: CRANE }];
 
+/** Today's date in a zone, independently of the code under test. */
+const dayIn = (timeZone: string) =>
+  new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+
+describe("the day a quotation is issued", () => {
+  it("IS THE BUSINESS'S OWN DAY, not the database's", async () => {
+    /* Two zones 25 hours apart: at every hour of the day at least one of them
+       is on a different date from UTC, so a UTC stamp fails this whenever it
+       runs — not only in the hours it happens to be wrong. */
+    for (const zone of ["Pacific/Kiritimati", "Pacific/Pago_Pago"]) {
+      await db.seed(`
+        DELETE FROM document_lines; DELETE FROM documents;
+        INSERT INTO settings (sub_account_id, time_zone) VALUES ('${TENANT_A}', '${zone}')
+        ON CONFLICT (sub_account_id) DO UPDATE SET time_zone = EXCLUDED.time_zone;`);
+      await draft(oneCraneDay);
+      const [doc] = await inA((q) => q.rows<{ issued_on: string }>(
+        `SELECT issued_on::text AS issued_on FROM documents WHERE sub_account_id = $1`, [TENANT_A]));
+      expect(doc.issued_on, `a quotation in ${zone} was dated on another day`).toBe(dayIn(zone));
+    }
+    await db.seed(`DELETE FROM settings WHERE sub_account_id = '${TENANT_A}'`);
+  });
+});
+
 describe("what a drafted quotation is", () => {
   it("lands waiting for approval, marked as the agent's work, at revision zero", async () => {
     const { quote } = await draft(oneCraneDay);

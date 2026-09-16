@@ -2,21 +2,13 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { placeValueLabels } from "@/lib/place-labels";
+import { useMoney } from "@/components/money/CurrencyProvider";
 
 type Point = { label: string; value: number };
 
 /** Used until the container has been measured, so a chart always exists. */
 const FALLBACK_WIDTH = 560;
 
-/** Compact money, so thousands stay readable at axis-label size. */
-function compactMoney(n: number): string {
-  if (n >= 1_000_000) return `$${trim(n / 1_000_000)}M`;
-  if (n >= 1_000) return `$${trim(n / 1_000)}K`;
-  return `$${Math.round(n)}`;
-}
-function trim(n: number): string {
-  return (Math.round(n * 10) / 10).toString();
-}
 
 /**
  * A scale whose gridlines land on numbers a person would choose.
@@ -208,14 +200,18 @@ function useWidth(): [React.RefObject<HTMLDivElement | null>, number] {
 export function AreaChart({
   data,
   height = 220,
-  format = compactMoney,
+  format: formatProp,
   ticks = 4,
 }: {
   data: Point[];
   height?: number;
+  /** Defaults to compact money, in whole units, in the workspace's currency. */
   format?: (n: number) => string;
   ticks?: number;
 }) {
+  const { format: formatMoney } = useMoney();
+  /* Compact, so thousands stay readable at axis-label size. Values are whole units. */
+  const format = formatProp ?? ((n: number) => formatMoney(Math.round(n * 100), "compact"));
   const [ref, measured] = useWidth();
 
   /**

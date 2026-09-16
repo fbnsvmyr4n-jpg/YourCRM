@@ -2,6 +2,7 @@ import { finishAfter, nextWorkingDay, type Holidays } from "./schedule";
 import { addDependency, addTask, listTasks } from "./repos/tasks";
 import { listPriceItems } from "./repos/pricing";
 import { holidaySet } from "./repos/holidays";
+import { businessToday } from "./repos/settings";
 import type { TenantQuery } from "./tenant";
 
 /**
@@ -222,7 +223,9 @@ export async function buildPlanFromQuote(
   /* The project's own start when it has one, otherwise the next working day.
      A plan that begins in the past is one somebody has to drag before they can
      read it. */
-  const today = new Date().toISOString().slice(0, 10);
+  /* Today in the business's calendar — the server's UTC date would start a plan
+     built just after midnight in Johannesburg on the day before. */
+  const today = await businessToday(q);
   const from = doc.starts_on && doc.starts_on > today ? doc.starts_on : today;
 
   const planned = planFromLines(

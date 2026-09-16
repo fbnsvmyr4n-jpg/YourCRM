@@ -2528,6 +2528,27 @@ ALTER TABLE automations ADD CONSTRAINT automations_action_shape CHECK (
 );
 
 -- ---------------------------------------------------------------------------
+-- The currency this workspace's money is in.
+--
+-- Every amount was printed with a hard-coded "$". A firm in Cape Town quoting
+-- R250,000 saw "$250,000" on its own pipeline, in its reports, and in the
+-- quotation emailed to its client. The figures were right; the unit was not.
+--
+-- An ISO 4217 code. Existing workspaces default to USD because that is what
+-- they have been showing all along — changing it for them silently would
+-- change the meaning of numbers people already read. Amounts are NOT
+-- converted when the currency changes: a business that sets ZAR is saying its
+-- figures were always rand.
+--
+-- Only the workspace's own money. What YourCRM bills a workspace stays in
+-- dollars, because that is what it is charged in.
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'USD';
+ALTER TABLE settings DROP CONSTRAINT IF EXISTS settings_currency_code;
+ALTER TABLE settings ADD CONSTRAINT settings_currency_code CHECK (currency ~ '^[A-Z]{3}$');
+
+-- ---------------------------------------------------------------------------
 -- What the application's own database role may do.
 --
 -- KEEP THIS THE LAST BLOCK IN THE FILE: `GRANT … ON ALL TABLES` covers only the

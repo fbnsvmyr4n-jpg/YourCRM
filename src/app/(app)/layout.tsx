@@ -9,6 +9,7 @@ import { canAccessCrm, roleCan } from "@/server/permissions";
 import { withSystem } from "@/server/tenant";
 import { navCounts } from "@/server/nav-counts";
 import { listNotifications } from "@/server/notifications";
+import { getSettings } from "@/server/repos/settings";
 import { currentUser, withTenantPage } from "@/server/tenant-session";
 
 export const dynamic = "force-dynamic";
@@ -70,15 +71,17 @@ export default async function AppGroupLayout({ children }: { children: React.Rea
      product look broken rather than restricted.
   */
   const crmAccess = canAccessCrm(user.role);
-  const { notifications, counts } = crmAccess
-    ? await withTenantPage(
-        async (q) => ({
-          notifications: await listNotifications(q),
-          counts: await navCounts(q),
-        }),
-        { crmData: false }
-      )
-    : { notifications: [], counts: { inbox: 0, calendarToday: false, tasksDue: 0 } };
+  /* The currency is read for everybody: it is how this business counts, not a
+     record about a customer, and accounts see amounts on Billing too. */
+  const { notifications, counts, currency } = await withTenantPage(
+    async (q) => ({
+      currency: (await getSettings(q)).currency,
+      ...(crmAccess
+        ? { notifications: await listNotifications(q), counts: await navCounts(q) }
+        : { notifications: [], counts: { inbox: 0, calendarToday: false, tasksDue: 0 } }),
+    }),
+    { crmData: false }
+  );
 
   return (
     <AppShell
@@ -101,6 +104,7 @@ export default async function AppGroupLayout({ children }: { children: React.Rea
          actually stops an IT admin opening /contacts by typing the URL. Hiding
          the link keeps the sidebar honest about where they can go. */
       crmAccess={crmAccess}
+      currency={currency}
     >
       {children}
     </AppShell>

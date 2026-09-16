@@ -16,6 +16,7 @@ import { listContacts } from "./repos/contacts";
 import { unreadCount } from "./repos/inbox";
 import { getSettings } from "./repos/settings";
 import { instantToWallClock } from "@/lib/zoned";
+import { formatMoney } from "@/lib/money";
 import type { TenantQuery } from "./tenant";
 
 /**
@@ -291,9 +292,10 @@ export async function listNotifications(q: TenantQuery): Promise<Notification[]>
       id: "deals-demo",
       kind: "deal",
       title: `${awaitingClose.length} deal${awaitingClose.length === 1 ? "" : "s"} awaiting a close`,
-      detail: `$${Math.round(
-        awaitingClose.reduce((s, d) => s + d.valueCents, 0) / 100
-      ).toLocaleString()} presented`,
+      detail: `${formatMoney(
+        awaitingClose.reduce((s, d) => s + d.valueCents, 0),
+        settings.currency
+      )} presented`,
       href: "/deals",
       weight: 50,
     });

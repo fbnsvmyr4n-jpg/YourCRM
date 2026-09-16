@@ -6,6 +6,7 @@ import { Briefcase, Building2, ChevronDown, Search, Settings2, Users } from "luc
 import { Card, CardHeader, CardMeta } from "@/components/ui/Card";
 import { clsx } from "@/lib/clsx";
 import { stageMeta } from "@/data/pipeline";
+import { useMoney } from "@/components/money/CurrencyProvider";
 import type { CompanyProjects, Project } from "@/server/projects-view";
 
 /**
@@ -27,12 +28,11 @@ import type { CompanyProjects, Project } from "@/server/projects-view";
  * and hiding it would make the list lie about who you have worked with.
  */
 
-const money = (cents: number) => {
-  const n = Math.round(cents / 100);
-  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
-  if (n >= 1000) return `$${(n / 1000).toFixed(1).replace(/\.0$/, "")}K`;
-  return `$${n}`;
-};
+/** Compact, in the workspace's currency: these sit in chips and dense rows. */
+function useCompactMoney() {
+  const { format } = useMoney();
+  return (cents: number) => format(cents, "compact");
+}
 
 export function ProjectsView({
   companies,
@@ -191,6 +191,7 @@ export function ProjectsView({
 }
 
 function CompanyCard({ company }: { company: CompanyProjects }) {
+  const money = useCompactMoney();
   const [showHistory, setShowHistory] = useState(false);
   const historyId = `history-${company.id}`;
 
@@ -257,6 +258,7 @@ function CompanyCard({ company }: { company: CompanyProjects }) {
 }
 
 function ProjectRow({ project, muted = false }: { project: Project; muted?: boolean }) {
+  const money = useCompactMoney();
   const meta = stageMeta(project.stage);
 
   return (

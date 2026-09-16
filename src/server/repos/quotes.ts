@@ -1,4 +1,5 @@
 import type { TenantQuery } from "../tenant";
+import { businessToday } from "./settings";
 
 /**
  * Quotations an agent drafted, waiting for a person to say yes.
@@ -312,6 +313,10 @@ export async function draftQuote(
      this is a numbering scheme a person should look at, not one to loop over.
   */
   const MAX_NUMBER_TRIES = 5;
+  /* The business's day, not the database's: `CURRENT_DATE` is UTC in
+     production, so a quotation drafted in Johannesburg shortly after midnight
+     was issued yesterday — on a document the client reads. */
+  const issuedOn = await businessToday(q);
   const firstTried = number;
   let lastTried = number;
   let inserted = false;
@@ -324,7 +329,7 @@ export async function draftQuote(
              (id, sub_account_id, deal_id, kind, number, status, party, party_contact_id,
               issued_on, notes, drafted_by_agent, revision)
            VALUES ($1, $2, $3, 'quote', $4, 'awaiting_approval', $5, $6,
-                   CURRENT_DATE, $7, $8, 0)`,
+                   $9::date, $7, $8, 0)`,
           [
             documentId,
             q.ctx.subAccountId,
@@ -334,6 +339,7 @@ export async function draftQuote(
             input.partyContactId,
             input.notes,
             input.agent,
+            issuedOn,
           ]
         )
       );

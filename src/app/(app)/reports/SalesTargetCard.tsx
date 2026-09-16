@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Settings2, Target } from "lucide-react";
 import { Card, CardHeader, CardMeta } from "@/components/ui/Card";
+import { formatMoney, type CurrencyCode } from "@/lib/money";
 
 /**
  * Progress against the monthly target.
@@ -30,11 +31,16 @@ export function SalesTargetCard({
   pct,
   won,
   target,
+  currency,
 }: {
   pct: number | null;
+  /** Whole units. */
   won: number;
+  /** Whole units. */
   target: number;
+  currency: CurrencyCode;
 }) {
+  const money = (units: number) => formatMoney(units * 100, currency);
   return (
     <Card>
       <CardHeader
@@ -60,7 +66,7 @@ export function SalesTargetCard({
               Target Amount
             </p>
             <p className="mt-1 text-4xl font-bold tracking-tight tabular-nums">
-              ${target.toLocaleString()}
+              {money(target)}
             </p>
             <Link
               href="/settings"
@@ -74,7 +80,7 @@ export function SalesTargetCard({
             style={{ borderColor: "var(--green)", background: "var(--green-soft)" }}
             title="Won so far this month"
           >
-            ${won.toLocaleString()}
+            {money(won)}
           </span>
         </div>
 
@@ -85,7 +91,7 @@ export function SalesTargetCard({
           </p>
           <p className="mt-2 text-xs text-muted">
             {target > 0
-              ? `$${won.toLocaleString()} of $${target.toLocaleString()} this month`
+              ? `${money(won)} of ${money(target)} this month`
               : "Set a monthly target in Settings to track progress"}
           </p>
 

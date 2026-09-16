@@ -101,7 +101,7 @@ describe("the dashboard on a phone", () => {
        the cluttered one — the reader has to open each to find out whether it
        matters. Every fold carries a figure. */
     expect(section).toMatch(/hint\?: string;/);
-    expect(page).toMatch(/hint=\{`\$\$\{revenueTotal\.toLocaleString\(\)\} won · last 6 weeks`\}/);
+    expect(page).toMatch(/hint=\{`\$\{formatMoney\(report\.revenue\.wonCents, currency\)\} won · last 6 weeks`\}/);
     expect(page).toMatch(/hint=\{`\$\{activity\.length\} recent`\}/);
   });
 

@@ -13,6 +13,7 @@ import { listMeetings } from "@/server/repos/meetings";
 import { listMessages, unreadCount } from "@/server/repos/inbox";
 import { getSettings } from "@/server/repos/settings";
 import { dueForUser } from "@/server/repos/todos";
+import { formatMoney, type CurrencyCode } from "@/lib/money";
 import { DateTimeBar } from "./DateTimeBar";
 import { MobileSection } from "./MobileSection";
 import { instantToWallClock } from "@/lib/zoned";
@@ -40,7 +41,7 @@ function relativeDay(iso: string, now: Date) {
 export default async function DashboardPage() {
   const me = await currentUser();
 
-  const { contacts, meetingsToday, unread, wonDeals, revenueSeries, feed, report, followUps, upcoming, timeZone, myTasks } =
+  const { contacts, meetingsToday, unread, wonDeals, revenueSeries, feed, report, followUps, upcoming, timeZone, myTasks, currency } =
     await withTenantPage(async (q) => {
       const settings = await getSettings(q);
       const todayKey =
@@ -61,6 +62,7 @@ export default async function DashboardPage() {
       return {
         contacts,
         myTasks,
+        currency: settings.currency,
         // "Today" in the business's zone, not the server's — the same rule the
         // calendar follows, and for the same reason.
         meetingsToday: meetings
@@ -234,7 +236,7 @@ export default async function DashboardPage() {
       // Deals closed means *deals*, not leads marked closed — those are
       // different records and conflating them overstated the number.
       title: `${wonDeals.length} deal${wonDeals.length === 1 ? "" : "s"} closed`,
-      sub: `$${revenueTotal.toLocaleString()} won · ${clientCount} active client${clientCount === 1 ? "" : "s"}`,
+      sub: `${formatMoney(report.revenue.wonCents, currency)} won · ${clientCount} active client${clientCount === 1 ? "" : "s"}`,
     },
   ];
 
@@ -299,7 +301,7 @@ export default async function DashboardPage() {
           <div className="order-5 @min-[820px]:order-none">
             <MobileSection
               title="Revenue"
-              hint={`$${revenueTotal.toLocaleString()} won · last 6 weeks`}
+              hint={`${formatMoney(report.revenue.wonCents, currency)} won · last 6 weeks`}
               /* Green, the same green Leads gives "Closed Won" — this section is
                  money that has been banked. */
               tone={{ color: "var(--green)", soft: "var(--green-soft)" }}
@@ -315,18 +317,19 @@ export default async function DashboardPage() {
                     hint above.
                 */}
                 <div className="hidden sm:block">
-                  <RevenueOverview series={revenueSeries} total={revenueTotal} />
+                  <RevenueOverview series={revenueSeries} total={revenueTotal} currency={currency} />
                 </div>
 
                 {/* Second on a phone, so This Week leads. Untouched from `sm`. */}
                 <div className="order-2 sm:order-none">
-                  <RevenueReceived rows={revenueRows} now={now} />
+                  <RevenueReceived rows={revenueRows} now={now} currency={currency} />
                 </div>
 
                 {/* First on a phone. On a desktop it stays in the second row,
                     which is where the DOM order already puts it. */}
                 <div className="order-1 sm:order-none">
                   <ThisWeek
+                    currency={currency}
                     wonThisWeek={wonThisWeek.length}
                     wonValue={Math.round(
                       wonThisWeek.reduce((sum, d) => sum + d.amountCents, 0) / 100
@@ -490,9 +493,12 @@ function Hero({
 function RevenueOverview({
   series,
   total,
+  currency,
 }: {
   series: { label: string; value: number }[];
+  /** Whole units. */
   total: number;
+  currency: CurrencyCode;
 }) {
   const hasRevenue = series.some((p) => p.value > 0);
   return (
@@ -507,7 +513,7 @@ function RevenueOverview({
       />
       {hasRevenue ? (
         <>
-          <p className="-mt-1 mb-1 text-2xl font-bold tabular-nums">${total.toLocaleString()}</p>
+          <p className="-mt-1 mb-1 text-2xl font-bold tabular-nums">{formatMoney(total * 100, currency)}</p>
           <p className="mb-2 text-xs text-faint">Won across all closed deals</p>
           <AreaChart data={series} height={230} />
         </>
@@ -525,7 +531,9 @@ function RevenueOverview({
 function RevenueReceived({
   rows,
   now,
+  currency,
 }: {
+  currency: CurrencyCode;
   rows: {
     id: string;
     initials: string;
@@ -571,7 +579,7 @@ function RevenueReceived({
                   </div>
                 </div>
                 <p className="hidden truncate text-xs text-muted sm:block">{relativeDay(r.wonAt, now)}</p>
-                <p className="text-right text-sm font-semibold text-green">+${r.amount.toLocaleString()}</p>
+                <p className="text-right text-sm font-semibold text-green">+{formatMoney(r.amount * 100, currency)}</p>
               </div>
             ))}
           </div>
@@ -630,7 +638,9 @@ function ThisWeek({
   wonValue,
   needFollowUp,
   totalLeads,
+  currency,
 }: {
+  currency: CurrencyCode;
   wonThisWeek: number;
   wonValue: number;
   needFollowUp: number;
@@ -643,7 +653,7 @@ function ThisWeek({
       <div className="pt-1">
         <p className="text-xs text-faint">Closed won · last 7 days</p>
         <p className="mt-1 text-3xl font-bold tabular-nums text-green">
-          ${wonValue.toLocaleString()}
+          {formatMoney(wonValue * 100, currency)}
         </p>
         <p className="mt-1 text-xs text-faint">
           {wonThisWeek === 0

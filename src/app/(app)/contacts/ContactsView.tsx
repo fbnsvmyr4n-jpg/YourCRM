@@ -49,6 +49,7 @@ import { clsx } from "@/lib/clsx";
 import { useElementWidth } from "@/lib/use-element-width";
 import { useRememberedToggle } from "@/lib/remembered-toggle";
 import { useCanDial } from "@/lib/useCanDial";
+import { useMoney } from "@/components/money/CurrencyProvider";
 import { CustomFieldInputs } from "@/components/custom-fields/CustomFieldInputs";
 import { displayValue, type CustomField, type FieldValues } from "@/server/custom-field-rules";
 import { sortTodos, type Todo } from "@/server/todo-rules";
@@ -74,8 +75,6 @@ type ModalState = null | "new" | "import" | Contact;
    Revenue and Note already do, rather than handing off to nothing. */
 type Panel = null | "note" | "revenue" | "call" | "text" | "task";
 
-/** Takes integer cents, because that is what the database stores. */
-const money = (cents: number) => `$${Math.round(cents / 100).toLocaleString()}`;
 
 
 export function ContactsView({
@@ -1041,6 +1040,8 @@ function ReachPanel({
 }
 
 function RevenuePanel({ summary }: { summary?: ContactSummary }) {
+  /* Integer cents in, whole figures out, in the workspace's currency. */
+  const { format: money } = useMoney();
   if (!summary) return null;
 
   return (
@@ -1110,6 +1111,7 @@ function ActivityPanel({
   /** Whether the fold applies at the current width — see `useGridWidth`. */
   foldsActivity: boolean;
 }) {
+  const { format: money } = useMoney();
   /*
      The last thing that happened, and the next thing due.
 

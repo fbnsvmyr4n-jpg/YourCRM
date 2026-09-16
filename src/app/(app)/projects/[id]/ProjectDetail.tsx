@@ -25,6 +25,7 @@ import { TimeAgo } from "@/components/ui/TimeAgo";
 import { stageMeta } from "@/data/pipeline";
 import { clsx } from "@/lib/clsx";
 import { useFormDisclosure } from "@/lib/form-disclosure";
+import { useMoney } from "@/components/money/CurrencyProvider";
 import { CustomFieldInputs } from "@/components/custom-fields/CustomFieldInputs";
 import { displayValue, type CustomField, type FieldValues } from "@/server/custom-field-rules";
 import { useRememberedToggle } from "@/lib/remembered-toggle";
@@ -85,11 +86,10 @@ import {
  *
  * Whole amounts keep their old appearance, so nothing else on this page moves.
  */
-const money = (cents: number) =>
-  `$${(cents / 100).toLocaleString("en-US", {
-    minimumFractionDigits: cents % 100 === 0 ? 0 : 2,
-    maximumFractionDigits: 2,
-  })}`;
+function useExactMoney() {
+  const { format } = useMoney();
+  return (cents: number) => format(cents, "exact");
+}
 
 const initialsOf = (name: string) =>
   name
@@ -425,6 +425,7 @@ function ProjectHeaderCard({
  * needs — nothing has been asked for yet.
  */
 function MoneyStrip({ value, figures }: { value: number; figures: ProjectMoney }) {
+  const money = useExactMoney();
   const {
     quotedCents: quoted,
     committedCents: committed,
@@ -934,6 +935,7 @@ function StageView({
   sending: boolean;
   onRaiseForStage: (task: { id: string; name: string }) => void;
 }) {
+  const money = useExactMoney();
   const { stages, unfiled } = grouped;
   const unfiledLines = unfiled.reduce((n, e) => n + e.lines.length, 0);
 
@@ -1090,6 +1092,7 @@ function DocumentRow({
   onSend?: (formData: FormData) => void;
   sending?: boolean;
 }) {
+  const money = useExactMoney();
   const [open, setOpen] = useState(false);
   const tone = DOC_STATUS_TONE[doc.status] ?? DOC_STATUS_TONE.draft;
   const scope = groupKey ? `${groupKey}-${doc.id}`.replace(/[^A-Za-z0-9_-]/g, "_") : doc.id;
@@ -1301,6 +1304,7 @@ function DocumentForm({
   stage?: { id: string; name: string } | null;
   onClearStage?: () => void;
 }) {
+  const money = useExactMoney();
   return (
     <form action={action} className="mb-4 space-y-3 border-b border-[var(--border)] pb-4">
       <Banner state={state} />
@@ -1471,6 +1475,7 @@ function ThreadsTab({ threads }: { threads: ProjectThread[] }) {
 /* ---------------- timeline ---------------- */
 
 function TimelineTab({ events }: { events: ProjectEvent[] }) {
+  const money = useExactMoney();
   return (
     <Card>
       <CardHeader title="Everything that has happened" icon={<CalendarDays className="h-[18px] w-[18px] text-accent" />} />

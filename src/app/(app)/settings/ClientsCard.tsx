@@ -5,6 +5,7 @@ import { Briefcase, ChevronDown, UserRoundX } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Card, CardHeader, CardMeta } from "@/components/ui/Card";
 import { clsx } from "@/lib/clsx";
+import { useMoney } from "@/components/money/CurrencyProvider";
 import type { Book } from "@/server/clients-view";
 
 /**
@@ -25,13 +26,6 @@ import type { Book } from "@/server/clients-view";
  * commonest reason to be here.
  */
 
-/** Compact money, matching the Reports cards. Whole units — cents are noise here. */
-function money(cents: number): string {
-  const n = Math.round(cents / 100);
-  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
-  if (n >= 1000) return `$${(n / 1000).toFixed(1).replace(/\.0$/, "")}K`;
-  return `$${n}`;
-}
 
 const initialsOf = (name: string) =>
   name
@@ -108,6 +102,9 @@ function BookRow({
   isYou: boolean;
   defaultOpen: boolean;
 }) {
+  /* Compact, matching the Reports cards — cents are noise here. */
+  const { format } = useMoney();
+  const money = (cents: number) => format(cents, "compact");
   const [open, setOpen] = useState(defaultOpen);
   const { owner, entries, clientCount, wonValueCents } = book;
   const bodyId = `book-${owner?.id ?? "unassigned"}`;

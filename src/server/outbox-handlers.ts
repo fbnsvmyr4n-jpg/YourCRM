@@ -14,6 +14,7 @@ import { findQuote, markQuoteSent } from "./repos/quotes";
 import { findInvoice, markInvoiceSent } from "./repos/invoices";
 import { canSendOn, findOutgoing, setDelivery } from "./repos/inbox";
 import { findUserById } from "./repos/users";
+import { getSettings } from "./repos/settings";
 import { createResetToken } from "./repos/auth";
 import { getCall } from "./repos/calls";
 import { getContact } from "./repos/contacts";
@@ -121,6 +122,8 @@ const quoteEmailHandler: OutboxHandler = {
       return { workspace: row?.name ?? "YourCRM", approver: approver?.name ?? "YourCRM" };
     });
 
+    /* Read in its own tenant transaction, after the system read — never nested. */
+    const { currency } = await withTenant(job.ctx, (q) => getSettings(q));
     const { subject, text, html } = quotationEmail({
       number: quote.number,
       project: quote.projectTitle,
@@ -129,6 +132,7 @@ const quoteEmailHandler: OutboxHandler = {
       notes: quote.notes,
       lines: quote.lines,
       totalCents: quote.totalCents,
+      currency,
     });
 
     const sent = await sendEmail({
@@ -250,9 +254,11 @@ const invoiceEmailHandler: OutboxHandler = {
       return { workspace: row?.name ?? "YourCRM", sentBy: sender?.name ?? "YourCRM" };
     });
 
+    const { currency } = await withTenant(job.ctx, (q) => getSettings(q));
     const sent = await sendEmail({
       to: invoice.partyEmail,
       ...invoiceEmail({
+        currency,
         number: invoice.number,
         project: invoice.projectTitle,
         from: who.workspace,

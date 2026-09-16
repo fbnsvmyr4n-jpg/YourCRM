@@ -2,6 +2,7 @@
 
 import { useActionState, useState, useSyncExternalStore } from "react";
 import { useFormDisclosure } from "@/lib/form-disclosure";
+import { CURRENCIES, currencySymbol } from "@/lib/money";
 import {
   Building2,
   CalendarOff,
@@ -130,7 +131,7 @@ export function TargetsForm({ settings }: { settings: Settings }) {
         <Banner state={state} />
         <div className="grid grid-cols-1 gap-4 @min-[440px]:grid-cols-2">
           <Field
-            label="Monthly revenue target ($)"
+            label={`Monthly revenue target (${currencySymbol(settings.currency).trim()})`}
             name="monthlyTarget"
             type="number"
             // Stored in cents, typed in whole units.
@@ -145,6 +146,22 @@ export function TargetsForm({ settings }: { settings: Settings }) {
             required
           />
         </div>
+        {/* Beside the zone: both describe where this business is, and both
+            change how every figure and time in the product reads. */}
+        <label className="block">
+          <span className="mb-1.5 block text-xs font-semibold text-muted">Currency</span>
+          <select
+            name="currency"
+            defaultValue={settings.currency}
+            className="focus-ring w-full rounded-lg bg-[var(--sunken)] px-3 py-2 text-sm"
+          >
+            {CURRENCIES.map((c) => (
+              <option key={c.code} value={c.code}>
+                {c.name} ({c.symbol.trim()})
+              </option>
+            ))}
+          </select>
+        </label>
         <label className="block">
           <span className="mb-1.5 block text-xs font-semibold text-muted">Time zone</span>
           <select
@@ -165,8 +182,9 @@ export function TargetsForm({ settings }: { settings: Settings }) {
         </label>
         <p className="text-xs text-faint">
           Sales Target progress is measured against the revenue target; Workload &amp; Capacity on
-          Meetings is measured against the weekly capacity. Meeting times are read and shown in the
-          time zone above.
+          Meetings is measured against the weekly capacity. Every amount is shown in the currency
+          above — changing it relabels your figures, it does not convert them. Meeting times are read
+          and shown in the time zone above.
         </p>
         <div className="flex justify-end">
           <button

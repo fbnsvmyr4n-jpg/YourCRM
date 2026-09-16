@@ -12,6 +12,7 @@ export type { Deal } from "@/server/decorate-deal";
 
 import { clsx } from "@/lib/clsx";
 import { restoreAt } from "@/lib/restore-position";
+import { useMoney } from "@/components/money/CurrencyProvider";
 import {
   addDealAction,
   addPainPointsAction,
@@ -24,15 +25,18 @@ import {
   setDealValueAction,
 } from "./actions";
 
-function money(n: number) {
-  if (n >= 1000) {
-    const k = n / 1000;
-    return `$${k % 1 === 0 ? k.toFixed(0) : k.toFixed(1)}K`;
-  }
-  return `$${n}`;
-}
-function fullMoney(n: number) {
-  return `$${n.toLocaleString()}`;
+/**
+ * The board's two money shapes, in the workspace's currency. Deals carry whole
+ * units here, so both take units: compact for cards and column totals, whole
+ * for sentences and the summary tiles.
+ */
+function useBoardMoney() {
+  const { format, symbol } = useMoney();
+  return {
+    money: (n: number) => format(Math.round(n * 100), "compact"),
+    fullMoney: (n: number) => format(Math.round(n * 100), "whole"),
+    symbol: symbol.trim(),
+  };
 }
 
 /** A won record is only part of the story while it's short of the contract. */
@@ -78,6 +82,7 @@ const isWon = (d: Deal) => d.wonAt !== null;
 const canPay = (d: Deal) => (d.stage === "demo" || d.stage === "discovery") && d.value > 0;
 
 export function DealsBoard({ deals }: { deals: Deal[] }) {
+  const { money, fullMoney } = useBoardMoney();
   const [items, setItems] = useState<Deal[]>(deals);
   const [dragId, setDragId] = useState<string | null>(null);
   const [overStage, setOverStage] = useState<StageId | null>(null);
@@ -1076,6 +1081,7 @@ function DealCard({
   onDelete: () => void;
   onPaidInFull: () => void;
 }) {
+  const { money, fullMoney } = useBoardMoney();
   const showsMoney = carriesMoney(deal.stage);
   const partial = isPartiallyPaid(deal);
   const needsValue = showsMoney && deal.value === 0;
@@ -1281,6 +1287,7 @@ function DealModal({
   onSetValue: (formData: FormData) => void | Promise<void>;
   onPainPoints: (points: string[]) => void;
 }) {
+  const { money, fullMoney, symbol } = useBoardMoney();
   const [error, setError] = useState<string | null>(null);
   // Payment is recorded against a deal that has been presented — Discovery or
   // Demo. Recording one is what CLOSES it: the won record is created and
@@ -1370,7 +1377,7 @@ function DealModal({
               </p>
 
               <label className="mt-3 block">
-                <span className="mb-1.5 block text-xs font-medium text-muted">Amount received ($)</span>
+                <span className="mb-1.5 block text-xs font-medium text-muted">Amount received ({symbol})</span>
                 <input
                   name="amount"
                   type="number"
@@ -1441,7 +1448,7 @@ function DealModal({
                 The quoted amount for this deal.
               </p>
               <label className="mt-3 block">
-                <span className="mb-1.5 block text-xs font-medium text-muted">Value ($)</span>
+                <span className="mb-1.5 block text-xs font-medium text-muted">Value ({symbol})</span>
                 <input
                   name="value"
                   type="number"
@@ -1815,6 +1822,7 @@ function AddDealModal({
   onClose: () => void;
   onSubmit: (formData: FormData) => void | Promise<void>;
 }) {
+  const { symbol } = useBoardMoney();
   const [stage, setStage] = useState<StageId>(defaultStage);
   const showsMoney = carriesMoney(stage);
 
@@ -1858,7 +1866,7 @@ function AddDealModal({
                   enabled on Leads In invited a number the pipeline then had to
                   throw away. */}
               {showsMoney ? (
-                <Field name="value" label="Value ($)" type="number" placeholder="10000" />
+                <Field name="value" label={`Value (${symbol})`} type="number" placeholder="10000" />
               ) : (
                 <div className="self-end pb-2.5 text-xs text-faint">
                   No value at this stage — added when you quote.

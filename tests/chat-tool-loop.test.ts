@@ -267,7 +267,8 @@ describe("the model asks for a quotation and gets one", () => {
 
     const system = created[0].system as string;
     expect(system).toMatch(/You CANNOT send a quotation/);
-    expect(system).toMatch(/Mobile crane hire — \$12000\.00 per day/);
+    /* In the workspace's currency (USD by default), exact to the cent. */
+    expect(system).toMatch(/Mobile crane hire — \$12,000\.00 per day/);
 
     /*
        And the tools are on every call, so the capability does not depend on

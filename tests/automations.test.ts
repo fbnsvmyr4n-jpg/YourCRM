@@ -101,7 +101,10 @@ describe("adding a task", () => {
     const [task] = await read<{ title: string; assignee_user_id: string; deal_id: string; contact_id: string;
       automation_id: string; created_by_user_id: string | null; due_on: string; today: string }>(
       `SELECT title, assignee_user_id, deal_id, contact_id, automation_id, created_by_user_id,
-              due_on::text AS due_on, (CURRENT_DATE + 1)::text AS today FROM todos`
+              due_on::text AS due_on,
+              -- Tomorrow in UTC, the default workspace zone. Not CURRENT_DATE,
+              -- which is the session's local day and differs near midnight.
+              ((now() AT TIME ZONE 'UTC')::date + 1)::text AS today FROM todos`
     );
     expect(task).toMatchObject({
       title: "Call them back",

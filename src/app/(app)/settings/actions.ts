@@ -2,6 +2,7 @@
 
 import { revalidateApp } from "@/server/revalidate";
 import { isValidTimeZone, updateSettings } from "@/server/repos/settings";
+import { isCurrency } from "@/lib/money";
 import {
   parseClock,
   listWorkingHours,
@@ -65,6 +66,10 @@ export async function updateTargetsAction(_prev: FormState, formData: FormData):
     if (timeZone && !isValidTimeZone(timeZone)) {
       return { error: "That is not a recognised time zone." };
     }
+    const currency = text(formData.get("currency"), 3);
+    if (currency && !isCurrency(currency)) {
+      return { error: "That is not a currency this workspace can use." };
+    }
 
     await updateSettings(q, {
       // The form takes whole currency units, which is what a person types.
@@ -72,6 +77,7 @@ export async function updateTargetsAction(_prev: FormState, formData: FormData):
       monthlyTargetCents: Math.round(monthlyTarget * 100),
       weeklyCapacity,
       ...(timeZone ? { timeZone } : {}),
+      ...(currency && isCurrency(currency) ? { currency } : {}),
     });
 
     // Several pages read these, so refresh the group rather than just Settings.

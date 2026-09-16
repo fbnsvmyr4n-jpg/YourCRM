@@ -6,6 +6,7 @@ import { Banner } from "@/components/ui/Banner";
 import { Card, CardHeader, CardMeta } from "@/components/ui/Card";
 import { clsx } from "@/lib/clsx";
 import { useFormDisclosure } from "@/lib/form-disclosure";
+import { useMoney } from "@/components/money/CurrencyProvider";
 import type { PriceItem } from "@/server/repos/pricing";
 import {
   deletePriceItemAction,
@@ -26,12 +27,6 @@ import {
  * It earns its place without the agent too — this is the list a person picks
  * from when writing a quote by hand.
  */
-
-const money = (cents: number) =>
-  `$${(cents / 100).toLocaleString(undefined, {
-    minimumFractionDigits: cents % 100 === 0 ? 0 : 2,
-    maximumFractionDigits: 2,
-  })}`;
 
 export function PricingView({ items }: { items: PriceItem[] }) {
   const [query, setQuery] = useState("");
@@ -225,6 +220,9 @@ function Group({
   onRemove: (formData: FormData) => void;
   busy: boolean;
 }) {
+  /* Cents when there are any — a rate of 12.50 an hour is ordinary. */
+  const { format } = useMoney();
+  const money = (cents: number) => format(cents, "exact");
   if (items.length === 0) return null;
   return (
     <Card>

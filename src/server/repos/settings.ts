@@ -1,4 +1,6 @@
 import type { TenantQuery } from "../tenant";
+import { DEFAULT_CURRENCY, isCurrency, type CurrencyCode } from "@/lib/money";
+import { instantToWallClock } from "@/lib/zoned";
 
 /**
  * Per-sub-account settings.
@@ -30,6 +32,8 @@ export type Settings = {
   timeZone: string;
   /** How clients are told to pay, printed at the foot of every invoice. */
   invoicePayTo: string | null;
+  /** The currency every amount in this workspace is in. See `lib/money.ts`. */
+  currency: CurrencyCode;
   updatedAt: string | null;
 };
 
@@ -50,6 +54,7 @@ export const DEFAULT_SETTINGS: Settings = {
   /* Null, never a placeholder. An invoice printing "Bank: your bank here" is
      worse than one that omits payment details entirely. */
   invoicePayTo: null,
+  currency: DEFAULT_CURRENCY,
   updatedAt: null,
 };
 
@@ -58,8 +63,11 @@ type Row = {
   weekly_capacity: number;
   time_zone: string;
   invoice_pay_to: string | null;
+  currency: string;
   updated_at: Date;
 };
+
+const COLUMNS = `monthly_target_cents, weekly_capacity, time_zone, invoice_pay_to, currency, updated_at`;
 
 /** Rejects anything `Intl` cannot resolve, rather than storing a typo. */
 export function isValidTimeZone(zone: string): boolean {
@@ -77,6 +85,9 @@ function toSettings(r: Row): Settings {
     weeklyCapacity: r.weekly_capacity,
     timeZone: r.time_zone,
     invoicePayTo: r.invoice_pay_to,
+    /* A code this build does not know — added by a newer deployment, say —
+       shows as the default rather than breaking every page that prints money. */
+    currency: isCurrency(r.currency) ? r.currency : DEFAULT_CURRENCY,
     updatedAt: r.updated_at.toISOString(),
   };
 }
@@ -84,17 +95,42 @@ function toSettings(r: Row): Settings {
 /** Never throws for a sub-account that has not saved anything; returns defaults. */
 export async function getSettings(q: TenantQuery): Promise<Settings> {
   const row = await q.one<Row>(
-    `SELECT monthly_target_cents, weekly_capacity, time_zone, invoice_pay_to, updated_at
+    `SELECT ${COLUMNS}
      FROM settings WHERE sub_account_id = $1`,
     [q.ctx.subAccountId]
   );
   return row ? toSettings(row) : { ...DEFAULT_SETTINGS };
 }
 
+/**
+ * Today's date in this business's own calendar, as `YYYY-MM-DD`.
+ *
+ * For anything that stamps a day onto a record — a quotation's issue date, the
+ * day a plan starts. The database's `CURRENT_DATE` and the server's clock are
+ * both UTC in production, which in Johannesburg is yesterday until 02:00 and
+ * in Auckland is yesterday until lunchtime; a document issued "today" must
+ * carry the day the business was actually in.
+ */
+export async function businessToday(q: TenantQuery): Promise<string> {
+  const { timeZone } = await getSettings(q);
+  return (
+    instantToWallClock(new Date().toISOString(), timeZone)?.date ?? new Date().toISOString().slice(0, 10)
+  );
+}
+
 export async function updateSettings(
   q: TenantQuery,
-  patch: { monthlyTargetCents?: number; weeklyCapacity?: number; timeZone?: string; invoicePayTo?: string | null }
+  patch: {
+    monthlyTargetCents?: number;
+    weeklyCapacity?: number;
+    timeZone?: string;
+    invoicePayTo?: string | null;
+    currency?: CurrencyCode;
+  }
 ): Promise<Settings> {
+  if (patch.currency !== undefined && !isCurrency(patch.currency)) {
+    throw new Error("That is not a currency this workspace can use.");
+  }
   if (patch.monthlyTargetCents !== undefined) {
     if (!Number.isSafeInteger(patch.monthlyTargetCents) || patch.monthlyTargetCents < 0) {
       throw new Error("Monthly target must be whole cents, and not negative.");
@@ -115,19 +151,21 @@ export async function updateSettings(
   // Upsert: the first save for a sub-account must not require a separate
   // "create settings" step that something has to remember to run.
   const row = await q.one<Row>(
-    `INSERT INTO settings (sub_account_id, monthly_target_cents, weekly_capacity, time_zone, invoice_pay_to)
-     VALUES ($1, COALESCE($2, 0), COALESCE($3, ${DEFAULT_SETTINGS.weeklyCapacity}), COALESCE($4, 'UTC'), $5)
+    `INSERT INTO settings (sub_account_id, monthly_target_cents, weekly_capacity, time_zone, invoice_pay_to, currency)
+     VALUES ($1, COALESCE($2, 0), COALESCE($3, ${DEFAULT_SETTINGS.weeklyCapacity}), COALESCE($4, 'UTC'), $5,
+             COALESCE($7, '${DEFAULT_CURRENCY}'))
      ON CONFLICT (sub_account_id) DO UPDATE SET
        monthly_target_cents = COALESCE($2, settings.monthly_target_cents),
        weekly_capacity      = COALESCE($3, settings.weekly_capacity),
        time_zone            = COALESCE($4, settings.time_zone),
+       currency             = COALESCE($7, settings.currency),
        -- $6 says whether the caller mentioned it at all, so an empty box
        -- CLEARS the details rather than being mistaken for "leave as they
        -- were", which is what COALESCE alone would do and would make removing
        -- bank details impossible.
        invoice_pay_to       = CASE WHEN $6::boolean THEN $5 ELSE settings.invoice_pay_to END,
        updated_at           = now()
-     RETURNING monthly_target_cents, weekly_capacity, time_zone, invoice_pay_to, updated_at`,
+     RETURNING ${COLUMNS}`,
     [
       q.ctx.subAccountId,
       patch.monthlyTargetCents ?? null,
@@ -135,6 +173,7 @@ export async function updateSettings(
       patch.timeZone ?? null,
       patch.invoicePayTo ?? null,
       patch.invoicePayTo !== undefined,
+      patch.currency ?? null,
     ]
   );
   if (!row) throw new Error("Settings were not saved.");

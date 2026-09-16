@@ -27,14 +27,13 @@ import { listContacts } from "@/server/repos/contacts";
 import { meetingAnalytics } from "@/server/meeting-analytics";
 import { decorateMeeting } from "@/server/decorate-meeting";
 import { instantToWallClock } from "@/lib/zoned";
+import { formatMoney } from "@/lib/money";
 import { WorkloadCapacity } from "@/components/meetings/WorkloadCapacity";
 import { ExportButton } from "./ExportButton";
 import { ReportSections } from "./ReportSections";
 import { PeriodTabs } from "./PeriodTabs";
 
 export const dynamic = "force-dynamic";
-
-const money = (n: number) => `$${Math.round(n).toLocaleString()}`;
 
 /**
  * A bar's fill, fading slightly to the right.
@@ -67,7 +66,7 @@ export default async function ReportsPage({
   const periodId: PeriodId = isPeriod(requested) ? requested : "all-time";
   // Both in one tenant transaction — a referrer's credit cannot describe deals
   // a different read would not return.
-  const { r, referrers, accounts, monthlyTarget, wonThisMonth, meetings, meetingStats, weeklyCapacity } =
+  const { r, referrers, accounts, monthlyTarget, wonThisMonth, meetings, meetingStats, weeklyCapacity, currency } =
     await withTenantPage(async (q) => {
     // The business's own time zone, so "July" is July where they are — read in
     // the same transaction as the figures it defines.
@@ -119,8 +118,12 @@ export default async function ReportsPage({
       meetings: meetingRows.map((m) => decorateMeeting(m, meetingPeople, settings.timeZone, nowKey)),
       meetingStats: await meetingAnalytics(q),
       weeklyCapacity: settings.weeklyCapacity,
+      currency: settings.currency,
     };
   });
+
+  /* Whole units in, whole figures out, in the workspace's currency. */
+  const money = (n: number) => formatMoney(Math.round(n * 100), currency);
 
   // A target of zero is the default on a new account; dividing by it would give
   // Infinity, so progress is simply unknown until one is set.
@@ -281,6 +284,7 @@ export default async function ReportsPage({
           pct={targetPct}
           won={wonThisMonth}
           target={monthlyTarget}
+          currency={currency}
         />
       </div>
 

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, Pencil, RotateCcw, Send, Sparkles, Trash2 } from "lucide-react";
 import { instantToWallClock } from "@/lib/zoned";
+import { useMoney } from "@/components/money/CurrencyProvider";
 import type { ChatMessage } from "@/server/repos/chat";
 import type { Quote } from "@/server/repos/quotes";
 import { intentOf, suggestFor } from "@/server/chat-answers";
@@ -38,12 +39,6 @@ function renderText(text: string) {
 
 type Knows = { contacts: number; deals: number; meetings: number };
 
-const money = (cents: number) =>
-  `$${(cents / 100).toLocaleString("en-US", {
-    minimumFractionDigits: cents % 100 === 0 ? 0 : 2,
-    maximumFractionDigits: 2,
-  })}`;
-
 /** A quantity reads as "3.5" and "2", never "3.500" and "2.000". */
 const qty = (n: number) => String(Number(n.toFixed(3)));
 
@@ -74,6 +69,9 @@ function QuoteCard({
   onDiscard: () => void;
   onRequestChanges: () => void;
 }) {
+  /* Cents when there are any: this is a price a client will be sent. */
+  const { format } = useMoney();
+  const money = (cents: number) => format(cents, "exact");
   const approved = quote.status === "approved";
   const off = busy || disabled;
 

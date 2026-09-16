@@ -13,6 +13,8 @@ import {
 import { logWrite } from "./log";
 import type { TenantQuery } from "./tenant";
 import { decimal, multiline, text } from "./validate";
+import { getSettings } from "./repos/settings";
+import { formatMoney, type CurrencyCode } from "@/lib/money";
 
 /**
  * The assistant's hands.
@@ -159,12 +161,6 @@ export const QUOTE_TOOLS = [
   },
 ];
 
-const money = (cents: number) =>
-  `$${(cents / 100).toLocaleString("en-US", {
-    minimumFractionDigits: cents % 100 === 0 ? 0 : 2,
-    maximumFractionDigits: 2,
-  })}`;
-
 /** A quantity reads as "3.5" and "2", never "3.500" and "2.000". */
 const qty = (n: number) => String(Number(n.toFixed(3)));
 
@@ -176,7 +172,10 @@ const qty = (n: number) => String(Number(n.toFixed(3)));
  * it an internal id as well would only be an opportunity to quote one at
  * somebody.
  */
-function describe(quote: Quote, lead: string): string {
+function describe(quote: Quote, lead: string, currency: CurrencyCode): string {
+  /* In the workspace's currency: the model reads this back to the user, and a
+     price in the wrong unit is a wrong price. */
+  const money = (cents: number) => formatMoney(cents, currency, "exact");
   return [
     `${lead} ${quote.number} for ${quote.projectTitle}${quote.party ? `, addressed to ${quote.party}` : ""}.`,
     ...quote.lines.map(
@@ -432,7 +431,7 @@ export async function runQuoteTool(
       detail: `${agent} agent, ${quote.lines.length} lines`,
     });
 
-    return { text: describe(quote, "Drafted quotation"), quote };
+    return { text: describe(quote, "Drafted quotation", (await getSettings(q)).currency), quote };
   }
 
   if (name === "revise_quotation") {
@@ -465,7 +464,10 @@ export async function runQuoteTool(
       detail: `${agent} agent, revision ${quote.revision}`,
     });
 
-    return { text: describe(quote, `Revised quotation (revision ${quote.revision})`), quote };
+    return {
+      text: describe(quote, `Revised quotation (revision ${quote.revision})`, (await getSettings(q)).currency),
+      quote,
+    };
   }
 
   /* An unknown tool name is a bug, not an attack — the model can only call what

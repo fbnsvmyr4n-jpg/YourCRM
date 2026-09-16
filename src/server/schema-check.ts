@@ -66,6 +66,9 @@ export const EXPECTED_TABLES = [
 /** Columns added by `ALTER TABLE … ADD COLUMN IF NOT EXISTS`, which a stale
  *  database is most likely to be missing while still having the table. */
 export const EXPECTED_COLUMNS: ReadonlyArray<[string, string]> = [
+  /* Read by getSettings, which the layout calls on EVERY page — an unmigrated
+     database breaks the whole app, not one screen. */
+  ["settings", "currency"],
   /* Read by every automations query, so a database without them breaks the
      engine — and the engine runs whenever a deal is created. */
   ["automations", "task_title"],

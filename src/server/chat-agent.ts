@@ -14,6 +14,7 @@ import { quotesAwaitingApproval } from "./repos/quotes";
 import { getSettings } from "./repos/settings";
 import { QUOTE_TOOLS, quoteInstructions, runQuoteTool } from "./quote-agent";
 import { instantToWallClock } from "@/lib/zoned";
+import { formatMoney, type CurrencyCode } from "@/lib/money";
 import type { TenantQuery } from "./tenant";
 import { aiCostMicros, recordUsage } from "./usage";
 import { CONFIDENT, findEntity, rankIntents } from "./chat-intents";
@@ -24,13 +25,15 @@ import { INTENTS, SUGGESTION_POOL } from "./chat-answers";
 // The previous value, claude-opus-4-8, was a superseded generation.
 const MODEL = "claude-sonnet-5";
 
-function money(n: number) {
-  return `$${Math.round(n).toLocaleString()}`;
-}
+/** Whole units in, whole figures out, in the workspace's own currency. */
+const moneyIn = (currency: CurrencyCode) => (n: number) => formatMoney(Math.round(n * 100), currency);
 
 /** A compact, factual snapshot of the whole CRM for the agent to reason over. */
 export async function buildCrmContext(q: TenantQuery) {
   const settings = await getSettings(q);
+  /* The model repeats whatever unit it is shown, so the briefing it reads has
+     to be in the business's currency — or a rand business is quoted dollars. */
+  const money = moneyIn(settings.currency);
   const contacts = await listContacts(q);
   const deals = await listDeals(q);
   const meetings = await listMeetings(q);
@@ -112,6 +115,7 @@ export async function buildCrmContext(q: TenantQuery) {
        answers below are the ones a user sees when there is not, so they are
        the ones that have to be able to say so. */
     aiLive: aiConfigured(),
+    currency: settings.currency,
     monthlyTarget,
     wonThisMonth,
     /**
@@ -164,7 +168,7 @@ export async function buildCrmContext(q: TenantQuery) {
         ? `PRICE LIST (the ONLY prices you may quote):\n${prices
             .map(
               (p) =>
-                `  • ${p.name} — $${(p.unitCents / 100).toFixed(2)} ${p.unit}${
+                `  • ${p.name} — ${formatMoney(p.unitCents, settings.currency, "cents")} ${p.unit}${
                   p.description ? ` (${p.description})` : ""
                 }`
             )
@@ -371,7 +375,7 @@ function describeEntity(question: string, ctx: CrmContext): string | null {
    * have nothing to say about files rather than to answer from a name — the
    * exact failure this product keeps designing against.
    */
-  const money = (n: number) => `$${Math.round(n).toLocaleString()}`;
+  const money = moneyIn(ctx.currency);
   const units = (cents: number) => Math.round(cents / 100);
   const fullName = (c: { firstName: string; lastName: string }) =>
     `${c.firstName} ${c.lastName}`.trim();
@@ -419,6 +423,7 @@ function describeEntity(question: string, ctx: CrmContext): string | null {
 }
 
 function answerFor(id: string, ctx: CrmContext): string {
+  const money = moneyIn(ctx.currency);
   switch (id) {
     case "pipeline": {
       const sorted = [...ctx.openDeals].sort((a, b) => b.valueCents - a.valueCents);

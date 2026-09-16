@@ -6,6 +6,7 @@ import { listMeetings } from "@/server/repos/meetings";
 import { listMessages } from "@/server/repos/inbox";
 import { getSettings } from "@/server/repos/settings";
 import { instantToWallClock } from "@/lib/zoned";
+import { formatMoney } from "@/lib/money";
 import { canAccessCrm } from "@/server/permissions";
 import { requireTenant, withCurrentTenant } from "@/server/tenant-session";
 
@@ -21,14 +22,6 @@ export type SearchItem = {
   color: AvatarColor;
 };
 
-function money(cents: number) {
-  const n = Math.round(cents / 100);
-  if (n >= 1000) {
-    const k = n / 1000;
-    return `$${k % 1 === 0 ? k.toFixed(0) : k.toFixed(1)}K`;
-  }
-  return `$${n}`;
-}
 
 const AVATAR_COLORS: AvatarColor[] = ["blue", "green", "amber", "purple", "pink", "teal"];
 
@@ -119,7 +112,7 @@ export async function GET() {
         id: `deal-${d.id}`,
         type: "Deal",
         title: d.title,
-        subtitle: [who, money(d.valueCents)].filter(Boolean).join(" · "),
+        subtitle: [who, formatMoney(d.valueCents, settings.currency, "compact")].filter(Boolean).join(" · "),
         href: "/deals",
         initials: initialsOf(who || d.title),
         color: paletteFor(d.id),

@@ -1,5 +1,7 @@
 import type { Tone } from "@/components/ui/tone";
 import type { TenantQuery } from "./tenant";
+import { getSettings } from "./repos/settings";
+import { formatMoney } from "@/lib/money";
 
 /**
  * The Home activity feed.
@@ -49,13 +51,14 @@ export async function activityFeed(q: TenantQuery, limit = 20): Promise<FeedEven
     [tenant, limit]
   );
 
+  const { currency } = await getSettings(q);
   for (const d of deals) {
     const who = d.contact_name ? ` with ${d.contact_name}` : "";
     if (d.won_at) {
       events.push({
         icon: "dollar",
         tone: "green",
-        text: `Won ${d.title}${who} — $${Math.round(Number(d.value_cents) / 100).toLocaleString()}`,
+        text: `Won ${d.title}${who} — ${formatMoney(Number(d.value_cents), currency)}`,
         at: d.won_at.toISOString(),
       });
     } else {

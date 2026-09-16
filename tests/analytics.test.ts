@@ -298,6 +298,22 @@ describe("owners, voice and trend", () => {
     const times = weekly.map((w) => Date.parse(w.weekStart));
     expect([...times].sort((a, b) => a - b)).toEqual(times);
   });
+
+  it("DRAWS EVERY ONE OF THE SIX WEEKS, a quiet week at zero", async () => {
+    /* All the wins in one week used to return a single point, which a chart
+       cannot draw — the dashboard showed a total over an empty card — and a
+       week with no wins vanished from the line instead of reading zero. */
+    await seedDeals(`
+      ('d1','${TENANT_A}',NULL,NULL,'A',100000,'won','other',now(),NULL),
+      ('d2','${TENANT_A}',NULL,NULL,'B',400000,'won','other',now() - interval '2 weeks',NULL),
+      ('d3','${TENANT_A}',NULL,NULL,'Old',900000,'won','other',now() - interval '9 weeks',NULL)`);
+
+    const weekly = (await report()).weekly;
+    expect(weekly, "one point per week of the six the screens label").toHaveLength(6);
+    expect(weekly.map((w) => w.wonCents)).toEqual([0, 0, 0, 400000, 0, 100000]);
+    const gaps = weekly.slice(1).map((w, i) => Date.parse(w.weekStart) - Date.parse(weekly[i].weekStart));
+    expect(new Set(gaps), "the weeks are not consecutive").toEqual(new Set([7 * 86_400_000]));
+  });
 });
 
 describe("every figure is one tenant's", () => {

@@ -217,15 +217,29 @@ export async function reportData(
   );
 
   // Grouped by the database's week, so the buckets do not shift with
-      // whichever server rendered the page.
+  // whichever server rendered the page.
+  //
+  // EVERY week of the six, zeros included. This used to return only the weeks
+  // that had a win, and two things followed: a business whose recent wins all
+  // fell in one week got a single point, which the chart cannot draw, so
+  // "Revenue Overview" showed its total above an empty card; and a quiet week
+  // simply vanished from the line, so three points spanning six weeks were
+  // drawn evenly spaced as if they were consecutive. It also reached back
+  // seven weeks while both screens say "Last 6 weeks". A week with nothing
+  // won is a fact, and it gets a point at zero.
   const weekly = await q.rows<{ week_start: Date; won_cents: string }>(
-        `SELECT date_trunc('week', won_at) AS week_start,
-                COALESCE(SUM(value_cents), 0)::text AS won_cents
-         FROM deals
-         WHERE sub_account_id = $1 AND deleted_at IS NULL AND won_at IS NOT NULL
-           AND won_at >= date_trunc('week', now()) - interval '7 weeks'
-         GROUP BY 1
-         ORDER BY 1 ASC`,
+        `SELECT w.week_start,
+                COALESCE(SUM(d.value_cents), 0)::text AS won_cents
+           FROM generate_series(
+                  date_trunc('week', now()) - interval '5 weeks',
+                  date_trunc('week', now()),
+                  interval '1 week'
+                ) AS w(week_start)
+           LEFT JOIN deals d
+             ON d.sub_account_id = $1 AND d.deleted_at IS NULL AND d.won_at IS NOT NULL
+            AND date_trunc('week', d.won_at) = w.week_start
+          GROUP BY w.week_start
+          ORDER BY w.week_start ASC`,
         [tenant]
   );
 

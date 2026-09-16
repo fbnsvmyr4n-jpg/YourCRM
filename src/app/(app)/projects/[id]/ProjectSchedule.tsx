@@ -21,15 +21,7 @@ import type { Dependency, ProjectTask, ScheduleSummary } from "@/server/repos/ta
 import type { ProjectDocument } from "@/server/repos/projects";
 import { documentsForStage, type StageMoney } from "@/server/stage-money";
 
-/**
- * Money for a stage row, in the same shape the rest of the project uses.
- *
- * Whole units with separators: these sit inline in a dense list, and cents
- * would add four characters to every figure for a precision nobody reads at
- * this size. The document itself shows the exact number.
- */
-const money$ = (cents: number) =>
-  `${cents < 0 ? "-" : ""}$${Math.round(Math.abs(cents) / 100).toLocaleString()}`;
+import { useMoney } from "@/components/money/CurrencyProvider";
 import {
   addDependencyAction,
   addTaskAction,
@@ -90,6 +82,11 @@ export function ProjectSchedule({
   today: string;
   staff: { id: string; name: string }[];
 }) {
+  /* Money for a stage row. Whole units with separators: these sit inline in a
+     dense list, and cents would add three characters to every figure for a
+     precision nobody reads at this size. The document shows the exact number. */
+  const { format } = useMoney();
+  const money$ = (cents: number) => format(cents, "whole");
   const [editing, setEditing] = useState<ProjectTask | null>(null);
   /** Which task's "waits for" picker is open. One at a time. */
   const [linking, setLinking] = useState<string | null>(null);

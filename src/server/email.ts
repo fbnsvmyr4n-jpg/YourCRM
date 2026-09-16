@@ -1,5 +1,6 @@
 import { logFailure } from "./log";
 import { utcOffsetLabel } from "@/lib/zoned";
+import { formatMoney, type CurrencyCode } from "@/lib/money";
 
 /**
  * Outbound email.
@@ -228,9 +229,10 @@ export function quotationEmail(quote: {
   notes: string | null;
   lines: { description: string; quantity: number; unitCents: number; totalCents: number }[];
   totalCents: number;
+  /** Required, not defaulted: a document a client signs must not guess its unit. */
+  currency: CurrencyCode;
 }) {
-  const money = (cents: number) =>
-    `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const money = (cents: number) => formatMoney(cents, quote.currency, "cents");
   const qty = (n: number) => String(Number(n.toFixed(3)));
 
   const subject = `Quotation ${quote.number} — ${quote.project}`;
@@ -303,9 +305,10 @@ export function invoiceEmail(invoice: {
   notes: string | null;
   lines: { description: string; quantity: number; unitCents: number; totalCents: number }[];
   totalCents: number;
+  /** Required, not defaulted: an invoice must not guess the currency it bills in. */
+  currency: CurrencyCode;
 }) {
-  const money = (cents: number) =>
-    `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const money = (cents: number) => formatMoney(cents, invoice.currency, "cents");
   const qty = (n: number) => String(Number(n.toFixed(3)));
 
   const subject = `Invoice ${invoice.number} — ${invoice.project}`;

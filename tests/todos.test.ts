@@ -12,6 +12,8 @@ let closePool: typeof import("../src/server/db").closePool;
 const ctxA: TenantContext = { agencyId: AGENCY, subAccountId: TENANT_A, userId: USER_A, role: "owner" };
 const inA = <T>(fn: (q: TenantQuery) => Promise<T>) => withTenant(ctxA, fn);
 const TODAY = "2026-09-16";
+/** Today in the default workspace zone, as SQL. See the note where it is used. */
+const UTC_TODAY = "(now() AT TIME ZONE 'UTC')::date";
 
 beforeAll(async () => {
   db = await startTestDb();
@@ -134,13 +136,16 @@ describe("where late work is announced", () => {
   it("THE BELL RINGS FOR MY LATE TASKS ONLY, and the sidebar counts today's too", async () => {
     const notifications = await import("../src/server/notifications");
     const { navCounts } = await import("../src/server/nav-counts");
-    /* Relative to the database's own today, which is what the default
-       workspace zone (UTC) resolves to. */
+    /* Relative to TODAY IN UTC, the default workspace zone — NOT `CURRENT_DATE`.
+       `CURRENT_DATE` is the database session's local day, and this test failed
+       for the two hours after midnight in Johannesburg, when the machine's day
+       had already turned and the workspace's had not. The app was right; the
+       test was asking a different clock. */
     await db.seed(`
       INSERT INTO todos (id, sub_account_id, title, due_on, assignee_user_id) VALUES
-        ('m1', '${TENANT_A}', 'mine, late',   CURRENT_DATE - 2, '${USER_A}'),
-        ('m2', '${TENANT_A}', 'mine, today',  CURRENT_DATE,     '${USER_A}'),
-        ('s1', '${TENANT_A}', 'Sam''s, late', CURRENT_DATE - 5, 'u_sam');
+        ('m1', '${TENANT_A}', 'mine, late',   ${UTC_TODAY} - 2, '${USER_A}'),
+        ('m2', '${TENANT_A}', 'mine, today',  ${UTC_TODAY},     '${USER_A}'),
+        ('s1', '${TENANT_A}', 'Sam''s, late', ${UTC_TODAY} - 5, 'u_sam');
     `);
     const feed = await inA((q) => notifications.listNotifications(q));
     const item = feed.find((n) => n.id === "tasks-overdue");
@@ -155,7 +160,7 @@ describe("where late work is announced", () => {
     const notifications = await import("../src/server/notifications");
     await db.seed(`
       INSERT INTO todos (id, sub_account_id, title, due_on, assignee_user_id) VALUES
-        ('m2', '${TENANT_A}', 'mine, today', CURRENT_DATE, '${USER_A}');`);
+        ('m2', '${TENANT_A}', 'mine, today', ${UTC_TODAY}, '${USER_A}');`);
     const feed = await inA((q) => notifications.listNotifications(q));
     expect(feed.find((n) => n.id === "tasks-overdue")).toBeUndefined();
   });
