@@ -54,9 +54,12 @@ import type { ProjectOption } from "@/server/repos/inbox";
 import { useDraft, hasContent, type Draft } from "@/lib/use-draft";
 import { SwipeToDelete } from "@/components/ui/SwipeToDelete";
 import { useMoney } from "@/components/money/CurrencyProvider";
+import { TicketBar, TicketLine, TrackTicketButton } from "@/components/tickets/TicketControls";
+import { compareTickets, type Ticket, type TicketStatus } from "@/server/ticket-rules";
 import {
   addMessageAction,
   forwardAction,
+  logReceivedAction,
   markReadAction,
   fileThreadAction,
   replyAction,
@@ -119,6 +122,10 @@ export function InboxView({
   revenueFor,
   projects,
   companyFor,
+  tickets = [],
+  team = [],
+  currentUserId = null,
+  initialFolder,
 }: {
   messages: Message[];
   contactFor: Record<string, string>;
@@ -132,6 +139,12 @@ export function InboxView({
   projects: ProjectOption[];
   /** Contact id → company id, for marking the sender's own jobs. */
   companyFor: Record<string, string>;
+  /** Conversations being tracked as tickets. */
+  tickets?: Ticket[];
+  /** Who a ticket can be given to. */
+  team?: { id: string; name: string }[];
+  currentUserId?: string | null;
+  initialFolder?: InboxFilter;
 }) {
   /**
    * A message in progress survives the composer closing.
@@ -150,11 +163,19 @@ export function InboxView({
      message names what is about to go. */
   const [pendingDelete, setPendingDelete] = useState<Message | null>(null);
 
-  const [filter, setFilter] = useState<InboxFilter>("All");
+  const [filter, setFilter] = useState<InboxFilter>(initialFolder ?? "All");
   const [category, setCategory] = useState<MsgCategory | null>(null);
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<InboxSort>("newest");
-  const [selectedId, setSelectedId] = useState(messages[0]?.id ?? "");
+  /* The Tickets folder is a queue, looked at one state at a time: what is
+     open is the work, and the rest is there when asked for. */
+  const [ticketStatus, setTicketStatus] = useState<TicketStatus>("open");
+  const [mineOnly, setMineOnly] = useState(false);
+  const ticketByThread = useMemo(() => new Map(tickets.map((t) => [t.threadId, t])), [tickets]);
+  const teamName = useMemo(() => new Map(team.map((p) => [p.id, p.name])), [team]);
+  const [composeError, setComposeError] = useState<string | null>(null);
+  /* Arriving on the queue selects its first ticket, not the newest mail. */
+  const [selectedId, setSelectedId] = useState(initialFolder ? "" : (messages[0]?.id ?? ""));
   /*
      On a phone the reader is its own screen, not a card under the list.
 
@@ -239,8 +260,19 @@ export function InboxView({
       switch (filter) {
         case "Unread":
           return messages.filter((m) => m.unread && !m.trashed);
-        case "Assigned to me":
-          return messages.filter((m) => m.assigned && !m.trashed);
+        case "Tickets": {
+          /* One row per ticket: its conversation's latest message. */
+          const latest = new Map<string, Message>();
+          for (const m of messages) {
+            if (m.trashed || !ticketByThread.has(m.threadId)) continue;
+            const seen = latest.get(m.threadId);
+            if (!seen || m.at > seen.at) latest.set(m.threadId, m);
+          }
+          return [...latest.values()].filter((m) => {
+            const t = ticketByThread.get(m.threadId)!;
+            return t.status === ticketStatus && (!mineOnly || t.assigneeUserId === currentUserId);
+          });
+        }
         case "Sent":
           return messages.filter((m) => m.direction === "sent" && !m.trashed);
         case "Received":
@@ -254,20 +286,26 @@ export function InboxView({
 
     const byCategory = category ? byFolder.filter((m) => m.category === category) : byFolder;
 
+    /* Tickets keep the queue's own order — what is owed soonest first —
+       rather than the sort menu's, which is about mail. */
+    const order = (rows: Message[]) =>
+      filter === "Tickets"
+        ? [...rows].sort((a, b) => compareTickets(ticketByThread.get(a.threadId)!, ticketByThread.get(b.threadId)!))
+        : sortMessages(rows, sort);
+
     const q = query.trim().toLowerCase();
-    if (!q) return sortMessages(byCategory, sort);
+    if (!q) return order(byCategory);
 
     // Search covers the body too — the useful search is usually for something
     // said inside a message, not just its subject line.
-    return sortMessages(
+    return order(
       byCategory.filter((m) =>
         [m.name, m.subject, m.preview, m.company, m.email, ...m.body].some((f) =>
           f.toLowerCase().includes(q)
         )
-      ),
-      sort
+      )
     );
-  }, [filter, category, query, messages, sort]);
+  }, [filter, category, query, messages, sort, ticketByThread, ticketStatus, mineOnly, currentUserId]);
 
   // Counts come from the same folder the user is looking at, so a chip never
   // promises results that the current folder would filter away.
@@ -287,9 +325,28 @@ export function InboxView({
     if (msg?.unread) markReadAction(id);
   }
 
-  async function handleCompose(formData: FormData) {
+  async function handleCompose(formData: FormData, mode: "send" | "log"): Promise<boolean> {
     setBusy(true);
+    setComposeError(null);
     try {
+      if (mode === "log") {
+        const logged = await logReceivedAction(formData);
+        if ("error" in logged) {
+          setComposeError(logged.error);
+          return false;
+        }
+        setComposeOpen(false);
+        setCategory(null);
+        if (logged.ticket) {
+          setFilter("Tickets");
+          setTicketStatus(logged.ticket.status);
+        } else {
+          setFilter("Received");
+        }
+        setSelectedId(logged.id);
+        setNotice(null);
+        return true;
+      }
       const result = await addMessageAction(formData);
       setComposeOpen(false);
       if (result) {
@@ -300,6 +357,7 @@ export function InboxView({
            screen that said it while nothing was being sent. */
         setNotice(result.notice);
       }
+      return true;
     } finally {
       setBusy(false);
     }
@@ -435,7 +493,12 @@ export function InboxView({
       <div className="tab-row flex flex-wrap items-center gap-2">
         {inboxFilters.map((f) => {
           const active = filter === f;
-          const count = f === "Unread" ? messages.filter((m) => m.unread && !m.trashed).length : undefined;
+          const count =
+            f === "Unread"
+              ? messages.filter((m) => m.unread && !m.trashed).length
+              : f === "Tickets"
+                ? tickets.filter((t) => t.status === "open").length
+                : undefined;
           return (
             <button
               key={f}
@@ -499,6 +562,19 @@ export function InboxView({
           setQuery={setQuery}
           sort={sort}
           setSort={setSort}
+          ticketQueue={{
+            ticketByThread,
+            teamName,
+            status: ticketStatus,
+            setStatus: setTicketStatus,
+            mineOnly,
+            setMineOnly,
+            counts: {
+              open: tickets.filter((t) => t.status === "open").length,
+              waiting: tickets.filter((t) => t.status === "waiting").length,
+              resolved: tickets.filter((t) => t.status === "resolved").length,
+            },
+          }}
         />
         {selected ? (
           <Reader
@@ -509,6 +585,9 @@ export function InboxView({
             recent={recent}
             projects={projects}
             companyFor={companyFor}
+            ticket={ticketByThread.get(selected.threadId) ?? null}
+            team={team}
+            currentUserId={currentUserId}
             busy={busy}
             onTrash={() => handleTrash(selected.id)}
             onRestore={() => handleRestore(selected.id)}
@@ -561,8 +640,12 @@ export function InboxView({
           people={people}
           recent={recent}
           busy={busy}
-          onClose={() => setComposeOpen(false)}
+          onClose={() => {
+            setComposeOpen(false);
+            setComposeError(null);
+          }}
           onSubmit={handleCompose}
+          error={composeError}
           draft={draft}
           save={save}
           clear={clear}
@@ -592,6 +675,7 @@ function MessageList({
   draftWaiting,
   onAskDelete,
   filter,
+  ticketQueue,
 }: {
   list: Message[];
   selectedId: string;
@@ -613,7 +697,17 @@ function MessageList({
   onAskDelete: (m: Message) => void;
   /** Which folder is showing — Trash says how long its contents survive. */
   filter: InboxFilter;
+  ticketQueue: {
+    ticketByThread: Map<string, Ticket>;
+    teamName: Map<string, string>;
+    status: TicketStatus;
+    setStatus: (s: TicketStatus) => void;
+    mineOnly: boolean;
+    setMineOnly: (v: boolean) => void;
+    counts: Record<TicketStatus, number>;
+  };
 }) {
+  const inTickets = filter === "Tickets";
   const [filterOpen, setFilterOpen] = useState(false);
   const [filterAnchor, setFilterAnchor] = useState<HTMLButtonElement | null>(null);
   /*
@@ -647,7 +741,9 @@ function MessageList({
           </button>
         )}
         </div>
-        <SortMenu options={INBOX_SORTS} value={sort} onChange={setSort} defaultId="newest" />
+        {/* The queue has its own order, so a sort menu there would be a control
+            that does nothing. */}
+        {!inTickets && <SortMenu options={INBOX_SORTS} value={sort} onChange={setSort} defaultId="newest" />}
 
         {/*
             The category facet and Compose, on a phone only.
@@ -735,7 +831,59 @@ function MessageList({
             Deleted messages are removed for good after 7 days.
           </p>
         )}
-        {list.length === 0 && <p className="mt-8 text-center text-sm text-faint">No messages here.</p>}
+        {inTickets && (
+          <div className="flex items-center gap-2 px-0.5 pb-1">
+            <div className="grid flex-1 grid-cols-3 gap-1 rounded-xl p-1" style={{ background: "var(--raise)" }} role="radiogroup" aria-label="Ticket status">
+              {(
+                [
+                  ["open", "Open"],
+                  ["waiting", "Waiting"],
+                  ["resolved", "Resolved"],
+                ] as const
+              ).map(([id, label]) => {
+                const active = ticketQueue.status === id;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    onClick={() => ticketQueue.setStatus(id)}
+                    className={clsx(
+                      "focus-ring rounded-lg px-1 py-1.5 text-xs font-semibold transition-colors",
+                      active ? "text-accent shadow-sm" : "text-muted hover:text-[var(--text)]"
+                    )}
+                    style={active ? { background: "var(--panel-solid)" } : undefined}
+                  >
+                    {label}
+                    <span className="ml-1 font-normal text-faint">{ticketQueue.counts[id]}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <button
+              type="button"
+              aria-pressed={ticketQueue.mineOnly}
+              onClick={() => ticketQueue.setMineOnly(!ticketQueue.mineOnly)}
+              className={clsx(
+                "focus-ring shrink-0 rounded-xl px-3 py-2 text-xs font-semibold transition-colors",
+                ticketQueue.mineOnly ? "text-accent" : "btn-soft text-muted"
+              )}
+              style={ticketQueue.mineOnly ? { background: "var(--accent-soft)" } : undefined}
+            >
+              Mine
+            </button>
+          </div>
+        )}
+        {list.length === 0 && (
+          <p className="mt-8 text-center text-sm text-faint">
+            {inTickets
+              ? ticketQueue.status === "open"
+                ? "No open tickets. Track a conversation from the reader, or log a message you received."
+                : `No ${ticketQueue.status === "waiting" ? "tickets waiting on a customer" : "resolved tickets"}${ticketQueue.mineOnly ? " of yours" : ""}.`
+              : "No messages here."}
+          </p>
+        )}
         {list.map((m) => {
           const active = m.id === selectedId;
           const row = (
@@ -777,7 +925,17 @@ function MessageList({
                   </div>
                 </div>
               </div>
-              <p className="mt-2 line-clamp-2 text-xs text-faint">{m.preview}</p>
+              {inTickets && ticketQueue.ticketByThread.get(m.threadId) ? (
+                <TicketLine
+                  ticket={ticketQueue.ticketByThread.get(m.threadId)!}
+                  assignee={(() => {
+                    const id = ticketQueue.ticketByThread.get(m.threadId)!.assigneeUserId;
+                    return id ? (ticketQueue.teamName.get(id) ?? "No longer on the team") : null;
+                  })()}
+                />
+              ) : (
+                <p className="mt-2 line-clamp-2 text-xs text-faint">{m.preview}</p>
+              )}
             </button>
           );
           /* Already in the bin: swiping to delete something deleted is a
@@ -870,6 +1028,9 @@ function Reader({
   recent,
   projects,
   companyFor,
+  ticket,
+  team,
+  currentUserId,
   busy,
   onTrash,
   onRestore,
@@ -877,6 +1038,10 @@ function Reader({
   className,
 }: {
   message: Message;
+  /** The ticket this conversation is, if it is one. */
+  ticket: Ticket | null;
+  team: { id: string; name: string }[];
+  currentUserId: string | null;
   people: Person[];
   recent: Person[];
   /** Live projects this conversation could belong to. The sender's own first. */
@@ -969,6 +1134,7 @@ function Reader({
       </div>
 
       <div className="-mx-1 flex-1 scroll-p-1 overflow-y-auto px-1 py-5">
+        {ticket && <TicketBar ticket={ticket} team={team} currentUserId={currentUserId} />}
         {/* The category sits with the subject, not in the header row — beside
             the name and the delete button it left no room for either. */}
         {message.category && (
@@ -1113,6 +1279,7 @@ function Reader({
           <CornerUpRight className="h-4 w-4" />
           Forward
         </button>
+        {!ticket && !message.trashed && <TrackTicketButton threadId={message.threadId} />}
       </div>
 
       {viewing && <AttachmentViewer attachment={viewing} from={message.name} onClose={() => setViewing(null)} />}
@@ -1630,12 +1797,15 @@ function ComposeModal({
   busy,
   onClose,
   onSubmit,
+  error,
 }: {
   people: Person[];
   recent: Person[];
   busy: boolean;
   onClose: () => void;
-  onSubmit: (formData: FormData) => void | Promise<void>;
+  /** Resolves false when the server refused, so the draft is kept. */
+  onSubmit: (formData: FormData, mode: "send" | "log") => Promise<boolean>;
+  error: string | null;
   draft: Draft;
   save: (d: Draft) => void;
   clear: () => void;
@@ -1643,6 +1813,17 @@ function ComposeModal({
 }) {
   const to = draft.to;
   const setTo = (v: string) => save({ ...draft, to: v });
+  /*
+     Send, or write down something that arrived another way.
+
+     Nothing brings inbound mail into the product yet, so a WhatsApp from a
+     client, a call, or an email to somebody's own mailbox could never start a
+     conversation here — and a support ticket is a conversation somebody else
+     started. Same box, because it is the same record facing the other way.
+  */
+  const [mode, setMode] = useState<"send" | "log">("send");
+  const [receivedLocal, setReceivedLocal] = useState("");
+  const logging = mode === "log";
 
   const addressable = useMemo(() => addressablePeople(people), [people]);
   const addressableRecent = useMemo(() => addressablePeople(recent), [recent]);
@@ -1672,19 +1853,48 @@ function ComposeModal({
           /* Cleared after, and only after. Clearing on submit would throw the
              message away on the one occasion it matters most — a send that
              failed. */
-          await onSubmit(formData);
-          clear();
+          if (await onSubmit(formData, mode)) clear();
         }}
         className="modal-surface relative z-10 w-full max-w-lg p-6"
       >
         <div className="mb-5 flex items-center justify-between">
           <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight">
-            <Send className="h-[18px] w-[18px] text-accent" /> New Email
+            <Send className="h-[18px] w-[18px] text-accent" /> {logging ? "Log a message" : "New Email"}
           </h2>
           <button type="button" onClick={onClose} className="text-faint hover:text-[var(--text)]" aria-label="Close">
             <X className="h-5 w-5" />
           </button>
         </div>
+
+        <div className="mb-5 grid grid-cols-2 gap-1 rounded-xl p-1" style={{ background: "var(--raise)" }} role="radiogroup" aria-label="Send or log">
+          {(
+            [
+              ["send", "Send"],
+              ["log", "Log one you received"],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              role="radio"
+              aria-checked={mode === id}
+              onClick={() => setMode(id)}
+              className={clsx(
+                "focus-ring rounded-lg px-2 py-1.5 text-xs font-semibold transition-colors",
+                mode === id ? "text-accent shadow-sm" : "text-muted hover:text-[var(--text)]"
+              )}
+              style={mode === id ? { background: "var(--panel-solid)" } : undefined}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {error && (
+          <p className="mb-4 rounded-xl px-3.5 py-2.5 text-sm" style={{ background: "var(--red-soft)", color: "var(--red)" }} role="alert">
+            {error}
+          </p>
+        )}
 
         {/* Said plainly, once. Fields that quietly refill themselves look like
             a bug the first time; saying where the text came from, and offering
@@ -1705,7 +1915,7 @@ function ComposeModal({
         <div className="space-y-4">
           <div className="block">
             <span className="mb-1.5 block text-xs font-medium text-muted">
-              To<span className="text-[var(--red)]"> *</span>
+              {logging ? "From" : "To"}<span className="text-[var(--red)]"> *</span>
             </span>
             {/* Suggests from contacts and leads. Typing a recipient from memory
                 was the only option before, in a CRM that already knows every
@@ -1756,10 +1966,34 @@ function ComposeModal({
               rows={5}
               value={draft.body}
               onChange={(e) => save({ ...draft, body: e.target.value })}
-              placeholder="Write your message..."
+              placeholder={logging ? "Type or paste what they said..." : "Write your message..."}
               className="field-input resize-y"
             />
           </label>
+          {logging && (
+            <div className="grid grid-cols-1 items-end gap-4 @min-[440px]:grid-cols-2">
+              <label className="block">
+                <span className="mb-1.5 block text-xs font-medium text-muted">Received</span>
+                {/* Local time as the person reads it, sent as an instant. Empty
+                    means just now, which is the common case. */}
+                <input
+                  type="datetime-local"
+                  value={receivedLocal}
+                  onChange={(e) => setReceivedLocal(e.target.value)}
+                  className="field-input"
+                />
+                <input
+                  type="hidden"
+                  name="receivedAt"
+                  value={receivedLocal && !Number.isNaN(new Date(receivedLocal).getTime()) ? new Date(receivedLocal).toISOString() : ""}
+                />
+              </label>
+              <label className="flex items-center gap-2.5 pb-2.5 text-sm">
+                <input type="checkbox" name="openTicket" className="h-4 w-4 accent-[var(--accent)]" />
+                Open a ticket for this
+              </label>
+            </div>
+          )}
         </div>
 
         <div className="mt-6 flex items-center justify-end gap-3">
@@ -1776,7 +2010,7 @@ function ComposeModal({
             disabled={busy || !to.trim()}
             className="btn-accent focus-ring flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold disabled:opacity-60"
           >
-            <Send className="h-4 w-4" /> {busy ? "Sending…" : "Send Email"}
+            <Send className="h-4 w-4" /> {logging ? (busy ? "Logging…" : "Log message") : busy ? "Sending…" : "Send Email"}
           </button>
         </div>
       </form>

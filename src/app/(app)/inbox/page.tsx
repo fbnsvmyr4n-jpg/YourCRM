@@ -2,13 +2,22 @@ import { listMessages, projectOptions, purgeExpiredMessages } from "@/server/rep
 import { contactSummaries } from "@/server/contact-summaries";
 import { listContacts } from "@/server/repos/contacts";
 import { decorateMessage } from "@/server/decorate-message";
-import { withTenantPage } from "@/server/tenant-session";
+import { requireTenantPage, withTenantPage } from "@/server/tenant-session";
+import { listTickets } from "@/server/repos/tickets";
+import { assignableTeam } from "@/server/repos/automations";
 import { InboxView } from "./InboxView";
 
 export const dynamic = "force-dynamic";
 
-export default async function InboxPage() {
-  const { messages, contactFor, people, recent, revenueFor, projects, companyFor } =
+export default async function InboxPage({
+  searchParams,
+}: {
+  /** `?folder=tickets` — how the bell lands on the queue rather than the mail. */
+  searchParams: Promise<{ folder?: string }>;
+}) {
+  const { folder } = await searchParams;
+  const ctx = await requireTenantPage();
+  const { messages, contactFor, people, recent, revenueFor, projects, companyFor, tickets, team } =
     await withTenantPage(async (q) => {
     /* Before reading, so nothing expired is listed and then vanishes on the
        next load. There is no scheduler in this app; the bin is emptied by
@@ -124,6 +133,10 @@ export default async function InboxPage() {
     }
 
     return {
+      /* The conversations somebody is answerable for, and who they can be
+         handed to — people who can see customer records. */
+      tickets: await listTickets(q),
+      team: await assignableTeam(q),
       messages: rows.map((m) => decorateMessage(m, senders)),
       contactFor,
       people: addressBook,
@@ -152,6 +165,10 @@ export default async function InboxPage() {
       recent={recent}
       projects={projects}
       companyFor={companyFor}
+      tickets={tickets}
+      team={team}
+      currentUserId={ctx.userId}
+      initialFolder={folder === "tickets" ? "Tickets" : undefined}
     />
   );
 }

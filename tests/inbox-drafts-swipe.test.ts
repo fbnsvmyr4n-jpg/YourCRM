@@ -44,8 +44,10 @@ describe("a message survives the composer closing", () => {
 
   it("clears only once the send has gone through", () => {
     /* Clearing on submit would throw the message away on the one occasion it
-       matters most — a send that failed. */
-    expect(code).toMatch(/await onSubmit\(formData\);\s*\n\s*clear\(\);/);
+       matters most — a send that failed. And since the box can also LOG a
+       received message, which the server can refuse ("a message cannot arrive
+       in the future"), it clears only when the submit says it went through. */
+    expect(code).toMatch(/if \(await onSubmit\(formData, mode\)\) clear\(\);/);
   });
 
   it("says the box is not throwing the message away", () => {

@@ -2,6 +2,7 @@ import { listCalls } from "./repos/calls";
 import { deadJobs } from "./repos/outbox";
 import { failingAutomations } from "./repos/automations";
 import { dueForUser } from "./repos/todos";
+import { overdueTickets } from "./repos/tickets";
 import {
   BOOKING_EMAIL,
   CALL_ANALYSIS,
@@ -234,6 +235,31 @@ export async function listNotifications(q: TenantQuery): Promise<Notification[]>
         detail: "Due before today and not done yet",
         href: "/tasks",
         weight: 95,
+      });
+    }
+  }
+
+  /*
+     Customers waiting past the reply-by time: yours, and nobody's. Somebody
+     else's overdue ticket is theirs to be told about — telling the whole team
+     about every one is how a bell stops being read.
+  */
+  if (q.ctx.userId) {
+    const late = await overdueTickets(q, q.ctx.userId);
+    const n = late.mine + late.unassigned;
+    if (n > 0) {
+      out.push({
+        id: "tickets-overdue",
+        kind: "message",
+        title: `${n} ticket${n === 1 ? "" : "s"} past ${n === 1 ? "its" : "their"} reply time`,
+        detail:
+          late.mine && late.unassigned
+            ? `${late.mine} yours, ${late.unassigned} unassigned`
+            : late.mine
+              ? "Assigned to you"
+              : "Nobody has taken them yet",
+        href: "/inbox?folder=tickets",
+        weight: 96,
       });
     }
   }

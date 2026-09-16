@@ -2645,6 +2645,74 @@ CREATE POLICY contact_views_tenant_isolation ON contact_views
   WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
 
 -- ---------------------------------------------------------------------------
+-- Tickets: a conversation somebody is responsible for answering.
+--
+-- Built ON the inbox's threads rather than beside them. A ticket is a thread
+-- with a status, a priority and an owner — the words are already in the Inbox,
+-- and a separate "ticket message" table would be two places a client's words
+-- live, which is exactly how one of them goes unanswered.
+--
+-- The clock is `awaiting_since`: when the customer spoke and we have not yet
+-- answered. The reply-by time is DERIVED from it and the priority, so changing
+-- priority re-times the ticket without a stored deadline to recompute, and
+-- nothing owed is simply NULL. Kept current by the message writer in the same
+-- transaction: their message starts it (and reopens the ticket), ours stops it.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS tickets (
+  id                 TEXT PRIMARY KEY,
+  sub_account_id     TEXT NOT NULL REFERENCES sub_accounts(id) ON DELETE CASCADE,
+  thread_id          TEXT NOT NULL,
+  status             TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'waiting', 'resolved')),
+  priority           TEXT NOT NULL DEFAULT 'normal' CHECK (priority IN ('low', 'normal', 'high', 'urgent')),
+  assignee_user_id   TEXT REFERENCES users(id) ON DELETE SET NULL,
+  awaiting_since     TIMESTAMPTZ,
+  resolved_at        TIMESTAMPTZ,
+  opened_by_user_id  TEXT REFERENCES users(id) ON DELETE SET NULL,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+  -- A resolved ticket has a time it was resolved and owes nobody a reply;
+  -- an unresolved one has neither.
+  CONSTRAINT tickets_resolved_shape CHECK (
+    (status = 'resolved' AND resolved_at IS NOT NULL AND awaiting_since IS NULL)
+    OR (status <> 'resolved' AND resolved_at IS NULL)
+  )
+);
+CREATE UNIQUE INDEX IF NOT EXISTS tickets_thread_once ON tickets (sub_account_id, thread_id);
+CREATE INDEX IF NOT EXISTS tickets_queue_idx ON tickets (sub_account_id, status, awaiting_since);
+
+CREATE OR REPLACE FUNCTION assert_ticket_links() RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.assignee_user_id IS NOT NULL AND NOT EXISTS (
+       SELECT 1 FROM users u JOIN sub_accounts sa ON sa.id = NEW.sub_account_id
+        WHERE u.id = NEW.assignee_user_id AND u.deleted_at IS NULL
+          AND u.agency_id = sa.agency_id
+          AND (u.sub_account_id IS NULL OR u.sub_account_id = NEW.sub_account_id)) THEN
+    RAISE EXCEPTION 'assignee % does not belong to sub-account %', NEW.assignee_user_id, NEW.sub_account_id
+      USING ERRCODE = 'check_violation';
+  END IF;
+
+  IF NOT EXISTS (
+       SELECT 1 FROM messages m WHERE m.thread_id = NEW.thread_id AND m.sub_account_id = NEW.sub_account_id) THEN
+    RAISE EXCEPTION 'thread % has no messages in sub-account %', NEW.thread_id, NEW.sub_account_id
+      USING ERRCODE = 'check_violation';
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS tickets_links ON tickets;
+CREATE TRIGGER tickets_links
+  BEFORE INSERT OR UPDATE OF assignee_user_id, thread_id, sub_account_id ON tickets
+  FOR EACH ROW EXECUTE FUNCTION assert_ticket_links();
+
+ALTER TABLE tickets ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tickets FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tickets_tenant_isolation ON tickets;
+CREATE POLICY tickets_tenant_isolation ON tickets
+  USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
+  WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
+
+-- ---------------------------------------------------------------------------
 -- What the application's own database role may do.
 --
 -- KEEP THIS THE LAST BLOCK IN THE FILE: `GRANT … ON ALL TABLES` covers only the

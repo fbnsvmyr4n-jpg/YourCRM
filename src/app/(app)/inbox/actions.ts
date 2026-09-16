@@ -14,12 +14,16 @@ import {
 import { getContact } from "@/server/repos/contacts";
 import { linkContactByName } from "@/server/link-contact";
 import { requireTenant, withCurrentTenant } from "@/server/tenant-session";
-import type { TenantContext } from "@/server/tenant";
+import type { TenantContext, TenantQuery } from "@/server/tenant";
 import { canSendOn, findOutgoing, setDelivery, type Channel } from "@/server/repos/inbox";
 import { drain } from "@/server/outbox";
 import { OUTBOX_REGISTRY, queueMessageEmail } from "@/server/outbox-handlers";
 import { MSG_CATEGORIES } from "@/data/inbox";
 import { id as validId, multiline, pick, text } from "@/server/validate";
+import { openTicket, updateTicket } from "@/server/repos/tickets";
+import { assignableTeam } from "@/server/repos/automations";
+import { logWrite } from "@/server/log";
+import { TICKET_PRIORITIES, TICKET_STATUSES, type Ticket } from "@/server/ticket-rules";
 
 /**
  * Inbox actions.
@@ -323,5 +327,128 @@ export async function fileThreadAction(threadId: string, dealId: string | null) 
     const n = result.moved;
     const plural = `${n} ${n === 1 ? "message" : "messages"}`;
     return { ok: target ? `${plural} filed against the project.` : `${plural} unfiled.` };
+  });
+}
+
+
+/* ------------------------------------------------------------------ */
+/* Tickets                                                             */
+/*                                                                     */
+/* Anybody who works the customer records can track a conversation,    */
+/* take it, hand it on and close it — that is the work, the same as     */
+/* replying is.                                                        */
+/* ------------------------------------------------------------------ */
+
+type TicketResult = { error: string } | { ok: true; ticket: Ticket };
+
+/** Only people who can see customer records can be handed a customer's conversation. */
+async function checkAssignee(q: TenantQuery, raw: unknown): Promise<{ id: string | null } | { error: string }> {
+  if (raw === null || raw === "") return { id: null };
+  const id = validId(raw);
+  if (!id || !(await assignableTeam(q)).some((p) => p.id === id)) {
+    return { error: "That person cannot be given tickets in this workspace." };
+  }
+  return { id };
+}
+
+/** Start tracking a conversation as a ticket. */
+export async function trackTicketAction(threadId: string): Promise<TicketResult> {
+  return withCurrentTenant(async (q) => {
+    const thread = validId(threadId);
+    if (!thread) return { error: "That conversation no longer exists." };
+    const out = await openTicket(q, thread);
+    if ("error" in out) return out;
+    if (out.created) logWrite("create", "ticket", { id: out.ticket.id, actor: q.ctx.userId });
+    revalidateApp();
+    return { ok: true as const, ticket: out.ticket };
+  });
+}
+
+export async function updateTicketAction(
+  ticketId: string,
+  patch: { status?: string; priority?: string; assigneeUserId?: string | null }
+): Promise<TicketResult> {
+  return withCurrentTenant(async (q) => {
+    const id = validId(ticketId);
+    if (!id) return { error: "That ticket no longer exists." };
+
+    const status = patch.status === undefined ? undefined : pick(patch.status, TICKET_STATUSES);
+    if (status === null) return { error: "That is not a ticket status." };
+    const priority = patch.priority === undefined ? undefined : pick(patch.priority, TICKET_PRIORITIES);
+    if (priority === null) return { error: "That is not a priority." };
+
+    let assigneeUserId: string | null | undefined;
+    if (patch.assigneeUserId !== undefined) {
+      const who = await checkAssignee(q, patch.assigneeUserId);
+      if ("error" in who) return who;
+      assigneeUserId = who.id;
+    }
+
+    const out = await updateTicket(q, id, { status, priority, assigneeUserId });
+    if ("error" in out) return out;
+    logWrite("update", "ticket", { id, actor: q.ctx.userId });
+    revalidateApp();
+    return { ok: true as const, ticket: out.ticket };
+  });
+}
+
+/** How far ahead of the server clock a logged message may claim to be. */
+const CLOCK_SKEW_MS = 5 * 60_000;
+
+/**
+ * Record a message somebody RECEIVED — a WhatsApp on their phone, a call, an
+ * email in another mailbox.
+ *
+ * Nothing brings inbound mail into this product yet, so without this the
+ * Received folder could only ever hold imported history, and a support
+ * conversation could never start here. It is marked read: the person logging
+ * it has read it. Optionally it opens a ticket in the same go.
+ */
+export async function logReceivedAction(
+  formData: FormData
+): Promise<{ error: string } | { ok: true; id: string; ticket: Ticket | null }> {
+  return withCurrentTenant(async (q) => {
+    const from = text(formData.get("to"), 120);
+    if (!from) return { error: "Say who it was from." };
+    const body = multiline(formData.get("body"), 10_000);
+    if (!body) return { error: "Type or paste what they said." };
+
+    let sentAt: Date | undefined;
+    const when = text(formData.get("receivedAt"), 40);
+    if (when) {
+      const d = new Date(when);
+      if (Number.isNaN(d.getTime())) return { error: "That time is not valid." };
+      if (d.getTime() > Date.now() + CLOCK_SKEW_MS) return { error: "A message cannot arrive in the future." };
+      sentAt = d;
+    }
+
+    const looksLikeEmail = from.includes("@");
+    const contactId = await linkContactByName(
+      q,
+      looksLikeEmail ? from.split("@")[0].replace(/[._]/g, " ") : from,
+      looksLikeEmail ? from : null
+    );
+
+    const created = await createMessage(q, {
+      direction: "received",
+      contactId,
+      channel: pick(formData.get("channel"), CHANNELS) ?? "email",
+      subject: text(formData.get("subject"), 200),
+      body,
+      sentAt,
+      unread: false,
+    });
+
+    let ticket: Ticket | null = null;
+    if (formData.get("openTicket") === "on") {
+      const out = await openTicket(q, created.threadId);
+      if ("ticket" in out) {
+        ticket = out.ticket;
+        logWrite("create", "ticket", { id: ticket.id, actor: q.ctx.userId });
+      }
+    }
+
+    revalidateApp();
+    return { ok: true as const, id: created.id, ticket };
   });
 }

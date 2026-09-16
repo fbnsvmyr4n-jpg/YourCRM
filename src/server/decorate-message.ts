@@ -58,9 +58,6 @@ export function decorateMessage(m: MessageRecord, people: MessagePerson[]): Mess
     // quoting text that is no longer there.
     preview: paragraphs[0]?.slice(0, 160) ?? "",
     unread: m.unread,
-    // A folder nothing could ever assign to anybody. Kept false rather than
-    // removed from the type, which would ripple through the whole view.
-    assigned: false,
     direction: m.direction,
     trashed: m.deletedAt !== null,
     body: paragraphs,

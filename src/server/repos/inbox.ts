@@ -1,6 +1,7 @@
 import { classifyMessage } from "../inbox-classify";
 import type { MsgCategory } from "@/data/inbox";
 import type { TenantQuery } from "../tenant";
+import { recordOnTicket } from "./tickets";
 
 /**
  * Inbox messages.
@@ -274,7 +275,11 @@ export async function createMessage(q: TenantQuery, input: NewMessage): Promise<
     ]
   );
   if (!row) throw new Error("Message was not created.");
-  return toRecord(row);
+  const record = toRecord(row);
+  /* The ticket on this thread, if there is one, learns in the same
+     transaction: their message starts the clock, ours stops it. */
+  await recordOnTicket(q, record.threadId, record.direction, record.sentAt);
+  return record;
 }
 
 export async function setUnread(

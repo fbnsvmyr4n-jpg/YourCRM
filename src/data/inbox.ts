@@ -1,7 +1,7 @@
 import type { Channel, Delivery } from "@/server/repos/inbox";
 import type { AvatarColor } from "@/components/ui/Avatar";
 
-export type MsgFolder = "unread" | "assigned" | "sent" | "received" | "trash";
+export type MsgFolder = "unread" | "tickets" | "sent" | "received" | "trash";
 
 /** Allowed values first, types derived — see the note in `data/contacts.ts`. */
 export const MSG_CATEGORIES = [
@@ -67,7 +67,6 @@ export type Message = {
   subject: string;
   preview: string;
   unread: boolean;
-  assigned: boolean;
   direction: "sent" | "received";
   trashed: boolean;
   body: string[];
@@ -103,7 +102,10 @@ export type Message = {
 export const inboxFilters = [
   "All",
   "Unread",
-  "Assigned to me",
+  /* Was "Assigned to me", a folder nothing could ever put anything in. A
+     ticket is the thing that is assigned to somebody, so this is where that
+     promise is finally kept. */
+  "Tickets",
   "Sent",
   "Received",
   "Trash",
