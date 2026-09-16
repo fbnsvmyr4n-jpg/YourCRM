@@ -147,6 +147,9 @@ describe("the AI quote drafter", () => {
       ctx: { agencyId: AGENCY, subAccountId: TENANT_A, userId: USER_A, role: "owner" },
       one: async (sql: string) => {
         statements.push(sql);
+        /* A workspace that has never saved settings: drafting reads them for
+           the business's own date, and gets the defaults. */
+        if (/FROM settings/.test(sql)) return null;
         return { id: JOB };
       },
       rows: async (sql: string) => {
