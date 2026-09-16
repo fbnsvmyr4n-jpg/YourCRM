@@ -1,6 +1,7 @@
 import { listCalls } from "./repos/calls";
 import { deadJobs } from "./repos/outbox";
 import { failingAutomations } from "./repos/automations";
+import { dueForUser } from "./repos/todos";
 import {
   BOOKING_EMAIL,
   CALL_ANALYSIS,
@@ -40,7 +41,7 @@ import type { TenantQuery } from "./tenant";
  * and a row nobody queries, which meant the person who needed the email found
  * out from the client.
  */
-export type NotificationKind = "meeting" | "lead" | "message" | "call" | "deal" | "stuck";
+export type NotificationKind = "meeting" | "lead" | "message" | "call" | "deal" | "stuck" | "task";
 
 export type Notification = {
   id: string;
@@ -212,6 +213,28 @@ export async function listNotifications(q: TenantQuery): Promise<Notification[]>
       href: "/meetings",
       weight: 100,
     });
+  }
+
+  /*
+     The reader's own tasks that are already late.
+
+     Only late ones, and only theirs: today's tasks are on the sidebar badge and
+     the Tasks page, and a bell that rings for everything due today rings every
+     morning until it is ignored. A late task is different — it is a promise
+     somebody has already broken.
+  */
+  if (q.ctx.userId) {
+    const mine = await dueForUser(q, q.ctx.userId, todayKey);
+    if (mine.overdue > 0) {
+      out.push({
+        id: "tasks-overdue",
+        kind: "task",
+        title: `${mine.overdue} of your tasks ${mine.overdue === 1 ? "is" : "are"} overdue`,
+        detail: "Due before today and not done yet",
+        href: "/tasks",
+        weight: 95,
+      });
+    }
   }
 
   // Calls the agent handled that have not become records yet. "Pending" is a

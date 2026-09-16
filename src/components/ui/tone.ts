@@ -5,6 +5,7 @@ import {
   DollarSign,
   FileText,
   Headphones,
+  ListChecks,
   MessageSquare,
   Phone,
   UserPlus,
@@ -32,4 +33,5 @@ export const iconMap: Record<string, LucideIcon> = {
   "bar-chart": BarChart3,
   dollar: DollarSign,
   message: MessageSquare,
+  check: ListChecks,
 };

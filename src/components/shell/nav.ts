@@ -7,6 +7,7 @@ import {
   Home,
   Inbox,
   KanbanSquare,
+  ListChecks,
   LifeBuoy,
   MessageSquare,
   NotebookPen,
@@ -29,7 +30,7 @@ export type NavItem = {
    * what was in their inbox. Naming the count instead means the value can only
    * come from the database.
    */
-  count?: "inbox" | "calendarToday";
+  count?: "inbox" | "calendarToday" | "tasksDue";
   /**
    * Whether this screen shows customer records.
    *
@@ -65,6 +66,9 @@ export const NAV: NavSection[] = [
       { label: "Projects", href: "/projects", icon: Briefcase },
       { label: "Inbox", href: "/inbox", icon: Inbox, count: "inbox" },
       { label: "Calendar", href: "/calendar", icon: CalendarDays, count: "calendarToday" },
+      /* Beside the Calendar: both answer "what is on today". The badge is the
+         reader's own tasks due today or late — work they can clear. */
+      { label: "Tasks", href: "/tasks", icon: ListChecks, count: "tasksDue" },
     ],
   },
   {

@@ -8,6 +8,7 @@ import {
   CalendarClock,
   ChevronDown,
   DollarSign,
+  ListChecks,
   Mail,
   Menu,
   MessageSquare,
@@ -35,6 +36,7 @@ const KIND_ICON: Record<NotificationKind, typeof Bell> = {
   call: Phone,
   deal: DollarSign,
   stuck: AlertTriangle,
+  task: ListChecks,
 };
 const KIND_TONE: Record<NotificationKind, string> = {
   meeting: "var(--red)",
@@ -45,6 +47,8 @@ const KIND_TONE: Record<NotificationKind, string> = {
   // Red, like a meeting starting now. Both mean somebody is waiting on you —
   // the difference is that this one already believes it was dealt with.
   stuck: "var(--red)",
+  // Amber: late, and yours to do — not yet somebody else waiting on a failure.
+  task: "var(--amber)",
 };
 
 /** Closes a popover on outside click and on Escape. */

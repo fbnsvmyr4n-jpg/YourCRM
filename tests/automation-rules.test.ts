@@ -21,6 +21,8 @@ const rule = (over: Partial<Automation> = {}): Automation => ({
   actionKind: "assign_owner",
   assigneeIds: ["u_sam"],
   targetStage: null,
+  taskTitle: null,
+  taskDueDays: null,
   rotationPosition: 0,
   enabled: true,
   createdAt: "2026-09-16T00:00:00.000Z",
@@ -107,8 +109,32 @@ describe("checking a rule somebody built", () => {
         actionKind: "assign_owner",
         assigneeIds: ["u_sam"],
         targetStage: null,
+        taskTitle: null,
+        taskDueDays: null,
       },
     });
+  });
+
+  it("ACCEPTS A TASK RULE WITH ITS WORDING AND DAY, and nothing else", () => {
+    const out = checkDraft(
+      form({ actionKind: "create_task", taskTitle: "  Call   them back ", taskDueDays: "1", assigneeIds: ["u_sam"], targetStage: "won" })
+    );
+    expect("draft" in out && out.draft).toMatchObject({
+      actionKind: "create_task",
+      taskTitle: "Call them back",
+      taskDueDays: 1,
+      assigneeIds: [],
+      targetStage: null,
+    });
+  });
+
+  it.each([
+    ["no wording", { taskTitle: "   ", taskDueDays: "0" }, /what the task should be/],
+    ["a day that is not offered", { taskTitle: "Call", taskDueDays: "5" }, /when the task is due/],
+    ["no day at all", { taskTitle: "Call" }, /when the task is due/],
+  ])("refuses a task rule with %s", (_what, over, pattern) => {
+    const out = checkDraft(form({ actionKind: "create_task", ...over }));
+    expect("error" in out && out.error).toMatch(pattern);
   });
 
   it("drops a stage posted alongside a lead rule, and a source alongside a stage rule", () => {
@@ -167,6 +193,12 @@ describe("saying a rule in English", () => {
 
   it("says somebody has left rather than showing an id", () => {
     expect(say({ assigneeIds: ["u_gone"] }).then).toBe("Give it to someone who has left");
+  });
+
+  it("says what a task rule adds and when it is due", () => {
+    expect(say({ actionKind: "create_task", taskTitle: "Call them back", taskDueDays: 0, assigneeIds: [] }).then).toBe(
+      "Add the task “Call them back” for whoever owns it, due the same day"
+    );
   });
 
   it("uses the board's own stage names", () => {

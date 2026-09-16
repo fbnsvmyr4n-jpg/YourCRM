@@ -51,6 +51,9 @@ import { useRememberedToggle } from "@/lib/remembered-toggle";
 import { useCanDial } from "@/lib/useCanDial";
 import { CustomFieldInputs } from "@/components/custom-fields/CustomFieldInputs";
 import { displayValue, type CustomField, type FieldValues } from "@/server/custom-field-rules";
+import { sortTodos, type Todo } from "@/server/todo-rules";
+import { TaskItem } from "@/components/tasks/TaskItem";
+import { NewTaskForm } from "@/components/tasks/NewTaskForm";
 import type { ImportPreview, ImportResult } from "@/server/import-contacts";
 import {
   addContactAction,
@@ -69,7 +72,7 @@ import {
 type ModalState = null | "new" | "import" | Contact;
 /* "call" and "text" answer in place on a device with no dialler, the same way
    Revenue and Note already do, rather than handing off to nothing. */
-type Panel = null | "note" | "revenue" | "call" | "text";
+type Panel = null | "note" | "revenue" | "call" | "text" | "task";
 
 /** Takes integer cents, because that is what the database stores. */
 const money = (cents: number) => `$${Math.round(cents / 100).toLocaleString()}`;
@@ -83,6 +86,10 @@ export function ContactsView({
   companies = [],
   customFields = [],
   customValues = {},
+  initialContactId,
+  tasksByContact = {},
+  team = [],
+  today = "",
 }: {
   contacts: Contact[];
   /** Colleagues who can own a record, for the assign control. */
@@ -94,8 +101,16 @@ export function ContactsView({
   customFields?: CustomField[];
   /** contactId → fieldId → value. */
   customValues?: Record<string, FieldValues>;
+  /** A contact to open on arrival, from `?c=`, already checked to exist. */
+  initialContactId?: string;
+  /** Open tasks about each contact. */
+  tasksByContact?: Record<string, Todo[]>;
+  /** Who a task can be given to. */
+  team?: { id: string; name: string }[];
+  /** The business's calendar day. */
+  today?: string;
 }) {
-  const [selectedId, setSelectedId] = useState(contacts[0]?.id ?? "");
+  const [selectedId, setSelectedId] = useState(initialContactId ?? contacts[0]?.id ?? "");
   /*
      On a phone the three panels become one column in DOM order — details,
      profile, then the list — so the index of contacts started 1,648px down a
@@ -113,7 +128,9 @@ export function ContactsView({
      a long history is a scroll between the reader and it. At 1030 and above
      they are side by side and the fold has nothing to earn. */
   const foldsActivity = gridWidth < 1030;
-  const [showDetail, setShowDetail] = useState(false);
+  /* Arriving from a link to one person opens them, on a phone too — landing on
+     the list when you followed a link to somebody is the wrong answer. */
+  const [showDetail, setShowDetail] = useState(Boolean(initialContactId));
   const openContact = useCallback((id: string) => {
     setSelectedId(id);
     setShowDetail(true);
@@ -326,6 +343,9 @@ export function ContactsView({
         setPanel={setPanel}
         busy={busy}
         foldsActivity={foldsActivity}
+        tasks={sortTodos(tasksByContact[contact.id] ?? [])}
+        team={team}
+        today={today}
       />
       <ContactsList
         className={clsx("@min-[700px]:[grid-area:list]", detailOnly && "hidden")}
@@ -503,7 +523,13 @@ function ProfilePanel({
   busy,
   className,
   foldsActivity,
+  tasks,
+  team,
+  today,
 }: {
+  tasks: Todo[];
+  team: { id: string; name: string }[];
+  today: string;
   contact: Contact;
   summary?: ContactSummary;
   currentUserId: string | null;
@@ -768,12 +794,63 @@ function ProfilePanel({
               setMore(false);
               onEdit();
             }}
+            onAddTask={() => {
+              setMore(false);
+              setPanel("task");
+            }}
             onCopy={copy}
           />
         )}
       </div>
 
       {panel === "note" && <NotePanel contactId={contact.id} onDone={() => setPanel(null)} />}
+      {panel === "task" && (
+        <div className="card-q mt-6 rounded-2xl border border-[var(--border)] p-4">
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-faint">Add a task</p>
+          <NewTaskForm
+            compact
+            today={today}
+            team={team}
+            currentUserId={currentUserId}
+            contactId={contact.id}
+            onDone={() => setPanel(null)}
+          />
+        </div>
+      )}
+
+      {/* What is owed to this person, above what has already happened with
+          them. Only when there is something: an empty "Tasks" heading on every
+          contact is a question nobody asked. */}
+      {tasks.length > 0 && (
+        <div className="card-q mt-6">
+          <div className="mb-1 flex items-center justify-between gap-3">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-faint">
+              Open tasks <span className="tabular-nums">{tasks.length}</span>
+            </p>
+            {panel !== "task" && (
+              <button
+                type="button"
+                onClick={() => setPanel("task")}
+                className="focus-ring rounded-lg text-xs font-medium text-accent hover:opacity-80"
+              >
+                Add a task
+              </button>
+            )}
+          </div>
+          <ul className="-mx-2 flex flex-col">
+            {tasks.map((todo) => (
+              <TaskItem
+                key={todo.id}
+                todo={todo}
+                today={today}
+                team={team}
+                currentUserId={currentUserId}
+                showRecord={false}
+              />
+            ))}
+          </ul>
+        </div>
+      )}
       {panel === "revenue" && <RevenuePanel summary={summary} />}
       {(panel === "call" || panel === "text") && (
         <ReachPanel
@@ -802,11 +879,13 @@ function MoreMenu({
   contact,
   onClose,
   onEdit,
+  onAddTask,
   onCopy,
 }: {
   contact: Contact;
   onClose: () => void;
   onEdit: () => void;
+  onAddTask: () => void;
   onCopy: (value: string, what: string) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -827,6 +906,7 @@ function MoreMenu({
 
   const items = [
     { label: "Edit contact", onClick: onEdit, enabled: true },
+    { label: "Add a task", onClick: onAddTask, enabled: true },
     { label: "Copy email", onClick: () => onCopy(contact.email, "more-email"), enabled: !!contact.email },
     { label: "Copy phone", onClick: () => onCopy(contact.phone, "more-phone"), enabled: !!contact.phone },
   ];

@@ -12,6 +12,7 @@ import { listDeals } from "@/server/repos/deals";
 import { listMeetings } from "@/server/repos/meetings";
 import { listMessages, unreadCount } from "@/server/repos/inbox";
 import { getSettings } from "@/server/repos/settings";
+import { dueForUser } from "@/server/repos/todos";
 import { DateTimeBar } from "./DateTimeBar";
 import { MobileSection } from "./MobileSection";
 import { instantToWallClock } from "@/lib/zoned";
@@ -39,12 +40,14 @@ function relativeDay(iso: string, now: Date) {
 export default async function DashboardPage() {
   const me = await currentUser();
 
-  const { contacts, meetingsToday, unread, wonDeals, revenueSeries, feed, report, followUps, upcoming, timeZone } =
+  const { contacts, meetingsToday, unread, wonDeals, revenueSeries, feed, report, followUps, upcoming, timeZone, myTasks } =
     await withTenantPage(async (q) => {
       const settings = await getSettings(q);
       const todayKey =
         instantToWallClock(new Date().toISOString(), settings.timeZone)?.date ??
         new Date().toISOString().slice(0, 10);
+      /* The reader's own, due today or late — the same count as the sidebar badge. */
+      const myTasks = q.ctx.userId ? await dueForUser(q, q.ctx.userId, todayKey) : { dueToday: 0, overdue: 0 };
 
       const contacts = await listContacts(q);
       const deals = await listDeals(q);
@@ -57,6 +60,7 @@ export default async function DashboardPage() {
 
       return {
         contacts,
+        myTasks,
         // "Today" in the business's zone, not the server's — the same rule the
         // calendar follows, and for the same reason.
         meetingsToday: meetings
@@ -192,6 +196,19 @@ export default async function DashboardPage() {
       sub: meetingsToday[0]
         ? `Next: ${meetingsToday[0].time}${meetingsToday[0].name ? ` with ${meetingsToday[0].name}` : ""}`
         : "Nothing on the calendar",
+    },
+    {
+      href: "/tasks",
+      menuLabel: "Your tasks",
+      icon: "check",
+      tone: (myTasks.overdue > 0 ? "red" : "blue") as Tone,
+      title: `${myTasks.dueToday + myTasks.overdue} task${myTasks.dueToday + myTasks.overdue === 1 ? "" : "s"} to do today`,
+      sub:
+        myTasks.overdue > 0
+          ? `${myTasks.overdue} of them overdue`
+          : myTasks.dueToday > 0
+            ? "All due today, none late"
+            : "Nothing due — you're clear",
     },
     {
       href: "/leads",

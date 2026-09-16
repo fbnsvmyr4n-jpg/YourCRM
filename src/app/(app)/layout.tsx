@@ -78,7 +78,7 @@ export default async function AppGroupLayout({ children }: { children: React.Rea
         }),
         { crmData: false }
       )
-    : { notifications: [], counts: { inbox: 0, calendarToday: false } };
+    : { notifications: [], counts: { inbox: 0, calendarToday: false, tasksDue: 0 } };
 
   return (
     <AppShell

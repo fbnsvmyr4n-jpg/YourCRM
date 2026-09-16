@@ -9,6 +9,7 @@ import {
   Home,
   Inbox,
   KanbanSquare,
+  ListChecks,
   Search,
   Settings,
   Target,
@@ -37,7 +38,8 @@ const PAGES: PageItem[] = [
   { id: "page-leads", type: "Page", title: "Leads", subtitle: "Sales targets", href: "/leads", icon: Target },
   { id: "page-meetings", type: "Page", title: "Meetings", subtitle: "Scheduling & dashboard", href: "/meetings", icon: Handshake },
   { id: "page-inbox", type: "Page", title: "Inbox", subtitle: "Messages", href: "/inbox", icon: Inbox },
-  { id: "page-calendar", type: "Page", title: "Calendar", subtitle: "Tasks & events", href: "/calendar", icon: CalendarDays },
+  { id: "page-calendar", type: "Page", title: "Calendar", subtitle: "Meetings by day", href: "/calendar", icon: CalendarDays },
+  { id: "page-tasks", type: "Page", title: "Tasks", subtitle: "What needs doing, by when", href: "/tasks", icon: ListChecks },
   { id: "page-settings", type: "Page", title: "Settings", subtitle: "Preferences", href: "/settings", icon: Settings },
 ];
 

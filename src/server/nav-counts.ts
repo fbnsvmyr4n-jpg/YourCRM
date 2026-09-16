@@ -1,4 +1,7 @@
 import type { TenantQuery } from "./tenant";
+import { getSettings } from "./repos/settings";
+import { dueForUser } from "./repos/todos";
+import { instantToWallClock } from "@/lib/zoned";
 
 /**
  * The numbers on the sidebar.
@@ -19,6 +22,11 @@ export type NavCounts = {
   inbox: number;
   /** Whether anything is scheduled today — the Calendar dot. */
   calendarToday: boolean;
+  /**
+   * The reader's OWN open tasks due today or already late. Not the team's: a
+   * badge counting colleagues' work is a number nobody can clear.
+   */
+  tasksDue: number;
 };
 
 export async function navCounts(q: TenantQuery): Promise<NavCounts> {
@@ -38,8 +46,16 @@ export async function navCounts(q: TenantQuery): Promise<NavCounts> {
     [q.ctx.subAccountId]
   );
 
+  /* Due "today" in the business's calendar, the same day the Tasks page uses. */
+  const settings = await getSettings(q);
+  const today =
+    instantToWallClock(new Date().toISOString(), settings.timeZone)?.date ??
+    new Date().toISOString().slice(0, 10);
+  const tasks = q.ctx.userId ? await dueForUser(q, q.ctx.userId, today) : { dueToday: 0, overdue: 0 };
+
   return {
     inbox: Number(row?.unread ?? 0),
     calendarToday: Number(row?.today ?? 0) > 0,
+    tasksDue: tasks.dueToday + tasks.overdue,
   };
 }

@@ -80,10 +80,50 @@ afterAll(async () => {
 
 beforeEach(() =>
   db.seed(`
-    DELETE FROM automation_runs; DELETE FROM automations; DELETE FROM activities;
+    DELETE FROM todos; DELETE FROM automation_runs; DELETE FROM automations; DELETE FROM activities;
     DELETE FROM deals; DELETE FROM contacts; DELETE FROM booking_links;
   `)
 );
+
+describe("adding a task", () => {
+  const taskRule = (id: string, title: string, days: number, minutesAgo = 5) =>
+    db.seed(`
+      INSERT INTO automations (id, sub_account_id, event_kind, action_kind, task_title, task_due_days, created_at)
+      VALUES ('${id}', '${TENANT_A}', 'lead_created', 'create_task', '${title}', ${days},
+              now() - interval '${minutesAgo} minutes');`);
+
+  it("GIVES THE TASK TO WHOEVER AN EARLIER RULE JUST ASSIGNED THE LEAD TO", async () => {
+    await assignRule("au_route", ["u_kim"], { minutesAgo: 20 });
+    await taskRule("au_call", "Call them back", 1, 10);
+    await db.seed(`INSERT INTO contacts (id, sub_account_id, first_name, last_name) VALUES ('ct_new', '${TENANT_A}', 'Amara', 'Dube');`);
+    const deal = await newLead({ contactId: "ct_new" });
+
+    const [task] = await read<{ title: string; assignee_user_id: string; deal_id: string; contact_id: string;
+      automation_id: string; created_by_user_id: string | null; due_on: string; today: string }>(
+      `SELECT title, assignee_user_id, deal_id, contact_id, automation_id, created_by_user_id,
+              due_on::text AS due_on, (CURRENT_DATE + 1)::text AS today FROM todos`
+    );
+    expect(task).toMatchObject({
+      title: "Call them back",
+      assignee_user_id: "u_kim",
+      deal_id: deal.id,
+      contact_id: "ct_new",
+      automation_id: "au_call",
+      created_by_user_id: null,
+    });
+    expect(task.due_on, "due a day after the lead, on the business's calendar").toBe(task.today);
+    expect((await runs()).map((r) => `${r.automation_id}:${r.outcome}`)).toEqual(["au_route:done", "au_call:done"]);
+  });
+
+  it("LEAVES THE TASK FOR NOBODY RATHER THAN ON THE DESK OF SOMEBODY WHO HAS LEFT", async () => {
+    await taskRule("au_call", "Call them back", 0);
+    await newLead({ ownerUserId: "u_it" });
+    const [task] = await read<{ assignee_user_id: string | null }>(`SELECT assignee_user_id FROM todos`);
+    expect(task.assignee_user_id).toBeNull();
+    const [run] = await runs();
+    expect(run.detail).toMatch(/for nobody yet/);
+  });
+});
 
 describe("the engine is switched on", () => {
   it("IS REGISTERED BY THE MODULE EVERY SERVER PATH LOADS", () => {

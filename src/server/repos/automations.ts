@@ -18,13 +18,15 @@ type Row = {
   action_kind: ActionKind;
   assignee_ids: string[] | null;
   target_stage: Stage | null;
+  task_title: string | null;
+  task_due_days: number | null;
   rotation_position: number;
   enabled: boolean;
   created_at: Date;
 };
 
 const COLUMNS = `id, event_kind, when_source, when_stage, action_kind, assignee_ids, target_stage,
-                 rotation_position, enabled, created_at`;
+                 task_title, task_due_days, rotation_position, enabled, created_at`;
 
 const toAutomation = (r: Row): Automation => ({
   id: r.id,
@@ -34,6 +36,8 @@ const toAutomation = (r: Row): Automation => ({
   actionKind: r.action_kind,
   assigneeIds: r.assignee_ids ?? [],
   targetStage: r.target_stage,
+  taskTitle: r.task_title,
+  taskDueDays: r.task_due_days,
   rotationPosition: r.rotation_position,
   enabled: r.enabled,
   createdAt: r.created_at.toISOString(),
@@ -76,8 +80,8 @@ export async function createAutomation(
   const row = await q.one<Row>(
     `INSERT INTO automations
        (id, sub_account_id, event_kind, when_source, when_stage, action_kind, assignee_ids,
-        target_stage, created_by_user_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7::text[], $8, $9)
+        target_stage, task_title, task_due_days, created_by_user_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7::text[], $8, $9, $10, $11)
      RETURNING ${COLUMNS}`,
     [
       id,
@@ -88,6 +92,8 @@ export async function createAutomation(
       draft.actionKind,
       draft.assigneeIds,
       draft.targetStage,
+      draft.taskTitle,
+      draft.taskDueDays,
       q.ctx.userId || null,
     ]
   );

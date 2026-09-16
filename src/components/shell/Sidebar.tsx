@@ -68,7 +68,8 @@ export function Sidebar({
                 const active = isActive(pathname, item.href);
                 const Icon = item.icon;
                 // The config names a count; the value comes from the database.
-                const unread = item.count === "inbox" ? counts.inbox : 0;
+                const unread =
+                  item.count === "inbox" ? counts.inbox : item.count === "tasksDue" ? counts.tasksDue : 0;
                 const today = item.count === "calendarToday" && counts.calendarToday;
                 return (
                   <li key={item.href}>

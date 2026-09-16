@@ -39,6 +39,8 @@ export async function createAutomationAction(_prev: FormState, formData: FormDat
          the order a rotation takes turns in. */
       assigneeIds: formData.getAll("assignee"),
       targetStage: formData.get("targetStage"),
+      taskTitle: formData.get("taskTitle"),
+      taskDueDays: formData.get("taskDueDays"),
     });
     if ("error" in checked) return { error: checked.error };
 

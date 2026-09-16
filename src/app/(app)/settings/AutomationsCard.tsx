@@ -257,6 +257,7 @@ function NewAutomation({ team }: { team: Person[] }) {
           >
             <option value="assign_owner">Give it to somebody</option>
             <option value="move_stage">Move it to a stage</option>
+            <option value="create_task">Add a task for its owner</option>
           </select>
           {actionKind === "move_stage" ? (
             <select
@@ -272,6 +273,24 @@ function NewAutomation({ team }: { team: Person[] }) {
                 </option>
               ))}
             </select>
+          ) : actionKind === "create_task" ? (
+            <>
+              <input
+                name="taskTitle"
+                required
+                maxLength={200}
+                placeholder="Call them back"
+                aria-label="What the task says"
+                className={field}
+              />
+              <select name="taskDueDays" defaultValue="0" aria-label="When it is due" className={field}>
+                <option value="0">Due the same day</option>
+                <option value="1">Due the next day</option>
+                <option value="2">Due in 2 days</option>
+                <option value="3">Due in 3 days</option>
+                <option value="7">Due a week later</option>
+              </select>
+            </>
           ) : (
             <p className="py-2 text-xs text-faint">
               {chosen.length > 1

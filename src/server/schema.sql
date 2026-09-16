@@ -2400,6 +2400,134 @@ CREATE TRIGGER custom_field_values_fit
   FOR EACH ROW EXECUTE FUNCTION assert_custom_value_fits();
 
 -- ---------------------------------------------------------------------------
+-- Tasks: something a person has to do, by a day.
+--
+-- "Call Amara back Thursday", "chase the deposit", "send the revised drawings".
+-- Until now these lived in people's heads or as notes, and a note has no due
+-- date, no owner and no way to be ticked off — so nothing reminded anybody and
+-- nothing showed what had been dropped.
+--
+-- Named `todos` because `project_tasks` already holds the stages of a job's
+-- schedule, and two different things both called "tasks" in the schema is how
+-- a query ends up joining the wrong one. On screen they are simply Tasks.
+--
+-- `due_on` is a DATE, not a timestamp. A task is due on a day in the business's
+-- calendar; stored as an instant it would be due at midnight UTC, which in
+-- Johannesburg is two hours into the day and on the previous day in New York.
+--
+-- A task may belong to a contact, a deal, both (a deal's contact), or nothing.
+-- Completing records who and when; deleting is soft, like every CRM record.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS todos (
+  id                  TEXT PRIMARY KEY,
+  sub_account_id      TEXT NOT NULL REFERENCES sub_accounts(id) ON DELETE CASCADE,
+  title               TEXT NOT NULL CHECK (length(btrim(title)) BETWEEN 1 AND 200),
+  notes               TEXT CHECK (notes IS NULL OR length(notes) <= 2000),
+  due_on              DATE,
+  assignee_user_id    TEXT REFERENCES users(id) ON DELETE SET NULL,
+  contact_id          TEXT REFERENCES contacts(id) ON DELETE CASCADE,
+  deal_id             TEXT REFERENCES deals(id) ON DELETE CASCADE,
+  done_at             TIMESTAMPTZ,
+  done_by_user_id     TEXT REFERENCES users(id) ON DELETE SET NULL,
+  -- Null when a rule made it; the rule is then named below.
+  created_by_user_id  TEXT REFERENCES users(id) ON DELETE SET NULL,
+  automation_id       TEXT REFERENCES automations(id) ON DELETE SET NULL,
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+  deleted_at          TIMESTAMPTZ,
+
+  CONSTRAINT todos_done_by_needs_done CHECK (done_by_user_id IS NULL OR done_at IS NOT NULL)
+);
+
+-- The two reads that matter: what is open, by due day, and what belongs to one
+-- record. Partial on open tasks, so it stays small as completed ones pile up.
+CREATE INDEX IF NOT EXISTS todos_open_idx
+  ON todos (sub_account_id, due_on) WHERE done_at IS NULL AND deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS todos_contact_idx
+  ON todos (sub_account_id, contact_id) WHERE contact_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS todos_deal_idx
+  ON todos (sub_account_id, deal_id) WHERE deal_id IS NOT NULL;
+
+ALTER TABLE todos ENABLE ROW LEVEL SECURITY;
+ALTER TABLE todos FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS todos_tenant_isolation ON todos;
+CREATE POLICY todos_tenant_isolation ON todos
+  USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
+  WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
+
+-- A task's person and records must all be this workspace's own. Row-level
+-- security allows the write — it targets this tenant's row — and only the
+-- values are wrong: a task handed to somebody at another customer, or pinned
+-- to another customer's contact, would put their name on this screen.
+CREATE OR REPLACE FUNCTION assert_todo_links() RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.assignee_user_id IS NOT NULL AND NOT EXISTS (
+       SELECT 1 FROM users u JOIN sub_accounts sa ON sa.id = NEW.sub_account_id
+        WHERE u.id = NEW.assignee_user_id AND u.deleted_at IS NULL
+          AND u.agency_id = sa.agency_id
+          AND (u.sub_account_id IS NULL OR u.sub_account_id = NEW.sub_account_id)) THEN
+    RAISE EXCEPTION 'assignee % does not belong to sub-account %', NEW.assignee_user_id, NEW.sub_account_id
+      USING ERRCODE = 'check_violation';
+  END IF;
+
+  IF NEW.contact_id IS NOT NULL AND NOT EXISTS (
+       SELECT 1 FROM contacts c WHERE c.id = NEW.contact_id AND c.sub_account_id = NEW.sub_account_id) THEN
+    RAISE EXCEPTION 'contact % does not belong to sub-account %', NEW.contact_id, NEW.sub_account_id
+      USING ERRCODE = 'check_violation';
+  END IF;
+
+  IF NEW.deal_id IS NOT NULL AND NOT EXISTS (
+       SELECT 1 FROM deals d WHERE d.id = NEW.deal_id AND d.sub_account_id = NEW.sub_account_id) THEN
+    RAISE EXCEPTION 'deal % does not belong to sub-account %', NEW.deal_id, NEW.sub_account_id
+      USING ERRCODE = 'check_violation';
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS todos_links ON todos;
+CREATE TRIGGER todos_links
+  BEFORE INSERT OR UPDATE OF assignee_user_id, contact_id, deal_id, sub_account_id ON todos
+  FOR EACH ROW EXECUTE FUNCTION assert_todo_links();
+
+-- ---------------------------------------------------------------------------
+-- A third thing an automation can do: add a task.
+--
+-- "Every new lead gets a call-back task for whoever it was given to, due the
+-- same day." Automations shipped without this because there was nowhere for a
+-- reminder to live; now there is.
+--
+-- The task goes to whoever OWNS the deal when the rule runs — which, because
+-- rules run in the order they were made, is the person an earlier assignment
+-- rule just chose. Due a number of calendar days after the event.
+--
+-- The action list and the shape rule are replaced rather than edited in the
+-- CREATE TABLE above: `CREATE TABLE IF NOT EXISTS` does nothing to a table that
+-- already exists, so a database that has the table would keep refusing the new
+-- action for ever.
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE automations ADD COLUMN IF NOT EXISTS task_title TEXT;
+ALTER TABLE automations ADD COLUMN IF NOT EXISTS task_due_days INTEGER;
+
+ALTER TABLE automations DROP CONSTRAINT IF EXISTS automations_action_kind_check;
+ALTER TABLE automations ADD CONSTRAINT automations_action_kind_check
+  CHECK (action_kind IN ('assign_owner', 'move_stage', 'create_task'));
+
+ALTER TABLE automations DROP CONSTRAINT IF EXISTS automations_action_shape;
+ALTER TABLE automations ADD CONSTRAINT automations_action_shape CHECK (
+  (action_kind = 'assign_owner' AND cardinality(assignee_ids) BETWEEN 1 AND 20
+     AND target_stage IS NULL AND task_title IS NULL AND task_due_days IS NULL)
+  OR (action_kind = 'move_stage' AND target_stage IS NOT NULL AND target_stage <> 'lost'
+     AND cardinality(assignee_ids) = 0 AND task_title IS NULL AND task_due_days IS NULL)
+  OR (action_kind = 'create_task' AND length(btrim(task_title)) BETWEEN 1 AND 200
+     AND task_due_days BETWEEN 0 AND 365
+     AND cardinality(assignee_ids) = 0 AND target_stage IS NULL)
+);
+
+-- ---------------------------------------------------------------------------
 -- What the application's own database role may do.
 --
 -- KEEP THIS THE LAST BLOCK IN THE FILE: `GRANT … ON ALL TABLES` covers only the

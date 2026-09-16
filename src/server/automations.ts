@@ -20,6 +20,10 @@ import {
 } from "./automation-rules";
 import { listenForDealEvents, type Chain, type DealEvent } from "./deal-events";
 import { logFailure } from "./log";
+import { createTodo } from "./repos/todos";
+import { getSettings } from "./repos/settings";
+import { addDays } from "./todo-rules";
+import { instantToWallClock } from "@/lib/zoned";
 
 /**
  * The automation engine.
@@ -146,6 +150,34 @@ async function apply(
       actorUserId: null,
     });
     return { outcome: "done", detail: `Assigned to ${name}`, deal: assigned.record };
+  }
+
+  if (rule.actionKind === "create_task") {
+    /* Due on the BUSINESS's calendar, counted from today there. */
+    const settings = await getSettings(q);
+    const today =
+      instantToWallClock(new Date().toISOString(), settings.timeZone)?.date ??
+      new Date().toISOString().slice(0, 10);
+    const dueOn = addDays(today, rule.taskDueDays ?? 0);
+
+    /* Whoever owns the deal now — possibly just chosen by an earlier rule. An
+       owner who can no longer take work is not handed it: the task is left
+       for nobody, where it shows on the team's list, rather than on the desk
+       of somebody who has left. */
+    const owner = deal.ownerUserId && names.has(deal.ownerUserId) ? deal.ownerUserId : null;
+    const task = await createTodo(q, {
+      title: rule.taskTitle ?? "Follow up",
+      dueOn,
+      assigneeUserId: owner,
+      contactId: deal.contactId,
+      dealId: deal.id,
+      automationId: rule.id,
+    });
+    return {
+      outcome: "done",
+      detail: `Added the task “${task.title}” for ${owner ? names.get(owner) : "nobody yet"}, due ${dueOn}`,
+      deal,
+    };
   }
 
   const target = rule.targetStage!;

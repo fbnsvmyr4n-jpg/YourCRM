@@ -15,7 +15,11 @@ import { stageMeta } from "@/data/pipeline";
 export const EVENT_KINDS = ["lead_created", "deal_stage_changed"] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];
 
-export const ACTION_KINDS = ["assign_owner", "move_stage"] as const;
+export const ACTION_KINDS = ["assign_owner", "move_stage", "create_task"] as const;
+
+/** How far ahead a rule's task is due, in calendar days from the day it runs. */
+export const TASK_DUE_CHOICES = [0, 1, 2, 3, 7] as const;
+export const MAX_TASK_TITLE = 200;
 export type ActionKind = (typeof ACTION_KINDS)[number];
 
 /**
@@ -58,6 +62,9 @@ export type Automation = {
   /** One person, or several in rotation. */
   assigneeIds: string[];
   targetStage: Stage | null;
+  /** create_task: what the task says, and how many days after the event it is due. */
+  taskTitle: string | null;
+  taskDueDays: number | null;
   rotationPosition: number;
   enabled: boolean;
   createdAt: string;
@@ -66,7 +73,7 @@ export type Automation = {
 /** The parts a person chooses; the rest is the engine's bookkeeping. */
 export type AutomationDraft = Pick<
   Automation,
-  "eventKind" | "whenSource" | "whenStage" | "actionKind" | "assigneeIds" | "targetStage"
+  "eventKind" | "whenSource" | "whenStage" | "actionKind" | "assigneeIds" | "targetStage" | "taskTitle" | "taskDueDays"
 >;
 
 /** What happened, in the terms a rule matches on. */
@@ -131,6 +138,8 @@ export function checkDraft(raw: {
   actionKind: unknown;
   assigneeIds: unknown[];
   targetStage: unknown;
+  taskTitle?: unknown;
+  taskDueDays?: unknown;
 }): { draft: AutomationDraft } | { error: string } {
   const eventKind = (EVENT_KINDS as readonly unknown[]).includes(raw.eventKind)
     ? (raw.eventKind as EventKind)
@@ -166,7 +175,22 @@ export function checkDraft(raw: {
     if (ids.length > MAX_ASSIGNEES) {
       return { error: `A rotation can include up to ${MAX_ASSIGNEES} people.` };
     }
-    return { draft: { eventKind, whenSource, whenStage, actionKind, assigneeIds: ids, targetStage: null } };
+    return {
+      draft: { eventKind, whenSource, whenStage, actionKind, assigneeIds: ids, targetStage: null, taskTitle: null, taskDueDays: null },
+    };
+  }
+
+  if (actionKind === "create_task") {
+    const title =
+      typeof raw.taskTitle === "string" ? raw.taskTitle.replace(/\s+/g, " ").trim().slice(0, MAX_TASK_TITLE) : "";
+    if (!title) return { error: "Say what the task should be — “Call them back”, say." };
+    const days = Number(raw.taskDueDays);
+    if (!(TASK_DUE_CHOICES as readonly number[]).includes(days)) {
+      return { error: "Choose when the task is due." };
+    }
+    return {
+      draft: { eventKind, whenSource, whenStage, actionKind, assigneeIds: [], targetStage: null, taskTitle: title, taskDueDays: days },
+    };
   }
 
   if (raw.targetStage === "lost") {
@@ -179,7 +203,17 @@ export function checkDraft(raw: {
   if (whenStage === targetStage) {
     return { error: "That would move a deal to the stage it has just arrived at." };
   }
-  return { draft: { eventKind, whenSource, whenStage, actionKind, assigneeIds: [], targetStage } };
+  return {
+    draft: { eventKind, whenSource, whenStage, actionKind, assigneeIds: [], targetStage, taskTitle: null, taskDueDays: null },
+  };
+}
+
+/** "the same day", "the next day", "in 3 days", "in a week". */
+export function dueInWords(days: number): string {
+  if (days === 0) return "the same day";
+  if (days === 1) return "the next day";
+  if (days === 7) return "a week later";
+  return `in ${days} days`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -212,6 +246,12 @@ export function describeAutomation(
 
   if (rule.actionKind === "move_stage") {
     return { when, then: `Move it to ${stageLabel(rule.targetStage ?? "prospect")}` };
+  }
+  if (rule.actionKind === "create_task") {
+    return {
+      when,
+      then: `Add the task “${rule.taskTitle ?? ""}” for whoever owns it, due ${dueInWords(rule.taskDueDays ?? 0)}`,
+    };
   }
   const names = rule.assigneeIds.map((id) => nameOf(id) ?? "someone who has left");
   return {
