@@ -1,4 +1,5 @@
 import type { TenantQuery } from "../tenant";
+import { emitDealEvent, type Chain } from "../deal-events";
 
 /**
  * Deals — the pipeline, on Bradley's six stages.
@@ -219,7 +220,17 @@ export async function createDeal(q: TenantQuery, input: NewDeal): Promise<DealRe
     ]
   );
   if (!row) throw new Error("Deal was not created.");
-  return toRecord(row);
+  const deal = toRecord(row);
+
+  /* A deal born before the close is a lead, whichever of the six ways it
+     arrived. Raised here rather than by each caller so none can be missed. A
+     rule may have given it to somebody, so the caller gets the deal as it now
+     stands. */
+  if ((OPEN_STAGES as readonly string[]).includes(deal.stage)) {
+    await emitDealEvent(q, { kind: "lead_created", deal });
+    return (await getDeal(q, deal.id)) ?? deal;
+  }
+  return deal;
 }
 
 export async function updateDeal(
@@ -295,7 +306,11 @@ export async function moveStage(
   q: TenantQuery,
   id: string,
   stage: Stage,
-  opts: { lostReason?: string | null } = {}
+  opts: {
+    lostReason?: string | null;
+    /** Set only by the automation engine, for a move a rule made. */
+    chain?: Chain;
+  } = {}
 ): Promise<DealRecord | null> {
   if (!STAGES.includes(stage)) throw new Error(`Unknown stage: ${stage}`);
   if (stage === "lost" && !opts.lostReason?.trim()) {
@@ -304,6 +319,16 @@ export async function moveStage(
     // happened to annotate, which is worse than having no report.
     throw new Error("A lost deal needs a reason.");
   }
+
+  /* Where it was, locked, so "moved from" is true even with two people
+     dragging the same card. An automation only cares about a real change —
+     dropping a card back in its own column is not a move. */
+  const before = await q.one<{ stage: Stage }>(
+    `SELECT stage FROM deals
+      WHERE id = $2 AND sub_account_id = $1 AND deleted_at IS NULL
+      FOR UPDATE`,
+    [q.ctx.subAccountId, id]
+  );
 
   const row = await q.one<Row>(
     `WITH updated AS (
@@ -334,7 +359,13 @@ export async function moveStage(
      ${SELECT.replace("FROM deals d", "FROM updated d")}`,
     [q.ctx.subAccountId, id, stage, opts.lostReason?.trim() ?? null]
   );
-  return row ? toRecord(row) : null;
+  if (!row) return null;
+  const deal = toRecord(row);
+  if (before && before.stage !== stage) {
+    await emitDealEvent(q, { kind: "deal_stage_changed", deal, from: before.stage }, opts.chain ?? []);
+    return (await getDeal(q, id)) ?? deal;
+  }
+  return deal;
 }
 
 /** Add pain points discovered on a call, without disturbing the ones already there. */
@@ -582,6 +613,15 @@ export async function recordPayment(
        WHERE id = $2 AND sub_account_id = $1 AND deleted_at IS NULL`,
       [q.ctx.subAccountId, deal.id, remaining, splitId, splitTotal]
     );
+  }
+
+  /* Recording a payment is the commonest way a deal is won, and it never goes
+     through `moveStage` — it writes a new won record. So it raises the same
+     event a drag into Closed Won does, once, when that record is created. A
+     second part-payment tops the record up and is not a second win. */
+  if (!existingWon) {
+    const won = await getDeal(q, wonDealId);
+    if (won) await emitDealEvent(q, { kind: "deal_stage_changed", deal: won, from: deal.stage });
   }
 
   return { ok: true, wonDealId, dealId: deal.id };

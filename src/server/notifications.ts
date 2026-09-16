@@ -1,5 +1,6 @@
 import { listCalls } from "./repos/calls";
 import { deadJobs } from "./repos/outbox";
+import { failingAutomations } from "./repos/automations";
 import {
   BOOKING_EMAIL,
   CALL_ANALYSIS,
@@ -174,6 +175,26 @@ export async function listNotifications(q: TenantQuery): Promise<Notification[]>
       href: meta.href,
       // Above the most time-critical human task. Somebody's client is waiting
       // on something this workspace believes it already sent.
+      weight: 110,
+    });
+  }
+
+  /*
+     An automation that has stopped working.
+
+     Same standing as an abandoned job: the system promised something and did
+     not do it. A rotation whose people have all left keeps leaving new leads
+     wherever they landed, and nothing else says so. Reported only while it is
+     still true — see `failingAutomations`.
+  */
+  const failing = await failingAutomations(q);
+  if (failing.count > 0) {
+    out.push({
+      id: "automations-failing",
+      kind: "stuck",
+      title: `${failing.count} automation${failing.count === 1 ? "" : "s"} could not run`,
+      detail: failing.latest ?? "No reason was recorded",
+      href: "/settings?s=automations",
       weight: 110,
     });
   }

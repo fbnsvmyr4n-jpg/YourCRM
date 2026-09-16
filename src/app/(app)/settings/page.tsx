@@ -16,6 +16,7 @@ import { instantToWallClock } from "@/lib/zoned";
 import { listHolidays } from "@/server/repos/holidays";
 import { listWorkingHours } from "@/server/repos/working-hours";
 import { listBookingLinks } from "@/server/repos/booking-links";
+import { assignableTeam, listAutomations, listRuns } from "@/server/repos/automations";
 import { getSettings } from "@/server/repos/settings";
 import { listUsers } from "@/server/repos/users";
 import { clientBook, groupByOwner } from "@/server/clients-view";
@@ -25,6 +26,7 @@ import { listTrash } from "@/server/trash";
 import { ROLES, withSystem } from "@/server/tenant";
 import { currentUser, requireTenantPage, withTenantPage } from "@/server/tenant-session";
 import { storageEngine } from "@/server/store";
+import { AutomationsCard } from "./AutomationsCard";
 import { ClientsCard } from "./ClientsCard";
 import { SettingsNav } from "./SettingsNav";
 import { sectionFromParam, type SettingsSectionId } from "./sections";
@@ -43,6 +45,23 @@ import {
 } from "./SettingsForms";
 
 export const dynamic = "force-dynamic";
+
+/**
+ * "16 Sep, 14:05" in the business's own zone.
+ *
+ * Formatted here on the server and handed down as text: formatting a date in
+ * the browser renders it twice, once per clock and locale, and the two need
+ * not agree — which React reports as a hydration mismatch.
+ */
+function shortWhen(iso: string, timeZone: string): string {
+  const at = new Date(iso);
+  const options = { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false } as const;
+  try {
+    return new Intl.DateTimeFormat("en-GB", { ...options, timeZone }).format(at);
+  } catch {
+    return new Intl.DateTimeFormat("en-GB", { ...options, timeZone: "UTC" }).format(at);
+  }
+}
 
 /** The names on the pricing page, not the identifiers in the column. */
 const PLAN_NAMES: Record<string, string> = {
@@ -90,9 +109,26 @@ export default async function SettingsPage({
      still read the records.
   */
   const crmAccess = canAccessCrm(user.role);
-  const { settings, usage, trash, book, holidays, workingHours, bookingLinks } = await withTenantPage(
+  const {
+    settings,
+    usage,
+    trash,
+    book,
+    holidays,
+    workingHours,
+    bookingLinks,
+    automations,
+    automationRuns,
+    assignable,
+  } = await withTenantPage(
     async (q) => ({
       settings: await getSettings(q),
+      /* Rules about leads and deals, what they did to which deal, and who they
+         may hand work to — all customer-side, so not loaded for IT or
+         accounts, whose Settings has no Automations area at all. */
+      automations: crmAccess ? await listAutomations(q) : [],
+      automationRuns: crmAccess ? await listRuns(q, 8) : [],
+      assignable: crmAccess ? await assignableTeam(q) : [],
       /* Loaded for CRM users only, like the address book: publishing a page
          that creates contacts and meetings is CRM work, and the save action is
          gated the same way. */
@@ -259,6 +295,22 @@ export default async function SettingsPage({
          so it is not offered at all to IT or accounts — the tab disappears
          rather than opening onto an empty card, which would only invite the
          question of what is being hidden. */
+      needsCrm: true,
+    },
+    {
+      /* Rules act on leads and deals, so this is CRM work: offered only to
+         people who can see customer records. Changing one is further limited
+         to whoever manages the team, because a rule decides whose desk every
+         new lead lands on. */
+      id: "automations",
+      content: (
+        <AutomationsCard
+          automations={automations}
+          runs={automationRuns.map((run) => ({ ...run, when: shortWhen(run.at, settings.timeZone) }))}
+          team={assignable}
+          canManage={roleCan(user.role, "manage_users")}
+        />
+      ),
       needsCrm: true,
     },
     {

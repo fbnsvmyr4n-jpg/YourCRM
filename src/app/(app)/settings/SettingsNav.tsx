@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import {
   Briefcase,
   CreditCard,
@@ -8,6 +8,7 @@ import {
   SlidersHorizontal,
   UserRound,
   Users,
+  Zap,
   type LucideIcon,
 } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
@@ -45,6 +46,7 @@ const META: Record<SettingsSectionId, { label: string; icon: LucideIcon; blurb: 
   account: { label: "Account", icon: UserRound, blurb: "Your name, sign-in and password" },
   team: { label: "Team", icon: Users, blurb: "Everyone who works here, by department" },
   clients: { label: "Clients", icon: Briefcase, blurb: "Who is looking after whom" },
+  automations: { label: "Automations", icon: Zap, blurb: "What happens on its own when a lead or deal changes" },
   preferences: { label: "Preferences", icon: SlidersHorizontal, blurb: "Targets, working calendar and theme" },
   billing: { label: "Billing", icon: CreditCard, blurb: "Plan, workspaces, usage and referrals" },
   data: { label: "Data", icon: Database, blurb: "Deleted records and storage" },
@@ -136,7 +138,10 @@ export function SettingsNav({
 
       {/* ---- the chips (phone and tablet) ---- */}
       <div className="@min-[880px]:hidden">
-        <div className="grid grid-cols-3 gap-1.5">
+        {/* Seven areas for somebody who works the CRM: four over three reads as
+            two deliberate rows, where three columns would strand one chip on a
+            line of its own. IT and accounts see five and keep three across. */}
+        <div className={clsx("grid gap-1.5", sections.length > 6 ? "grid-cols-4" : "grid-cols-3")}>
           {sections.map(({ id }) => (
             <Chip key={id} id={id} active={active === id} onSelect={select} />
           ))}
@@ -173,7 +178,12 @@ export function SettingsNav({
               </h2>
               <p className="text-xs text-faint @min-[880px]:mt-0.5">{META[id].blurb}</p>
             </div>
-            {content}
+            {/* Its own keyed slot. The content is built by the server page and
+                can reach the client as a separately streamed chunk, which React
+                then finds sitting unkeyed in this element's list of children —
+                the "unique key" warning that appeared once there were seven
+                areas. A keyed fragment adds no element to the page. */}
+            <Fragment key="content">{content}</Fragment>
           </section>
         ))}
       </div>

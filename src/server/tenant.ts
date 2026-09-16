@@ -1,6 +1,11 @@
 import type { PoolClient, QueryResultRow } from "pg";
 import { getPool } from "./db";
 import { logDenied } from "./log";
+/* Registers the automation engine as the listener for deal events. Here because
+   every server path that can create or move a deal runs through this module,
+   and only the server ever loads it — `repos/deals.ts` is in the client bundle
+   and must not import the engine. See `deal-events.ts`; pinned by a test. */
+import "./automations";
 
 /**
  * Tenant context — the thing every query must run inside.

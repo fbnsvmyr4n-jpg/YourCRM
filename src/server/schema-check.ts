@@ -56,6 +56,8 @@ export const EXPECTED_TABLES = [
   "outbox",
   "working_hours",
   "booking_links",
+  "automations",
+  "automation_runs",
 ] as const;
 
 /** Columns added by `ALTER TABLE … ADD COLUMN IF NOT EXISTS`, which a stale

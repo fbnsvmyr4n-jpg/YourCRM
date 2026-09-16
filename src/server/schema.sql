@@ -2136,6 +2136,113 @@ CREATE INDEX IF NOT EXISTS messages_delivery_idx
   ON messages (sub_account_id, delivery) WHERE delivery IS NOT NULL;
 
 -- ---------------------------------------------------------------------------
+-- Automations: "when this happens to a deal, do that".
+--
+-- Leads now arrive on their own — the website form, the booking page, the
+-- voice agent — at any hour, and until now each one landed on whoever owned
+-- the link and waited there. The first thing a business wants is for the right
+-- person to have it, straight away, without somebody sorting the board.
+--
+-- Deliberately small. Two things can happen (a lead is added; a deal moves to
+-- a stage) and two things can be done (give it to somebody, or to the next
+-- person in a rotation; move it to a stage). Every one of those is a change to
+-- this database and nothing else, so a rule runs INSIDE the transaction that
+-- caused it: the lead and its owner are written together or not at all, with
+-- no queue to drain and no schedule to wait for. Anything that leaves the
+-- building — an email to a client — does not belong here, because in this
+-- product a person approves that first.
+--
+-- A rule is stored as its parts rather than as free-form JSON so the database
+-- can refuse a rule that makes no sense: a stage trigger with no stage, an
+-- assignment with nobody to assign to, a move to Lost (which needs a reason
+-- no rule can give).
+--
+-- `assignee_ids` cannot be a foreign key — Postgres has none for arrays — so a
+-- person who later leaves is checked for at run time and stepped over, and a
+-- rotation with nobody left records a failure a person will see.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS automations (
+  id                  TEXT PRIMARY KEY,
+  sub_account_id      TEXT NOT NULL REFERENCES sub_accounts(id) ON DELETE CASCADE,
+
+  event_kind          TEXT NOT NULL
+                        CHECK (event_kind IN ('lead_created', 'deal_stage_changed')),
+  -- lead_created: only leads from this source, or any when NULL.
+  when_source         TEXT,
+  -- deal_stage_changed: the stage the deal has just moved INTO.
+  when_stage          TEXT,
+
+  action_kind         TEXT NOT NULL
+                        CHECK (action_kind IN ('assign_owner', 'move_stage')),
+  -- One person, or several taking turns in this order.
+  assignee_ids        TEXT[] NOT NULL DEFAULT '{}',
+  target_stage        TEXT,
+  -- Whose turn it is next, as an index into assignee_ids. Moved on in the same
+  -- transaction that assigns, under a row lock, so two leads arriving together
+  -- cannot both go to the same person.
+  rotation_position   INTEGER NOT NULL DEFAULT 0 CHECK (rotation_position >= 0),
+
+  enabled             BOOLEAN NOT NULL DEFAULT TRUE,
+  created_by_user_id  TEXT REFERENCES users(id) ON DELETE SET NULL,
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  CONSTRAINT automations_event_shape CHECK (
+    (event_kind = 'lead_created' AND when_stage IS NULL)
+    OR (event_kind = 'deal_stage_changed' AND when_stage IS NOT NULL AND when_source IS NULL)
+  ),
+  CONSTRAINT automations_action_shape CHECK (
+    (action_kind = 'assign_owner' AND cardinality(assignee_ids) BETWEEN 1 AND 20
+       AND target_stage IS NULL)
+    OR (action_kind = 'move_stage' AND target_stage IS NOT NULL AND target_stage <> 'lost'
+       AND cardinality(assignee_ids) = 0)
+  )
+);
+
+CREATE INDEX IF NOT EXISTS automations_tenant_idx ON automations (sub_account_id, event_kind);
+
+ALTER TABLE automations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE automations FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS automations_tenant_isolation ON automations;
+CREATE POLICY automations_tenant_isolation ON automations
+  USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
+  WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
+
+-- What each rule did, and to which deal.
+--
+-- The answer to "why is this lead Sam's?" A rule that acts silently is one
+-- nobody trusts, and the first time it hands a hot lead to somebody on leave
+-- the whole feature gets switched off. Failures are kept too, and surface in
+-- the notification feed: a rotation whose people have all left must not
+-- quietly stop assigning.
+--
+-- `detail` is a sentence about what the RULE did ("Assigned to Sam Lee"), never
+-- a copy of the customer's details; the deal is linked, and shown as it is now.
+CREATE TABLE IF NOT EXISTS automation_runs (
+  id              TEXT PRIMARY KEY,
+  sub_account_id  TEXT NOT NULL REFERENCES sub_accounts(id) ON DELETE CASCADE,
+  automation_id   TEXT REFERENCES automations(id) ON DELETE SET NULL,
+  deal_id         TEXT REFERENCES deals(id) ON DELETE SET NULL,
+  outcome         TEXT NOT NULL CHECK (outcome IN ('done', 'skipped', 'failed')),
+  detail          TEXT NOT NULL,
+  -- clock_timestamp(), not now(): now() is the START of the transaction, and
+  -- every rule a single change sets off runs inside that one transaction — so
+  -- with now() a chain of three runs shares one instant and is listed in
+  -- whatever order the ids happen to sort. Caught by the loop test.
+  at              TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+);
+
+CREATE INDEX IF NOT EXISTS automation_runs_tenant_idx ON automation_runs (sub_account_id, at DESC);
+
+ALTER TABLE automation_runs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE automation_runs FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS automation_runs_tenant_isolation ON automation_runs;
+CREATE POLICY automation_runs_tenant_isolation ON automation_runs
+  USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
+  WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
+
+-- ---------------------------------------------------------------------------
 -- What the application's own database role may do.
 --
 -- KEEP THIS THE LAST BLOCK IN THE FILE: `GRANT … ON ALL TABLES` covers only the
