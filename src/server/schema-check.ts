@@ -61,6 +61,9 @@ export const EXPECTED_TABLES = [
   "custom_fields",
   "custom_field_values",
   "todos",
+  "tags",
+  "contact_tags",
+  "contact_views",
 ] as const;
 
 /** Columns added by `ALTER TABLE … ADD COLUMN IF NOT EXISTS`, which a stale

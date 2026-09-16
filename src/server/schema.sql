@@ -2549,6 +2549,102 @@ ALTER TABLE settings DROP CONSTRAINT IF EXISTS settings_currency_code;
 ALTER TABLE settings ADD CONSTRAINT settings_currency_code CHECK (currency ~ '^[A-Z]{3}$');
 
 -- ---------------------------------------------------------------------------
+-- Tags, and the saved views built from them.
+--
+-- Contacts could be filtered two ways — lead or client — and that was all. A
+-- business that thinks of its people as "Stellenbosch", "decision maker",
+-- "cold since winter" had nowhere to say so except a note, which nothing can
+-- filter on. A custom field answers "what is this person's X"; a tag answers
+-- "which group is this person in", and a person is in several at once.
+--
+-- A tag is a LABEL, not a record. Deleting one removes it from every contact
+-- (the contacts themselves are untouched), and renaming it renames it
+-- everywhere, because a tag is shared by the workspace rather than typed per
+-- contact — that is what stops "Cape Town", "cape town" and "CPT" becoming
+-- three groups of the same people.
+--
+-- A saved view is a named filter: which kind of contact, which tags, and
+-- whether a contact needs ANY of them or ALL. Stored as JSON because it is
+-- read and written whole by one screen and never queried by its parts; the
+-- application checks its shape on the way in and on the way out.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS tags (
+  id              TEXT PRIMARY KEY,
+  sub_account_id  TEXT NOT NULL REFERENCES sub_accounts(id) ON DELETE CASCADE,
+  name            TEXT NOT NULL CHECK (length(btrim(name)) BETWEEN 1 AND 40),
+  color           TEXT NOT NULL DEFAULT 'blue'
+                    CHECK (color IN ('blue', 'green', 'amber', 'red', 'purple', 'teal', 'pink', 'slate')),
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS tags_name_once ON tags (sub_account_id, lower(name));
+
+ALTER TABLE tags ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tags FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tags_tenant_isolation ON tags;
+CREATE POLICY tags_tenant_isolation ON tags
+  USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
+  WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
+
+CREATE TABLE IF NOT EXISTS contact_tags (
+  sub_account_id  TEXT NOT NULL REFERENCES sub_accounts(id) ON DELETE CASCADE,
+  contact_id      TEXT NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+  tag_id          TEXT NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (sub_account_id, contact_id, tag_id)
+);
+
+CREATE INDEX IF NOT EXISTS contact_tags_tag_idx ON contact_tags (sub_account_id, tag_id);
+
+ALTER TABLE contact_tags ENABLE ROW LEVEL SECURITY;
+ALTER TABLE contact_tags FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS contact_tags_tenant_isolation ON contact_tags;
+CREATE POLICY contact_tags_tenant_isolation ON contact_tags
+  USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
+  WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
+
+-- A tag and a contact from the SAME workspace. Row-level security allows the
+-- write (it is this tenant's row); only the ids are wrong, and the result would
+-- be another customer's label on this customer's person.
+CREATE OR REPLACE FUNCTION assert_contact_tag_in_tenant() RETURNS TRIGGER AS $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM tags t WHERE t.id = NEW.tag_id AND t.sub_account_id = NEW.sub_account_id) THEN
+    RAISE EXCEPTION 'tag % does not belong to sub-account %', NEW.tag_id, NEW.sub_account_id
+      USING ERRCODE = 'check_violation';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM contacts c WHERE c.id = NEW.contact_id AND c.sub_account_id = NEW.sub_account_id) THEN
+    RAISE EXCEPTION 'contact % does not belong to sub-account %', NEW.contact_id, NEW.sub_account_id
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS contact_tags_in_tenant ON contact_tags;
+CREATE TRIGGER contact_tags_in_tenant
+  BEFORE INSERT OR UPDATE ON contact_tags
+  FOR EACH ROW EXECUTE FUNCTION assert_contact_tag_in_tenant();
+
+CREATE TABLE IF NOT EXISTS contact_views (
+  id                  TEXT PRIMARY KEY,
+  sub_account_id      TEXT NOT NULL REFERENCES sub_accounts(id) ON DELETE CASCADE,
+  name                TEXT NOT NULL CHECK (length(btrim(name)) BETWEEN 1 AND 60),
+  filter              JSONB NOT NULL,
+  created_by_user_id  TEXT REFERENCES users(id) ON DELETE SET NULL,
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS contact_views_name_once ON contact_views (sub_account_id, lower(name));
+
+ALTER TABLE contact_views ENABLE ROW LEVEL SECURITY;
+ALTER TABLE contact_views FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS contact_views_tenant_isolation ON contact_views;
+CREATE POLICY contact_views_tenant_isolation ON contact_views
+  USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
+  WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
+
+-- ---------------------------------------------------------------------------
 -- What the application's own database role may do.
 --
 -- KEEP THIS THE LAST BLOCK IN THE FILE: `GRANT … ON ALL TABLES` covers only the

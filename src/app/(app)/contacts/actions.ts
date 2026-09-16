@@ -14,7 +14,7 @@ import { logActivity } from "@/server/repos/activity";
 import { withCurrentTenant } from "@/server/tenant-session";
 import { findOrCreateCompany } from "@/server/repos/companies";
 import type { TenantQuery } from "@/server/tenant";
-import { email as validEmail, id as validId, multiline, text } from "@/server/validate";
+import { email as validEmail, id as validId, multiline, pick, text } from "@/server/validate";
 import { logWrite } from "@/server/log";
 import { importContacts, previewImport } from "@/server/import-contacts";
 import { applyCustomValues, parseCustomValues } from "@/server/custom-field-form";
@@ -24,6 +24,26 @@ import {
   bulkDeleteContacts,
   bulkSetCompany,
 } from "@/server/repos/contacts";
+import {
+  createTag,
+  deleteTag,
+  deleteView,
+  findTagByName,
+  listTags,
+  saveView,
+  setTagOnContacts,
+  updateTag,
+} from "@/server/repos/tags";
+import {
+  cleanName,
+  MAX_TAG_NAME,
+  MAX_VIEW_NAME,
+  parseFilter,
+  TAG_COLORS,
+  type SavedView,
+  type Tag,
+} from "@/server/contact-filter";
+import { roleCan } from "@/server/permissions";
 
 /**
  * Contact actions, on the relational schema.
@@ -398,6 +418,21 @@ export async function bulkSetCompanyAction(
   });
 }
 
+/** Put a tag on — or take it off — every selected contact. */
+export async function bulkTagContactsAction(ids: string[], tagId: string, on: boolean): Promise<BulkResult> {
+  return withCurrentTenant(async (q) => {
+    const clean = readIds(ids);
+    if (clean.length === 0) return { error: "Nothing selected." };
+    const tag = validId(tagId);
+    if (!tag || !(await listTags(q)).some((t) => t.id === tag)) return { error: "That tag no longer exists." };
+
+    const changed = await setTagOnContacts(q, tag, clean, on === true);
+    logWrite("update", "contact", { id: `${changed} contacts`, detail: on ? "bulk tag" : "bulk untag" });
+    revalidateApp();
+    return { ok: true as const, changed };
+  });
+}
+
 export async function bulkDeleteContactsAction(ids: string[]): Promise<BulkResult> {
   return withCurrentTenant(async (q) => {
     const clean = readIds(ids);
@@ -407,5 +442,163 @@ export async function bulkDeleteContactsAction(ids: string[]): Promise<BulkResul
     logWrite("delete", "contact", { id: `${changed} contacts`, detail: "bulk delete" });
     revalidateApp();
     return { ok: true as const, changed };
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* Tags                                                                */
+/*                                                                     */
+/* Anybody who works the contacts can label them, make a new label as   */
+/* they type, and save a view — that is the work. Renaming, recolouring */
+/* or deleting a label changes it on every contact for everybody, so    */
+/* that is for whoever manages the team, like the shape of the record.  */
+/* ------------------------------------------------------------------ */
+
+const NOT_YOUR_TAGS = "Only somebody who manages the team can rename or delete a tag.";
+
+type TagResult = { error: string } | { ok: true; tag: Tag };
+
+/**
+ * Tag one contact, with an existing tag or one named as it is typed.
+ *
+ * A typed name that matches an existing tag in any case reuses it, so "cape
+ * town" does not quietly become a second Cape Town.
+ */
+export async function addTagToContactAction(
+  contactId: string,
+  input: { tagId?: string; name?: string; color?: string }
+): Promise<TagResult> {
+  return withCurrentTenant(async (q) => {
+    const id = validId(contactId);
+    const contact = id ? await getContact(q, id) : null;
+    if (!id || !contact) return { error: "That contact no longer exists." };
+
+    const tags = await listTags(q);
+    let tag: Tag | null = null;
+    if (input.tagId !== undefined) {
+      const tagId = validId(input.tagId);
+      tag = tags.find((t) => t.id === tagId) ?? null;
+      if (!tag) return { error: "That tag no longer exists." };
+    } else {
+      const name = cleanName(input.name, MAX_TAG_NAME);
+      if (!name) return { error: "Type a name for the tag." };
+      tag = await findTagByName(q, name);
+      if (!tag) {
+        /* A colour nobody has used yet where there is one, so a new tag reads
+           as different from the last at a glance. */
+        const used = new Set(tags.map((t) => t.color));
+        const color =
+          pick(input.color, TAG_COLORS) ?? TAG_COLORS.find((c) => !used.has(c)) ?? TAG_COLORS[tags.length % TAG_COLORS.length];
+        const made = await createTag(q, name, color);
+        if ("error" in made) return { error: made.error };
+        tag = made.tag;
+        logWrite("create", "tag", { id: tag.id, actor: q.ctx.userId });
+      }
+    }
+
+    const changed = await setTagOnContacts(q, tag.id, [id], true);
+    if (changed > 0) {
+      await logActivity(q, {
+        entityType: "contact",
+        entityId: id,
+        kind: "updated",
+        title: "Tag added",
+        detail: tag.name,
+        actorUserId: q.ctx.userId,
+      });
+    }
+    revalidateApp();
+    return { ok: true as const, tag };
+  });
+}
+
+export async function removeTagFromContactAction(contactId: string, tagId: string): Promise<{ error: string } | { ok: true }> {
+  return withCurrentTenant(async (q) => {
+    const id = validId(contactId);
+    const tag = validId(tagId);
+    if (!id || !tag) return { error: "That tag is not on this contact." };
+    const name = (await listTags(q)).find((t) => t.id === tag)?.name;
+
+    const changed = await setTagOnContacts(q, tag, [id], false);
+    if (changed > 0 && name) {
+      await logActivity(q, {
+        entityType: "contact",
+        entityId: id,
+        kind: "updated",
+        title: "Tag removed",
+        detail: name,
+        actorUserId: q.ctx.userId,
+      });
+    }
+    revalidateApp();
+    return { ok: true as const };
+  });
+}
+
+export async function updateTagAction(tagId: string, name: string, color: string): Promise<{ error: string } | { ok: true }> {
+  return withCurrentTenant(async (q) => {
+    if (!roleCan(q.ctx.role, "manage_users")) return { error: NOT_YOUR_TAGS };
+    const id = validId(tagId);
+    if (!id) return { error: "That tag no longer exists." };
+    const clean = cleanName(name, MAX_TAG_NAME);
+    if (!clean) return { error: "A tag needs a name." };
+    const tone = pick(color, TAG_COLORS);
+    if (!tone) return { error: "Choose one of the colours." };
+
+    const out = await updateTag(q, id, { name: clean, color: tone });
+    if ("error" in out) return out;
+    logWrite("update", "tag", { id, actor: q.ctx.userId });
+    revalidateApp();
+    return out;
+  });
+}
+
+/** The label comes off every contact. The contacts themselves are untouched. */
+export async function deleteTagAction(tagId: string): Promise<{ error: string } | { ok: true }> {
+  return withCurrentTenant(async (q) => {
+    if (!roleCan(q.ctx.role, "manage_users")) return { error: NOT_YOUR_TAGS };
+    const id = validId(tagId);
+    if (!id || !(await deleteTag(q, id))) return { error: "That tag no longer exists." };
+    logWrite("delete", "tag", { id, actor: q.ctx.userId });
+    revalidateApp();
+    return { ok: true as const };
+  });
+}
+
+/** Saved for the whole workspace: a view is how a team agrees what "hot leads" means. */
+export async function saveViewAction(name: string, filter: unknown): Promise<{ error: string } | { ok: true; view: SavedView }> {
+  return withCurrentTenant(async (q) => {
+    const clean = cleanName(name, MAX_VIEW_NAME);
+    if (!clean) return { error: "Give the view a name." };
+    const parsed = parseFilter(filter, new Set((await listTags(q)).map((t) => t.id)));
+    if (parsed.type === "all" && parsed.tagIds.length === 0) {
+      return { error: "Choose a type or a tag first — this view would show everybody." };
+    }
+    const out = await saveView(q, clean, parsed);
+    if ("error" in out) return out;
+    logWrite("create", "contact_view", { id: out.view.id, actor: q.ctx.userId });
+    revalidateApp();
+    return { ok: true as const, view: out.view };
+  });
+}
+
+/** Whoever saved a view may delete it, and so may whoever manages the team. */
+export async function deleteViewAction(viewId: string): Promise<{ error: string } | { ok: true }> {
+  return withCurrentTenant(async (q) => {
+    const id = validId(viewId);
+    const row = id
+      ? await q.one<{ created_by_user_id: string | null }>(
+          `SELECT created_by_user_id FROM contact_views WHERE sub_account_id = $1 AND id = $2`,
+          [q.ctx.subAccountId, id]
+        )
+      : null;
+    if (!id || !row) return { error: "That view no longer exists." };
+    if (row.created_by_user_id !== q.ctx.userId && !roleCan(q.ctx.role, "manage_users")) {
+      return { error: "Only whoever saved this view, or somebody who manages the team, can delete it." };
+    }
+    if (!(await deleteView(q, id))) return { error: "That view no longer exists." };
+    logWrite("delete", "contact_view", { id, actor: q.ctx.userId });
+    revalidateApp();
+    return { ok: true as const };
   });
 }

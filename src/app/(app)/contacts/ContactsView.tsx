@@ -57,10 +57,24 @@ import { TaskItem } from "@/components/tasks/TaskItem";
 import { NewTaskForm } from "@/components/tasks/NewTaskForm";
 import type { ImportPreview, ImportResult } from "@/server/import-contacts";
 import {
+  describeFilter,
+  EMPTY_FILTER,
+  isEmptyFilter,
+  matchesFilter,
+  MAX_VIEW_NAME,
+  type ContactFilter,
+  type SavedView,
+  type Tag,
+} from "@/server/contact-filter";
+import { ContactTags, EditTagsDialog, TagDot } from "@/components/tags/Tags";
+import {
   addContactAction,
   bulkAssignContactsAction,
   bulkDeleteContactsAction,
   bulkSetCompanyAction,
+  bulkTagContactsAction,
+  deleteViewAction,
+  saveViewAction,
   importContactsAction,
   previewImportAction,
   addNoteAction,
@@ -89,6 +103,10 @@ export function ContactsView({
   tasksByContact = {},
   team = [],
   today = "",
+  tags = [],
+  tagIdsByContact = {},
+  views = [],
+  canManageTags = false,
 }: {
   contacts: Contact[];
   /** Colleagues who can own a record, for the assign control. */
@@ -108,6 +126,14 @@ export function ContactsView({
   team?: { id: string; name: string }[];
   /** The business's calendar day. */
   today?: string;
+  /** Every tag in the workspace, with live counts. */
+  tags?: Tag[];
+  /** contactId → its tag ids. */
+  tagIdsByContact?: Record<string, string[]>;
+  /** Filters saved for the whole workspace. */
+  views?: SavedView[];
+  /** Renaming, recolouring and deleting tags is for whoever manages the team. */
+  canManageTags?: boolean;
 }) {
   const [selectedId, setSelectedId] = useState(initialContactId ?? contacts[0]?.id ?? "");
   /*
@@ -150,7 +176,8 @@ export function ContactsView({
      which was fine while nothing could be refused; a custom number field that
      reads "about fifty" can be, and closing would throw the edit away. */
   const [modalError, setModalError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<"all" | ContactType>("all");
+  const [filter, setFilter] = useState<ContactFilter>(EMPTY_FILTER);
+  const [editingTags, setEditingTags] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkOpen, setBulkOpen] = useState(false);
 
@@ -262,6 +289,7 @@ export function ContactsView({
           count={selected.size}
           people={people}
           companies={companies}
+          tags={tags}
           onClose={() => setBulkOpen(false)}
           onDone={() => {
             setSelected(new Set());
@@ -310,6 +338,8 @@ export function ContactsView({
         contact={contact}
         customFields={customFields}
         customValues={customValues[contact.id] ?? {}}
+        tags={tags}
+        tagIds={tagIdsByContact[contact.id] ?? []}
         /*
            The card comes first in one column; these fields follow it.
 
@@ -361,13 +391,21 @@ export function ContactsView({
         selected={selected}
         setSelected={setSelected}
         onBulk={() => setBulkOpen(true)}
+        tags={tags}
+        tagIdsByContact={tagIdsByContact}
+        views={views}
+        currentUserId={currentUserId}
+        canManageTags={canManageTags}
+        onEditTags={() => setEditingTags(true)}
       />
       {modalEl}
+      {editingTags && <EditTagsDialog tags={tags} onClose={() => setEditingTags(false)} />}
       {bulkOpen && (
         <BulkActions
           count={selected.size}
           people={people}
           companies={companies}
+          tags={tags}
           onClose={() => setBulkOpen(false)}
           onDone={() => {
             setSelected(new Set());
@@ -390,11 +428,15 @@ function InfoPanel({
   className,
   customFields,
   customValues,
+  tags,
+  tagIds,
 }: {
   contact: Contact;
   className?: string;
   customFields: CustomField[];
   customValues: FieldValues;
+  tags: Tag[];
+  tagIds: string[];
 }) {
   // Derived status, so the palette is chosen from what is true now.
   const tone = contact.isClient
@@ -427,6 +469,12 @@ function InfoPanel({
           it is not. Two places showing one number is how they drift, and this
           panel is the record, not the reporting.
       */}
+
+      {/* Straight under Status: both say what kind of person this is to the
+          business, and a tag is the one thing here edited in place. */}
+      <Section title="Tags">
+        <ContactTags contactId={contact.id} tags={tags} onContact={tagIds} />
+      </Section>
 
       <Section title="Personal Information">
         {/* Whole name first: it is what you came to check, and the parts are the
@@ -1426,14 +1474,20 @@ function ContactsList({
   selected,
   setSelected,
   onBulk,
+  tags,
+  tagIdsByContact,
+  views,
+  currentUserId,
+  canManageTags,
+  onEditTags,
 }: {
   contacts: Contact[];
   selectedId: string;
   onSelect: (id: string) => void;
   onAdd: () => void;
   onImport: () => void;
-  filter: "all" | ContactType;
-  setFilter: (f: "all" | ContactType) => void;
+  filter: ContactFilter;
+  setFilter: (f: ContactFilter) => void;
   grouped: boolean;
   toggleGrouped: () => void;
   className?: string;
@@ -1442,6 +1496,12 @@ function ContactsList({
   selected: Set<string>;
   setSelected: (next: Set<string>) => void;
   onBulk: () => void;
+  tags: Tag[];
+  tagIdsByContact: Record<string, string[]>;
+  views: SavedView[];
+  currentUserId: string | null;
+  canManageTags: boolean;
+  onEditTags: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [sort, setSort] = useState<SortId>("recent");
@@ -1462,9 +1522,13 @@ function ContactsList({
   }, [menuOpen]);
 
   const visible = useMemo(() => {
-    const filtered = filter === "all" ? contacts : contacts.filter((c) => c.type === filter);
+    const filtered = isEmptyFilter(filter)
+      ? contacts
+      : contacts.filter((c) => matchesFilter({ type: c.type, tagIds: tagIdsByContact[c.id] ?? [] }, filter));
     return sortContacts(filtered, sort, values);
-  }, [contacts, filter, sort, values]);
+  }, [contacts, filter, sort, values, tagIdsByContact]);
+  const tagById = useMemo(() => new Map(tags.map((t) => [t.id, t])), [tags]);
+  const filtering = !isEmptyFilter(filter);
 
   const allShown = visible.length > 0 && visible.every((c) => selected.has(c.id));
 
@@ -1482,11 +1546,6 @@ function ContactsList({
       .filter((g) => g.rows.length > 0);
   }, [grouped, visible]);
 
-  const filters: { id: "all" | ContactType; label: string }[] = [
-    { id: "all", label: "All contacts" },
-    { id: "client", label: "Clients only" },
-    { id: "lead", label: "Leads only" },
-  ];
 
   return (
     <aside className={clsx("card flex flex-col overflow-hidden p-5", className)}>
@@ -1550,13 +1609,14 @@ function ContactsList({
 
           <button
             onClick={() => setMenuOpen((m) => !m)}
-            title="Filter by type"
+            title="Filter"
+            aria-label="Filter contacts"
             aria-expanded={menuOpen}
             className={clsx(
               "focus-ring grid h-9 w-9 place-items-center rounded-full transition-colors",
-              filter !== "all" ? "text-accent" : "btn-soft text-muted"
+              filtering ? "text-accent" : "btn-soft text-muted"
             )}
-            style={filter !== "all" ? { background: "var(--accent-soft)" } : undefined}
+            style={filtering ? { background: "var(--accent-soft)" } : undefined}
           >
             <Filter className="h-4 w-4" />
           </button>
@@ -1578,27 +1638,35 @@ function ContactsList({
           </button>
 
           {menuOpen && (
-            <div
-              ref={menuRef}
-              className="absolute right-0 top-full z-30 mt-2 w-48 overflow-hidden rounded-2xl border border-[var(--border-strong)] py-1.5 shadow-[var(--shadow-lg)]"
-              style={{ background: "var(--panel-solid)" }}
-            >
-              {filters.map((f) => (
-                <button
-                  key={f.id}
-                  onClick={() => {
-                    setFilter(f.id);
-                    setMenuOpen(false);
-                  }}
-                  className="flex w-full items-center justify-between px-4 py-2.5 text-left text-sm transition-colors hover:bg-[var(--raise)]"
-                >
-                  {f.label}
-                  {filter === f.id && <Check className="h-4 w-4 text-accent" />}
-                </button>
-              ))}
-            </div>
+            <FilterMenu
+              menuRef={menuRef}
+              filter={filter}
+              setFilter={setFilter}
+              tags={tags}
+              views={views}
+              currentUserId={currentUserId}
+              canManageTags={canManageTags}
+              onClose={() => setMenuOpen(false)}
+              onEditTags={() => {
+                setMenuOpen(false);
+                onEditTags();
+              }}
+            />
           )}
         </div>
+        {/* What the list is showing, in words, whenever it is not everybody —
+            a filter left on is otherwise a list that seems to be missing
+            people. */}
+        {filtering && (
+          <div className="mt-3 flex items-center justify-between gap-2 text-xs">
+            <span className="min-w-0 truncate font-medium text-accent">
+              {describeFilter(filter, (id) => tagById.get(id)?.name)}
+            </span>
+            <button type="button" onClick={() => setFilter(EMPTY_FILTER)} className="focus-ring shrink-0 rounded-md px-1.5 py-0.5 font-medium text-muted hover:text-[var(--text)]">
+              Clear
+            </button>
+          </div>
+        )}
       </div>
 
       {/**
@@ -1653,6 +1721,7 @@ function ContactsList({
                       onSelect={onSelect}
                       checked={selected.has(c.id)}
                       onToggle={() => toggle(c.id)}
+                      tags={(tagIdsByContact[c.id] ?? []).map((id) => tagById.get(id)).filter((t): t is Tag => Boolean(t))}
                     />
                   ))}
                 </div>
@@ -1666,10 +1735,239 @@ function ContactsList({
                 onSelect={onSelect}
                 checked={selected.has(c.id)}
                 onToggle={() => toggle(c.id)}
+                tags={(tagIdsByContact[c.id] ?? []).map((id) => tagById.get(id)).filter((t): t is Tag => Boolean(t))}
               />
             ))}
       </div>
     </aside>
+  );
+}
+
+/** Same people, whatever order the tags were ticked in. */
+function sameFilter(a: ContactFilter, b: ContactFilter): boolean {
+  if (a.type !== b.type || a.tagIds.length !== b.tagIds.length) return false;
+  if (a.tagIds.length > 1 && a.match !== b.match) return false;
+  const bs = new Set(b.tagIds);
+  return a.tagIds.every((t) => bs.has(t));
+}
+
+/**
+ * Who the list shows: by type, by tag, or a view somebody saved.
+ *
+ * Ticking a tag leaves the menu open, because choosing two is common and
+ * reopening it for the second is a tax. Choosing a type or a view is one
+ * decision, so that closes it.
+ */
+function FilterMenu({
+  menuRef,
+  filter,
+  setFilter,
+  tags,
+  views,
+  currentUserId,
+  canManageTags,
+  onClose,
+  onEditTags,
+}: {
+  menuRef: React.RefObject<HTMLDivElement | null>;
+  filter: ContactFilter;
+  setFilter: (f: ContactFilter) => void;
+  tags: Tag[];
+  views: SavedView[];
+  currentUserId: string | null;
+  canManageTags: boolean;
+  onClose: () => void;
+  onEditTags: () => void;
+}) {
+  const [naming, setNaming] = useState(false);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const current = views.find((v) => sameFilter(v.filter, filter));
+
+  const toggleTag = (id: string) =>
+    setFilter({
+      ...filter,
+      tagIds: filter.tagIds.includes(id) ? filter.tagIds.filter((t) => t !== id) : [...filter.tagIds, id],
+    });
+
+  async function save() {
+    setBusy(true);
+    setError(null);
+    try {
+      const out = await saveViewAction(name, filter);
+      if ("error" in out) setError(out.error);
+      else {
+        setNaming(false);
+        setName("");
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove(id: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      const out = await deleteViewAction(id);
+      if ("error" in out) setError(out.error);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const heading = "mb-1.5 px-4 text-[11px] font-semibold uppercase tracking-[0.14em] text-faint";
+  const row = "flex w-full items-center gap-2.5 px-4 py-2 text-left text-sm transition-colors hover:bg-[var(--raise)]";
+
+  return (
+    <div
+      ref={menuRef}
+      className="absolute right-0 top-full z-30 mt-2 flex max-h-[min(70dvh,520px)] w-72 max-w-[calc(100vw-48px)] flex-col overflow-y-auto rounded-2xl border border-[var(--border-strong)] py-3 shadow-[var(--shadow-lg)]"
+      style={{ background: "var(--panel-solid)" }}
+    >
+      <p className={heading}>Show</p>
+      <div className="mx-4 mb-3 grid grid-cols-3 gap-1 rounded-xl p-1" style={{ background: "var(--raise)" }} role="radiogroup" aria-label="Contact type">
+        {(
+          [
+            ["all", "All"],
+            ["client", "Clients"],
+            ["lead", "Leads"],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            role="radio"
+            aria-checked={filter.type === id}
+            onClick={() => setFilter({ ...filter, type: id })}
+            className={clsx(
+              "focus-ring rounded-lg py-1.5 text-xs font-semibold transition-colors",
+              filter.type === id ? "text-accent shadow-sm" : "text-muted hover:text-[var(--text)]"
+            )}
+            style={filter.type === id ? { background: "var(--panel-solid)" } : undefined}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div className="mb-1.5 flex items-center justify-between gap-2 pr-4">
+        <p className={clsx(heading, "mb-0")}>Tags</p>
+        {/* Only meaningful with two or more, so only offered then. */}
+        {filter.tagIds.length > 1 && (
+          <div className="flex rounded-lg p-0.5 text-[11px] font-semibold" style={{ background: "var(--raise)" }} role="radiogroup" aria-label="Match">
+            {(
+              [
+                ["any", "Any"],
+                ["all", "All"],
+              ] as const
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                role="radio"
+                aria-checked={filter.match === id}
+                onClick={() => setFilter({ ...filter, match: id })}
+                className={clsx("focus-ring rounded-md px-2 py-0.5", filter.match === id ? "text-accent" : "text-muted")}
+                style={filter.match === id ? { background: "var(--panel-solid)" } : undefined}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      {tags.length === 0 ? (
+        <p className="px-4 pb-2 text-xs text-faint">No tags yet. Add one from a contact’s details.</p>
+      ) : (
+        tags.map((t) => (
+          <button key={t.id} type="button" role="checkbox" aria-checked={filter.tagIds.includes(t.id)} onClick={() => toggleTag(t.id)} className={row}>
+            <TagDot color={t.color} />
+            <span className="min-w-0 flex-1 truncate">{t.name}</span>
+            <span className="text-xs tabular-nums text-faint">{t.contacts}</span>
+            <Check className={clsx("h-4 w-4 shrink-0 text-accent", !filter.tagIds.includes(t.id) && "invisible")} />
+          </button>
+        ))
+      )}
+
+      {views.length > 0 && (
+        <>
+          <p className={clsx(heading, "mt-3 border-t border-[var(--border)] pt-3")}>Saved views</p>
+          {views.map((v) => (
+            <div key={v.id} className="group/view flex items-center hover:bg-[var(--raise)]">
+              <button
+                type="button"
+                onClick={() => {
+                  setFilter(v.filter);
+                  onClose();
+                }}
+                className="flex min-w-0 flex-1 items-center gap-2.5 py-2 pl-4 text-left text-sm"
+              >
+                <span className="min-w-0 flex-1 truncate">{v.name}</span>
+                {current?.id === v.id && <Check className="h-4 w-4 shrink-0 text-accent" />}
+              </button>
+              {(v.createdBy === currentUserId || canManageTags) && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void remove(v.id)}
+                  aria-label={`Delete the view ${v.name}`}
+                  className="focus-ring mr-2 grid h-8 w-8 shrink-0 place-items-center rounded-lg text-faint hover:text-[var(--red)]"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+          ))}
+        </>
+      )}
+
+      {error && (
+        <p className="mx-4 mt-2 text-xs" style={{ color: "var(--red)" }}>
+          {error}
+        </p>
+      )}
+
+      {((!isEmptyFilter(filter) && !current) || (canManageTags && tags.length > 0)) && (
+        <div className="mt-3 flex flex-col gap-2 border-t border-[var(--border)] px-4 pt-3">
+          {!isEmptyFilter(filter) &&
+            !current &&
+            (naming ? (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void save();
+                }}
+                className="flex gap-2"
+              >
+                <input
+                  autoFocus
+                  value={name}
+                  maxLength={MAX_VIEW_NAME}
+                  onChange={(e) => setName(e.target.value)}
+                  onKeyDown={(e) => e.key === "Escape" && (e.stopPropagation(), setNaming(false))}
+                  placeholder="Name this view"
+                  aria-label="Name this view"
+                  className="field-input min-w-0 flex-1 !py-1.5 text-sm"
+                />
+                <button type="submit" disabled={busy || !name.trim()} className="btn-accent focus-ring shrink-0 rounded-lg px-3 text-xs font-semibold disabled:opacity-60">
+                  Save
+                </button>
+              </form>
+            ) : (
+              <button type="button" onClick={() => setNaming(true)} className="focus-ring self-start text-sm font-medium text-accent">
+                Save as a view…
+              </button>
+            ))}
+          {canManageTags && tags.length > 0 && (
+            <button type="button" onClick={onEditTags} className="focus-ring self-start text-sm font-medium text-muted hover:text-[var(--text)]">
+              Edit tags…
+            </button>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -1679,12 +1977,14 @@ function ContactRow({
   onSelect,
   checked,
   onToggle,
+  tags,
 }: {
   contact: Contact;
   active: boolean;
   onSelect: (id: string) => void;
   checked: boolean;
   onToggle: () => void;
+  tags: Tag[];
 }) {
   const isLead = contact.type === "lead";
   return (
@@ -1732,6 +2032,16 @@ function ContactRow({
         </p>
         <p className="truncate text-xs text-faint">{contact.info}</p>
       </div>
+      {/* Colour only, and at most three: the row is for finding somebody, and
+          the names are one click away. Spoken in full for a screen reader. */}
+      {tags.length > 0 && (
+        <span className="flex shrink-0 items-center gap-1" title={tags.map((t) => t.name).join(", ")}>
+          <span className="sr-only">Tagged {tags.map((t) => t.name).join(", ")}</span>
+          {tags.slice(0, 3).map((t) => (
+            <TagDot key={t.id} color={t.color} />
+          ))}
+        </span>
+      )}
       <span
         className="rounded-full px-2 py-0.5 text-[10px] font-bold tracking-wide"
         style={{
@@ -2146,6 +2456,7 @@ function BulkActions({
   count,
   people,
   companies,
+  tags,
   onClose,
   onDone,
 }: {
@@ -2153,6 +2464,7 @@ function BulkActions({
   count: number;
   people: { id: string; name: string }[];
   companies: { id: string; name: string }[];
+  tags: Tag[];
   onClose: () => void;
   onDone: () => void;
 }) {
@@ -2257,6 +2569,39 @@ function BulkActions({
                       {c.name}
                     </option>
                   ))}
+                </select>
+              </label>
+
+              {/* One control for both directions, grouped, so the choice reads
+                  as a sentence: "Add tag — Cape Town". */}
+              <label className="block">
+                <span className="mb-1.5 block text-xs font-medium text-muted">Tag</span>
+                <select
+                  defaultValue=""
+                  disabled={busy || tags.length === 0}
+                  onChange={(e) => {
+                    const [dir, tagId] = e.target.value.split(":");
+                    if (tagId) void run(() => bulkTagContactsAction(ids, tagId, dir === "add"));
+                  }}
+                  className="field-input"
+                >
+                  <option value="" disabled>
+                    {tags.length === 0 ? "No tags yet" : "Add or remove a tag"}
+                  </option>
+                  <optgroup label="Add tag">
+                    {tags.map((t) => (
+                      <option key={t.id} value={`add:${t.id}`}>
+                        {t.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="Remove tag">
+                    {tags.map((t) => (
+                      <option key={t.id} value={`remove:${t.id}`}>
+                        {t.name}
+                      </option>
+                    ))}
+                  </optgroup>
                 </select>
               </label>
 

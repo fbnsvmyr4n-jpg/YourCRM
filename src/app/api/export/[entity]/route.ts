@@ -5,6 +5,7 @@ import { listFields, valuesFor } from "@/server/repos/custom-fields";
 import { displayValue, type FieldEntity } from "@/server/custom-field-rules";
 import type { TenantQuery } from "@/server/tenant";
 import { listMeetings } from "@/server/repos/meetings";
+import { listTags, tagIdsByContact } from "@/server/repos/tags";
 import { toCsv } from "@/server/csv";
 import { canAccessCrm } from "@/server/permissions";
 import { requireTenant, withCurrentTenant } from "@/server/tenant-session";
@@ -105,8 +106,12 @@ export async function GET(
       case "contacts": {
         const rows = await listContacts(q);
         const custom = await customColumns(q, "contact", rows.map((c) => c.id));
+        /* Tags as one cell, named and in alphabetical order, separated the way
+           a person would type them back in. */
+        const tagName = new Map((await listTags(q)).map((t) => [t.id, t.name]));
+        const tagIds = await tagIdsByContact(q);
         return toCsv(
-          ["First name", "Last name", "Email", "Phone", "Company", "Location", "Client", "Open deal", "Added", ...custom.headers],
+          ["First name", "Last name", "Email", "Phone", "Company", "Location", "Client", "Open deal", "Tags", "Added", ...custom.headers],
           rows.map((c) => [
             c.firstName,
             c.lastName,
@@ -116,6 +121,7 @@ export async function GET(
             c.location ?? "",
             c.isClient ? "yes" : "no",
             c.hasOpenDeal ? "yes" : "no",
+            (tagIds[c.id] ?? []).map((id) => tagName.get(id) ?? "").filter(Boolean).join("; "),
             c.createdAt,
             ...custom.cells(c.id),
           ])
