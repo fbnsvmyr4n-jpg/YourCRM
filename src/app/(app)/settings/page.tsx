@@ -17,6 +17,7 @@ import { listHolidays } from "@/server/repos/holidays";
 import { listWorkingHours } from "@/server/repos/working-hours";
 import { listBookingLinks } from "@/server/repos/booking-links";
 import { assignableTeam, listAutomations, listRuns } from "@/server/repos/automations";
+import { listFields } from "@/server/repos/custom-fields";
 import { getSettings } from "@/server/repos/settings";
 import { listUsers } from "@/server/repos/users";
 import { clientBook, groupByOwner } from "@/server/clients-view";
@@ -28,6 +29,7 @@ import { currentUser, requireTenantPage, withTenantPage } from "@/server/tenant-
 import { storageEngine } from "@/server/store";
 import { AutomationsCard } from "./AutomationsCard";
 import { ClientsCard } from "./ClientsCard";
+import { CustomFieldsCard } from "./CustomFieldsCard";
 import { SettingsNav } from "./SettingsNav";
 import { sectionFromParam, type SettingsSectionId } from "./sections";
 import { TeamCard } from "./TeamCard";
@@ -120,9 +122,16 @@ export default async function SettingsPage({
     automations,
     automationRuns,
     assignable,
+    contactFields,
+    dealFields,
   } = await withTenantPage(
     async (q) => ({
       settings: await getSettings(q),
+      /* The shape of contacts and deals — which is itself about customer
+         records, so it loads for the people who work them. Archived fields
+         too: this is where they are restored. */
+      contactFields: crmAccess ? await listFields(q, "contact", { includeArchived: true }) : [],
+      dealFields: crmAccess ? await listFields(q, "deal", { includeArchived: true }) : [],
       /* Rules about leads and deals, what they did to which deal, and who they
          may hand work to — all customer-side, so not loaded for IT or
          accounts, whose Settings has no Automations area at all. */
@@ -369,6 +378,15 @@ export default async function SettingsPage({
               contact, and a bin holding the deleted ones. The platform card
               below stays, because whether this deployment has a real database
               is not a fact about anybody's customers. */}
+          {/* First, because it changes what every contact and deal records —
+              and the export beneath it carries these fields as columns. */}
+          {crmAccess && (
+            <CustomFieldsCard
+              contactFields={contactFields}
+              dealFields={dealFields}
+              canManage={roleCan(user.role, "manage_users")}
+            />
+          )}
           {crmAccess && <ExportCard />}
           {crmAccess && <TrashCard items={trash} />}
           {/* Platform status is the account holder's business, not every

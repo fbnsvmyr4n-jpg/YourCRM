@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { listContacts } from "@/server/repos/contacts";
+import { listFields, valuesFor } from "@/server/repos/custom-fields";
 import {
   projectDocuments,
   projectHeader,
@@ -36,6 +37,9 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
     if (!header) return null;
     return {
       header,
+      /* The workspace's own fields for deals, and this job's values for them. */
+      customFields: await listFields(q, "deal"),
+      customValues: (await valuesFor(q, "deal", [id]))[id] ?? {},
       people: await projectPeople(q, id),
       documents: await projectDocuments(q, id),
       /* So a hand-typed document can pick from the price list instead of
@@ -97,6 +101,8 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
   return (
     <ProjectDetail
       header={data.header}
+      customFields={data.customFields}
+      customValues={data.customValues}
       people={data.people}
       documents={data.documents}
       priceItems={data.priceItems}

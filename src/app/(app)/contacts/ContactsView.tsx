@@ -20,6 +20,7 @@ import {
   Phone,
   Plus,
   StickyNote,
+  Tags,
   Trash2,
   Upload,
   User,
@@ -48,6 +49,8 @@ import { clsx } from "@/lib/clsx";
 import { useElementWidth } from "@/lib/use-element-width";
 import { useRememberedToggle } from "@/lib/remembered-toggle";
 import { useCanDial } from "@/lib/useCanDial";
+import { CustomFieldInputs } from "@/components/custom-fields/CustomFieldInputs";
+import { displayValue, type CustomField, type FieldValues } from "@/server/custom-field-rules";
 import type { ImportPreview, ImportResult } from "@/server/import-contacts";
 import {
   addContactAction,
@@ -78,6 +81,8 @@ export function ContactsView({
   currentUserId,
   people = [],
   companies = [],
+  customFields = [],
+  customValues = {},
 }: {
   contacts: Contact[];
   /** Colleagues who can own a record, for the assign control. */
@@ -85,6 +90,10 @@ export function ContactsView({
   companies?: { id: string; name: string }[];
   summaries: Record<string, ContactSummary>;
   currentUserId: string | null;
+  /** This workspace's live custom fields for contacts, in order. */
+  customFields?: CustomField[];
+  /** contactId → fieldId → value. */
+  customValues?: Record<string, FieldValues>;
 }) {
   const [selectedId, setSelectedId] = useState(contacts[0]?.id ?? "");
   /*
@@ -121,6 +130,10 @@ export function ContactsView({
   const [modal, setModal] = useState<ModalState>(null);
   const [panel, setPanel] = useState<Panel>(null);
   const [busy, setBusy] = useState(false);
+  /* Said inside the form, which stays open. It used to close on every submit,
+     which was fine while nothing could be refused; a custom number field that
+     reads "about fifty" can be, and closing would throw the edit away. */
+  const [modalError, setModalError] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | ContactType>("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkOpen, setBulkOpen] = useState(false);
@@ -144,13 +157,19 @@ export function ContactsView({
 
   async function handleSubmit(formData: FormData) {
     setBusy(true);
+    setModalError(null);
     try {
-      if (modal === "new") {
-        const newId = await addContactAction(formData);
-        if (newId) setSelectedId(newId);
-      } else if (modal && modal !== "import") {
-        await updateContactAction(modal.id, formData);
+      const result =
+        modal === "new"
+          ? await addContactAction(formData)
+          : modal && modal !== "import"
+            ? await updateContactAction(modal.id, formData)
+            : undefined;
+      if (result && typeof result === "object" && "error" in result) {
+        setModalError(result.error);
+        return;
       }
+      if (modal === "new" && typeof result === "string") setSelectedId(result);
       setModal(null);
     } finally {
       setBusy(false);
@@ -185,9 +204,15 @@ export function ContactsView({
     ) : modal !== null ? (
       <ContactModal
         contact={modal === "new" ? undefined : modal}
-        onClose={() => setModal(null)}
+        onClose={() => {
+          setModal(null);
+          setModalError(null);
+        }}
         onSubmit={handleSubmit}
         busy={busy}
+        error={modalError}
+        customFields={customFields}
+        customValues={modal === "new" ? {} : (customValues[modal.id] ?? {})}
       />
     ) : null;
 
@@ -267,6 +292,8 @@ export function ContactsView({
       )}
       <InfoPanel
         contact={contact}
+        customFields={customFields}
+        customValues={customValues[contact.id] ?? {}}
         /*
            The card comes first in one column; these fields follow it.
 
@@ -342,9 +369,13 @@ export function ContactsView({
 function InfoPanel({
   contact,
   className,
+  customFields,
+  customValues,
 }: {
   contact: Contact;
   className?: string;
+  customFields: CustomField[];
+  customValues: FieldValues;
 }) {
   // Derived status, so the palette is chosen from what is true now.
   const tone = contact.isClient
@@ -413,6 +444,22 @@ function InfoPanel({
         <InfoRow icon={Phone} label="Phone / WhatsApp" value={contact.phone} />
         <InfoRow icon={User} label="Contact Owner" value={contact.owner} />
       </Section>
+
+      {/* The workspace's own fields, after everything the product ships with.
+          Only when there are some: an empty heading is a question nobody
+          asked. Every field shows, set or not, so a gap is visible as a gap. */}
+      {customFields.length > 0 && (
+        <Section title="More details">
+          {customFields.map((field) => (
+            <InfoRow
+              key={field.id}
+              icon={Tags}
+              label={field.label}
+              value={displayValue(field.kind, customValues[field.id])}
+            />
+          ))}
+        </Section>
+      )}
     </aside>
   );
 }
@@ -1624,11 +1671,17 @@ function ContactModal({
   onClose,
   onSubmit,
   busy,
+  error,
+  customFields,
+  customValues,
 }: {
   contact?: Contact;
   onClose: () => void;
   onSubmit: (formData: FormData) => void | Promise<void>;
   busy: boolean;
+  error: string | null;
+  customFields: CustomField[];
+  customValues: FieldValues;
 }) {
   const editing = !!contact;
 
@@ -1690,6 +1743,27 @@ function ContactModal({
             */}
             <ModalField name="location" label="Location" className="sm:col-span-2" defaultValue={contact?.location} />
           </div>
+
+          {customFields.length > 0 && (
+            <>
+              <p className="mb-3 mt-5 border-t border-[var(--border)] pt-4 text-[11px] font-semibold uppercase tracking-[0.14em] text-faint">
+                More details
+              </p>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <CustomFieldInputs fields={customFields} values={customValues} />
+              </div>
+            </>
+          )}
+
+          {error && (
+            <p
+              role="alert"
+              className="mt-5 rounded-xl px-3.5 py-2.5 text-sm"
+              style={{ background: "var(--red-soft)", color: "var(--red)" }}
+            >
+              {error}
+            </p>
+          )}
 
           <div className="mt-6 flex items-center justify-end gap-3">
             <button type="button" onClick={onClose} className="btn-soft focus-ring rounded-xl px-5 py-2.5 text-sm font-medium">

@@ -2243,6 +2243,163 @@ CREATE POLICY automation_runs_tenant_isolation ON automation_runs
   WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
 
 -- ---------------------------------------------------------------------------
+-- Custom fields: the facts a business records that no CRM ships with.
+--
+-- A crane hire firm needs "Lifting capacity" on a job and "Site induction done"
+-- on a person; a landscaper needs neither. Without somewhere to put them they
+-- end up in a note, where nothing can find, sort or export them.
+--
+-- Two tables. A DEFINITION per field, per workspace, for contacts or for deals;
+-- and a VALUE per field per record, in a column of its own type. A typed value
+-- table rather than a JSON blob on the record, for three reasons:
+--
+--   * a date is stored as a date and a number as a number, so an export or a
+--     future filter compares them properly rather than as text;
+--   * the contacts and deals SELECTs that every screen and sign-in path share
+--     are not touched, so an unmigrated database breaks only this feature;
+--   * the database itself can refuse a value in the wrong column, on the wrong
+--     kind of record, or from another workspace (see the trigger below).
+--
+-- A field is ARCHIVED, never deleted. Somebody tidying the list must not be one
+-- click from destroying what colleagues typed into four hundred records;
+-- archived fields disappear from forms and panels, keep their values, and can
+-- be restored.
+--
+-- A field's KIND never changes after creation: "12" typed as text is not a
+-- number, and silently reinterpreting existing values is how data gets lost.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS custom_fields (
+  id              TEXT PRIMARY KEY,
+  sub_account_id  TEXT NOT NULL REFERENCES sub_accounts(id) ON DELETE CASCADE,
+  entity          TEXT NOT NULL CHECK (entity IN ('contact', 'deal')),
+  label           TEXT NOT NULL CHECK (length(btrim(label)) BETWEEN 1 AND 60),
+  kind            TEXT NOT NULL CHECK (kind IN ('text', 'number', 'date', 'choice', 'yes_no')),
+  -- The choices for a `choice` field, in the order offered. Empty for every
+  -- other kind, and never empty for a choice — a dropdown with nothing in it.
+  options         TEXT[] NOT NULL DEFAULT '{}',
+  position        INTEGER NOT NULL DEFAULT 0,
+  archived_at     TIMESTAMPTZ,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  CONSTRAINT custom_fields_options_shape CHECK ((kind = 'choice') = (cardinality(options) > 0))
+);
+
+-- Two live fields both called "Site" on the same kind of record is a form
+-- nobody can fill in correctly. An archived one does not count, so a label can
+-- be reused after its old field is put away.
+CREATE UNIQUE INDEX IF NOT EXISTS custom_fields_label_once
+  ON custom_fields (sub_account_id, entity, lower(label)) WHERE archived_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS custom_fields_tenant_idx ON custom_fields (sub_account_id, entity, position);
+
+ALTER TABLE custom_fields ENABLE ROW LEVEL SECURITY;
+ALTER TABLE custom_fields FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS custom_fields_tenant_isolation ON custom_fields;
+CREATE POLICY custom_fields_tenant_isolation ON custom_fields
+  USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
+  WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
+
+CREATE TABLE IF NOT EXISTS custom_field_values (
+  sub_account_id      TEXT NOT NULL REFERENCES sub_accounts(id) ON DELETE CASCADE,
+  field_id            TEXT NOT NULL REFERENCES custom_fields(id) ON DELETE CASCADE,
+  -- Exactly one of these: the record the value belongs to. Two real foreign
+  -- keys rather than an `entity_id` string, so a value cannot outlive or point
+  -- past its record.
+  contact_id          TEXT REFERENCES contacts(id) ON DELETE CASCADE,
+  deal_id             TEXT REFERENCES deals(id) ON DELETE CASCADE,
+
+  -- Exactly one of these, chosen by the field's kind: text and choice use
+  -- value_text, number value_number, date value_date, yes_no value_bool.
+  value_text          TEXT CHECK (value_text IS NULL OR length(value_text) <= 500),
+  value_number        NUMERIC(19, 4),
+  value_date          DATE,
+  value_bool          BOOLEAN,
+
+  updated_by_user_id  TEXT REFERENCES users(id) ON DELETE SET NULL,
+  updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  CONSTRAINT custom_field_values_one_record CHECK (num_nonnulls(contact_id, deal_id) = 1),
+  CONSTRAINT custom_field_values_one_value
+    CHECK (num_nonnulls(value_text, value_number, value_date, value_bool) = 1)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS custom_field_values_contact_once
+  ON custom_field_values (field_id, contact_id) WHERE contact_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS custom_field_values_deal_once
+  ON custom_field_values (field_id, deal_id) WHERE deal_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS custom_field_values_tenant_idx
+  ON custom_field_values (sub_account_id, contact_id, deal_id);
+
+ALTER TABLE custom_field_values ENABLE ROW LEVEL SECURITY;
+ALTER TABLE custom_field_values FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS custom_field_values_tenant_isolation ON custom_field_values;
+CREATE POLICY custom_field_values_tenant_isolation ON custom_field_values
+  USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
+  WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
+
+-- A value must belong to a field of ITS workspace, on the right KIND of record,
+-- in the column its kind uses, on a record of the same workspace.
+--
+-- Row-level security cannot catch any of these: each write targets this
+-- tenant's rows and is legitimately allowed, and only the value is wrong. The
+-- result would be a contact carrying another customer's field, or a number
+-- quietly stored as text where no export or filter would ever treat it as one.
+CREATE OR REPLACE FUNCTION assert_custom_value_fits() RETURNS TRIGGER AS $$
+DECLARE
+  f_entity TEXT;
+  f_kind   TEXT;
+  fits     BOOLEAN;
+BEGIN
+  SELECT entity, kind INTO f_entity, f_kind FROM custom_fields
+   WHERE id = NEW.field_id AND sub_account_id = NEW.sub_account_id;
+
+  IF f_entity IS NULL THEN
+    RAISE EXCEPTION 'field % does not belong to sub-account %', NEW.field_id, NEW.sub_account_id
+      USING ERRCODE = 'check_violation';
+  END IF;
+
+  IF (f_entity = 'contact') <> (NEW.contact_id IS NOT NULL) THEN
+    RAISE EXCEPTION 'field % is for a %, not this record', NEW.field_id, f_entity
+      USING ERRCODE = 'check_violation';
+  END IF;
+
+  -- Assigned first, not written inside the IF: PL/pgSQL reads an IF condition
+  -- up to the first THEN, and a CASE has THENs of its own.
+  fits := CASE f_kind
+            WHEN 'number' THEN NEW.value_number IS NOT NULL
+            WHEN 'date'   THEN NEW.value_date   IS NOT NULL
+            WHEN 'yes_no' THEN NEW.value_bool   IS NOT NULL
+            ELSE NEW.value_text IS NOT NULL
+          END;
+  IF NOT fits THEN
+    RAISE EXCEPTION 'a % field cannot hold that value', f_kind
+      USING ERRCODE = 'check_violation';
+  END IF;
+
+  IF NEW.contact_id IS NOT NULL AND NOT EXISTS (
+       SELECT 1 FROM contacts c WHERE c.id = NEW.contact_id AND c.sub_account_id = NEW.sub_account_id) THEN
+    RAISE EXCEPTION 'contact % does not belong to sub-account %', NEW.contact_id, NEW.sub_account_id
+      USING ERRCODE = 'check_violation';
+  END IF;
+
+  IF NEW.deal_id IS NOT NULL AND NOT EXISTS (
+       SELECT 1 FROM deals d WHERE d.id = NEW.deal_id AND d.sub_account_id = NEW.sub_account_id) THEN
+    RAISE EXCEPTION 'deal % does not belong to sub-account %', NEW.deal_id, NEW.sub_account_id
+      USING ERRCODE = 'check_violation';
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS custom_field_values_fit ON custom_field_values;
+CREATE TRIGGER custom_field_values_fit
+  BEFORE INSERT OR UPDATE ON custom_field_values
+  FOR EACH ROW EXECUTE FUNCTION assert_custom_value_fits();
+
+-- ---------------------------------------------------------------------------
 -- What the application's own database role may do.
 --
 -- KEEP THIS THE LAST BLOCK IN THE FILE: `GRANT … ON ALL TABLES` covers only the

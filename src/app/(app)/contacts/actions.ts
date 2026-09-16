@@ -17,6 +17,7 @@ import type { TenantQuery } from "@/server/tenant";
 import { email as validEmail, id as validId, multiline, text } from "@/server/validate";
 import { logWrite } from "@/server/log";
 import { importContacts, previewImport } from "@/server/import-contacts";
+import { applyCustomValues, parseCustomValues } from "@/server/custom-field-form";
 import {
   BULK_LIMIT,
   bulkAssignOwner,
@@ -96,6 +97,11 @@ export async function addContactAction(formData: FormData) {
     const input = parseContact(formData);
     if (!input) return;
 
+    /* Before anything is written, so a bad value refuses the whole save
+       rather than leaving a person created without it. */
+    const custom = await parseCustomValues(q, "contact", formData);
+    if ("error" in custom) return { error: custom.error };
+
     // Ownership comes from the session, never the form. A client could
     // otherwise claim any owner it liked — and the database now refuses an
     // owner from outside this tenant regardless.
@@ -104,6 +110,7 @@ export async function addContactAction(formData: FormData) {
       companyId: await companyIdFrom(q, formData),
       ownerUserId: q.ctx.userId,
     });
+    await applyCustomValues(q, "contact", created.id, custom);
 
     await logActivity(q, {
       entityType: "contact",
@@ -188,16 +195,23 @@ export async function updateContactAction(id: string, formData: FormData) {
     const before = await getContact(q, contactId);
     if (!before) return;
 
+    const custom = await parseCustomValues(q, "contact", formData);
+    if ("error" in custom) return { error: custom.error };
+
     await updateContact(q, contactId, {
       ...input,
       companyId: await companyIdFrom(q, formData),
     });
+    const customChanged = await applyCustomValues(q, "contact", contactId, custom);
 
     // Name the fields that changed rather than logging a bare "updated" — the
     // point of a history is being able to see what somebody actually did.
-    const changed = (["firstName", "lastName", "email", "phone", "location"] as const).filter(
-      (k) => String(before[k] ?? "") !== String(input[k] ?? "")
-    );
+    const changed = [
+      ...(["firstName", "lastName", "email", "phone", "location"] as const).filter(
+        (k) => String(before[k] ?? "") !== String(input[k] ?? "")
+      ),
+      ...customChanged,
+    ];
 
     if (changed.length) {
       await logActivity(q, {

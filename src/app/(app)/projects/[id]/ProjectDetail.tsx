@@ -25,6 +25,8 @@ import { TimeAgo } from "@/components/ui/TimeAgo";
 import { stageMeta } from "@/data/pipeline";
 import { clsx } from "@/lib/clsx";
 import { useFormDisclosure } from "@/lib/form-disclosure";
+import { CustomFieldInputs } from "@/components/custom-fields/CustomFieldInputs";
+import { displayValue, type CustomField, type FieldValues } from "@/server/custom-field-rules";
 import { useRememberedToggle } from "@/lib/remembered-toggle";
 import type {
   DocumentLine,
@@ -159,6 +161,8 @@ type TabId = (typeof TABS)[number]["id"];
 
 export function ProjectDetail({
   header,
+  customFields,
+  customValues,
   people,
   documents,
   priceItems,
@@ -171,6 +175,9 @@ export function ProjectDetail({
   candidates,
 }: {
   header: ProjectHeader;
+  /** This workspace's live custom fields for deals, and this job's values. */
+  customFields: CustomField[];
+  customValues: FieldValues;
   people: ProjectPerson[];
   documents: ProjectDocument[];
   /** The active price list, so a hand-typed line can pick a rate. */
@@ -208,7 +215,7 @@ export function ProjectDetail({
         All projects
       </Link>
 
-      <ProjectHeaderCard header={header} stage={stage} />
+      <ProjectHeaderCard header={header} stage={stage} customFields={customFields} customValues={customValues} />
 
       <MoneyStrip value={header.valueCents} figures={figures} />
 
@@ -283,10 +290,19 @@ export function ProjectDetail({
 function ProjectHeaderCard({
   header,
   stage,
+  customFields,
+  customValues,
 }: {
   header: ProjectHeader;
   stage: { label: string; color: string };
+  customFields: CustomField[];
+  customValues: FieldValues;
 }) {
+  /* Only the ones filled in, beside the owner and dates — the same rule those
+     follow. "Capacity —" is a line spent saying nothing; Edit details is where
+     the empty ones are. */
+  const filled = customFields.filter((f) => customValues[f.id] !== undefined);
+  const hasDetails = Boolean(header.site || header.startsOn || header.dueOn || filled.length);
   const [state, action, pending] = useActionState<FormState, FormData>(
     updateProjectAction,
     undefined
@@ -346,12 +362,20 @@ function ProjectHeaderCard({
               Due <span className="font-medium text-[var(--text)]">{readableDay(header.dueOn)}</span>
             </span>
           )}
+          {filled.map((field) => (
+            <span key={field.id}>
+              {field.label}{" "}
+              <span className="font-medium text-[var(--text)]">
+                {displayValue(field.kind, customValues[field.id])}
+              </span>
+            </span>
+          ))}
           <button
             type="button"
             onClick={openEdit}
             className="focus-ring rounded-lg font-medium text-accent transition-opacity hover:opacity-80"
           >
-            {header.site || header.startsOn || header.dueOn ? "Edit details" : "Add site and dates"}
+            {hasDetails ? "Edit details" : customFields.length ? "Add details" : "Add site and dates"}
           </button>
         </div>
       )}
@@ -370,6 +394,7 @@ function ProjectHeaderCard({
             <Field label="Site" name="site" defaultValue={header.site ?? ""} placeholder="Stellenbosch" />
             <Field label="Starts" name="startsOn" type="date" defaultValue={header.startsOn ?? ""} />
             <Field label="Due" name="dueOn" type="date" defaultValue={header.dueOn ?? ""} />
+            <CustomFieldInputs fields={customFields} values={customValues} />
           </div>
           <div className="flex justify-end gap-2">
             <button type="button" onClick={closeEdit} className="btn-soft focus-ring rounded-xl px-4 py-2 text-xs font-medium text-muted">

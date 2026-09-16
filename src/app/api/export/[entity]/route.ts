@@ -1,6 +1,9 @@
 import { listCompanies } from "@/server/repos/companies";
 import { listContacts } from "@/server/repos/contacts";
 import { listDeals } from "@/server/repos/deals";
+import { listFields, valuesFor } from "@/server/repos/custom-fields";
+import { displayValue, type FieldEntity } from "@/server/custom-field-rules";
+import type { TenantQuery } from "@/server/tenant";
 import { listMeetings } from "@/server/repos/meetings";
 import { toCsv } from "@/server/csv";
 import { canAccessCrm } from "@/server/permissions";
@@ -37,6 +40,28 @@ function isEntity(value: string): value is Entity {
 
 /** Cents to a plain decimal, so a spreadsheet reads it as money and not as 500000. */
 const amount = (cents: number) => (cents / 100).toFixed(2);
+
+/**
+ * The workspace's own fields, as extra columns.
+ *
+ * Archived fields are included and say so: an export is somebody taking their
+ * data with them, and what they typed into a field they later put away is
+ * still theirs. Numbers and dates go out in their plain form — "12500",
+ * "2026-10-01" — which a spreadsheet reads as a number and a date; the display
+ * formatting is only for yes/no.
+ */
+async function customColumns(q: TenantQuery, entity: FieldEntity, ids: string[]) {
+  const fields = await listFields(q, entity, { includeArchived: true });
+  const values = await valuesFor(q, entity, ids);
+  return {
+    headers: fields.map((f) => (f.archived ? `${f.label} (archived)` : f.label)),
+    cells: (id: string) =>
+      fields.map((f) => {
+        const v = values[id]?.[f.id];
+        return v === undefined ? "" : f.kind === "yes_no" ? displayValue(f.kind, v).toLowerCase() : v;
+      }),
+  };
+}
 
 export async function GET(
   _request: Request,
@@ -79,8 +104,9 @@ export async function GET(
     switch (entity) {
       case "contacts": {
         const rows = await listContacts(q);
+        const custom = await customColumns(q, "contact", rows.map((c) => c.id));
         return toCsv(
-          ["First name", "Last name", "Email", "Phone", "Company", "Location", "Client", "Open deal", "Added"],
+          ["First name", "Last name", "Email", "Phone", "Company", "Location", "Client", "Open deal", "Added", ...custom.headers],
           rows.map((c) => [
             c.firstName,
             c.lastName,
@@ -91,6 +117,7 @@ export async function GET(
             c.isClient ? "yes" : "no",
             c.hasOpenDeal ? "yes" : "no",
             c.createdAt,
+            ...custom.cells(c.id),
           ])
         );
       }
@@ -101,8 +128,9 @@ export async function GET(
         const nameOf = new Map(
           contacts.map((c) => [c.id, `${c.firstName} ${c.lastName}`.trim()])
         );
+        const custom = await customColumns(q, "deal", deals.map((d) => d.id));
         return toCsv(
-          ["Title", "Contact", "Value", "Stage", "Source", "Lost reason", "Won at", "Created"],
+          ["Title", "Contact", "Value", "Stage", "Source", "Lost reason", "Won at", "Created", ...custom.headers],
           deals.map((d) => [
             d.title,
             d.contactId ? nameOf.get(d.contactId) ?? "" : "",
@@ -112,6 +140,7 @@ export async function GET(
             d.lostReason ?? "",
             d.wonAt ?? "",
             d.createdAt,
+            ...custom.cells(d.id),
           ])
         );
       }

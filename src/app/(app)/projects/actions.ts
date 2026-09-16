@@ -1,6 +1,7 @@
 "use server";
 
 import { logWrite } from "@/server/log";
+import { applyCustomValues, parseCustomValues } from "@/server/custom-field-form";
 import { cascade } from "@/server/repos/tasks";
 import { revalidateApp } from "@/server/revalidate";
 import { requireTenant, withCurrentTenant } from "@/server/tenant-session";
@@ -54,6 +55,10 @@ export async function updateProjectAction(_prev: FormState, formData: FormData):
       return { error: "The due date is before the start date." };
     }
 
+    /* Checked before the deal is touched, so a bad value saves nothing. */
+    const custom = await parseCustomValues(q, "deal", formData);
+    if ("error" in custom) return { error: custom.error };
+
     const row = await q.one<{ id: string }>(
       `UPDATE deals
           SET site = $3, starts_on = $4::date, due_on = $5::date, updated_at = now()
@@ -62,6 +67,7 @@ export async function updateProjectAction(_prev: FormState, formData: FormData):
       [q.ctx.subAccountId, dealId, site || null, startsOn, dueOn]
     );
     if (!row) return { error: "That project no longer exists." };
+    await applyCustomValues(q, "deal", dealId, custom);
 
     revalidateApp();
     return { ok: "Project updated." };
