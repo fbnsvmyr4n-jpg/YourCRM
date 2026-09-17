@@ -600,7 +600,11 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
           className="col-span-2 @min-[880px]:col-span-1"
           wide
           icon={<Wallet className="h-5 w-5" />}
-          label="Open Pipeline"
+          /* NOT "Open Pipeline": Reports uses that name for every open stage,
+             prospects included, and this tile deliberately leaves prospects out
+             (see the note on the summary above). Two screens showing different
+             money under one name is how somebody stops believing either. */
+          label="In Discussion"
           sub="Discovery and Demo"
           value={fullMoney(summary.open)}
           tone="var(--amber)"

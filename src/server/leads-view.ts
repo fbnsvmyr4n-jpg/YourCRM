@@ -117,7 +117,15 @@ export async function listLeadsWithStatus(q: TenantQuery): Promise<LeadCard[]> {
      FROM contacts c
      JOIN deals d ON d.contact_id = c.id AND d.deleted_at IS NULL AND d.stage <> 'lost'
      WHERE c.sub_account_id = $1 AND c.deleted_at IS NULL
-     ORDER BY c.id, d.created_at ASC`,
+     /* OPEN work first, then oldest.
+
+        This ordered by date alone, so a contact was described by their EARLIEST
+        deal — and a client who comes back disappeared from this page: their old
+        won job made them "Closed Won" while the new enquiry sat here unlisted and
+        uncounted. Found on 18 Sep 2026 with a fixture where one person had both;
+        Home counted 3 open leads and this page showed 2. Repeat business is the
+        cheapest work there is, so it is exactly what this page must not lose. */
+     ORDER BY c.id, (d.won_at IS NULL) DESC, d.created_at ASC`,
     [q.ctx.subAccountId]
   );
 

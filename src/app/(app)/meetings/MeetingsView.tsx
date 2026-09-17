@@ -172,8 +172,9 @@ function MeetingsBreakdown({
   analytics: MeetingAnalytics;
   meetings: UpcomingMeeting[];
 }) {
-  // Soonest first. `when` is already recomputed from the stored date on read,
-  // so anything past reads as "Today" and stays visible rather than vanishing.
+  // Soonest first. `when` is recomputed from the stored date on read, so a
+  // meeting whose day has gone is listed as "Past" — visible, and named
+  // honestly, which is what it was not until 18 Sep 2026.
   const next = [...meetings]
     .filter((m) => m.date)
     .sort((a, b) => (a.date! + toDisplayTime(a.time)).localeCompare(b.date! + toDisplayTime(b.time)))
@@ -754,8 +755,9 @@ function MeetingCard({
         <span
           className="rounded-md px-2 py-0.5 text-[10px] font-semibold"
           style={{
-            background: m.when === "Today" ? "var(--accent-soft)" : "var(--amber-soft)",
-            color: m.when === "Today" ? "var(--accent)" : "var(--amber)",
+            background:
+              m.when === "Today" ? "var(--accent-soft)" : m.when === "Past" ? "var(--red-soft)" : "var(--amber-soft)",
+            color: m.when === "Today" ? "var(--accent)" : m.when === "Past" ? "var(--red)" : "var(--amber)",
           }}
         >
           {m.when}
@@ -872,8 +874,9 @@ function MeetingRow({
         <span
           className="mr-2 rounded-md px-2 py-0.5 text-[10px] font-semibold"
           style={{
-            background: m.when === "Today" ? "var(--accent-soft)" : "var(--amber-soft)",
-            color: m.when === "Today" ? "var(--accent)" : "var(--amber)",
+            background:
+              m.when === "Today" ? "var(--accent-soft)" : m.when === "Past" ? "var(--red-soft)" : "var(--amber-soft)",
+            color: m.when === "Today" ? "var(--accent)" : m.when === "Past" ? "var(--red)" : "var(--amber)",
           }}
         >
           {m.when}

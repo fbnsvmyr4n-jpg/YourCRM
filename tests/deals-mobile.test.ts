@@ -98,9 +98,9 @@ describe("the deals board on a phone", () => {
   it("ranks the four summary figures instead of tiling them", () => {
     /**
      * Four equal boxes claimed four equal facts. Three are money and one is a
-     * count; among the money only Open Pipeline is about what can still
+     * count; among the money only In Discussion is about what can still
      * happen, Closed Won is the scoreboard, and In Delivery is a sub-state of
-     * it. So Open Pipeline takes the full row, the two "won" figures pair
+     * it. So In Discussion takes the full row, the two "won" figures pair
      * beneath it, and the count lays out as a slim strip where a number that
      * is not money stops competing with ones that are.
      *
@@ -119,7 +119,11 @@ describe("the deals board on a phone", () => {
     /* Order is the deliverable here, so it is asserted as a sequence rather
        than as four independent labels. */
     const labels = [...board.matchAll(/^\s*label="([^"]+)"/gm)].map((m) => m[1]);
-    expect(labels).toEqual(["Open Pipeline", "In Delivery", "Closed Won", "Total Deals"]);
+    /* "In Discussion" since 18 Sep 2026: Reports calls every open stage the
+       "Open Pipeline", prospects included, and this tile leaves prospects out —
+       so the two screens showed different money under one name. The ranking
+       this test is about is unchanged. */
+    expect(labels).toEqual(["In Discussion", "In Delivery", "Closed Won", "Total Deals"]);
   });
 
   it("keeps the wide tiles short so they read as a different rank", () => {

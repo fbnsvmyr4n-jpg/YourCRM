@@ -8,6 +8,18 @@ export const MEETING_STATUSES = ["Confirmed", "Pending"] as const;
 export type MeetingStatus = (typeof MEETING_STATUSES)[number];
 
 export const MEETING_WHENS = ["Today", "Tomorrow", "This Week"] as const;
+
+/**
+ * What a meeting is LABELLED as, which includes one a caller can never ask
+ * for: a meeting whose time has passed.
+ *
+ * Until 18 Sep 2026 anything past was labelled "Today" so it would stay
+ * visible. It stayed visible and it lied: a meeting from two days ago sat
+ * under "Today" while Home said, correctly, that there were no meetings today.
+ * Keeping it on screen is right; calling it today is not.
+ */
+export const MEETING_LABELS = [...MEETING_WHENS, "Past"] as const;
+export type MeetingLabel = (typeof MEETING_LABELS)[number];
 export type MeetingWhen = (typeof MEETING_WHENS)[number];
 
 /**
@@ -55,7 +67,7 @@ export type UpcomingMeeting = {
    * their stored label.
    */
   date?: string;
-  when: MeetingWhen;
+  when: MeetingLabel;
   time: string;
   initials: string;
   color: AvatarColor;

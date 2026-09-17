@@ -30,7 +30,11 @@ function whenLabel(date: string, todayKey: string): UpcomingMeeting["when"] {
   const d = Date.parse(`${date}T00:00:00Z`);
   if (!Number.isFinite(d) || !Number.isFinite(t)) return "This Week";
   const days = Math.round((d - t) / 86_400_000);
-  if (days <= 0) return "Today";
+  /* A meeting whose day has gone says so. It used to say "Today", which kept
+     it visible by misnaming it — and disagreed with Home, which counts the
+     real day. It is still listed; it is just called what it is. */
+  if (days < 0) return "Past";
+  if (days === 0) return "Today";
   if (days === 1) return "Tomorrow";
   return "This Week";
 }
