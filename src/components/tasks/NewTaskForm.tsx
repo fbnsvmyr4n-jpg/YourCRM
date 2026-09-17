@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState, useRef } from "react";
+import { useRef } from "react";
+import { useKeptForm } from "@/lib/use-kept-form";
 import { Plus } from "lucide-react";
 import { Banner } from "@/components/ui/Banner";
 import { addDays } from "@/server/todo-rules";
@@ -39,10 +40,11 @@ export function NewTaskForm({
   onDone?: () => void;
 }) {
   const formRef = useRef<HTMLFormElement>(null);
-  const [state, action, pending] = useActionState<TaskFormState, FormData>(async (prev, formData) => {
+  const { state, onSubmit, pending } = useKeptForm<TaskFormState>(async (prev, formData) => {
     const out = await createTodoAction(prev, formData);
     if (out?.ok) {
-      formRef.current?.reset();
+      /* The hook clears the form after a save that worked; focus goes back
+         to the title so the next task can be typed straight away. */
       formRef.current?.querySelector<HTMLInputElement>('input[name="title"]')?.focus();
       onDone?.();
     }
@@ -51,7 +53,7 @@ export function NewTaskForm({
   const meIsAssignable = team.some((p) => p.id === currentUserId);
 
   return (
-    <form ref={formRef} action={action} className="space-y-3">
+    <form ref={formRef} onSubmit={onSubmit} className="space-y-3">
       {state?.error && <Banner state={state} />}
       {contactId && <input type="hidden" name="contactId" value={contactId} />}
       <div className="flex gap-2">

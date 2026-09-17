@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 
-import { useActionState, useState } from "react";
+import { useState } from "react";
+import { useKeptForm } from "@/lib/use-kept-form";
 import { AlertCircle, ArrowRight, Eye, EyeOff, Lock, ShieldCheck, User } from "lucide-react";
 import { signInAction, type AuthState } from "@/app/(auth)/actions";
 import { BrandLockup } from "@/components/login/OrbitScene";
@@ -12,7 +13,7 @@ export default function LoginPage() {
   const [showPw, setShowPw] = useState(false);
   const [showReset, setShowReset] = useState(false);
   const [oauthNote, setOauthNote] = useState<string | null>(null);
-  const [state, formAction, pending] = useActionState<AuthState, FormData>(signInAction, undefined);
+  const { state, onSubmit: formAction, pending } = useKeptForm<AuthState>(signInAction, undefined);
 
   return (
 
@@ -28,7 +29,7 @@ export default function LoginPage() {
           Sign in to continue your journey
         </p>
 
-        <form className="mt-8 space-y-3.5" action={formAction}>
+        <form className="mt-8 space-y-3.5" onSubmit={formAction}>
           {state?.error && (
             <p
               className="flex items-center gap-2 rounded-2xl px-4 py-3 text-left text-sm"

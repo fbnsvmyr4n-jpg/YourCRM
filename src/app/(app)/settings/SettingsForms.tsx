@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState, useState, useSyncExternalStore } from "react";
+import { useState, useSyncExternalStore } from "react";
+import { useKeptForm } from "@/lib/use-kept-form";
 import { useFormDisclosure } from "@/lib/form-disclosure";
 import { CURRENCIES, currencySymbol } from "@/lib/money";
 import {
@@ -46,12 +47,12 @@ import {
 } from "./actions";
 
 export function ProfileForm({ user }: { user: SafeUser }) {
-  const [state, action, pending] = useActionState<FormState, FormData>(updateProfileAction, undefined);
+  const { state, onSubmit: action, pending } = useKeptForm<FormState>(updateProfileAction, undefined);
 
   return (
     <Card className="card-q">
       <CardHeader title="Profile" icon={<UserRound className="h-[18px] w-[18px] text-accent" />} />
-      <form action={action} className="space-y-4">
+      <form onSubmit={action} className="space-y-4">
         <Banner state={state} />
         <div className="grid grid-cols-1 gap-4 @min-[440px]:grid-cols-2">
           <Field label="Full name" name="name" defaultValue={user.name} required />
@@ -118,7 +119,7 @@ const COMMON_ZONES = [
 ];
 
 export function TargetsForm({ settings }: { settings: Settings }) {
-  const [state, action, pending] = useActionState<FormState, FormData>(updateTargetsAction, undefined);
+  const { state, onSubmit: action, pending } = useKeptForm<FormState>(updateTargetsAction, undefined);
 
   const ZONES = COMMON_ZONES.includes(settings.timeZone)
     ? COMMON_ZONES
@@ -127,7 +128,7 @@ export function TargetsForm({ settings }: { settings: Settings }) {
   return (
     <Card className="card-q">
       <CardHeader title="Targets & capacity" icon={<Target className="h-[18px] w-[18px] text-accent" />} />
-      <form action={action} className="space-y-4">
+      <form onSubmit={action} className="space-y-4">
         <Banner state={state} />
         <div className="grid grid-cols-1 gap-4 @min-[440px]:grid-cols-2">
           <Field
@@ -209,7 +210,7 @@ export function TargetsForm({ settings }: { settings: Settings }) {
  * the part a fold usually gets wrong.
  */
 export function PasswordForm() {
-  const [state, action, pending] = useActionState<FormState, FormData>(changePasswordAction, undefined);
+  const { state, onSubmit: action, pending } = useKeptForm<FormState>(changePasswordAction, undefined);
   const [open, openForm, closeForm] = useFormDisclosure(state, (s) => Boolean(s?.ok));
 
   return (
@@ -238,7 +239,7 @@ export function PasswordForm() {
       {!open && state && <Banner state={state} />}
 
       {open && (
-        <form action={action} className="space-y-4">
+        <form onSubmit={action} className="space-y-4">
           <Banner state={state} />
           <Field label="Current password" name="currentPassword" type="password" required />
           <div className="grid grid-cols-1 gap-4 @min-[440px]:grid-cols-2">
@@ -339,14 +340,10 @@ export function WorkspacesCard({
   planName: string;
   canManage: boolean;
 }) {
-  const [createState, create, creating] = useActionState<FormState, FormData>(
-    createWorkspaceAction,
-    undefined
-  );
-  const [switchState, doSwitch, switching] = useActionState<FormState, FormData>(
-    switchWorkspaceAction,
-    undefined
-  );
+  const { state: createState, onSubmit: create, pending: creating } = useKeptForm<FormState>(createWorkspaceAction,
+    undefined);
+  const { state: switchState, onSubmit: doSwitch, pending: switching } = useKeptForm<FormState>(switchWorkspaceAction,
+    undefined);
   const atLimit = limit !== null && workspaces.length >= limit;
   const [addOpen, openAdd, closeAdd] = useFormDisclosure(createState, (st) => Boolean(st?.ok));
 
@@ -399,7 +396,7 @@ export function WorkspacesCard({
               {active ? (
                 <span className="text-xs font-semibold text-accent">Current</span>
               ) : (
-                <form action={doSwitch}>
+                <form onSubmit={doSwitch}>
                   <input type="hidden" name="subAccountId" value={w.id} />
                   <button
                     type="submit"
@@ -446,7 +443,7 @@ export function WorkspacesCard({
               </button>
             </div>
           ) : (
-            <form action={create} className="space-y-4">
+            <form onSubmit={create} className="space-y-4">
               <Banner state={createState} />
               <div className="grid grid-cols-1 gap-4 @min-[440px]:grid-cols-2">
                 <Field label="Client name" name="name" required />
@@ -509,10 +506,8 @@ export function WorkingHoursCard({
   week: OpenDay[];
   timeZone: string;
 }) {
-  const [state, action, pending] = useActionState<FormState, FormData>(
-    updateWorkingHoursAction,
-    undefined
-  );
+  const { state, onSubmit: action, pending } = useKeptForm<FormState>(updateWorkingHoursAction,
+    undefined);
 
   const configured = week.length > 0;
   /* The suggestion fills the FORM, never the store. `configured` above is what
@@ -525,7 +520,7 @@ export function WorkingHoursCard({
         title="Opening hours"
         icon={<Clock className="h-[18px] w-[18px] text-accent" />}
       />
-      <form action={action} className="space-y-4">
+      <form onSubmit={action} className="space-y-4">
         <Banner state={state} />
 
         {!configured && (
@@ -623,10 +618,8 @@ export function BookingLinkCard({
   link: BookingLink | null;
   hasHours: boolean;
 }) {
-  const [state, action, pending] = useActionState<FormState, FormData>(
-    saveBookingLinkAction,
-    undefined
-  );
+  const { state, onSubmit: action, pending } = useKeptForm<FormState>(saveBookingLinkAction,
+    undefined);
   const bookingsLive = Boolean(link?.enabled);
   const enquiriesLive = Boolean(link?.enquiriesEnabled);
   /* The site's own address, for code pasted into ANOTHER site — a relative
@@ -646,7 +639,7 @@ export function BookingLinkCard({
   return (
     <Card className="card-q">
       <CardHeader title="Public pages" icon={<Link2 className="h-[18px] w-[18px] text-accent" />} />
-      <form action={action} className="space-y-4">
+      <form onSubmit={action} className="space-y-4">
         <Banner state={state} />
 
         <div className="grid grid-cols-1 gap-2 @min-[560px]:grid-cols-2">
@@ -874,15 +867,11 @@ export function HolidaysCard({
   /** Resolved on the server against the business's zone, not the device's. */
   thisYear: number;
 }) {
-  const [addState, add, adding] = useActionState<FormState, FormData>(addHolidayAction, undefined);
-  const [importState, importYear, importing] = useActionState<FormState, FormData>(
-    importHolidaysAction,
-    undefined
-  );
-  const [removeState, remove] = useActionState<FormState, FormData>(
-    removeHolidayAction,
-    undefined
-  );
+  const { state: addState, onSubmit: add, pending: adding } = useKeptForm<FormState>(addHolidayAction, undefined);
+  const { state: importState, onSubmit: importYear, pending: importing } = useKeptForm<FormState>(importHolidaysAction,
+    undefined);
+  const { state: removeState, onSubmit: remove } = useKeptForm<FormState>(removeHolidayAction,
+    undefined);
 
   /* Grouped by year, newest first, because a calendar with three years in it is
      three lists rather than one of forty rows. */
@@ -913,7 +902,7 @@ export function HolidaysCard({
         <Banner state={removeState} />
       </div>
 
-      <form action={importYear} className="mt-3 flex flex-wrap items-end gap-2">
+      <form onSubmit={importYear} className="mt-3 flex flex-wrap items-end gap-2">
         <input type="hidden" name="setId" value="za" />
         <label className="w-28">
           <span className="mb-1.5 block text-xs font-medium text-muted">Year</span>
@@ -935,7 +924,7 @@ export function HolidaysCard({
         </button>
       </form>
 
-      <form action={add} className="mt-3 flex flex-wrap items-end gap-2 border-t border-[var(--border)] pt-3">
+      <form onSubmit={add} className="mt-3 flex flex-wrap items-end gap-2 border-t border-[var(--border)] pt-3">
         <label className="w-40">
           <span className="mb-1.5 block text-xs font-medium text-muted">Date</span>
           <input type="date" name="onDate" required className="field-input" />
@@ -975,7 +964,7 @@ export function HolidaysCard({
                       {readableHoliday(h.onDate)}
                     </span>
                     <span className="min-w-0 flex-1 truncate text-sm">{h.name}</span>
-                    <form action={remove} className="shrink-0">
+                    <form onSubmit={remove} className="shrink-0">
                       <input type="hidden" name="id" value={h.id} />
                       <button
                         type="submit"

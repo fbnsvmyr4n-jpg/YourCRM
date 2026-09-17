@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useKeptForm } from "@/lib/use-kept-form";
 import { MessageSquareText, Plus } from "lucide-react";
 import { Card, CardHeader, CardMeta } from "@/components/ui/Card";
@@ -82,7 +82,7 @@ export function TemplatesCard({
 function TemplateRow({ template: t, me, canChange }: { template: MessageTemplate; me: { name: string; business: string }; canChange: boolean }) {
   const edit = useKeptForm<FormState>(updateTemplateAction, undefined);
   const editState = edit.state;
-  const [deleteState, remove, deleting] = useActionState<FormState, FormData>(deleteTemplateAction, undefined);
+  const { state: deleteState, onSubmit: remove, pending: deleting } = useKeptForm<FormState>(deleteTemplateAction, undefined);
   const [isEditing, openEdit, closeEdit] = useFormDisclosure(editState, (s) => Boolean(s?.ok));
   const [confirming, setConfirming] = useState(false);
 
@@ -107,7 +107,7 @@ function TemplateRow({ template: t, me, canChange }: { template: MessageTemplate
             Edit
           </button>
           {confirming ? (
-            <form action={remove} className="flex items-center gap-2">
+            <form onSubmit={remove} className="flex items-center gap-2">
               <input type="hidden" name="id" value={t.id} />
               <span className="text-xs text-muted">Delete for everyone?</span>
               <button type="button" onClick={() => setConfirming(false)} className="btn-soft focus-ring rounded-lg px-2.5 py-1.5 text-xs font-medium">

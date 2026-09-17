@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState } from "react";
+
+import { useKeptForm } from "@/lib/use-kept-form";
 import { enquireAction, type EnquireState } from "./actions";
 
 /**
@@ -15,7 +16,7 @@ import { enquireAction, type EnquireState } from "./actions";
  * assistive technology so a screen reader user is never asked to fill it.
  */
 export function EnquiryView({ slug, workspaceName }: { slug: string; workspaceName: string }) {
-  const [state, action, pending] = useActionState<EnquireState, FormData>(enquireAction, undefined);
+  const { state, onSubmit: action, pending } = useKeptForm<EnquireState>(enquireAction, undefined);
 
   if (state?.ok) {
     return (
@@ -37,7 +38,7 @@ export function EnquiryView({ slug, workspaceName }: { slug: string; workspaceNa
         <p className="text-sm text-muted">Tell us what you need and we will get back to you.</p>
       </header>
 
-      <form action={action} className="flex flex-col gap-3">
+      <form onSubmit={action} className="flex flex-col gap-3">
         <input type="hidden" name="slug" value={slug} />
 
         <div aria-hidden="true" className="absolute -left-[10000px] top-auto h-px w-px overflow-hidden">

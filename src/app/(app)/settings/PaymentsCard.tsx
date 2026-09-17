@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useState } from "react";
 import { Check, Copy, Wallet } from "lucide-react";
 import { Card, CardHeader, CardMeta } from "@/components/ui/Card";
 import { Banner } from "@/components/ui/Banner";
@@ -33,7 +33,7 @@ export function PaymentsCard({
 }) {
   const connect = useKeptForm<FormState>(connectPaystackAction, undefined);
   const { state: connectState, pending: connecting } = connect;
-  const [disconnectState, disconnect, disconnecting] = useActionState<FormState, FormData>(disconnectPaystackAction, undefined);
+  const { state: disconnectState, onSubmit: disconnect, pending: disconnecting } = useKeptForm<FormState>(disconnectPaystackAction, undefined);
   const [open, openForm, closeForm] = useFormDisclosure(connectState, (s) => Boolean(s?.ok));
   const [confirming, setConfirming] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -105,7 +105,7 @@ export function PaymentsCard({
                   Replace key
                 </button>
                 {confirming ? (
-                  <form action={disconnect} className="flex items-center gap-2">
+                  <form onSubmit={disconnect} className="flex items-center gap-2">
                     <span className="text-xs text-muted">Stop taking card payments?</span>
                     <button type="button" onClick={() => setConfirming(false)} className="btn-soft focus-ring rounded-lg px-2.5 py-1.5 text-xs font-medium">
                       Keep

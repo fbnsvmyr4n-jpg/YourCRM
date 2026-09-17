@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 
-import { useActionState, useState } from "react";
+import { useState } from "react";
+import { useKeptForm } from "@/lib/use-kept-form";
 import { AlertCircle, ArrowRight, Check, Eye, EyeOff, Lock, ShieldCheck } from "lucide-react";
 import { resetPasswordAction, type ResetState } from "@/app/(auth)/reset-actions";
 import { BrandLockup } from "@/components/login/OrbitScene";
@@ -17,7 +18,7 @@ export function ResetPasswordView({
   valid: boolean;
 }) {
   const [showPw, setShowPw] = useState(false);
-  const [state, action, pending] = useActionState<ResetState, FormData>(resetPasswordAction, undefined);
+  const { state, onSubmit: action, pending } = useKeptForm<ResetState>(resetPasswordAction, undefined);
   const done = !!state?.ok;
 
   return (
@@ -55,7 +56,7 @@ export function ResetPasswordView({
             Request a new link
           </Link>
         ) : (
-          <form className="mt-8 space-y-3.5" action={action}>
+          <form className="mt-8 space-y-3.5" onSubmit={action}>
             <input type="hidden" name="token" value={token} />
 
             {state?.error && (

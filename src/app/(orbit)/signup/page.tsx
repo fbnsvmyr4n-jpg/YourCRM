@@ -2,14 +2,15 @@
 
 import Link from "next/link";
 
-import { useActionState, useState } from "react";
+import { useState } from "react";
+import { useKeptForm } from "@/lib/use-kept-form";
 import { AlertCircle, ArrowRight, Eye, EyeOff, Lock, Mail, ShieldCheck, User } from "lucide-react";
 import { signUpAction, type AuthState } from "@/app/(auth)/actions";
 import { BrandLockup } from "@/components/login/OrbitScene";
 
 export default function SignUpPage() {
   const [showPw, setShowPw] = useState(false);
-  const [state, formAction, pending] = useActionState<AuthState, FormData>(signUpAction, undefined);
+  const { state, onSubmit: formAction, pending } = useKeptForm<AuthState>(signUpAction, undefined);
 
   return (
 
@@ -25,7 +26,7 @@ export default function SignUpPage() {
           Start managing your pipeline in minutes
         </p>
 
-        <form className="mt-8 space-y-3.5" action={formAction}>
+        <form className="mt-8 space-y-3.5" onSubmit={formAction}>
           {state?.error && (
             <p
               className="flex items-center gap-2 rounded-2xl px-4 py-3 text-left text-sm"

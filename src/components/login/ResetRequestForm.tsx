@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState } from "react";
+
+import { useKeptForm } from "@/lib/use-kept-form";
 import { AlertCircle, Check, Mail } from "lucide-react";
 import { requestResetAction, type ResetState } from "@/app/(auth)/reset-actions";
 
@@ -11,10 +12,10 @@ import { requestResetAction, type ResetState } from "@/app/(auth)/reset-actions"
  * is invalid HTML and would break the sign-in submit.
  */
 export function ResetRequestForm() {
-  const [state, action, pending] = useActionState<ResetState, FormData>(requestResetAction, undefined);
+  const { state, onSubmit: action, pending } = useKeptForm<ResetState>(requestResetAction, undefined);
 
   return (
-    <form action={action} className="mt-4 rounded-2xl bg-white/[0.035] p-3.5">
+    <form onSubmit={action} className="mt-4 rounded-2xl bg-white/[0.035] p-3.5">
       <p className="mb-2.5 text-xs leading-relaxed text-[#8b96aa]">
         Enter your email and we&apos;ll send a link to choose a new password.
       </p>

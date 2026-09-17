@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState, useRef, useState } from "react";
+import { useRef, useState } from "react";
+import { useKeptForm } from "@/lib/use-kept-form";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -315,10 +316,8 @@ function ProjectHeaderCard({
      the empty ones are. */
   const filled = customFields.filter((f) => customValues[f.id] !== undefined);
   const hasDetails = Boolean(header.site || header.startsOn || header.dueOn || filled.length);
-  const [state, action, pending] = useActionState<FormState, FormData>(
-    updateProjectAction,
-    undefined
-  );
+  const { state, onSubmit: action, pending } = useKeptForm<FormState>(updateProjectAction,
+    undefined);
   const [editing, openEdit, closeEdit] = useFormDisclosure(state, (s) => Boolean(s?.ok));
 
   return (
@@ -399,7 +398,7 @@ function ProjectHeaderCard({
       )}
 
       {editing && (
-        <form action={action} className="mt-4 space-y-3 border-t border-[var(--border)] pt-4">
+        <form onSubmit={action} className="mt-4 space-y-3 border-t border-[var(--border)] pt-4">
           <Banner state={state} />
           <input type="hidden" name="dealId" value={header.id} />
           <div className="grid grid-cols-1 gap-3 @min-[560px]:grid-cols-3">
@@ -527,14 +526,10 @@ function TeamTab({
   people: ProjectPerson[];
   candidates: { staff: Candidate[]; contacts: Candidate[] };
 }) {
-  const [addState, add, adding] = useActionState<FormState, FormData>(
-    addProjectPersonAction,
-    undefined
-  );
-  const [removeState, remove, removing] = useActionState<FormState, FormData>(
-    removeProjectPersonAction,
-    undefined
-  );
+  const { state: addState, onSubmit: add, pending: adding } = useKeptForm<FormState>(addProjectPersonAction,
+    undefined);
+  const { state: removeState, onSubmit: remove, pending: removing } = useKeptForm<FormState>(removeProjectPersonAction,
+    undefined);
   const [open, openAdd, closeAdd] = useFormDisclosure(addState, (s) => Boolean(s?.ok));
 
   const ours = people.filter((p) => p.side === "us");
@@ -569,7 +564,7 @@ function TeamTab({
         </div>
 
         {open && (
-          <form action={add} className="mb-4 space-y-3">
+          <form onSubmit={add} className="mb-4 space-y-3">
             <Banner state={addState} />
             <input type="hidden" name="dealId" value={dealId} />
             <div className="grid grid-cols-1 gap-3 @min-[440px]:grid-cols-2">
@@ -643,7 +638,7 @@ function PeopleGroup({
 }: {
   label: string;
   people: ProjectPerson[];
-  onRemove: (formData: FormData) => void;
+  onRemove: React.FormEventHandler<HTMLFormElement>;
   busy: boolean;
 }) {
   if (people.length === 0) return null;
@@ -685,7 +680,7 @@ function PeopleGroup({
                   <Phone className="h-4 w-4" />
                 </a>
               )}
-              <form action={onRemove}>
+              <form onSubmit={onRemove}>
                 <input type="hidden" name="id" value={p.id} />
                 <button
                   type="submit"
@@ -720,23 +715,15 @@ function DocumentsTab({
   /** The job's plan, so documents can be arranged and filed by stage. */
   tasks: ProjectTask[];
 }) {
-  const [createState, create, creating] = useActionState<FormState, FormData>(
-    createDocumentAction,
-    undefined
-  );
-  const [statusState, setStatus, settingStatus] = useActionState<FormState, FormData>(
-    setDocumentStatusAction,
-    undefined
-  );
+  const { state: createState, onSubmit: create, pending: creating } = useKeptForm<FormState>(createDocumentAction,
+    undefined);
+  const { state: statusState, onSubmit: setStatus, pending: settingStatus } = useKeptForm<FormState>(setDocumentStatusAction,
+    undefined);
   const [open, openForm, closeForm] = useFormDisclosure(createState, (s) => Boolean(s?.ok));
-  const [raiseState, raise, raising] = useActionState<FormState, FormData>(
-    raiseInvoiceAction,
-    undefined
-  );
-  const [sendState, send, sending] = useActionState<FormState, FormData>(
-    sendInvoiceAction,
-    undefined
-  );
+  const { state: raiseState, onSubmit: raise, pending: raising } = useKeptForm<FormState>(raiseInvoiceAction,
+    undefined);
+  const { state: sendState, onSubmit: send, pending: sending } = useKeptForm<FormState>(sendInvoiceAction,
+    undefined);
 
   /* The stage a new document is being raised for, when it was opened from a
      stage rather than from New. */
@@ -853,7 +840,7 @@ function DocumentsTab({
             key={formKey}
             dealId={dealId}
             priceItems={priceItems}
-            action={create}
+            onSubmit={create}
             pending={creating}
             state={createState}
             onCancel={cancelForm}
@@ -871,7 +858,7 @@ function DocumentsTab({
           offer only appears when there is an accepted quotation and nothing
           has been billed yet, so it cannot become a way to bill twice. */}
       {canInvoice && (
-        <form action={raise} className="mb-3">
+        <form onSubmit={raise} className="mb-3">
           <input type="hidden" name="dealId" value={dealId} />
           <button
             type="submit"
@@ -943,9 +930,9 @@ function StageView({
 }: {
   grouped: DocumentsByStage;
   tasks: ProjectTask[];
-  onStatus: (formData: FormData) => void;
+  onStatus: React.FormEventHandler<HTMLFormElement>;
   busy: boolean;
-  onSend: (formData: FormData) => void;
+  onSend: React.FormEventHandler<HTMLFormElement>;
   sending: boolean;
   onRaiseForStage: (task: { id: string; name: string }) => void;
 }) {
@@ -1059,10 +1046,10 @@ function DocumentGroup({
   label: string;
   docs: ProjectDocument[];
   tasks: ProjectTask[];
-  onStatus: (formData: FormData) => void;
+  onStatus: React.FormEventHandler<HTMLFormElement>;
   busy: boolean;
   /** Only invoices can be sent from here, so only they are given this. */
-  onSend?: (formData: FormData) => void;
+  onSend?: React.FormEventHandler<HTMLFormElement>;
   sending?: boolean;
 }) {
   if (docs.length === 0) return null;
@@ -1110,9 +1097,9 @@ function DocumentRow({
   shareCents?: number;
   /** The job's stages, for filing each line. */
   tasks?: ProjectTask[];
-  onStatus: (formData: FormData) => void;
+  onStatus: React.FormEventHandler<HTMLFormElement>;
   busy: boolean;
-  onSend?: (formData: FormData) => void;
+  onSend?: React.FormEventHandler<HTMLFormElement>;
   sending?: boolean;
 }) {
   const money = useExactMoney();
@@ -1195,7 +1182,7 @@ function DocumentRow({
               relying on the handler to refuse. A live button that does nothing
               is how somebody ends up pressing it three times wondering why. */}
           {onSend && !doc.sentAt && (
-            <form action={onSend} className="mt-3">
+            <form onSubmit={onSend} className="mt-3">
               <input type="hidden" name="documentId" value={doc.id} />
               <button
                 type="submit"
@@ -1229,7 +1216,7 @@ function DocumentRow({
           ) : (
           /* Moving a document along is the change actually made day to day, so
              it is one control here rather than an edit screen. */
-          <form action={onStatus} className="mt-3 flex items-center justify-end gap-2">
+          <form onSubmit={onStatus} className="mt-3 flex items-center justify-end gap-2">
             <input type="hidden" name="documentId" value={doc.id} />
             <label className="sr-only" htmlFor={`status-${scope}`}>
               Status for {doc.number}
@@ -1277,10 +1264,10 @@ function LineStageSelect({
   tasks: ProjectTask[];
   scope: string;
 }) {
-  const [state, action, pending] = useActionState<FormState, FormData>(fileLineAction, undefined);
+  const { state, onSubmit: action, pending } = useKeptForm<FormState>(fileLineAction, undefined);
   const id = `stage-${scope}-${line.id}`.replace(/[^A-Za-z0-9_-]/g, "_");
   return (
-    <form action={action} className="flex shrink-0 items-center gap-1.5">
+    <form onSubmit={action} className="flex shrink-0 items-center gap-1.5">
       <input type="hidden" name="lineId" value={line.id} />
       <label className="sr-only" htmlFor={id}>
         Stage for {line.description}
@@ -1315,7 +1302,7 @@ const BLANK_LINES = [0, 1, 2, 3];
 function DocumentForm({
   dealId,
   priceItems,
-  action,
+  onSubmit: action,
   pending,
   state,
   onCancel,
@@ -1324,7 +1311,7 @@ function DocumentForm({
 }: {
   dealId: string;
   priceItems: PriceItem[];
-  action: (formData: FormData) => void;
+  onSubmit: React.FormEventHandler<HTMLFormElement>;
   pending: boolean;
   state: FormState;
   onCancel: () => void;
@@ -1334,7 +1321,7 @@ function DocumentForm({
 }) {
   const money = useExactMoney();
   return (
-    <form action={action} className="mb-4 space-y-3 border-b border-[var(--border)] pb-4">
+    <form onSubmit={action} className="mb-4 space-y-3 border-b border-[var(--border)] pb-4">
       <Banner state={state} />
       <input type="hidden" name="dealId" value={dealId} />
       {stage && (

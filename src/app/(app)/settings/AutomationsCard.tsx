@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useState } from "react";
+import { useKeptForm } from "@/lib/use-kept-form";
 import { Plus, Trash2, Zap } from "lucide-react";
 import { Card, CardHeader, CardMeta } from "@/components/ui/Card";
 import { Banner } from "@/components/ui/Banner";
@@ -98,8 +99,8 @@ function RuleRow({
   canManage: boolean;
 }) {
   const { when, then } = describeAutomation(rule, nameOf);
-  const [toggleState, toggle, toggling] = useActionState<FormState, FormData>(setAutomationEnabledAction, undefined);
-  const [deleteState, remove, removing] = useActionState<FormState, FormData>(deleteAutomationAction, undefined);
+  const { state: toggleState, onSubmit: toggle, pending: toggling } = useKeptForm<FormState>(setAutomationEnabledAction, undefined);
+  const { state: deleteState, onSubmit: remove, pending: removing } = useKeptForm<FormState>(deleteAutomationAction, undefined);
   const [confirming, setConfirming] = useState(false);
   const error = toggleState?.error ?? deleteState?.error;
 
@@ -113,7 +114,7 @@ function RuleRow({
 
         {canManage ? (
           <>
-            <form action={toggle} className="flex shrink-0">
+            <form onSubmit={toggle} className="flex shrink-0">
               <input type="hidden" name="id" value={rule.id} />
               <input type="hidden" name="enabled" value={rule.enabled ? "false" : "true"} />
               <button
@@ -135,7 +136,7 @@ function RuleRow({
             </form>
 
             {confirming ? (
-              <form action={remove} className="flex shrink-0 items-center gap-1">
+              <form onSubmit={remove} className="flex shrink-0 items-center gap-1">
                 <input type="hidden" name="id" value={rule.id} />
                 <button
                   type="submit"
@@ -178,7 +179,7 @@ function RuleRow({
 }
 
 function NewAutomation({ team }: { team: Person[] }) {
-  const [state, action, pending] = useActionState<FormState, FormData>(createAutomationAction, undefined);
+  const { state, onSubmit: action, pending } = useKeptForm<FormState>(createAutomationAction, undefined);
   const [open, show, hide] = useFormDisclosure(state, (s) => Boolean(s?.ok));
   const [eventKind, setEventKind] = useState<EventKind>("lead_created");
   const [actionKind, setActionKind] = useState<ActionKind>("assign_owner");
@@ -210,7 +211,7 @@ function NewAutomation({ team }: { team: Person[] }) {
   const label = "mb-1.5 block text-xs font-medium text-muted";
 
   return (
-    <form action={action} className="space-y-4 rounded-xl border border-[var(--border)] p-3.5">
+    <form onSubmit={action} className="space-y-4 rounded-xl border border-[var(--border)] p-3.5">
       {state?.error && <Banner state={state} />}
 
       <div className="grid grid-cols-1 gap-4 @min-[560px]:grid-cols-2">

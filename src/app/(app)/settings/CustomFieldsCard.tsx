@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useState } from "react";
+import { useKeptForm } from "@/lib/use-kept-form";
 import { Archive, ArchiveRestore, ListPlus, Pencil, Plus } from "lucide-react";
 import { Card, CardHeader, CardMeta } from "@/components/ui/Card";
 import { Banner } from "@/components/ui/Banner";
@@ -127,18 +128,16 @@ export function CustomFieldsCard({
 }
 
 function FieldRow({ field, canManage }: { field: CustomField; canManage: boolean }) {
-  const [editState, edit, saving] = useActionState<FormState, FormData>(updateCustomFieldAction, undefined);
-  const [archiveState, archive, archiving] = useActionState<FormState, FormData>(
-    setCustomFieldArchivedAction,
-    undefined
-  );
+  const { state: editState, onSubmit: edit, pending: saving } = useKeptForm<FormState>(updateCustomFieldAction, undefined);
+  const { state: archiveState, onSubmit: archive, pending: archiving } = useKeptForm<FormState>(setCustomFieldArchivedAction,
+    undefined);
   const [editing, openEdit, closeEdit] = useFormDisclosure(editState, (s) => Boolean(s?.ok));
   const error = archiveState?.error ?? (!editing ? editState?.error : undefined);
 
   if (editing) {
     return (
       <li className="rounded-xl px-3.5 py-3" style={{ background: "var(--surface-2)" }}>
-        <form action={edit} className="space-y-3">
+        <form onSubmit={edit} className="space-y-3">
           {editState?.error && <Banner state={editState} />}
           <input type="hidden" name="id" value={field.id} />
           <label className="block">
@@ -199,7 +198,7 @@ function FieldRow({ field, canManage }: { field: CustomField; canManage: boolean
                 <Pencil className="h-4 w-4" />
               </button>
             )}
-            <form action={archive}>
+            <form onSubmit={archive}>
               <input type="hidden" name="id" value={field.id} />
               <input type="hidden" name="archived" value={field.archived ? "false" : "true"} />
               <button
@@ -230,7 +229,7 @@ function FieldRow({ field, canManage }: { field: CustomField; canManage: boolean
 }
 
 function NewField({ entity }: { entity: FieldEntity }) {
-  const [state, action, pending] = useActionState<FormState, FormData>(createCustomFieldAction, undefined);
+  const { state, onSubmit: action, pending } = useKeptForm<FormState>(createCustomFieldAction, undefined);
   const [open, show, hide] = useFormDisclosure(state, (s) => Boolean(s?.ok));
   const [kind, setKind] = useState<FieldKind>("text");
 
@@ -254,7 +253,7 @@ function NewField({ entity }: { entity: FieldEntity }) {
   }
 
   return (
-    <form action={action} className="space-y-3 rounded-xl border border-[var(--border)] p-3.5">
+    <form onSubmit={action} className="space-y-3 rounded-xl border border-[var(--border)] p-3.5">
       {state?.error && <Banner state={state} />}
       <input type="hidden" name="entity" value={entity} />
       <div className="grid grid-cols-1 gap-3 @min-[440px]:grid-cols-2">

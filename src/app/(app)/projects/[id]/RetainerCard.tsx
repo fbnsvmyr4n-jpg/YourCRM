@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useState } from "react";
 import { Pause, Play, Repeat, X } from "lucide-react";
 import { Banner } from "@/components/ui/Banner";
 import { Card, CardHeader } from "@/components/ui/Card";
@@ -27,7 +27,7 @@ import {
 export function RetainerCard({ dealId, retainers, today }: { dealId: string; retainers: Retainer[]; today: string }) {
   const create = useKeptForm<FormState>(createRetainerAction, undefined);
   const createState = create.state;
-  const [statusState, setStatus, settingStatus] = useActionState<FormState, FormData>(setRetainerStatusAction, undefined);
+  const { state: statusState, onSubmit: setStatus, pending: settingStatus } = useKeptForm<FormState>(setRetainerStatusAction, undefined);
   const [open, openForm, closeForm] = useFormDisclosure(createState, (s) => Boolean(s?.ok));
 
   const live = retainers.filter((r) => r.status !== "cancelled");
@@ -89,7 +89,7 @@ function RetainerRow({
 }: {
   retainer: Retainer;
   today: string;
-  onStatus: (formData: FormData) => void;
+  onStatus: React.FormEventHandler<HTMLFormElement>;
   busy: boolean;
 }) {
   const { format } = useMoney();
@@ -107,7 +107,7 @@ function RetainerRow({
   }
 
   const statusForm = (to: string, label: React.ReactNode, className?: string) => (
-    <form action={onStatus}>
+    <form onSubmit={onStatus}>
       <input type="hidden" name="retainerId" value={r.id} />
       <input type="hidden" name="to" value={to} />
       <button

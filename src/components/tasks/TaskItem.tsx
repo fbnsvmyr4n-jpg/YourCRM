@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState, useOptimistic, useState, useTransition } from "react";
+import { useOptimistic, useState, useTransition } from "react";
+import { useKeptForm } from "@/lib/use-kept-form";
 import Link from "next/link";
 import { Check, Pencil, Trash2, Zap } from "lucide-react";
 import { Banner } from "@/components/ui/Banner";
@@ -42,8 +43,8 @@ export function TaskItem({
 }) {
   const [done, setDone] = useOptimistic(Boolean(todo.doneAt));
   const [ticking, startTick] = useTransition();
-  const [editState, edit, saving] = useActionState<TaskFormState, FormData>(updateTodoAction, undefined);
-  const [deleteState, remove, removing] = useActionState<TaskFormState, FormData>(deleteTodoAction, undefined);
+  const { state: editState, onSubmit: edit, pending: saving } = useKeptForm<TaskFormState>(updateTodoAction, undefined);
+  const { state: deleteState, onSubmit: remove, pending: removing } = useKeptForm<TaskFormState>(deleteTodoAction, undefined);
   const [editing, openEdit, closeEdit] = useFormDisclosure(editState, (s) => Boolean(s?.ok));
   const [confirming, setConfirming] = useState(false);
 
@@ -57,7 +58,7 @@ export function TaskItem({
   if (editing) {
     return (
       <li className="rounded-xl px-3.5 py-3" style={{ background: "var(--surface-2)" }}>
-        <form action={edit} className="space-y-3">
+        <form onSubmit={edit} className="space-y-3">
           {editState?.error && <Banner state={editState} />}
           <input type="hidden" name="id" value={todo.id} />
           <label className="block">
@@ -160,7 +161,7 @@ export function TaskItem({
         )}
       >
         {confirming ? (
-          <form action={remove} className="flex items-center gap-1">
+          <form onSubmit={remove} className="flex items-center gap-1">
             <input type="hidden" name="id" value={todo.id} />
             <button
               type="submit"

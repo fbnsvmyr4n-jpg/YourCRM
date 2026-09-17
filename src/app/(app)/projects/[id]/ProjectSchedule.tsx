@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { useKeptForm } from "@/lib/use-kept-form";
 import {
   CalendarDays,
   Check,
@@ -91,14 +92,10 @@ export function ProjectSchedule({
   /** Which task's "waits for" picker is open. One at a time. */
   const [linking, setLinking] = useState<string | null>(null);
 
-  const [linkState, link, linkBusy] = useActionState<FormState, FormData>(
-    addDependencyAction,
-    undefined
-  );
-  const [unlinkState, unlink] = useActionState<FormState, FormData>(
-    removeDependencyAction,
-    undefined
-  );
+  const { state: linkState, onSubmit: link, pending: linkBusy } = useKeptForm<FormState>(addDependencyAction,
+    undefined);
+  const { state: unlinkState, onSubmit: unlink } = useKeptForm<FormState>(removeDependencyAction,
+    undefined);
 
   /* Rebuilt from the pairs the server sent — a Map cannot cross that boundary. */
   const linksFor = useMemo(
@@ -107,24 +104,16 @@ export function ProjectSchedule({
   );
   const nameOf = useMemo(() => new Map(tasks.map((t) => [t.id, t.name])), [tasks]);
 
-  const [addState, add, adding] = useActionState<FormState, FormData>(addTaskAction, undefined);
-  const [planState, buildPlan, planning] = useActionState<FormState, FormData>(
-    buildPlanAction,
-    undefined
-  );
-  const [editState, edit, editingBusy] = useActionState<FormState, FormData>(
-    updateTaskAction,
-    undefined
-  );
-  const [completeState, complete, completing] = useActionState<FormState, FormData>(
-    setTaskCompleteAction,
-    undefined
-  );
-  const [moveState, move] = useActionState<FormState, FormData>(moveTaskAction, undefined);
-  const [removeState, remove, removing] = useActionState<FormState, FormData>(
-    deleteTaskAction,
-    undefined
-  );
+  const { state: addState, onSubmit: add, pending: adding } = useKeptForm<FormState>(addTaskAction, undefined);
+  const { state: planState, onSubmit: buildPlan, pending: planning } = useKeptForm<FormState>(buildPlanAction,
+    undefined);
+  const { state: editState, onSubmit: edit, pending: editingBusy } = useKeptForm<FormState>(updateTaskAction,
+    undefined);
+  const { state: completeState, onSubmit: complete, pending: completing } = useKeptForm<FormState>(setTaskCompleteAction,
+    undefined);
+  const { state: moveState, onSubmit: move } = useKeptForm<FormState>(moveTaskAction, undefined);
+  const { state: removeState, onSubmit: remove, pending: removing } = useKeptForm<FormState>(deleteTaskAction,
+    undefined);
   const [addOpen, openAdd, closeAdd] = useFormDisclosure(addState, (s) => Boolean(s?.ok));
 
   /*
@@ -537,7 +526,7 @@ export function ProjectSchedule({
             task={editing}
             staff={staff}
             state={editing ? editState : addState}
-            action={editing ? edit : add}
+            onSubmit={editing ? edit : add}
             busy={editing ? editingBusy : adding}
             onCancel={() => {
               setEditing(null);
@@ -556,7 +545,7 @@ export function ProjectSchedule({
               No tasks yet. If this job has an approved quotation, its lines can lay the plan
               out — in order, on working days, each waiting on the one before it.
             </p>
-            <form action={buildPlan}>
+            <form onSubmit={buildPlan}>
               <input type="hidden" name="dealId" value={dealId} />
               <button
                 type="submit"
@@ -580,7 +569,7 @@ export function ProjectSchedule({
                   style={{ background: "var(--surface-2)" }}
                 >
                   {/* Done is a form, not a checkbox input: it writes. */}
-                  <form action={complete} className="shrink-0">
+                  <form onSubmit={complete} className="shrink-0">
                     <input type="hidden" name="taskId" value={task.id} />
                     <input type="hidden" name="done" value={done ? "false" : "true"} />
                     <button
@@ -690,7 +679,7 @@ export function ProjectSchedule({
                               after {nameOf.get(l.dependsOnId) ?? "a removed task"}
                               {l.lagDays > 0 && ` + ${l.lagDays}d`}
                             </span>
-                            <form action={unlink} className="inline">
+                            <form onSubmit={unlink} className="inline">
                               <input type="hidden" name="linkId" value={l.id} />
                               <button
                                 type="submit"
@@ -706,7 +695,7 @@ export function ProjectSchedule({
                     )}
 
                     {linking === task.id && (
-                      <form action={link} className="mt-2 flex flex-wrap items-end gap-2">
+                      <form onSubmit={link} className="mt-2 flex flex-wrap items-end gap-2">
                         <input type="hidden" name="dealId" value={dealId} />
                         <input type="hidden" name="taskId" value={task.id} />
                         <label className="min-w-0 flex-1">
@@ -763,7 +752,7 @@ export function ProjectSchedule({
                   <div className="flex shrink-0 items-center gap-1">
                     {/* Reordering by neighbour swap. Drag would be nicer on a
                         desktop and unusable with a thumb; this works on both. */}
-                    <form action={move}>
+                    <form onSubmit={move}>
                       <input type="hidden" name="dealId" value={dealId} />
                       <input type="hidden" name="taskId" value={task.id} />
                       <input type="hidden" name="direction" value="up" />
@@ -776,7 +765,7 @@ export function ProjectSchedule({
                         <ChevronUp className="h-3.5 w-3.5" />
                       </button>
                     </form>
-                    <form action={move}>
+                    <form onSubmit={move}>
                       <input type="hidden" name="dealId" value={dealId} />
                       <input type="hidden" name="taskId" value={task.id} />
                       <input type="hidden" name="direction" value="down" />
@@ -809,7 +798,7 @@ export function ProjectSchedule({
                     >
                       <Pencil className="h-3.5 w-3.5" />
                     </button>
-                    <form action={remove}>
+                    <form onSubmit={remove}>
                       <input type="hidden" name="taskId" value={task.id} />
                       <button
                         type="submit"
@@ -837,7 +826,7 @@ function TaskForm({
   task,
   staff,
   state,
-  action,
+  onSubmit: action,
   busy,
   onCancel,
 }: {
@@ -845,12 +834,12 @@ function TaskForm({
   task: ProjectTask | null;
   staff: { id: string; name: string }[];
   state: FormState;
-  action: (formData: FormData) => void;
+  onSubmit: React.FormEventHandler<HTMLFormElement>;
   busy: boolean;
   onCancel: () => void;
 }) {
   return (
-    <form action={action} key={task?.id ?? "new"} className="mb-3 space-y-3">
+    <form onSubmit={action} key={task?.id ?? "new"} className="mb-3 space-y-3">
       <Banner state={state} />
       <input type="hidden" name="dealId" value={dealId} />
       {task && <input type="hidden" name="taskId" value={task.id} />}

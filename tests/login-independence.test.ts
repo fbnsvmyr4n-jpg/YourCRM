@@ -171,8 +171,10 @@ describe("the sign-in form itself", () => {
      * threw while rendering the sky would leave the credentials path intact.
      */
     const page = read("src/app/(orbit)/login/page.tsx");
-    expect(page).toMatch(/action=\{formAction\}/);
-    expect(page).toMatch(/useActionState<AuthState, FormData>\(signInAction/);
+    /* Through useKeptForm since 18 Sep 2026, so a wrong password does not also
+       wipe the email address typed a moment ago. Still the server action. */
+    expect(page).toMatch(/onSubmit=\{formAction\}/);
+    expect(page).toMatch(/useKeptForm<AuthState>\(signInAction/);
   });
 
   it("does not await the environment before rendering the form", () => {

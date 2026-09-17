@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { useKeptForm } from "@/lib/use-kept-form";
 import { EyeOff, Pencil, Plus, RotateCcw, Search, Tags, Trash2 } from "lucide-react";
 import { Banner } from "@/components/ui/Banner";
 import { Card, CardHeader, CardMeta } from "@/components/ui/Card";
@@ -32,18 +33,12 @@ export function PricingView({ items }: { items: PriceItem[] }) {
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<PriceItem | null>(null);
 
-  const [saveState, save, saving] = useActionState<FormState, FormData>(
-    savePriceItemAction,
-    undefined
-  );
-  const [toggleState, toggle, toggling] = useActionState<FormState, FormData>(
-    togglePriceItemAction,
-    undefined
-  );
-  const [removeState, remove, removing] = useActionState<FormState, FormData>(
-    deletePriceItemAction,
-    undefined
-  );
+  const { state: saveState, onSubmit: save, pending: saving } = useKeptForm<FormState>(savePriceItemAction,
+    undefined);
+  const { state: toggleState, onSubmit: toggle, pending: toggling } = useKeptForm<FormState>(togglePriceItemAction,
+    undefined);
+  const { state: removeState, onSubmit: remove, pending: removing } = useKeptForm<FormState>(deletePriceItemAction,
+    undefined);
   const [adding, openAdd, closeAdd] = useFormDisclosure(saveState, (s) => Boolean(s?.ok));
 
   const shown = useMemo(() => {
@@ -90,7 +85,7 @@ export function PricingView({ items }: { items: PriceItem[] }) {
             icon={<Tags className="h-[18px] w-[18px] text-accent" />}
           />
           <form
-            action={save}
+            onSubmit={save}
             /* Remounted per item, so switching which one you are editing
                replaces the values rather than keeping the last one's. */
             key={editing?.id ?? "new"}
@@ -216,8 +211,8 @@ function Group({
   title: string;
   items: PriceItem[];
   onEdit: (item: PriceItem) => void;
-  onToggle: (formData: FormData) => void;
-  onRemove: (formData: FormData) => void;
+  onToggle: React.FormEventHandler<HTMLFormElement>;
+  onRemove: React.FormEventHandler<HTMLFormElement>;
   busy: boolean;
 }) {
   /* Cents when there are any — a rate of 12.50 an hour is ordinary. */
@@ -265,7 +260,7 @@ function Group({
                 <Pencil className="h-4 w-4" />
               </button>
 
-              <form action={onToggle} className="shrink-0">
+              <form onSubmit={onToggle} className="shrink-0">
                 <input type="hidden" name="id" value={item.id} />
                 <input type="hidden" name="active" value={item.active ? "false" : "true"} />
                 <button
@@ -278,7 +273,7 @@ function Group({
                 </button>
               </form>
 
-              <form action={onRemove} className="shrink-0">
+              <form onSubmit={onRemove} className="shrink-0">
                 <input type="hidden" name="id" value={item.id} />
                 <button
                   type="submit"

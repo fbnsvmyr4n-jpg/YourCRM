@@ -18,12 +18,15 @@ import { startTransition, useActionState, useCallback, useEffect, useRef } from 
  *
  *   const { state, pending, formProps } = useKeptForm(saveAction, undefined);
  *   <form {...formProps}>…</form>
+ *
+ * One submit handler may serve many forms — a status control on every row —
+ * so the form cleared is the one that was submitted, not a fixed one.
  */
-export function useKeptForm<S extends { ok?: string; error?: string } | undefined>(
+export function useKeptForm<S>(
   action: (prev: S, formData: FormData) => Promise<S>,
   initial: S
 ) {
-  const formRef = useRef<HTMLFormElement>(null);
+  const submitted = useRef<HTMLFormElement | null>(null);
   const [state, dispatch, pending] = useActionState<S, FormData>(
     action as (prev: Awaited<S>, formData: FormData) => Promise<S>,
     initial as Awaited<S>
@@ -34,6 +37,7 @@ export function useKeptForm<S extends { ok?: string; error?: string } | undefine
       event.preventDefault();
       /* The button pressed travels with the data, as it would natively. */
       const submitter = (event.nativeEvent as SubmitEvent).submitter as HTMLElement | null;
+      submitted.current = event.currentTarget;
       const data = new FormData(event.currentTarget, submitter);
       startTransition(() => dispatch(data));
     },
@@ -42,8 +46,8 @@ export function useKeptForm<S extends { ok?: string; error?: string } | undefine
 
   /* Clear only after a save that worked. */
   useEffect(() => {
-    if (state && !state.error) formRef.current?.reset();
+    if (state && !(state as { error?: unknown }).error) submitted.current?.reset();
   }, [state]);
 
-  return { state, pending, formProps: { ref: formRef, onSubmit } };
+  return { state, pending, onSubmit, formProps: { onSubmit } };
 }

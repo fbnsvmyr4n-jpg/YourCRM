@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useKeptForm } from "@/lib/use-kept-form";
 import { useRouter } from "next/navigation";
 import { bookAction, type BookState } from "./actions";
 
@@ -35,7 +36,7 @@ export function BookingView({
   taking: boolean;
 }) {
   const router = useRouter();
-  const [state, action, pending] = useActionState<BookState, FormData>(bookAction, undefined);
+  const { state, onSubmit: action, pending } = useKeptForm<BookState>(bookAction, undefined);
   const [dayIndex, setDayIndex] = useState(0);
   const [picked, setChosen] = useState<string | null>(null);
 
@@ -103,7 +104,7 @@ export function BookingView({
             : "This page is not taking bookings at the moment."}
         </p>
       ) : (
-        <form action={action} className="flex flex-col gap-5">
+        <form onSubmit={action} className="flex flex-col gap-5">
           <input type="hidden" name="slug" value={slug} />
           <input type="hidden" name="startsAt" value={chosen ?? ""} />
 

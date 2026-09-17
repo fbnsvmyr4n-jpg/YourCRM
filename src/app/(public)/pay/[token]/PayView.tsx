@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState } from "react";
+
+import { useKeptForm } from "@/lib/use-kept-form";
 import { CheckCircle2, Lock } from "lucide-react";
 import { formatMoney } from "@/lib/money";
 import type { PayPage } from "@/server/pay/pay";
@@ -21,7 +22,7 @@ const day = (iso: string) => {
  * Paystack's own checkout, which says so.
  */
 export function PayView({ token, page, notice }: { token: string; page: Shown; notice: { tone: "good" | "bad"; text: string } | null }) {
-  const [state, action, pending] = useActionState<PayState, FormData>(payAction, undefined);
+  const { state, onSubmit: action, pending } = useKeptForm<PayState>(payAction, undefined);
   const money = (cents: number) => formatMoney(cents, page.currency, "cents");
   const paid = page.state === "paid";
 
@@ -83,7 +84,7 @@ export function PayView({ token, page, notice }: { token: string; page: Shown; n
             <CheckCircle2 className="h-5 w-5" /> Paid — nothing more to do.
           </p>
         ) : page.state === "payable" ? (
-          <form action={action} className="flex flex-col gap-2">
+          <form onSubmit={action} className="flex flex-col gap-2">
             <input type="hidden" name="token" value={token} />
             {state?.error && (
               <p className="rounded-xl px-3.5 py-2.5 text-sm" style={{ background: "var(--red-soft)", color: "var(--red)" }} role="alert">

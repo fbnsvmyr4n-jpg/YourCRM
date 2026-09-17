@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useState } from "react";
+import { useKeptForm } from "@/lib/use-kept-form";
 import { Check, Copy, Gift } from "lucide-react";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { Banner } from "@/components/ui/Banner";
@@ -33,10 +34,8 @@ export function ReferralCard({
   canManage: boolean;
   configured: boolean;
 }) {
-  const [state, apply, busy] = useActionState<FormState, FormData>(
-    applyReferralCreditAction,
-    undefined
-  );
+  const { state, onSubmit: apply, pending: busy } = useKeptForm<FormState>(applyReferralCreditAction,
+    undefined);
   const [copied, setCopied] = useState(false);
 
   const money = (cents: number) => `$${(cents / 100).toFixed(2)}`;
@@ -89,7 +88,7 @@ export function ReferralCard({
       <Banner state={state} />
 
       {canManage && balanceCents > 0 && (
-        <form action={apply} className="mt-4 flex flex-wrap items-center justify-between gap-3">
+        <form onSubmit={apply} className="mt-4 flex flex-wrap items-center justify-between gap-3">
           <p className="text-xs text-faint">
             {applicableCents > 0
               ? `${money(applicableCents)} can go against your next invoice.`

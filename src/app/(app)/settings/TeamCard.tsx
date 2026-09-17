@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState, useRef, useState } from "react";
+import { useRef, useState } from "react";
+import { useKeptForm } from "@/lib/use-kept-form";
 import { Mail, Pencil, Phone, Plus, ShieldCheck, UserMinus, Users } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Banner } from "@/components/ui/Banner";
@@ -97,22 +98,14 @@ export function TeamCard({
   /** The roles this reader is allowed to hand out, worked out on the server. */
   assignable: readonly string[];
 }) {
-  const [inviteState, invite, inviting] = useActionState<FormState, FormData>(
-    inviteMemberAction,
-    undefined
-  );
-  const [roleState, changeRole, changingRole] = useActionState<FormState, FormData>(
-    setMemberRoleAction,
-    undefined
-  );
-  const [removeState, remove, removing] = useActionState<FormState, FormData>(
-    removeMemberAction,
-    undefined
-  );
-  const [detailState, saveDetails, savingDetails] = useActionState<FormState, FormData>(
-    updateStaffAction,
-    undefined
-  );
+  const { state: inviteState, onSubmit: invite, pending: inviting } = useKeptForm<FormState>(inviteMemberAction,
+    undefined);
+  const { state: roleState, onSubmit: changeRole, pending: changingRole } = useKeptForm<FormState>(setMemberRoleAction,
+    undefined);
+  const { state: removeState, onSubmit: remove, pending: removing } = useKeptForm<FormState>(removeMemberAction,
+    undefined);
+  const { state: detailState, onSubmit: saveDetails, pending: savingDetails } = useKeptForm<FormState>(updateStaffAction,
+    undefined);
 
   /* A new colleague starts with the least access on offer. `assignable` arrives
      in the matrix's own order, most powerful first, so the last entry is it —
@@ -218,7 +211,7 @@ export function TeamCard({
           {!inviteOpen && inviteState && <Banner state={inviteState} />}
 
           {inviteOpen && (
-            <form action={invite} className="space-y-4">
+            <form onSubmit={invite} className="space-y-4">
               <Banner state={inviteState} />
               <div className="grid grid-cols-1 gap-4 @min-[440px]:grid-cols-2">
                 <Field label="Full name" name="name" required />
@@ -318,9 +311,9 @@ function MemberRow({
   canManage: boolean;
   busy: boolean;
   detailState: FormState;
-  onChangeRole: (formData: FormData) => void;
-  onRemove: (formData: FormData) => void;
-  onSaveDetails: (formData: FormData) => void;
+  onChangeRole: React.FormEventHandler<HTMLFormElement>;
+  onRemove: React.FormEventHandler<HTMLFormElement>;
+  onSaveDetails: React.FormEventHandler<HTMLFormElement>;
 }) {
   const [confirming, setConfirming] = useState(false);
   const [editing, openEdit, closeEdit] = useFormDisclosure(detailState, (s) => Boolean(s?.ok));
@@ -371,7 +364,7 @@ function MemberRow({
         */}
         {canManage && (
           <div className="flex w-full items-center justify-end gap-1.5 @min-[440px]:w-auto">
-            <form action={onChangeRole} ref={roleForm} className="shrink-0">
+            <form onSubmit={onChangeRole} ref={roleForm} className="shrink-0">
               <input type="hidden" name="userId" value={member.id} />
               <label className="sr-only" htmlFor={`role-${member.id}`}>
                 Role for {member.name}
@@ -417,7 +410,7 @@ function MemberRow({
 
             {confirming ? (
               <span className="flex shrink-0 items-center gap-1.5">
-                <form action={onRemove}>
+                <form onSubmit={onRemove}>
                   <input type="hidden" name="userId" value={member.id} />
                   <button
                     type="submit"
@@ -461,7 +454,7 @@ function MemberRow({
       {!editing && <Details member={member} />}
 
       {editing && (
-        <form action={onSaveDetails} className="mt-3 space-y-3 border-t border-[var(--border)] pt-3">
+        <form onSubmit={onSaveDetails} className="mt-3 space-y-3 border-t border-[var(--border)] pt-3">
           <input type="hidden" name="userId" value={member.id} />
           <div className="grid grid-cols-1 gap-3 @min-[440px]:grid-cols-2">
             <Field label="Department" name="department" defaultValue={member.department ?? ""} />

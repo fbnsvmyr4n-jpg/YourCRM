@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState, useEffect } from "react";
+import { useEffect } from "react";
+import { useKeptForm } from "@/lib/use-kept-form";
 import { CreditCard, ExternalLink } from "lucide-react";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { clsx } from "@/lib/clsx";
@@ -31,14 +32,10 @@ export type BillingView = {
  * customer nothing; "6 days left" tells them when to decide.
  */
 export function BillingCard({ billing, canManage }: { billing: BillingView; canManage: boolean }) {
-  const [checkout, startCheckout, checkingOut] = useActionState<FormState, FormData>(
-    startCheckoutAction,
-    undefined
-  );
-  const [portal, openPortal, opening] = useActionState<FormState, FormData>(
-    billingPortalAction,
-    undefined
-  );
+  const { state: checkout, onSubmit: startCheckout, pending: checkingOut } = useKeptForm<FormState>(startCheckoutAction,
+    undefined);
+  const { state: portal, onSubmit: openPortal, pending: opening } = useKeptForm<FormState>(billingPortalAction,
+    undefined);
 
   // Stripe hands back a URL rather than redirecting from the action, so that a
   // refusal can be shown beside the form instead of navigating away from it.
@@ -105,7 +102,7 @@ export function BillingCard({ billing, canManage }: { billing: BillingView; canM
       ) : (
         <div className="flex flex-col gap-4">
           {billing.hasSubscription && (
-            <form action={openPortal}>
+            <form onSubmit={openPortal}>
               <button
                 type="submit"
                 disabled={opening}
@@ -121,7 +118,7 @@ export function BillingCard({ billing, canManage }: { billing: BillingView; canM
             {billing.plans.map((p) => {
               const current = p.plan === billing.plan && billing.status !== "canceled";
               return (
-                <form action={startCheckout} key={p.plan} className="contents">
+                <form onSubmit={startCheckout} key={p.plan} className="contents">
                   <input type="hidden" name="plan" value={p.plan} />
                   <div
                     className="flex flex-col gap-2 rounded-xl p-4"
