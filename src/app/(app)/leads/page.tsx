@@ -69,7 +69,7 @@ export default async function LeadsPage() {
 
       {/* Top row */}
       <div className="order-3 grid grid-cols-1 gap-5 sm:order-none @min-[960px]:grid-cols-2">
-        <WaitingCard ageing={ageing} />
+        <WaitingCard ageing={ageing} anyLeads={leads.length > 0} />
         <LeadSourcesCard stats={stats} />
       </div>
 
@@ -100,7 +100,7 @@ export default async function LeadsPage() {
  * Leads with no usable date are counted separately and said out loud rather
  * than being given an invented age or dropped silently.
  */
-function WaitingCard({ ageing }: { ageing: LeadAgeing }) {
+function WaitingCard({ ageing, anyLeads }: { ageing: LeadAgeing; anyLeads: boolean }) {
   const total = ageing.dated;
   const max = Math.max(1, ...ageing.buckets.map((b) => b.count));
   /* Four rungs need four steps. green / amber / red is three, and two rows
@@ -123,10 +123,18 @@ function WaitingCard({ ageing }: { ageing: LeadAgeing }) {
       </div>
 
       {total === 0 && ageing.undated === 0 ? (
-        /* Not "0 days" — nothing is open, which is a different statement from
-           everything being answered instantly. */
+        /* Three different nothings, and only one of them used to be said.
+
+           "Nothing open. Every lead is either won or closed" is a claim ABOUT
+           the leads — and on a workspace that has none it is simply untrue:
+           there is no lead here that was won, and none that was closed. A new
+           account read it as its first sentence on this page. Not "0 days"
+           either: nothing open is a different statement from everything being
+           answered instantly. */
         <p className="flex-1 py-10 text-center text-sm text-faint">
-          Nothing open. Every lead is either won or closed.
+          {anyLeads
+            ? "Nothing open. Every lead is either won or closed."
+            : "No leads yet. The moment one comes in, this shows how long it has been waiting."}
         </p>
       ) : (
         <>

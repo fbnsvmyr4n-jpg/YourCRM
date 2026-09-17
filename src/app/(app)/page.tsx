@@ -188,6 +188,20 @@ export default async function DashboardPage() {
   const weekAgo = now.getTime() - 7 * 86_400_000;
   const wonThisWeek = wonDeals.filter((d) => Date.parse(d.wonAt) >= weekAgo);
 
+  /**
+   * Whether this workspace has anything in it yet.
+   *
+   * "Inbox zero 🎉" and "You're all caught up" are congratulations, and on a
+   * brand-new account they congratulate somebody for work they have not done —
+   * the first screen after signing up read as though a day's work had just
+   * been cleared. Nothing left to do and nothing yet are different states and
+   * want different words: one is praise, the other is a first step.
+   *
+   * Contacts is the right test. Deals hang off a contact and messages come
+   * from one, so a workspace with no contacts has nothing else either.
+   */
+  const started = contacts.length > 0;
+
   const focus: FocusItem[] = [
     {
       href: "/meetings",
@@ -197,7 +211,7 @@ export default async function DashboardPage() {
       title: `${meetingsToday.length} meeting${meetingsToday.length === 1 ? "" : "s"} today`,
       sub: meetingsToday[0]
         ? `Next: ${meetingsToday[0].time}${meetingsToday[0].name ? ` with ${meetingsToday[0].name}` : ""}`
-        : "Nothing on the calendar",
+        : started ? "Nothing on the calendar" : "No meetings yet — book one from a contact",
     },
     {
       href: "/tasks",
@@ -210,7 +224,9 @@ export default async function DashboardPage() {
           ? `${myTasks.overdue} of them overdue`
           : myTasks.dueToday > 0
             ? "All due today, none late"
-            : "Nothing due — you're clear",
+            : started
+              ? "Nothing due — you're clear"
+              : "No tasks yet — add one here or from a contact",
     },
     {
       href: "/leads",
@@ -218,7 +234,11 @@ export default async function DashboardPage() {
       icon: "user-plus",
       tone: "amber" as Tone,
       title: `${openLeadCount} lead${openLeadCount === 1 ? "" : "s"} need follow-up`,
-      sub: openLeadCount > 0 ? "Open deals waiting on a next step" : "You're all caught up",
+      sub: openLeadCount > 0
+        ? "Open deals waiting on a next step"
+        : started
+          ? "You're all caught up"
+          : "No leads yet — add your first contact to start one",
     },
     {
       href: "/inbox",
@@ -226,7 +246,7 @@ export default async function DashboardPage() {
       icon: "message",
       tone: "blue" as Tone,
       title: `${unread} unread message${unread === 1 ? "" : "s"}`,
-      sub: unread > 0 ? "Waiting on a reply" : "Inbox zero 🎉",
+      sub: unread > 0 ? "Waiting on a reply" : started ? "Inbox zero 🎉" : "No messages yet",
     },
     {
       href: "/deals",
@@ -279,7 +299,15 @@ export default async function DashboardPage() {
             <Hero
               greeting={greeting(now.getHours())}
               name={me?.name.split(" ")[0] ?? "there"}
-              summary={`You have ${meetingsToday.length} meeting${meetingsToday.length === 1 ? "" : "s"} and ${openLeadCount} follow-up${openLeadCount === 1 ? "" : "s"} today.`}
+              /* A day's summary is only a summary once there is a day to sum
+                 up. "You have 0 meetings and 0 follow-ups today" was the first
+                 sentence a new account read, which says nothing and sounds
+                 like something has gone wrong. */
+              summary={
+                started
+                  ? `You have ${meetingsToday.length} meeting${meetingsToday.length === 1 ? "" : "s"} and ${openLeadCount} follow-up${openLeadCount === 1 ? "" : "s"} today.`
+                  : "Nothing in here yet. Add your first contact and the rest of this page fills itself in."
+              }
               stats={heroStats}
             />
           </div>

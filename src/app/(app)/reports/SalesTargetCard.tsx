@@ -65,8 +65,12 @@ export function SalesTargetCard({
             <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">
               Target Amount
             </p>
+            {/* A target nobody has set is not a target of zero. The progress
+                block below already said so ("Set a monthly target in
+                Settings") while this headline read "$0" at four times the
+                size — the two disagreed, and the louder one was wrong. */}
             <p className="mt-1 text-4xl font-bold tracking-tight tabular-nums">
-              {money(target)}
+              {target > 0 ? money(target) : "Not set"}
             </p>
             <Link
               href="/settings"

@@ -232,7 +232,9 @@ describe("the page it replaced", () => {
        beside it, showing the same name, company and status. */
     expect(page).not.toMatch(/LeadsFeedCard/);
     expect(page).not.toMatch(/Lead&apos;s Feed/);
-    expect(page).toMatch(/<WaitingCard ageing=\{ageing\} \/>/);
+    /* Props may grow; what this guards is that the ageing card is what sits
+       here, in place of the feed it replaced. */
+    expect(page).toMatch(/<WaitingCard ageing=\{ageing\}/);
   });
 
   it("derives the ageing from the rows already fetched", () => {
