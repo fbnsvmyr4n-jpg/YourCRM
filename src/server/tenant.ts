@@ -1,6 +1,7 @@
 import type { PoolClient, QueryResultRow } from "pg";
 import { getPool } from "./db";
 import { logDenied } from "./log";
+import { auditScope, type AuditEntry } from "./audit-context";
 /* Registers the automation engine as the listener for deal events. Here because
    every server path that can create or move a deal runs through this module,
    and only the server ever loads it — `repos/deals.ts` is in the client bundle
@@ -40,7 +41,7 @@ import "./automations";
  * `sub_account_id`, sub-account staff have one. Level is structure, role is
  * permission, and conflating them was what produced four overlapping values.
  */
-export const ROLES = ["owner", "admin", "finance", "member"] as const;
+export const ROLES = ["owner", "admin", "finance", "member", "viewer"] as const;
 export type Role = (typeof ROLES)[number];
 
 export type TenantContext = {
@@ -138,7 +139,8 @@ function querier(client: PoolClient, ctx: TenantContext): TenantQuery {
  */
 export async function withTenant<T>(
   ctx: TenantContext,
-  fn: (q: TenantQuery) => Promise<T>
+  fn: (q: TenantQuery) => Promise<T>,
+  options: { readOnly?: boolean } = {}
 ): Promise<T> {
   if (!ctx.subAccountId || !ctx.agencyId) {
     // Fail closed. An empty id would make `current_setting` return '' and match
@@ -151,9 +153,13 @@ export async function withTenant<T>(
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    /* A view-only person's request: Postgres itself refuses every write in it. */
+    if (options.readOnly) await client.query("SET TRANSACTION READ ONLY");
     await client.query("SELECT set_config('app.sub_account_id', $1, true)", [ctx.subAccountId]);
     await client.query("SELECT set_config('app.agency_id', $1, true)", [ctx.agencyId]);
-    const result = await fn(querier(client, ctx));
+    const entries: AuditEntry[] = [];
+    const result = await auditScope.run(entries, () => fn(querier(client, ctx)));
+    if (entries.length && !options.readOnly) await writeAudit(client, ctx, entries);
     await client.query("COMMIT");
     return result;
   } catch (err) {
@@ -161,6 +167,33 @@ export async function withTenant<T>(
     throw err;
   } finally {
     client.release();
+  }
+}
+
+/**
+ * Write the audit entries a transaction collected, just before it commits.
+ *
+ * The person is the entry's own actor when it names a user, otherwise the
+ * context's user; a public visitor or a scheduled job has none, and says so.
+ * The name is copied now, so the log still reads correctly after they leave.
+ */
+async function writeAudit(client: PoolClient, ctx: TenantContext, entries: AuditEntry[]): Promise<void> {
+  const clip = (v: string | null, n: number) => (v === null ? null : v.slice(0, n));
+  for (const e of entries) {
+    const isPublic = e.actor === "public";
+    const actorId = isPublic ? null : e.actor || ctx.userId || null;
+    await client.query(
+      `INSERT INTO audit_events (sub_account_id, actor_user_id, actor_name, action, entity, entity_id, detail)
+       VALUES ($1, $2, (SELECT name FROM users WHERE id = $2), $3, $4, $5, $6)`,
+      [
+        ctx.subAccountId,
+        actorId,
+        e.action.toLowerCase().replace(/[^a-z_]/g, "_").slice(0, 20),
+        e.entity.toLowerCase().replace(/[^a-z_]/g, "_").slice(0, 40),
+        clip(e.entityId, 120),
+        isPublic ? clip(`Public visitor${e.detail ? ` — ${e.detail}` : ""}`, 300) : clip(e.detail, 300),
+      ]
+    );
   }
 }
 

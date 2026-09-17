@@ -19,6 +19,8 @@ import { listBookingLinks } from "@/server/repos/booking-links";
 import { assignableTeam, listAutomations, listRuns } from "@/server/repos/automations";
 import { getConnection } from "@/server/repos/payments";
 import { listTemplates } from "@/server/repos/templates";
+import { AUDIT_PAGE, listAuditEvents } from "@/server/repos/audit";
+import { AuditCard } from "./AuditCard";
 import { TemplatesCard } from "./TemplatesCard";
 import { paystackTakes } from "@/server/paystack";
 import { PaymentsCard } from "./PaymentsCard";
@@ -125,6 +127,7 @@ export default async function SettingsPage({
     workingHours,
     paymentConnection,
     templates,
+    auditEvents,
     bookingLinks,
     automations,
     automationRuns,
@@ -160,6 +163,10 @@ export default async function SettingsPage({
       paymentConnection: await getConnection(q),
       /* What the team writes to clients: CRM work, like the address book. */
       templates: crmAccess ? await listTemplates(q) : [],
+      /* The trail of changes, for whoever manages the team — owners and IT.
+         It names records and never holds their contents, so it is not
+         customer data and does not need CRM access. */
+      auditEvents: roleCan(user.role, "manage_users") ? await listAuditEvents(q) : [],
       usage: await usageThisMonth(q),
       // Recovery lives here because this is where somebody looks after deleting
       // the wrong thing, and it costs one more query on a page already open.
@@ -277,6 +284,8 @@ export default async function SettingsPage({
     id: SettingsSectionId;
     content: React.ReactNode;
     needsCrm?: boolean;
+    /** Offered only to whoever manages the team. */
+    needsManageUsers?: boolean;
   }[] = [
     {
       id: "account",
@@ -439,12 +448,19 @@ export default async function SettingsPage({
         </>
       ),
     },
+    {
+      id: "audit",
+      content: <AuditCard events={auditEvents} timeZone={settings.timeZone} pageSize={AUDIT_PAGE} />,
+      needsManageUsers: true,
+    },
   ];
 
   /* An area that needs customer records is not offered to a reader who has
      none. `initial` is re-checked against what survives, so `?s=clients` typed
      by hand opens Account rather than a tab that is not there. */
-  const sections = allSections.filter((section) => !section.needsCrm || crmAccess);
+  const sections = allSections.filter(
+    (section) => (!section.needsCrm || crmAccess) && (!section.needsManageUsers || roleCan(user.role, "manage_users"))
+  );
 
   return (
     <div className="mx-auto max-w-[1080px] animate-fade-up">

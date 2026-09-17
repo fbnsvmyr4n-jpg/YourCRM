@@ -28,7 +28,7 @@ describe("tenant scoping cannot leak between requests", () => {
       /set_config\('app\.sub_account_id', \$1, true\)/
     );
     expect(
-      /\bSET\s+(?!LOCAL)/.test(TENANT.replace(/--.*|\/\*[\s\S]*?\*\//g, "")),
+      /\bSET\s+(?!LOCAL|TRANSACTION)/.test(TENANT.replace(/--.*|\/\*[\s\S]*?\*\//g, "")),
       "a session-level SET would outlive the transaction and follow the pooled connection into the next request"
     ).toBe(false);
   });

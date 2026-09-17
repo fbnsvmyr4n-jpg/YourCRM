@@ -51,6 +51,8 @@ const CRM_ACCESS: Record<Role, boolean> = {
   admin: false,
   finance: false,
   member: true,
+  /* Sees the records — that is the job — and changes none of them. */
+  viewer: true,
 };
 
 /**
@@ -89,6 +91,7 @@ const GRANTS: Record<Role, readonly Capability[]> = {
   admin: ["manage_workspaces", "manage_users"],
   finance: ["manage_billing"],
   member: [],
+  viewer: [],
 };
 
 /**

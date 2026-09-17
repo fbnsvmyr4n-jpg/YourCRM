@@ -666,6 +666,8 @@ export async function sendInvoiceAction(_prev: FormState, formData: FormData): P
     });
     return null;
   });
+  /* A view-only person's attempt comes back already worded. */
+  if (refusal && typeof refusal === "object") return refusal as { error: string };
   if (refusal) return { error: refusal };
 
   /* Drained here so the common case is done before the user looks away; the

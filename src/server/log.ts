@@ -18,6 +18,8 @@
  * storing that turns the log itself into a breach target.
  */
 
+import { recordAudit } from "./audit-context";
+
 type Level = "info" | "warn" | "error";
 
 /** Field names that must never reach the log, whatever a caller passes. */
@@ -95,6 +97,15 @@ export function logWrite(
   fields: { id?: string; actor?: string; detail?: string } = {}
 ): void {
   emit(action === "delete" ? "warn" : "info", `write.${entity}.${action}`, fields);
+  /* And into the workspace's audit log, when this happens inside a tenant
+     transaction — which writes it on commit. Same fields: never contents. */
+  recordAudit({
+    action,
+    entity,
+    entityId: fields.id ?? null,
+    actor: fields.actor ?? null,
+    detail: fields.detail ?? null,
+  });
 }
 
 /**

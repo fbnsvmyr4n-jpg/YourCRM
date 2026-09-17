@@ -21,6 +21,7 @@ export const SECTION_IDS = [
   "billing",
   "payments",
   "data",
+  "audit",
 ] as const;
 
 export type SettingsSectionId = (typeof SECTION_IDS)[number];

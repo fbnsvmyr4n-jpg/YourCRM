@@ -74,7 +74,21 @@ export function AppShell({
             flush against this scroller's edge — where the 3px ring falls outside
             the scrollport and is clipped, so the highlight appears cut on one
             side. Scroll padding reserves room for it. */}
-        <main className="@container flex-1 scroll-p-2 overflow-y-auto px-5 pb-8 pt-1 sm:px-7">{children}</main>
+        <main className="@container flex-1 scroll-p-2 overflow-y-auto px-5 pb-8 pt-1 sm:px-7">
+          {/* Said once, before anything is attempted. The database refuses a
+              view-only person's changes regardless; this is so nobody types a
+              paragraph first to find out. */}
+          {user.role === "viewer" && (
+            <p
+              role="status"
+              className="mx-auto mb-3 max-w-[1500px] rounded-xl px-4 py-2.5 text-sm font-medium"
+              style={{ background: "var(--amber-soft)", color: "var(--amber)" }}
+            >
+              View only — you can see everything here, and changes are not saved.
+            </p>
+          )}
+          {children}
+        </main>
       </div>
 
       <CommandPalette />

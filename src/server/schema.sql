@@ -113,7 +113,7 @@ CREATE TABLE IF NOT EXISTS users (
   -- together by a test — this pair had already drifted once, and nothing caught
   -- it until a real INSERT failed.
   role            TEXT NOT NULL DEFAULT 'member'
-                    CHECK (role IN ('owner', 'admin', 'finance', 'member')),
+                    CHECK (role IN ('owner', 'admin', 'finance', 'member', 'viewer')),
 
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
   deleted_at      TIMESTAMPTZ
@@ -974,7 +974,7 @@ CREATE INDEX IF NOT EXISTS users_directory_idx
 -- ---------------------------------------------------------------------------
 ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
 ALTER TABLE users ADD CONSTRAINT users_role_check
-  CHECK (role IN ('owner', 'admin', 'finance', 'member'));
+  CHECK (role IN ('owner', 'admin', 'finance', 'member', 'viewer'));
 
 -- ---------------------------------------------------------------------------
 -- A deal belongs to a company, directly.
@@ -2927,6 +2927,68 @@ ALTER TABLE message_templates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE message_templates FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS message_templates_tenant_isolation ON message_templates;
 CREATE POLICY message_templates_tenant_isolation ON message_templates
+  USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
+  WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
+
+-- ---------------------------------------------------------------------------
+-- A fifth role, 'viewer' (view only), is in users_role_check above.
+--
+-- Somebody who needs to SEE the customer records and change nothing — a
+-- support agent answering a client's question, an auditor, a new starter in
+-- their first week. The application runs every change such a person attempts
+-- in a READ ONLY transaction, so it is Postgres that refuses the write, not a
+-- button that happens to be hidden. The constraint is edited where it is
+-- defined, so there is one list of roles in this file, not two.
+-- ---------------------------------------------------------------------------
+
+-- ---------------------------------------------------------------------------
+-- The audit log: who changed what, and when.
+--
+-- Every write the application records with `logWrite` lands here, in the SAME
+-- transaction as the change it describes — so a change that rolled back leaves
+-- no entry, and there is no committed change without one. Like the log line it
+-- mirrors, it names the record and never holds the record's contents.
+--
+-- Append-only: a trigger refuses UPDATE and DELETE, so an entry cannot be
+-- edited or removed by the application — except when the whole workspace is
+-- deleted and its entries go with it.
+--
+-- `actor_name` is copied at the time on purpose. An audit trail that shows
+-- "unknown" for somebody who has since left the company answers nothing.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS audit_events (
+  id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  sub_account_id  TEXT NOT NULL REFERENCES sub_accounts(id) ON DELETE CASCADE,
+  at              TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+  actor_user_id   TEXT,
+  actor_name      TEXT,
+  action          TEXT NOT NULL CHECK (action ~ '^[a-z_]{1,20}$'),
+  entity          TEXT NOT NULL CHECK (entity ~ '^[a-z_]{1,40}$'),
+  entity_id       TEXT CHECK (length(entity_id) <= 120),
+  detail          TEXT CHECK (length(detail) <= 300)
+);
+CREATE INDEX IF NOT EXISTS audit_events_tenant_idx ON audit_events (sub_account_id, at DESC);
+
+CREATE OR REPLACE FUNCTION refuse_audit_change() RETURNS TRIGGER AS $$
+BEGIN
+  /* Allowed only as part of deleting the workspace itself. */
+  IF TG_OP = 'DELETE' AND NOT EXISTS (SELECT 1 FROM sub_accounts s WHERE s.id = OLD.sub_account_id) THEN
+    RETURN OLD;
+  END IF;
+  RAISE EXCEPTION 'audit entries cannot be changed or removed'
+    USING ERRCODE = 'insufficient_privilege';
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS audit_events_append_only ON audit_events;
+CREATE TRIGGER audit_events_append_only
+  BEFORE UPDATE OR DELETE ON audit_events
+  FOR EACH ROW EXECUTE FUNCTION refuse_audit_change();
+
+ALTER TABLE audit_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_events FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS audit_events_tenant_isolation ON audit_events;
+CREATE POLICY audit_events_tenant_isolation ON audit_events
   USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
   WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
 

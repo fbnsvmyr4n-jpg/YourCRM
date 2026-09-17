@@ -356,6 +356,10 @@ export function InboxView({
         return true;
       }
       const result = await addMessageAction(formData);
+      if (result && !result.id) {
+        setComposeError(result.notice);
+        return false;
+      }
       setComposeOpen(false);
       if (result) {
         setFilter("Sent");
@@ -1081,6 +1085,7 @@ function Reader({
   /* Controlled so a template can fill the reply. Keyed by message upstream, so
      it starts empty for each conversation. */
   const [replyBody, setReplyBody] = useState("");
+  const [refusal, setRefusal] = useState<string | null>(null);
 
   const addressable = useMemo(() => addressablePeople(people), [people]);
   const addressableRecent = useMemo(() => addressablePeople(recent), [recent]);
@@ -1092,7 +1097,13 @@ function Reader({
         mode === "reply"
           ? await replyAction(message.id, formData)
           : await forwardAction(message.id, formData);
+      /* Refused (view only): keep the reply open with what was written, and say why. */
+      if (result && !result.id) {
+        setRefusal(result.notice);
+        return;
+      }
       setMode(null);
+      setRefusal(null);
       if (result) onSent(result.id, result.notice);
     } finally {
       setSending(false);
@@ -1253,6 +1264,11 @@ function Reader({
               </div>
             )}
 
+            {refusal && (
+              <p className="mb-3 rounded-xl px-3.5 py-2.5 text-sm" style={{ background: "var(--red-soft)", color: "var(--red)" }} role="alert">
+                {refusal}
+              </p>
+            )}
             {mode === "reply" && (
               <div className="mb-3">
                 <TemplatePicker

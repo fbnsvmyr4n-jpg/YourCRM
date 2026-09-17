@@ -151,7 +151,7 @@ export async function requireTenant(): Promise<TenantContext> {
  */
 export async function withCurrentTenant<T>(
   fn: (q: TenantQuery) => Promise<T>,
-  options: { allowInactive?: boolean; crmData?: boolean } = {}
+  options: { allowInactive?: boolean; crmData?: boolean; page?: boolean } = {}
 ): Promise<T> {
   const ctx = await requireTenant();
 
@@ -196,7 +196,39 @@ export async function withCurrentTenant<T>(
     await requireActivePlan(ctx.agencyId, "server action");
   }
 
+  /*
+     View only, enforced by the database.
+
+     Every change a viewer attempts runs in a READ ONLY transaction, so it is
+     Postgres that refuses it — a control somebody forgot to hide still cannot
+     write. The refusal comes back as a sentence rather than an error page: a
+     form shows it where its own errors go, and a background call (marking a
+     message read) simply does nothing.
+  */
+  /* Actions only. A page load is not the person changing anything, but it does
+     its own housekeeping — emptying the Inbox bin, drafting a retainer invoice
+     that fell due — and refusing that broke every page a viewer opened: on
+     18 Sep 2026 the layout's retainer check was refused on each request. */
+  if (ctx.role === "viewer" && !options.page) {
+    try {
+      return await withTenant(ctx, fn, { readOnly: true });
+    } catch (err) {
+      if (isReadOnlyRefusal(err)) {
+        logDenied("view-only", "a view-only user attempted a change");
+        return { error: VIEW_ONLY_MESSAGE } as T;
+      }
+      throw err;
+    }
+  }
+
   return withTenant(ctx, fn);
+}
+
+export const VIEW_ONLY_MESSAGE = "You have view-only access, so this was not saved. Ask an owner or admin if you need to make changes.";
+
+/** Postgres's "cannot execute … in a read-only transaction". */
+export function isReadOnlyRefusal(err: unknown): boolean {
+  return (err as { code?: string } | null)?.code === "25006";
 }
 
 /**
@@ -244,7 +276,7 @@ export async function withTenantPage<T>(
    * and the layout runs before any page in the group, so there is no route that
    * skips it.
    */
-  return withCurrentTenant(fn, { allowInactive: true, crmData: options.crmData });
+  return withCurrentTenant(fn, { allowInactive: true, crmData: options.crmData, page: true });
 }
 
 /** Same, for a page that needs the context rather than a querier. */

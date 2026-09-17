@@ -126,6 +126,8 @@ export async function addMessageAction(
     });
   });
   if (!created) return null;
+  /* Refused for a view-only person: nothing was written, so nothing to send. */
+  if ("error" in created) return { id: "", notice: String(created.error) };
 
   const notice = await deliver(ctx, created);
   revalidateApp();
@@ -180,6 +182,8 @@ export async function replyAction(
     });
   });
   if (!created) return null;
+  /* Refused for a view-only person: nothing was written, so nothing to send. */
+  if ("error" in created) return { id: "", notice: String(created.error) };
 
   const notice = await deliver(ctx, created);
   revalidateApp();
@@ -241,6 +245,8 @@ export async function forwardAction(
     });
   });
   if (!created) return null;
+  /* Refused for a view-only person: nothing was written, so nothing to send. */
+  if ("error" in created) return { id: "", notice: String(created.error) };
 
   const notice = await deliver(ctx, created);
   revalidateApp();

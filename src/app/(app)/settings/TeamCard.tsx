@@ -67,6 +67,7 @@ const ROLE_TONE: Record<string, { color: string; soft: string }> = {
      A finance user is the one who handles it. */
   finance: { color: "var(--green)", soft: "var(--green-soft)" },
   member: { color: "var(--text-muted)", soft: "var(--raise)" },
+  viewer: { color: "var(--amber)", soft: "var(--amber-soft)" },
 };
 
 /**
@@ -79,9 +80,13 @@ const ROLE_TONE: Record<string, { color: string; soft: string }> = {
  */
 const ROLE_BLURB: Record<string, string> = {
   owner: "Everything, including the subscription and the card.",
-  admin: "Everything except billing — adds people and workspaces.",
-  finance: "Billing and invoices, plus normal CRM use. No people or workspaces.",
+  /* Both of these said the role could use the CRM. Neither can: IT and
+     accounts are kept out of customer records by design (see permissions.ts),
+     so the screen was promising access that every page then refused. */
+  admin: "People and workspaces — the IT side. No customer records or billing.",
+  finance: "Billing, payments and the subscription. No customer records, people or workspaces.",
   member: "Works inside the CRM. No billing, workspaces or people.",
+  viewer: "Sees the CRM and changes nothing — for support, auditors or a first week.",
 };
 
 export function TeamCard({

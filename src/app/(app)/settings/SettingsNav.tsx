@@ -12,6 +12,7 @@ import {
   type LucideIcon,
   Wallet,
   MessageSquareText,
+  ScrollText,
 } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { clsx } from "@/lib/clsx";
@@ -54,6 +55,7 @@ const META: Record<SettingsSectionId, { label: string; icon: LucideIcon; blurb: 
   billing: { label: "Billing", icon: CreditCard, blurb: "Plan, workspaces, usage and referrals" },
   payments: { label: "Payments", icon: Wallet, blurb: "How clients pay your invoices online" },
   data: { label: "Data", icon: Database, blurb: "Custom fields, exports and deleted records" },
+  audit: { label: "Audit log", icon: ScrollText, blurb: "Who changed what, and when" },
 };
 
 export function SettingsNav({
