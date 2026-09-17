@@ -38,6 +38,7 @@ const doc = (
   dueOn: null,
   notes: null,
   sentAt: null,
+  fromRetainer: false,
   lines,
   totalCents: lines.reduce((n, l) => n + l.totalCents, 0),
 });
@@ -126,6 +127,13 @@ describe("grouping by stage", () => {
     const g = documentsByStage(orphan, TASKS);
     expect(g.stages.every((s) => s.entries.length === 0)).toBe(true);
     expect(g.unfiled.map((e) => e.lines[0].id)).toEqual(["po9-a"]);
+  });
+
+  it("PUTS RETAINER INVOICES IN THEIR OWN GROUP, never asking for them to be filed to a stage", () => {
+    const monthly = { ...doc("inv9", "invoice", "draft", [line("inv9-a", 450_000, null)]), fromRetainer: true };
+    const g = documentsByStage([...DOCS, monthly], TASKS);
+    expect(g.retainer.map((e) => e.document.id)).toEqual(["inv9"]);
+    expect(g.unfiled.some((e) => e.document.id === "inv9")).toBe(false);
   });
 
   it("with no plan at all, everything is unfiled and there are no stages", () => {

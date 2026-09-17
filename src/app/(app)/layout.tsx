@@ -9,6 +9,7 @@ import { canAccessCrm, roleCan } from "@/server/permissions";
 import { withSystem } from "@/server/tenant";
 import { navCounts } from "@/server/nav-counts";
 import { listNotifications } from "@/server/notifications";
+import { raiseRetainersSafely } from "@/server/retainer-run";
 import { getSettings } from "@/server/repos/settings";
 import { currentUser, withTenantPage } from "@/server/tenant-session";
 
@@ -77,7 +78,13 @@ export default async function AppGroupLayout({ children }: { children: React.Rea
     async (q) => ({
       currency: (await getSettings(q)).currency,
       ...(crmAccess
-        ? { notifications: await listNotifications(q), counts: await navCounts(q) }
+        ? {
+            /* Retainer invoices that fell due are drafted BEFORE the bell is
+               read, so the bell can say they are waiting. Cheap when nothing
+               is due: one indexed read. */
+            notifications: (await raiseRetainersSafely(q), await listNotifications(q)),
+            counts: await navCounts(q),
+          }
         : { notifications: [], counts: { inbox: 0, calendarToday: false, tasksDue: 0 } }),
     }),
     { crmData: false }

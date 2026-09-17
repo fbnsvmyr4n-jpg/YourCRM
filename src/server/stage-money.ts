@@ -205,6 +205,12 @@ export type DocumentsByStage = {
   stages: { task: StageTask; entries: StageEntry[]; money: StageMoney | null }[];
   /** Documents with at least one line filed nowhere, showing only those lines. */
   unfiled: StageEntry[];
+  /**
+   * Invoices a retainer raised. Their own group: a monthly maintenance bill is
+   * not a stage of the build, and listing it as "not filed" would ask somebody
+   * to file something that has nowhere true to go.
+   */
+  retainer: StageEntry[];
 };
 
 /**
@@ -243,18 +249,23 @@ export function documentsByStage(
     }));
 
   const unfiled: StageEntry[] = [];
+  const retainer: StageEntry[] = [];
   for (const document of documents) {
+    if (document.fromRetainer) {
+      retainer.push(entry(document, document.lines));
+      continue;
+    }
     const lines = document.lines.filter((l) => !l.projectTaskId || !known.has(l.projectTaskId));
     if (lines.length > 0) unfiled.push(entry(document, lines));
   }
 
-  return { stages, unfiled };
+  return { stages, unfiled, retainer };
 }
 
 /** Lines filed against no stage at all, so the Documents tab can say so. */
 export function unfiledLineCount(documents: readonly ProjectDocument[]): number {
   return documents.reduce(
-    (n, d) => n + d.lines.filter((l) => !l.projectTaskId).length,
+    (n, d) => n + (d.fromRetainer ? 0 : d.lines.filter((l) => !l.projectTaskId).length),
     0
   );
 }

@@ -83,6 +83,7 @@ export async function raiseInvoiceFromQuote(
   const existing = await q.one<{ number: string }>(
     `SELECT number FROM documents
       WHERE sub_account_id = $1 AND deal_id = $2 AND kind = 'invoice' AND deleted_at IS NULL
+        AND retainer_id IS NULL
       LIMIT 1`,
     [q.ctx.subAccountId, dealId]
   );

@@ -39,6 +39,8 @@ import type {
 } from "@/server/repos/projects";
 import type { Dependency, ProjectTask, ScheduleSummary } from "@/server/repos/tasks";
 import { ProjectSchedule } from "./ProjectSchedule";
+import { RetainerCard } from "./RetainerCard";
+import type { Retainer } from "@/server/retainer-rules";
 import {
   documentsByStage,
   projectMoney,
@@ -165,6 +167,7 @@ export function ProjectDetail({
   customValues,
   people,
   documents,
+  retainers = [],
   priceItems,
   threads,
   timeline,
@@ -180,6 +183,8 @@ export function ProjectDetail({
   customValues: FieldValues;
   people: ProjectPerson[];
   documents: ProjectDocument[];
+  /** Scheduled billing on this job. */
+  retainers?: Retainer[];
   /** The active price list, so a hand-typed line can pick a rate. */
   priceItems: { id: string; name: string; unit: string; unitCents: number }[];
   threads: ProjectThread[];
@@ -262,7 +267,10 @@ export function ProjectDetail({
       <div className="mt-4 flex flex-col gap-4">
         {tab === "team" && <TeamTab dealId={header.id} people={people} candidates={candidates} />}
         {tab === "documents" && (
-          <DocumentsTab dealId={header.id} documents={documents} priceItems={priceItems} tasks={tasks} />
+          <>
+            <RetainerCard dealId={header.id} retainers={retainers} today={today} />
+            <DocumentsTab dealId={header.id} documents={documents} priceItems={priceItems} tasks={tasks} />
+          </>
         )}
         {tab === "threads" && <ThreadsTab threads={threads} />}
         {tab === "timeline" && (
@@ -749,7 +757,9 @@ function DocumentsTab({
      to ignore buttons — and one that stays after invoicing is an invitation to
      bill the same job twice. */
   const acceptedQuote = quotes.find((d) => d.status === "accepted" || d.status === "paid");
-  const canInvoice = Boolean(acceptedQuote) && invoices.length === 0;
+  /* A retainer's monthly bills are not this job's invoice: they must not hide
+     the offer to bill the quoted work. */
+  const canInvoice = Boolean(acceptedQuote) && invoices.every((d) => d.fromRetainer);
 
   /* Bumped each time the form is deliberately opened, so it starts fresh then
      and only then — never when the stage is merely cleared. */
@@ -936,7 +946,7 @@ function StageView({
   onRaiseForStage: (task: { id: string; name: string }) => void;
 }) {
   const money = useExactMoney();
-  const { stages, unfiled } = grouped;
+  const { stages, unfiled, retainer } = grouped;
   const unfiledLines = unfiled.reduce((n, e) => n + e.lines.length, 0);
 
   const rowFor = (groupKey: string, e: StageEntry) => (
@@ -973,6 +983,15 @@ function StageView({
             Open a document and choose a stage for each line, so that stage&apos;s margin counts it.
           </p>
           <ul className="flex flex-col gap-2">{unfiled.map((e) => rowFor("unfiled", e))}</ul>
+        </section>
+      )}
+
+      {retainer.length > 0 && (
+        <section>
+          <p className="mb-2 px-0.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-faint">
+            Retainer invoices <span className="font-normal tracking-normal">({retainer.length})</span>
+          </p>
+          <ul className="flex flex-col gap-2">{retainer.map((e) => rowFor("retainer", e))}</ul>
         </section>
       )}
 

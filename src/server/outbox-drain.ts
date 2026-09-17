@@ -1,6 +1,7 @@
-import { withSystem, type TenantContext } from "./tenant";
+import { withSystem, withTenant, type TenantContext } from "./tenant";
 import { drain, type DrainReport } from "./outbox";
 import { OUTBOX_REGISTRY } from "./outbox-handlers";
+import { raiseRetainersSafely } from "./retainer-run";
 
 /**
  * The sweep that catches what a request could not finish.
@@ -70,6 +71,8 @@ export async function sweep(perWorkspace = 10): Promise<SweepReport> {
       role: "owner",
     };
     try {
+      /* Retainer invoices due today, for a workspace nobody has opened yet. */
+      await withTenant(ctx, (q) => raiseRetainersSafely(q));
       const report = await drain(ctx, OUTBOX_REGISTRY, perWorkspace);
       total.workspaces += 1;
       total.ran += report.ran;

@@ -689,3 +689,111 @@ export async function sendInvoiceAction(_prev: FormState, formData: FormData): P
     ok: `${after.invoice?.number ?? "The invoice"} is queued to send. It hasn't gone out yet — we'll keep trying, and it will show in your notifications if it cannot be sent.`,
   };
 }
+
+/* ---------------- retainers ---------------- */
+
+/** The furthest back a retainer may start. Further than that is an import, not a retainer. */
+const MAX_BACKDATE_DAYS = 366;
+
+async function readRetainerForm(formData: FormData, today: string) {
+  const { addDays, isIsoDay, RETAINER_EVERY } = await import("@/server/retainer-rules");
+  const description = text(formData.get("description"), 200);
+  if (!description) return { error: "Say what the retainer is for — it becomes the invoice line." };
+
+  const amount = decimal(formData.get("amount"), MAX_UNIT_PRICE, 2);
+  if (amount === null || amount <= 0) return { error: "Enter the amount billed each period." };
+
+  const every = pick(formData.get("every"), RETAINER_EVERY);
+  if (!every) return { error: "Choose how often it is billed." };
+
+  const startsOn = text(formData.get("startsOn"), 10);
+  if (!isIsoDay(startsOn)) return { error: "Choose the date of the first invoice." };
+  if (startsOn < addDays(today, -MAX_BACKDATE_DAYS)) {
+    return { error: "A retainer can start at most a year back. Raise older invoices by hand." };
+  }
+
+  const endsRaw = text(formData.get("endsOn"), 10);
+  if (endsRaw && !isIsoDay(endsRaw)) return { error: "That end date is not valid." };
+  const endsOn = endsRaw || null;
+  if (endsOn && endsOn < startsOn) return { error: "The end date is before the retainer starts." };
+
+  const dueDays = count(formData.get("dueDays"), 120);
+  if (dueDays === null) return { error: "Payment terms are between 0 and 120 days." };
+
+  return { description, amountCents: Math.round(amount * 100), every, startsOn, endsOn, dueDays };
+}
+
+/**
+ * Put a project on a retainer.
+ *
+ * Anything already due — a first invoice dated today — is raised in the same
+ * press, so the person setting it up sees the draft rather than wondering when
+ * it will appear.
+ */
+export async function createRetainerAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  return withCurrentTenant(async (q) => {
+    const dealId = validId(formData.get("dealId"));
+    if (!dealId) return { error: "That project could not be identified." };
+    const { businessToday } = await import("@/server/repos/settings");
+    const { createRetainer, raiseDueRetainerInvoices } = await import("@/server/repos/retainers");
+    const today = await businessToday(q);
+
+    const input = await readRetainerForm(formData, today);
+    if ("error" in input) return { error: input.error };
+
+    const out = await createRetainer(q, dealId, input);
+    if ("error" in out) return { error: out.error };
+    logWrite("create", "retainer", { id: out.retainer.id, actor: q.ctx.userId });
+
+    const raised = await raiseDueRetainerInvoices(q, today);
+    revalidateApp();
+    return {
+      ok: raised.raised
+        ? raised.raised === 1
+          ? `Retainer set up. ${raised.numbers[0]} is ready as a draft — check it, then send it.`
+          : `Retainer set up. ${raised.numbers.join(", ")} are ready as drafts — check them, then send them.`
+        : "Retainer set up. Each invoice will be raised as a draft on its date for you to send.",
+    };
+  });
+}
+
+export async function updateRetainerAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  return withCurrentTenant(async (q) => {
+    const id = validId(formData.get("retainerId"));
+    if (!id) return { error: "That retainer no longer exists." };
+    const { businessToday } = await import("@/server/repos/settings");
+    const { updateRetainer } = await import("@/server/repos/retainers");
+    const input = await readRetainerForm(formData, await businessToday(q));
+    if ("error" in input) return { error: input.error };
+
+    const out = await updateRetainer(q, id, input);
+    if ("error" in out) return { error: out.error };
+    logWrite("update", "retainer", { id, actor: q.ctx.userId });
+    revalidateApp();
+    return { ok: "Saved. Invoices already raised keep their figures." };
+  });
+}
+
+export async function setRetainerStatusAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  return withCurrentTenant(async (q) => {
+    const id = validId(formData.get("retainerId"));
+    const { RETAINER_STATUSES, dayLabel } = await import("@/server/retainer-rules");
+    const to = pick(formData.get("to"), RETAINER_STATUSES);
+    if (!id || !to) return { error: "That change could not be made." };
+    const { businessToday } = await import("@/server/repos/settings");
+    const { setRetainerStatus } = await import("@/server/repos/retainers");
+
+    const out = await setRetainerStatus(q, id, to, await businessToday(q));
+    if ("error" in out) return { error: out.error };
+    logWrite("update", "retainer", { id, actor: q.ctx.userId, detail: to });
+    revalidateApp();
+    return {
+      ok:
+        to === "paused"
+          ? "Paused. Nothing is billed until you resume it."
+          : to === "active"
+            ? `Resumed. The next invoice is dated ${dayLabel(out.retainer.nextInvoiceOn)}.`
+            : "Cancelled. Invoices already raised stay on the project.",
+    };
+  });
+}

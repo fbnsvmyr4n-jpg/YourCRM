@@ -3,6 +3,7 @@ import { deadJobs } from "./repos/outbox";
 import { failingAutomations } from "./repos/automations";
 import { dueForUser } from "./repos/todos";
 import { overdueTickets } from "./repos/tickets";
+import { retainerDraftsWaiting } from "./repos/retainers";
 import {
   BOOKING_EMAIL,
   CALL_ANALYSIS,
@@ -324,6 +325,20 @@ export async function listNotifications(q: TenantQuery): Promise<Notification[]>
       )} presented`,
       href: "/deals",
       weight: 50,
+    });
+  }
+
+  /* Retainer invoices drafted on their date and not yet sent. Straight to the
+     project when they are all on one; the projects list otherwise. */
+  const drafts = await retainerDraftsWaiting(q);
+  if (drafts.count > 0) {
+    out.push({
+      id: "retainer-drafts",
+      kind: "deal",
+      title: `${drafts.count} retainer invoice${drafts.count === 1 ? "" : "s"} ready to send`,
+      detail: "Raised as drafts on their date — check and send",
+      href: drafts.dealIds.length === 1 ? `/projects/${drafts.dealIds[0]}` : "/projects",
+      weight: 85,
     });
   }
 

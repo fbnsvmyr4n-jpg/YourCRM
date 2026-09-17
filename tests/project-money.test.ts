@@ -28,6 +28,7 @@ const doc = (
   dueOn: null,
   notes: null,
   sentAt: null,
+  fromRetainer: false,
   lines: [
     { id: `${id}-l`, description: id, quantity: 1, unitCents: totalCents, totalCents, projectTaskId: null },
   ],

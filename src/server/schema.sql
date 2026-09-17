@@ -2713,6 +2713,78 @@ CREATE POLICY tickets_tenant_isolation ON tickets
   WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
 
 -- ---------------------------------------------------------------------------
+-- Retainers: a client billed the same amount on a schedule.
+--
+-- Monthly garden maintenance, a quarterly service contract, a yearly licence.
+-- Attached to a PROJECT because every document in this product belongs to one,
+-- so the invoices a retainer raises land on the job's own Documents tab and in
+-- its money strip with nothing new to learn.
+--
+-- `next_invoice_on` is stored, and computed by the application from the start
+-- date and how many periods have been billed — never by adding a month to the
+-- previous one, which walks a 31 Jan start to 28 Feb and then 28 Mar for ever.
+--
+-- Each invoice carries its retainer and the period it bills, unique together,
+-- so the same month cannot be billed twice however many page loads race to
+-- raise it.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS retainers (
+  id                  TEXT PRIMARY KEY,
+  sub_account_id      TEXT NOT NULL REFERENCES sub_accounts(id) ON DELETE CASCADE,
+  deal_id             TEXT NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+  description         TEXT NOT NULL CHECK (length(btrim(description)) BETWEEN 1 AND 200),
+  amount_cents        BIGINT NOT NULL CHECK (amount_cents > 0 AND amount_cents <= 100000000000),
+  every               TEXT NOT NULL CHECK (every IN ('month', 'quarter', 'year')),
+  starts_on           DATE NOT NULL,
+  ends_on             DATE,
+  due_days            INTEGER NOT NULL DEFAULT 7 CHECK (due_days BETWEEN 0 AND 120),
+  status              TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paused', 'cancelled')),
+  periods_billed      INTEGER NOT NULL DEFAULT 0 CHECK (periods_billed >= 0),
+  next_invoice_on     DATE NOT NULL,
+  created_by_user_id  TEXT REFERENCES users(id) ON DELETE SET NULL,
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+  cancelled_at        TIMESTAMPTZ,
+  CONSTRAINT retainers_ends_after_start CHECK (ends_on IS NULL OR ends_on >= starts_on),
+  CONSTRAINT retainers_cancelled_shape CHECK ((status = 'cancelled') = (cancelled_at IS NOT NULL))
+);
+CREATE INDEX IF NOT EXISTS retainers_due_idx ON retainers (sub_account_id, status, next_invoice_on);
+CREATE INDEX IF NOT EXISTS retainers_deal_idx ON retainers (sub_account_id, deal_id);
+
+CREATE OR REPLACE FUNCTION assert_retainer_deal_in_tenant() RETURNS TRIGGER AS $$
+BEGIN
+  IF NOT EXISTS (
+       SELECT 1 FROM deals d WHERE d.id = NEW.deal_id AND d.sub_account_id = NEW.sub_account_id) THEN
+    RAISE EXCEPTION 'deal % does not belong to sub-account %', NEW.deal_id, NEW.sub_account_id
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS retainers_deal_in_tenant ON retainers;
+CREATE TRIGGER retainers_deal_in_tenant
+  BEFORE INSERT OR UPDATE OF deal_id, sub_account_id ON retainers
+  FOR EACH ROW EXECUTE FUNCTION assert_retainer_deal_in_tenant();
+
+ALTER TABLE retainers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE retainers FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS retainers_tenant_isolation ON retainers;
+CREATE POLICY retainers_tenant_isolation ON retainers
+  USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
+  WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
+
+-- Which retainer, and which period, an invoice bills. Both or neither.
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS retainer_id  TEXT REFERENCES retainers(id) ON DELETE SET NULL;
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS period_start DATE;
+ALTER TABLE documents DROP CONSTRAINT IF EXISTS documents_period_shape;
+ALTER TABLE documents ADD CONSTRAINT documents_period_shape CHECK (
+  (period_start IS NULL) OR (kind = 'invoice')
+);
+CREATE UNIQUE INDEX IF NOT EXISTS documents_retainer_period_once
+  ON documents (sub_account_id, retainer_id, period_start)
+  WHERE retainer_id IS NOT NULL AND deleted_at IS NULL;
+
+-- ---------------------------------------------------------------------------
 -- What the application's own database role may do.
 --
 -- KEEP THIS THE LAST BLOCK IN THE FILE: `GRANT … ON ALL TABLES` covers only the
