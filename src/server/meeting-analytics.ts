@@ -122,7 +122,9 @@ export async function meetingAnalytics(q: TenantQuery): Promise<MeetingAnalytics
     // step is a count of meetings that reached at least that far, so it can
     // only ever narrow — a funnel that widens is a bug in the arithmetic.
     funnel: [
-      { label: "Booked", value: decided, pct: 100 },
+      // Derived, not asserted. Hard-coded 100 meant a board with nothing
+      // decided yet drew a full bar reading "Booked 0 — 100% of booked".
+      { label: "Booked", value: decided, pct: pct(decided, decided) },
       { label: "Showed up", value: attended, pct: pct(attended, decided) },
       { label: "Advanced", value: advanced + won, pct: pct(advanced + won, decided) },
       { label: "Closed won", value: won, pct: pct(won, decided) },

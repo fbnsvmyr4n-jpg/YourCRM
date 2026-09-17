@@ -68,6 +68,25 @@ export function dealMoneyBucket(stage: string, wonAt: Date | string | null): "wo
   return "none";
 }
 
+/**
+ * The line under a meeting on a contact's timeline.
+ *
+ * The outcome is shown rather than inferred: a past meeting nobody has marked
+ * up is still "scheduled" in the database, and calling it "held" would invent
+ * an event.
+ *
+ * But "scheduled" covers two situations, and only one of them is a gap in the
+ * record. A meeting three days from now had "Outcome not recorded" under it,
+ * which reads as a write-up somebody forgot — for a meeting that has not
+ * happened. Found on 18 Sep 2026 driving a contact card. Comparing instants is
+ * safe on the server; nothing here depends on the reader's time zone.
+ */
+export function meetingDetail(outcome: string, scheduledAt: Date | string, nowMs: number): string {
+  if (outcome !== "scheduled") return outcome.replace("_", "-");
+  const at = scheduledAt instanceof Date ? scheduledAt.getTime() : Date.parse(scheduledAt);
+  return Number.isFinite(at) && at > nowMs ? "Scheduled" : "Outcome not recorded";
+}
+
 export async function contactSummaries(
   q: TenantQuery,
   contactIds: string[]
@@ -139,9 +158,7 @@ export async function contactSummaries(
       id: `meeting-${m.id}`,
       kind: "meeting",
       title: m.topic || "Meeting",
-      // The outcome is shown rather than inferred: a past meeting nobody has
-      // marked up is still "scheduled", and saying otherwise invents an event.
-      detail: m.outcome === "scheduled" ? "Outcome not recorded" : m.outcome.replace("_", "-"),
+      detail: meetingDetail(m.outcome, m.scheduled_at, Date.now()),
       at: m.scheduled_at.toISOString(),
       source: "meeting",
     });

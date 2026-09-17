@@ -269,14 +269,20 @@ const FUNNEL_COLORS = ["var(--purple)", "var(--green)", "var(--accent)", "var(--
 function PipelineConversion({ analytics }: { analytics: MeetingAnalytics }) {
   const { funnel, total, decided, pending, noShow, won } = analytics;
 
-  if (total === 0) {
+  /* Nothing decided is the same nothing as nothing booked, as far as this card
+     is concerned: it counts outcomes, and says so in its own header. Keying the
+     empty state off `total` drew four zeroed steps with a full purple bar over
+     them for a board whose three meetings simply had not happened yet. */
+  if (decided === 0) {
     return (
       <Card>
         <h3 className="mb-4 flex items-center gap-2 text-[15px] font-semibold tracking-tight">
           <TrendingUp className="h-[18px] w-[18px] text-accent" /> Pipeline Conversion
         </h3>
         <p className="py-12 text-center text-sm text-faint">
-          Schedule a meeting and record its outcome to see the funnel.
+          {total === 0
+            ? "Schedule a meeting and record its outcome to see the funnel."
+            : `Record what happened at ${total === 1 ? "your meeting" : "a meeting"} to see the funnel.`}
         </p>
       </Card>
     );
