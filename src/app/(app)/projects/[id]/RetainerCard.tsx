@@ -6,6 +6,7 @@ import { Banner } from "@/components/ui/Banner";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { useMoney } from "@/components/money/CurrencyProvider";
 import { useFormDisclosure } from "@/lib/form-disclosure";
+import { useKeptForm } from "@/lib/use-kept-form";
 import { clsx } from "@/lib/clsx";
 import { dayLabel, EVERY_LABEL, RETAINER_EVERY, type Retainer } from "@/server/retainer-rules";
 import {
@@ -24,7 +25,8 @@ import {
  * sending it stays a person's decision, the same as every other invoice.
  */
 export function RetainerCard({ dealId, retainers, today }: { dealId: string; retainers: Retainer[]; today: string }) {
-  const [createState, create, creating] = useActionState<FormState, FormData>(createRetainerAction, undefined);
+  const create = useKeptForm<FormState>(createRetainerAction, undefined);
+  const createState = create.state;
   const [statusState, setStatus, settingStatus] = useActionState<FormState, FormData>(setRetainerStatusAction, undefined);
   const [open, openForm, closeForm] = useFormDisclosure(createState, (s) => Boolean(s?.ok));
 
@@ -59,14 +61,7 @@ export function RetainerCard({ dealId, retainers, today }: { dealId: string; ret
       </div>
 
       {open && (
-        <RetainerForm
-          dealId={dealId}
-          today={today}
-          action={create}
-          pending={creating}
-          state={createState}
-          onCancel={closeForm}
-        />
+        <RetainerForm dealId={dealId} today={today} form={create} onCancel={closeForm} />
       )}
 
       {!open && live.length === 0 && (
@@ -98,7 +93,8 @@ function RetainerRow({
   busy: boolean;
 }) {
   const { format } = useMoney();
-  const [editState, edit, editing] = useActionState<FormState, FormData>(updateRetainerAction, undefined);
+  const edit = useKeptForm<FormState>(updateRetainerAction, undefined);
+  const editState = edit.state;
   const [isEditing, openEdit, closeEdit] = useFormDisclosure(editState, (s) => Boolean(s?.ok));
   const [confirmCancel, setConfirmCancel] = useState(false);
   const paused = r.status === "paused";
@@ -106,15 +102,7 @@ function RetainerRow({
 
   if (isEditing) {
     return (
-      <RetainerForm
-        dealId={r.dealId}
-        today={today}
-        retainer={r}
-        action={edit}
-        pending={editing}
-        state={editState}
-        onCancel={closeEdit}
-      />
+      <RetainerForm dealId={r.dealId} today={today} retainer={r} form={edit} onCancel={closeEdit} />
     );
   }
 
@@ -192,23 +180,20 @@ function RetainerForm({
   dealId,
   today,
   retainer,
-  action,
-  pending,
-  state,
+  form,
   onCancel,
 }: {
   dealId: string;
   today: string;
   retainer?: Retainer;
-  action: (formData: FormData) => void;
-  pending: boolean;
-  state: FormState;
+  form: ReturnType<typeof useKeptForm<FormState>>;
   onCancel: () => void;
 }) {
+  const { state, pending, formProps } = form;
   const { symbol } = useMoney();
   const editing = Boolean(retainer);
   return (
-    <form action={action} className="mb-3 space-y-3 rounded-xl border border-[var(--border)] p-3.5">
+    <form {...formProps} className="mb-3 space-y-3 rounded-xl border border-[var(--border)] p-3.5">
       <Banner state={state} />
       <input type="hidden" name="dealId" value={dealId} />
       {retainer && <input type="hidden" name="retainerId" value={retainer.id} />}

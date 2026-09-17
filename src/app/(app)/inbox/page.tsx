@@ -2,7 +2,9 @@ import { listMessages, projectOptions, purgeExpiredMessages } from "@/server/rep
 import { contactSummaries } from "@/server/contact-summaries";
 import { listContacts } from "@/server/repos/contacts";
 import { decorateMessage } from "@/server/decorate-message";
-import { requireTenantPage, withTenantPage } from "@/server/tenant-session";
+import { currentUser, requireTenantPage, withTenantPage } from "@/server/tenant-session";
+import { listTemplates } from "@/server/repos/templates";
+import { withSystem } from "@/server/tenant";
 import { listTickets } from "@/server/repos/tickets";
 import { assignableTeam } from "@/server/repos/automations";
 import { InboxView } from "./InboxView";
@@ -17,7 +19,13 @@ export default async function InboxPage({
 }) {
   const { folder } = await searchParams;
   const ctx = await requireTenantPage();
-  const { messages, contactFor, people, recent, revenueFor, projects, companyFor, tickets, team } =
+  /* For templates: "{{my_name}}" and "{{business_name}}" are the writer and
+     this workspace, read once for the page. */
+  const user = await currentUser();
+  const business = await withSystem((sys) =>
+    sys.one<{ name: string }>(`SELECT name FROM sub_accounts WHERE id = $2 AND agency_id = $1`, [ctx.agencyId, ctx.subAccountId])
+  );
+  const { messages, contactFor, people, recent, revenueFor, projects, companyFor, tickets, team, templates } =
     await withTenantPage(async (q) => {
     /* Before reading, so nothing expired is listed and then vanishes on the
        next load. There is no scheduler in this app; the bin is emptied by
@@ -136,6 +144,7 @@ export default async function InboxPage({
       /* The conversations somebody is answerable for, and who they can be
          handed to — people who can see customer records. */
       tickets: await listTickets(q),
+      templates: await listTemplates(q),
       team: await assignableTeam(q),
       messages: rows.map((m) => decorateMessage(m, senders)),
       contactFor,
@@ -168,6 +177,8 @@ export default async function InboxPage({
       tickets={tickets}
       team={team}
       currentUserId={ctx.userId}
+      templates={templates}
+      me={{ name: user?.name ?? "", business: business?.name ?? "" }}
       initialFolder={folder === "tickets" ? "Tickets" : undefined}
     />
   );

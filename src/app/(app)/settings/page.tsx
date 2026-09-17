@@ -18,6 +18,8 @@ import { listWorkingHours } from "@/server/repos/working-hours";
 import { listBookingLinks } from "@/server/repos/booking-links";
 import { assignableTeam, listAutomations, listRuns } from "@/server/repos/automations";
 import { getConnection } from "@/server/repos/payments";
+import { listTemplates } from "@/server/repos/templates";
+import { TemplatesCard } from "./TemplatesCard";
 import { paystackTakes } from "@/server/paystack";
 import { PaymentsCard } from "./PaymentsCard";
 import { listFields } from "@/server/repos/custom-fields";
@@ -122,6 +124,7 @@ export default async function SettingsPage({
     holidays,
     workingHours,
     paymentConnection,
+    templates,
     bookingLinks,
     automations,
     automationRuns,
@@ -155,6 +158,8 @@ export default async function SettingsPage({
       /* How clients pay: a money setting, not a customer record, so it loads
          for accounts too. Never the key — only its mode and last four. */
       paymentConnection: await getConnection(q),
+      /* What the team writes to clients: CRM work, like the address book. */
+      templates: crmAccess ? await listTemplates(q) : [],
       usage: await usageThisMonth(q),
       // Recovery lives here because this is where somebody looks after deleting
       // the wrong thing, and it costs one more query on a page already open.
@@ -325,6 +330,18 @@ export default async function SettingsPage({
           runs={automationRuns.map((run) => ({ ...run, when: shortWhen(run.at, settings.timeZone) }))}
           team={assignable}
           canManage={roleCan(user.role, "manage_users")}
+        />
+      ),
+      needsCrm: true,
+    },
+    {
+      id: "templates",
+      content: (
+        <TemplatesCard
+          templates={templates}
+          readerId={user.id}
+          canManage={roleCan(user.role, "manage_users")}
+          me={{ name: user.name, business: workspaces.find((w) => w.id === tenant.subAccountId)?.name ?? "" }}
         />
       ),
       needsCrm: true,

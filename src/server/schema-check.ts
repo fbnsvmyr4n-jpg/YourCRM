@@ -68,6 +68,7 @@ export const EXPECTED_TABLES = [
   "retainers",
   "payment_connections",
   "invoice_payments",
+  "message_templates",
 ] as const;
 
 /** Columns added by `ALTER TABLE … ADD COLUMN IF NOT EXISTS`, which a stale

@@ -5,6 +5,7 @@ import { Check, Copy, Wallet } from "lucide-react";
 import { Card, CardHeader, CardMeta } from "@/components/ui/Card";
 import { Banner } from "@/components/ui/Banner";
 import { useFormDisclosure } from "@/lib/form-disclosure";
+import { useKeptForm } from "@/lib/use-kept-form";
 import type { PaymentConnection } from "@/server/repos/payments";
 import type { FormState } from "./actions";
 import { connectPaystackAction, disconnectPaystackAction } from "./payment-actions";
@@ -30,7 +31,8 @@ export function PaymentsCard({
   currencySupported: boolean;
   canManage: boolean;
 }) {
-  const [connectState, connect, connecting] = useActionState<FormState, FormData>(connectPaystackAction, undefined);
+  const connect = useKeptForm<FormState>(connectPaystackAction, undefined);
+  const { state: connectState, pending: connecting } = connect;
   const [disconnectState, disconnect, disconnecting] = useActionState<FormState, FormData>(disconnectPaystackAction, undefined);
   const [open, openForm, closeForm] = useFormDisclosure(connectState, (s) => Boolean(s?.ok));
   const [confirming, setConfirming] = useState(false);
@@ -139,7 +141,7 @@ export function PaymentsCard({
         )}
 
         {open && canManage && (
-          <form action={connect} className="flex flex-col gap-3 rounded-xl border border-[var(--border)] p-3.5">
+          <form {...connect.formProps} className="flex flex-col gap-3 rounded-xl border border-[var(--border)] p-3.5">
             <Banner state={connectState} />
             <label className="block">
               <span className="mb-1.5 block text-xs font-medium text-muted">Paystack secret key</span>

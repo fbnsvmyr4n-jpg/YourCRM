@@ -56,6 +56,8 @@ import { SwipeToDelete } from "@/components/ui/SwipeToDelete";
 import { useMoney } from "@/components/money/CurrencyProvider";
 import { TicketBar, TicketLine, TrackTicketButton } from "@/components/tickets/TicketControls";
 import { compareTickets, type Ticket, type TicketStatus } from "@/server/ticket-rules";
+import type { MessageTemplate } from "@/server/template-rules";
+import { TemplatePicker } from "@/components/templates/TemplatePicker";
 import {
   addMessageAction,
   forwardAction,
@@ -126,6 +128,8 @@ export function InboxView({
   team = [],
   currentUserId = null,
   initialFolder,
+  templates = [],
+  me = { name: "", business: "" },
 }: {
   messages: Message[];
   contactFor: Record<string, string>;
@@ -145,6 +149,10 @@ export function InboxView({
   team?: { id: string; name: string }[];
   currentUserId?: string | null;
   initialFolder?: InboxFilter;
+  /** The workspace's message templates. */
+  templates?: MessageTemplate[];
+  /** Who is writing, for {{my_name}} and {{business_name}}. */
+  me?: { name: string; business: string };
 }) {
   /**
    * A message in progress survives the composer closing.
@@ -588,6 +596,8 @@ export function InboxView({
             ticket={ticketByThread.get(selected.threadId) ?? null}
             team={team}
             currentUserId={currentUserId}
+            templates={templates}
+            me={me}
             busy={busy}
             onTrash={() => handleTrash(selected.id)}
             onRestore={() => handleRestore(selected.id)}
@@ -646,6 +656,8 @@ export function InboxView({
           }}
           onSubmit={handleCompose}
           error={composeError}
+          templates={templates}
+          me={me}
           draft={draft}
           save={save}
           clear={clear}
@@ -1031,6 +1043,8 @@ function Reader({
   ticket,
   team,
   currentUserId,
+  templates,
+  me,
   busy,
   onTrash,
   onRestore,
@@ -1042,6 +1056,8 @@ function Reader({
   ticket: Ticket | null;
   team: { id: string; name: string }[];
   currentUserId: string | null;
+  templates: MessageTemplate[];
+  me: { name: string; business: string };
   people: Person[];
   recent: Person[];
   /** Live projects this conversation could belong to. The sender's own first. */
@@ -1062,6 +1078,9 @@ function Reader({
   const [viewing, setViewing] = useState<Attachment | null>(null);
   const [sending, setSending] = useState(false);
   const [forwardTo, setForwardTo] = useState("");
+  /* Controlled so a template can fill the reply. Keyed by message upstream, so
+     it starts empty for each conversation. */
+  const [replyBody, setReplyBody] = useState("");
 
   const addressable = useMemo(() => addressablePeople(people), [people]);
   const addressableRecent = useMemo(() => addressablePeople(recent), [recent]);
@@ -1234,9 +1253,23 @@ function Reader({
               </div>
             )}
 
+            {mode === "reply" && (
+              <div className="mb-3">
+                <TemplatePicker
+                  templates={templates}
+                  channel={message.channel}
+                  person={{ name: message.name, company: message.company }}
+                  me={me}
+                  hasText={Boolean(replyBody.trim())}
+                  onPick={(filled) => setReplyBody(filled.body)}
+                />
+              </div>
+            )}
             <textarea
               name="body"
               rows={4}
+              value={replyBody}
+              onChange={(e) => setReplyBody(e.target.value)}
               required={mode === "reply"}
               autoFocus={mode === "reply"}
               placeholder={mode === "reply" ? `Write your reply to ${message.name}…` : "Add a note (optional)…"}
@@ -1798,9 +1831,13 @@ function ComposeModal({
   onClose,
   onSubmit,
   error,
+  templates,
+  me,
 }: {
   people: Person[];
   recent: Person[];
+  templates: MessageTemplate[];
+  me: { name: string; business: string };
   busy: boolean;
   onClose: () => void;
   /** Resolves false when the server refused, so the draft is kept. */
@@ -1822,6 +1859,14 @@ function ComposeModal({
      started. Same box, because it is the same record facing the other way.
   */
   const [mode, setMode] = useState<"send" | "log">("send");
+  /* Controlled, so the template menu offers the templates for this channel. */
+  const [channel, setChannel] = useState<"email" | "whatsapp" | "sms">("email");
+  /* Who the template is filled in for: the person picked in To, by address or name. */
+  const recipient = useMemo(() => {
+    const t = to.trim().toLowerCase();
+    if (!t) return null;
+    return people.find((p) => p.email.toLowerCase() === t || p.name.toLowerCase() === t) ?? null;
+  }, [people, to]);
   const [receivedLocal, setReceivedLocal] = useState("");
   const logging = mode === "log";
 
@@ -1859,7 +1904,7 @@ function ComposeModal({
       >
         <div className="mb-5 flex items-center justify-between">
           <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight">
-            <Send className="h-[18px] w-[18px] text-accent" /> {logging ? "Log a message" : "New Email"}
+            <Send className="h-[18px] w-[18px] text-accent" /> {logging ? "Log a message" : channel === "email" ? "New Email" : `New ${channel === "sms" ? "SMS" : "WhatsApp"} message`}
           </h2>
           <button type="button" onClick={onClose} className="text-faint hover:text-[var(--text)]" aria-label="Close">
             <X className="h-5 w-5" />
@@ -1952,13 +1997,30 @@ function ComposeModal({
                 a real thing people do; this is where they say so. */}
             <label className="block">
               <span className="mb-1.5 block text-xs font-medium text-muted">Channel</span>
-              <select name="channel" defaultValue="email" className="field-input">
+              <select
+                name="channel"
+                value={channel}
+                onChange={(e) => setChannel(e.target.value as "email" | "whatsapp" | "sms")}
+                className="field-input"
+              >
                 <option value="email">Email</option>
                 <option value="whatsapp">WhatsApp</option>
                 <option value="sms">SMS</option>
               </select>
             </label>
           </div>
+          {!logging && (
+            <TemplatePicker
+              templates={templates}
+              channel={channel}
+              person={recipient ? { name: recipient.name, company: recipient.company } : null}
+              me={me}
+              hasText={Boolean(draft.body.trim())}
+              onPick={(filled) =>
+                save({ ...draft, subject: channel === "email" && filled.subject ? filled.subject : draft.subject, body: filled.body })
+              }
+            />
+          )}
           <label className="block">
             <span className="mb-1.5 block text-xs font-medium text-muted">Message</span>
             <textarea
@@ -2010,7 +2072,11 @@ function ComposeModal({
             disabled={busy || !to.trim()}
             className="btn-accent focus-ring flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold disabled:opacity-60"
           >
-            <Send className="h-4 w-4" /> {logging ? (busy ? "Logging…" : "Log message") : busy ? "Sending…" : "Send Email"}
+            <Send className="h-4 w-4" /> {logging
+              ? busy ? "Logging…" : "Log message"
+              : channel !== "email"
+                ? busy ? "Saving…" : "Record message"
+                : busy ? "Sending…" : "Send Email"}
           </button>
         </div>
       </form>

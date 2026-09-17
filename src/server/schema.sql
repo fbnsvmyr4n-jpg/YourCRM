@@ -2897,6 +2897,40 @@ ALTER TABLE todos ADD COLUMN IF NOT EXISTS source_key TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS todos_source_once ON todos (sub_account_id, source_key) WHERE source_key IS NOT NULL;
 
 -- ---------------------------------------------------------------------------
+-- Message templates: the words a business sends again and again.
+--
+-- "Hi {{first_name}}, your quote is attached…" written once and filled in for
+-- each person from the composer and the reply box. Workspace-wide, because a
+-- team agrees on how it talks to clients.
+--
+-- A template belongs to a channel, because the three are written differently:
+-- an email has a subject, and an SMS is paid for in 160-character segments.
+-- Merge fields are checked by the application on save, so a misspelt
+-- {{frist_name}} is refused rather than sent to a client as braces.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS message_templates (
+  id                  TEXT PRIMARY KEY,
+  sub_account_id      TEXT NOT NULL REFERENCES sub_accounts(id) ON DELETE CASCADE,
+  name                TEXT NOT NULL CHECK (length(btrim(name)) BETWEEN 1 AND 60),
+  channel             TEXT NOT NULL CHECK (channel IN ('email', 'whatsapp', 'sms')),
+  subject             TEXT NOT NULL DEFAULT '' CHECK (length(subject) <= 200),
+  body                TEXT NOT NULL CHECK (length(btrim(body)) BETWEEN 1 AND 5000),
+  created_by_user_id  TEXT REFERENCES users(id) ON DELETE SET NULL,
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+  -- Only an email has a subject line to fill.
+  CONSTRAINT message_templates_subject_shape CHECK (channel = 'email' OR subject = '')
+);
+CREATE UNIQUE INDEX IF NOT EXISTS message_templates_name_once ON message_templates (sub_account_id, lower(name));
+
+ALTER TABLE message_templates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE message_templates FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS message_templates_tenant_isolation ON message_templates;
+CREATE POLICY message_templates_tenant_isolation ON message_templates
+  USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
+  WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
+
+-- ---------------------------------------------------------------------------
 -- What the application's own database role may do.
 --
 -- KEEP THIS THE LAST BLOCK IN THE FILE: `GRANT … ON ALL TABLES` covers only the

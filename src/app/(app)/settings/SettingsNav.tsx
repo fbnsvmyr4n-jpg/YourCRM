@@ -11,6 +11,7 @@ import {
   Zap,
   type LucideIcon,
   Wallet,
+  MessageSquareText,
 } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { clsx } from "@/lib/clsx";
@@ -48,6 +49,7 @@ const META: Record<SettingsSectionId, { label: string; icon: LucideIcon; blurb: 
   team: { label: "Team", icon: Users, blurb: "Everyone who works here, by department" },
   clients: { label: "Clients", icon: Briefcase, blurb: "Who is looking after whom" },
   automations: { label: "Automations", icon: Zap, blurb: "What happens on its own when a lead or deal changes" },
+  templates: { label: "Templates", icon: MessageSquareText, blurb: "Messages you send again and again" },
   preferences: { label: "Preferences", icon: SlidersHorizontal, blurb: "Targets, working calendar and theme" },
   billing: { label: "Billing", icon: CreditCard, blurb: "Plan, workspaces, usage and referrals" },
   payments: { label: "Payments", icon: Wallet, blurb: "How clients pay your invoices online" },
