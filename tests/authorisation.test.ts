@@ -103,6 +103,11 @@ const PUBLIC_ACTIONS = new Set([
   // published enquiries, bounded inputs and a trap field. See
   // server/enquiry/enquire.ts.
   "enquireAction",
+  // The public pay page. The unguessable token opens exactly one invoice (a
+  // row-level policy admits only the row it names), the amount is decided on
+  // the server, a per-address rate limit is checked first, and card details go
+  // to Paystack's own checkout. See server/pay/pay.ts.
+  "payAction",
 ]);
 
 /**
@@ -135,6 +140,11 @@ const PUBLIC_ROUTES: Record<string, string> = {
     "a Stripe webhook: no session exists, and the request is authorised by its " +
     "signature instead. See the block below, which checks exactly that — this " +
     "is the only unauthenticated endpoint in the app that WRITES.",
+  "src/app/api/paystack/webhook/[agencyId]/[subAccountId]/route.ts":
+    "a Paystack webhook: no session exists. It is authorised by an HMAC-SHA512 " +
+    "signature checked with THAT workspace's own secret key, and a charge is " +
+    "re-verified with Paystack's API before any money is recorded. See " +
+    "server/pay/webhook.ts and tests/payments.test.ts.",
   "src/app/api/tasks/drain/route.ts":
     "the scheduled job runner: a cron trigger carries no session, so it is " +
     "authorised by a shared secret instead. See the block below, which checks " +

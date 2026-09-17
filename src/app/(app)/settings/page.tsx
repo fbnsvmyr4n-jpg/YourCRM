@@ -9,7 +9,7 @@ import { applicableCredit, creditSummary, referralCodeFor } from "@/server/refer
 import { usageByWorkspace, usageThisMonth } from "@/server/usage";
 import { agencyBilling, trialDaysLeft } from "@/server/billing/checkout";
 import { PLAN_INFO, PLANS } from "@/server/billing/plans";
-import { stripeConfigured } from "@/server/billing/stripe";
+import { appUrl, stripeConfigured } from "@/server/billing/stripe";
 import { entitlementsFor, limitOf } from "@/server/entitlements";
 import { canAccessCrm, outranks, roleCan } from "@/server/permissions";
 import { instantToWallClock } from "@/lib/zoned";
@@ -17,6 +17,9 @@ import { listHolidays } from "@/server/repos/holidays";
 import { listWorkingHours } from "@/server/repos/working-hours";
 import { listBookingLinks } from "@/server/repos/booking-links";
 import { assignableTeam, listAutomations, listRuns } from "@/server/repos/automations";
+import { getConnection } from "@/server/repos/payments";
+import { paystackTakes } from "@/server/paystack";
+import { PaymentsCard } from "./PaymentsCard";
 import { listFields } from "@/server/repos/custom-fields";
 import { getSettings } from "@/server/repos/settings";
 import { listUsers } from "@/server/repos/users";
@@ -118,6 +121,7 @@ export default async function SettingsPage({
     book,
     holidays,
     workingHours,
+    paymentConnection,
     bookingLinks,
     automations,
     automationRuns,
@@ -148,6 +152,9 @@ export default async function SettingsPage({
       /* Same reasoning as holidays: when the business is open is a fact about
          the business, not a record about a customer. */
       workingHours: await listWorkingHours(q),
+      /* How clients pay: a money setting, not a customer record, so it loads
+         for accounts too. Never the key — only its mode and last four. */
+      paymentConnection: await getConnection(q),
       usage: await usageThisMonth(q),
       // Recovery lives here because this is where somebody looks after deleting
       // the wrong thing, and it costs one more query on a page already open.
@@ -368,6 +375,18 @@ export default async function SettingsPage({
             configured={stripeConfigured()}
           />
         </>
+      ),
+    },
+    {
+      id: "payments",
+      content: (
+        <PaymentsCard
+          connection={paymentConnection}
+          webhookUrl={`${appUrl()}/api/paystack/webhook/${tenant.agencyId}/${tenant.subAccountId}`}
+          currency={settings.currency}
+          currencySupported={paystackTakes(settings.currency)}
+          canManage={roleCan(user.role, "manage_billing")}
+        />
       ),
     },
     {

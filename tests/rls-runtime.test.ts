@@ -261,3 +261,76 @@ describe("the FORCE defect, reproduced", () => {
     expect(rows.map((r) => r.id)).toEqual(["c_alpha", "c_beta"]);
   });
 });
+
+/**
+ * The public pages — booking, enquiry, pay — find their row with no tenant.
+ *
+ * Found on 18 Sep 2026: every one of them ran through `withSystem`, which sets
+ * no tenant, so under the application role the lookup returned NOTHING and a
+ * published page would 404. Every other suite runs as a superuser, which
+ * ignores policies, so they were green throughout. This runs as `app`.
+ */
+describe("public lookups see exactly one row, and only with its key", () => {
+  let db: PGlite;
+  beforeAll(async () => {
+    db = await tenantDb();
+    await db.exec(`
+      INSERT INTO booking_links (id, sub_account_id, slug, title, enabled, enquiries_enabled) VALUES
+        ('bl_alpha', '${A}', 'alpha-cranes', 'Call', TRUE, FALSE),
+        ('bl_beta',  '${B}', 'beta-builds', 'Visit', FALSE, TRUE),
+        ('bl_off',   '${B}', 'beta-hidden', 'Off', FALSE, FALSE);
+      INSERT INTO documents (id, sub_account_id, deal_id, kind, number, pay_token) VALUES
+        ('inv_alpha', '${A}', 'd_alpha', 'invoice', 'INV-1', 'tok_alpha_0123456789abcdefghijklmnopqrstuv'),
+        ('inv_beta',  '${B}', 'd_beta',  'invoice', 'INV-1', 'tok_beta_0123456789abcdefghijklmnopqrstuvw');
+    `);
+  });
+
+  async function asPublic<T = Record<string, unknown>>(setting: string, value: string | null, sql: string): Promise<T[]> {
+    await db.exec("BEGIN");
+    try {
+      await db.exec("SET LOCAL ROLE app");
+      if (value !== null) await db.query("SELECT set_config($1, $2, true)", [setting, value]);
+      const { rows } = await db.query<T>(sql);
+      await db.exec("COMMIT");
+      return rows;
+    } catch (err) {
+      await db.exec("ROLLBACK");
+      throw err;
+    }
+  }
+
+  it("A PUBLISHED SLUG IS FOUND — which is what was broken", async () => {
+    expect(await asPublic("app.public_slug", "alpha-cranes", "SELECT id FROM booking_links")).toEqual([{ id: "bl_alpha" }]);
+    expect(await asPublic("app.public_slug", "beta-builds", "SELECT id FROM booking_links")).toEqual([{ id: "bl_beta" }]);
+  });
+
+  it("with no key, a wrong key, or an unpublished link: nothing", async () => {
+    expect(await asPublic("app.public_slug", null, "SELECT id FROM booking_links")).toEqual([]);
+    expect(await asPublic("app.public_slug", "", "SELECT id FROM booking_links")).toEqual([]);
+    expect(await asPublic("app.public_slug", "nope", "SELECT id FROM booking_links")).toEqual([]);
+    expect(await asPublic("app.public_slug", "beta-hidden", "SELECT id FROM booking_links")).toEqual([]);
+  });
+
+  it("a slug opens nothing else: no other link, no customer record", async () => {
+    expect(await asPublic("app.public_slug", "alpha-cranes", "SELECT id FROM contacts")).toEqual([]);
+    expect(await asPublic("app.public_slug", "alpha-cranes", "SELECT id FROM documents")).toEqual([]);
+  });
+
+  it("A PAY TOKEN FINDS ITS OWN INVOICE, and only that", async () => {
+    expect(
+      await asPublic("app.pay_token", "tok_alpha_0123456789abcdefghijklmnopqrstuv", "SELECT id, sub_account_id FROM documents")
+    ).toEqual([{ id: "inv_alpha", sub_account_id: A }]);
+    expect(await asPublic("app.pay_token", "tok_alpha_0123456789abcdefghijklmnopqrstuv", "SELECT id FROM document_lines")).toEqual([]);
+    expect(await asPublic("app.pay_token", "tok_guess", "SELECT id FROM documents")).toEqual([]);
+    expect(await asPublic("app.pay_token", null, "SELECT id FROM documents")).toEqual([]);
+  });
+
+  it("the lookups are read-only", async () => {
+    const changed = await asPublic(
+      "app.pay_token",
+      "tok_alpha_0123456789abcdefghijklmnopqrstuv",
+      "UPDATE documents SET status = 'paid' RETURNING id"
+    );
+    expect(changed).toEqual([]);
+  });
+});

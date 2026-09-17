@@ -126,6 +126,9 @@ export const bookingKey = (ip: string) => `book:${ip}`;
  */
 export const enquiryKey = (ip: string) => `enquire:${ip}`;
 
+/** Starting a payment on a public invoice link. Limited so the link cannot be used to hammer Paystack. */
+export const payKey = (ip: string) => `pay:${ip}`;
+
 /* Enough for a person who mistypes their email and tries again, nowhere near
    enough to fill a week. */
 const MAX_BOOKINGS_PER_IP = 6;

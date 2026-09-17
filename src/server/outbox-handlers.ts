@@ -1,5 +1,8 @@
 import { buildRegistry, queueJob, type JobOutcome, type OutboxHandler } from "./outbox";
 import type { TenantQuery } from "./tenant";
+import { ensurePayToken, getConnection } from "./repos/payments";
+import { paystackTakes } from "./paystack";
+import { appUrl } from "./billing/stripe";
 import { withSystem, withTenant } from "./tenant";
 import {
   bookingEmail,
@@ -255,10 +258,18 @@ const invoiceEmailHandler: OutboxHandler = {
     });
 
     const { currency } = await withTenant(job.ctx, (q) => getSettings(q));
+    /* A Pay now link when the business takes card payment in this currency.
+       Made before sending: the email is the only place the client gets it. */
+    const payUrl = await withTenant(job.ctx, async (q) => {
+      if (!(await getConnection(q)) || !paystackTakes(currency)) return null;
+      const token = await ensurePayToken(q, invoice.id);
+      return token ? `${appUrl()}/pay/${token}` : null;
+    });
     const sent = await sendEmail({
       to: invoice.partyEmail,
       ...invoiceEmail({
         currency,
+        payUrl,
         number: invoice.number,
         project: invoice.projectTitle,
         from: who.workspace,

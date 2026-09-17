@@ -18,6 +18,7 @@ export const SECTION_IDS = [
   "automations",
   "preferences",
   "billing",
+  "payments",
   "data",
 ] as const;
 

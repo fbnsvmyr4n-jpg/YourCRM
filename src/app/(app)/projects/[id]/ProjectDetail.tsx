@@ -40,6 +40,7 @@ import type {
 import type { Dependency, ProjectTask, ScheduleSummary } from "@/server/repos/tasks";
 import { ProjectSchedule } from "./ProjectSchedule";
 import { RetainerCard } from "./RetainerCard";
+import { PayLinkButton, PaymentsReady } from "./PayLinkButton";
 import type { Retainer } from "@/server/retainer-rules";
 import {
   documentsByStage,
@@ -168,6 +169,7 @@ export function ProjectDetail({
   people,
   documents,
   retainers = [],
+  paymentsReady = false,
   priceItems,
   threads,
   timeline,
@@ -185,6 +187,8 @@ export function ProjectDetail({
   documents: ProjectDocument[];
   /** Scheduled billing on this job. */
   retainers?: Retainer[];
+  /** Paystack connected, in a currency it takes: invoices get a pay link. */
+  paymentsReady?: boolean;
   /** The active price list, so a hand-typed line can pick a rate. */
   priceItems: { id: string; name: string; unit: string; unitCents: number }[];
   threads: ProjectThread[];
@@ -267,10 +271,10 @@ export function ProjectDetail({
       <div className="mt-4 flex flex-col gap-4">
         {tab === "team" && <TeamTab dealId={header.id} people={people} candidates={candidates} />}
         {tab === "documents" && (
-          <>
+          <PaymentsReady.Provider value={paymentsReady}>
             <RetainerCard dealId={header.id} retainers={retainers} today={today} />
             <DocumentsTab dealId={header.id} documents={documents} priceItems={priceItems} tasks={tasks} />
-          </>
+          </PaymentsReady.Provider>
         )}
         {tab === "threads" && <ThreadsTab threads={threads} />}
         {tab === "timeline" && (
@@ -1204,7 +1208,12 @@ function DocumentRow({
             </form>
           )}
           {onSend && doc.sentAt && (
-            <p className="mt-3 text-xs text-faint">Sent {readableDay(doc.sentAt.slice(0, 10))}.</p>
+            <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+              <p className="text-xs text-faint">
+                Sent {readableDay(doc.sentAt.slice(0, 10))}.{doc.status === "paid" && " Paid."}
+              </p>
+              {doc.status !== "paid" && doc.status !== "cancelled" && <PayLinkButton documentId={doc.id} />}
+            </div>
           )}
 
           {/* A quotation waiting on an approval is not moved along from here:

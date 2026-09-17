@@ -797,3 +797,27 @@ export async function setRetainerStatusAction(_prev: FormState, formData: FormDa
     };
   });
 }
+
+/* ---------------- taking payment ---------------- */
+
+/**
+ * The public pay link for a sent invoice, made the first time it is asked for.
+ * The link is the invoice's own token; asking twice gives the same link.
+ */
+export async function invoicePayLinkAction(documentId: string): Promise<{ url: string } | { error: string }> {
+  return withCurrentTenant(async (q) => {
+    const id = validId(documentId);
+    if (!id) return { error: "That invoice could not be identified." };
+    const { ensurePayToken, getConnection } = await import("@/server/repos/payments");
+    const { getSettings } = await import("@/server/repos/settings");
+    const { paystackTakes } = await import("@/server/paystack");
+    const { appUrl } = await import("@/server/billing/stripe");
+    if (!(await getConnection(q))) return { error: "Connect Paystack in Settings → Payments first." };
+    if (!paystackTakes((await getSettings(q)).currency)) return { error: "Paystack does not take this currency." };
+    const { findInvoice } = await import("@/server/repos/invoices");
+    if (!(await findInvoice(q, id))?.sentAt) return { error: "Send the invoice first; the link goes with it." };
+    const token = await ensurePayToken(q, id);
+    if (!token) return { error: "Only a sent, unpaid invoice has a pay link." };
+    return { url: `${appUrl()}/pay/${token}` };
+  });
+}

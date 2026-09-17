@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { withSystem, withTenant } from "@/server/tenant";
+import { withPublicLookup, withTenant } from "@/server/tenant";
 import { resolveSlug } from "@/server/repos/booking-links";
 import { getSettings } from "@/server/repos/settings";
 import { availabilityFor } from "@/server/booking/availability";
@@ -28,7 +28,7 @@ export const metadata: Metadata = {
 export default async function BookingPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
 
-  const link = await withSystem((sys) => resolveSlug(sys, slug));
+  const link = await withPublicLookup("slug", slug, (sys) => resolveSlug(sys, slug));
   /* Unpublished and nonexistent are the same answer from outside. A different
      response for "exists but off" would let anybody map which businesses use
      the product. */

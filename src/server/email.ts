@@ -307,6 +307,8 @@ export function invoiceEmail(invoice: {
   totalCents: number;
   /** Required, not defaulted: an invoice must not guess the currency it bills in. */
   currency: CurrencyCode;
+  /** The public Pay now link, when the business takes card payment. */
+  payUrl?: string | null;
 }) {
   const money = (cents: number) => formatMoney(cents, invoice.currency, "cents");
   const qty = (n: number) => String(Number(n.toFixed(3)));
@@ -323,6 +325,7 @@ export function invoiceEmail(invoice: {
     "",
     `Total due: ${money(invoice.totalCents)}`,
     ...(invoice.dueOn ? [`Payment due by ${invoice.dueOn}`] : []),
+    ...(invoice.payUrl ? ["", `Pay by card: ${invoice.payUrl}`] : []),
     ...(invoice.payTo ? ["", "Payment details:", invoice.payTo] : []),
     ...(invoice.notes ? ["", invoice.notes] : []),
     "",
@@ -351,6 +354,7 @@ ${rows}
     </tr>
   </table>
   ${invoice.dueOn ? `<p style="margin:16px 0 0;font-weight:600">Payment due by ${escapeHtml(invoice.dueOn)}</p>` : ""}
+  ${invoice.payUrl ? `<p style="margin:24px 0 0"><a href="${escapeHtml(invoice.payUrl)}" style="display:inline-block;background:#1f6feb;color:#ffffff;text-decoration:none;font-weight:600;padding:12px 22px;border-radius:10px">Pay ${money(invoice.totalCents)} now</a></p>` : ""}
   ${invoice.payTo ? `<p style="margin:20px 0 0;line-height:1.6;color:#55617a;white-space:pre-line"><strong style="color:#0b1220">Payment details</strong><br>${escapeHtml(invoice.payTo)}</p>` : ""}
   ${invoice.notes ? `<p style="margin:20px 0 0;line-height:1.6;color:#55617a;white-space:pre-line">${escapeHtml(invoice.notes)}</p>` : ""}
   <p style="margin:28px 0 0;font-size:13px;color:#8a94a8">

@@ -66,6 +66,8 @@ export const EXPECTED_TABLES = [
   "contact_views",
   "tickets",
   "retainers",
+  "payment_connections",
+  "invoice_payments",
 ] as const;
 
 /** Columns added by `ALTER TABLE … ADD COLUMN IF NOT EXISTS`, which a stale
@@ -73,6 +75,8 @@ export const EXPECTED_TABLES = [
 export const EXPECTED_COLUMNS: ReadonlyArray<[string, string]> = [
   /* Read by the Documents tab on every project, so an unmigrated database
      breaks the project screen rather than retainers alone. */
+  ["documents", "pay_token"],
+  ["todos", "source_key"],
   ["documents", "retainer_id"],
   ["documents", "period_start"],
   /* Read by getSettings, which the layout calls on EVERY page — an unmigrated

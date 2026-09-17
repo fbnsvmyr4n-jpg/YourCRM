@@ -1,4 +1,4 @@
-import { withSystem, withTenant, type TenantContext } from "../tenant";
+import { withPublicLookup, withTenant, type TenantContext } from "../tenant";
 import { resolveSlug, type PublicLink } from "../repos/booking-links";
 import { createContact, getContact, updateContact } from "../repos/contacts";
 import { createDeal } from "../repos/deals";
@@ -100,7 +100,7 @@ export async function enquire(request: EnquiryRequest): Promise<EnquiryOutcome> 
   if (!message) return { ok: false, reason: "invalid", detail: "Please tell us what you need." };
 
   /* The one unscoped read, for this purpose only. */
-  const link: PublicLink | null = await withSystem((sys) => resolveSlug(sys, request.slug, "enquiry"));
+  const link: PublicLink | null = await withPublicLookup("slug", String(request.slug ?? ""), (sys) => resolveSlug(sys, request.slug, "enquiry"));
   if (!link) {
     return { ok: false, reason: "not_found", detail: "That enquiry form is not available." };
   }

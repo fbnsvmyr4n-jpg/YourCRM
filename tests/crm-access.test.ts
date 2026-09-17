@@ -106,6 +106,10 @@ describe("nothing routes around the gate", () => {
       "numbers the business chooses about itself, not records about a customer. " +
       "restoreDeletedAction in the same file is deliberately left gated, because " +
       "what it puts back is contacts, deals and meetings.",
+    "src/app/(app)/settings/payment-actions.ts":
+      "connecting the business's own Paystack account is a money setting that " +
+      "accounts people own, gated on manage_billing instead. It reads and writes " +
+      "only payment_connections — never a customer record.",
   };
 
   it("only the listed files opt out", () => {

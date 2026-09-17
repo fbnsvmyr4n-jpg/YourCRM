@@ -1,4 +1,4 @@
-import { withSystem, withTenant, type TenantContext, type TenantQuery } from "../tenant";
+import { withPublicLookup, withTenant, type TenantContext, type TenantQuery } from "../tenant";
 import { resolveSlug, type PublicLink } from "../repos/booking-links";
 import { createMeeting } from "../repos/meetings";
 import { linkContactByName } from "../link-contact";
@@ -84,7 +84,7 @@ export async function book(request: BookingRequest, now: Date = new Date()): Pro
   /* The one unscoped read. Everything after this is inside the tenant it
      returns — and a link that is not published does not resolve, so an
      unpublished page and a nonexistent one are the same answer from outside. */
-  const link: PublicLink | null = await withSystem((sys) => resolveSlug(sys, request.slug));
+  const link: PublicLink | null = await withPublicLookup("slug", String(request.slug ?? ""), (sys) => resolveSlug(sys, request.slug));
   if (!link) {
     return { ok: false, reason: "not_found", detail: "That booking page is not available." };
   }

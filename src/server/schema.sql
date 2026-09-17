@@ -2785,6 +2785,118 @@ CREATE UNIQUE INDEX IF NOT EXISTS documents_retainer_period_once
   WHERE retainer_id IS NOT NULL AND deleted_at IS NULL;
 
 -- ---------------------------------------------------------------------------
+-- Public lookups that row-level security was silently refusing.
+--
+-- The booking page, the enquiry form and (now) the pay page are reached by
+-- somebody with no session, so they run with no `app.sub_account_id` — and
+-- under the restricted `yourcrm_app` role every tenant policy then matches
+-- nothing. Proven on Postgres 16 on 18 Sep 2026: the slug lookup found 1 row as
+-- a superuser and 0 as the app role. The tests had passed because they run as a
+-- superuser, which ignores policies. Production had no published link yet, so
+-- no visitor had met the 404 it would have served.
+--
+-- The fix exposes ONE row, and only to a request that already holds its public
+-- key: the lookup sets `app.public_slug` or `app.pay_token` for its own
+-- transaction, and these policies admit exactly the row that matches. Nothing
+-- is listable; a wrong or missing value matches nothing, as before.
+-- ---------------------------------------------------------------------------
+DROP POLICY IF EXISTS booking_links_public_lookup ON booking_links;
+CREATE POLICY booking_links_public_lookup ON booking_links FOR SELECT
+  USING (
+    (enabled OR enquiries_enabled)
+    AND lower(slug) = nullif(current_setting('app.public_slug', TRUE), '')
+  );
+
+-- ---------------------------------------------------------------------------
+-- Taking payment for invoices through the workspace's own Paystack account.
+--
+-- The money goes to the business that sent the invoice; YourCRM never holds it.
+-- The secret key is encrypted by the application before it is stored (see
+-- server/secrets.ts) and only its last four characters are ever shown.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS payment_connections (
+  sub_account_id        TEXT NOT NULL REFERENCES sub_accounts(id) ON DELETE CASCADE,
+  provider              TEXT NOT NULL DEFAULT 'paystack' CHECK (provider IN ('paystack')),
+  secret_encrypted      TEXT NOT NULL,
+  mode                  TEXT NOT NULL CHECK (mode IN ('test', 'live')),
+  key_last4             TEXT NOT NULL CHECK (length(key_last4) = 4),
+  connected_by_user_id  TEXT REFERENCES users(id) ON DELETE SET NULL,
+  connected_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (sub_account_id)
+);
+
+ALTER TABLE payment_connections ENABLE ROW LEVEL SECURITY;
+ALTER TABLE payment_connections FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS payment_connections_tenant_isolation ON payment_connections;
+CREATE POLICY payment_connections_tenant_isolation ON payment_connections
+  USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
+  WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
+
+-- The unguessable part of an invoice's public pay link. Global, because it is a URL.
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS pay_token TEXT;
+ALTER TABLE documents DROP CONSTRAINT IF EXISTS documents_pay_token_shape;
+ALTER TABLE documents ADD CONSTRAINT documents_pay_token_shape CHECK (
+  pay_token IS NULL OR (kind = 'invoice' AND pay_token ~ '^[A-Za-z0-9_-]{32,64}$')
+);
+CREATE UNIQUE INDEX IF NOT EXISTS documents_pay_token_once ON documents (pay_token) WHERE pay_token IS NOT NULL;
+
+DROP POLICY IF EXISTS documents_public_pay_lookup ON documents;
+CREATE POLICY documents_public_pay_lookup ON documents FOR SELECT
+  USING (
+    pay_token IS NOT NULL
+    AND deleted_at IS NULL
+    AND pay_token = nullif(current_setting('app.pay_token', TRUE), '')
+  );
+
+-- Money that arrived for an invoice, as Paystack itself confirmed it.
+CREATE TABLE IF NOT EXISTS invoice_payments (
+  id              TEXT PRIMARY KEY,
+  sub_account_id  TEXT NOT NULL REFERENCES sub_accounts(id) ON DELETE CASCADE,
+  document_id     TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  provider        TEXT NOT NULL CHECK (provider IN ('paystack')),
+  -- Paystack's reference, which is also ours: we choose it when the payment starts.
+  reference       TEXT NOT NULL,
+  amount_cents    BIGINT NOT NULL CHECK (amount_cents > 0),
+  currency        TEXT NOT NULL CHECK (currency ~ '^[A-Z]{3}$'),
+  status          TEXT NOT NULL DEFAULT 'paid' CHECK (status IN ('paid', 'disputed')),
+  channel         TEXT,
+  paid_at         TIMESTAMPTZ NOT NULL,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+-- One reference is one payment, however many times Paystack or a browser tells us about it.
+CREATE UNIQUE INDEX IF NOT EXISTS invoice_payments_reference_once ON invoice_payments (provider, reference);
+CREATE INDEX IF NOT EXISTS invoice_payments_document_idx ON invoice_payments (sub_account_id, document_id);
+
+CREATE OR REPLACE FUNCTION assert_invoice_payment_in_tenant() RETURNS TRIGGER AS $$
+BEGIN
+  IF NOT EXISTS (
+       SELECT 1 FROM documents d
+        WHERE d.id = NEW.document_id AND d.sub_account_id = NEW.sub_account_id AND d.kind = 'invoice') THEN
+    RAISE EXCEPTION 'invoice % does not belong to sub-account %', NEW.document_id, NEW.sub_account_id
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS invoice_payments_in_tenant ON invoice_payments;
+CREATE TRIGGER invoice_payments_in_tenant
+  BEFORE INSERT OR UPDATE OF document_id, sub_account_id ON invoice_payments
+  FOR EACH ROW EXECUTE FUNCTION assert_invoice_payment_in_tenant();
+
+ALTER TABLE invoice_payments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE invoice_payments FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS invoice_payments_tenant_isolation ON invoice_payments;
+CREATE POLICY invoice_payments_tenant_isolation ON invoice_payments
+  USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
+  WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
+
+-- A task the product raised about something, once: "chase INV-1003". The key
+-- says what it is about, so the same overdue invoice never makes two tasks.
+ALTER TABLE todos ADD COLUMN IF NOT EXISTS source_key TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS todos_source_once ON todos (sub_account_id, source_key) WHERE source_key IS NOT NULL;
+
+-- ---------------------------------------------------------------------------
 -- What the application's own database role may do.
 --
 -- KEEP THIS THE LAST BLOCK IN THE FILE: `GRANT … ON ALL TABLES` covers only the

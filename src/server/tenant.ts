@@ -199,9 +199,38 @@ export interface SystemQuery {
  * mistake, it returns empty rather than everything.
  */
 export async function withSystem<T>(fn: (q: SystemQuery) => Promise<T>): Promise<T> {
+  return systemTransaction(null, fn);
+}
+
+/**
+ * The public keys a visitor with no session may look a row up by.
+ *
+ * A published link's slug and an invoice's pay token. Row-level security has a
+ * policy for each that admits exactly the one row whose key matches the value
+ * set here — so a public page can find ITS row and cannot list, guess its way
+ * to, or see anything else. Without this those pages ran with no tenant and
+ * the restricted application role saw nothing at all.
+ */
+export type PublicKey = "slug" | "pay_token";
+
+export async function withPublicLookup<T>(
+  key: PublicKey,
+  value: string,
+  fn: (q: SystemQuery) => Promise<T>
+): Promise<T> {
+  const normalised = key === "slug" ? value.trim().toLowerCase() : value.trim();
+  return systemTransaction({ name: key === "slug" ? "app.public_slug" : "app.pay_token", value: normalised }, fn);
+}
+
+async function systemTransaction<T>(
+  lookup: { name: "app.public_slug" | "app.pay_token"; value: string } | null,
+  fn: (q: SystemQuery) => Promise<T>
+): Promise<T> {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    /* Transaction-local, like the tenant setting: it ends with this request. */
+    if (lookup) await client.query("SELECT set_config($1, $2, true)", [lookup.name, lookup.value]);
     const q = {
       async rows<R extends QueryResultRow>(sql: string, params: readonly unknown[] = []) {
         const { rows } = await client.query<R>(sql, params as unknown[]);

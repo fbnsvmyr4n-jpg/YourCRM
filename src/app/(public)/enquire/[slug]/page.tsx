@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { withSystem } from "@/server/tenant";
+import { withPublicLookup } from "@/server/tenant";
 import { resolveSlug } from "@/server/repos/booking-links";
 import { EnquiryView } from "./EnquiryView";
 
@@ -27,7 +27,7 @@ export const metadata: Metadata = {
 export default async function EnquiryPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
 
-  const link = await withSystem((sys) => resolveSlug(sys, slug, "enquiry"));
+  const link = await withPublicLookup("slug", slug, (sys) => resolveSlug(sys, slug, "enquiry"));
   /* Unpublished and nonexistent are the same answer from outside. */
   if (!link) notFound();
 

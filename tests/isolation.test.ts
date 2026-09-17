@@ -250,10 +250,31 @@ describe("row-level security backs the application up", () => {
   it("every policy checks writes as well as reads", () => {
     // USING alone filters SELECT but still permits INSERT/UPDATE of a row
     // belonging to another tenant. Both clauses are required.
-    const policies = [...SCHEMA.matchAll(/CREATE POLICY (\w+) ON (\w+)([\s\S]*?);/g)];
+    const all = [...SCHEMA.matchAll(/CREATE POLICY (\w+) ON (\w+)([\s\S]*?);/g)];
+    /* Read-only policies that let a visitor with no session find ONE row by its
+       public key. Pinned by name: each is SELECT-only, so it cannot admit a
+       write, and each matches only when the request itself set the key. A new
+       one is a decision to review, not something to slip in. */
+    const PUBLIC_LOOKUPS: Record<string, string> = {
+      booking_links_public_lookup: "app.public_slug",
+      documents_public_pay_lookup: "app.pay_token",
+    };
+    const lookups = all.filter(([, name]) => name in PUBLIC_LOOKUPS);
+    expect(lookups.map(([, name]) => name).sort()).toEqual(Object.keys(PUBLIC_LOOKUPS).sort());
+    for (const [, name, table, body] of lookups) {
+      expect(body, `${name} on ${table} must be SELECT-only`).toMatch(/^\s*FOR SELECT\b/);
+      expect(body, `${name} on ${table} must match only the key the request set`).toContain(
+        `nullif(current_setting('${PUBLIC_LOOKUPS[name]}', TRUE), '')`
+      );
+    }
+    const policies = all.filter(([, name]) => !(name in PUBLIC_LOOKUPS));
+    expect(
+      all.filter(([, , , body]) => /^\s*FOR SELECT\b/.test(body) ).length,
+      "a read-only policy exists that is not a reviewed public lookup"
+    ).toBe(lookups.length);
     // Tracks the schema rather than a number someone wrote once: every table
-    // that enables RLS must have exactly one policy, so the two counts move
-    // together and a new table cannot arrive with neither.
+    // that enables RLS must have exactly one tenant policy, so the two counts
+    // move together and a new table cannot arrive with neither.
     const enabled = [...SCHEMA.matchAll(/ALTER TABLE\s+(\w+)\s+ENABLE ROW LEVEL SECURITY/g)];
     expect(policies.length, "a table enables RLS but has no policy").toBe(enabled.length);
     for (const [, policyName, table, body] of policies) {

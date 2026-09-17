@@ -10,6 +10,7 @@ import {
   Users,
   Zap,
   type LucideIcon,
+  Wallet,
 } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { clsx } from "@/lib/clsx";
@@ -49,6 +50,7 @@ const META: Record<SettingsSectionId, { label: string; icon: LucideIcon; blurb: 
   automations: { label: "Automations", icon: Zap, blurb: "What happens on its own when a lead or deal changes" },
   preferences: { label: "Preferences", icon: SlidersHorizontal, blurb: "Targets, working calendar and theme" },
   billing: { label: "Billing", icon: CreditCard, blurb: "Plan, workspaces, usage and referrals" },
+  payments: { label: "Payments", icon: Wallet, blurb: "How clients pay your invoices online" },
   data: { label: "Data", icon: Database, blurb: "Custom fields, exports and deleted records" },
 };
 
