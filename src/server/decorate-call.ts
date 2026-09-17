@@ -48,9 +48,11 @@ export function decorateCall(
     color: paletteFor(c.id),
     receivedAt: c.receivedAt,
     durationSec: c.durationSec,
-    // Confirmed against the allow-list rather than asserted: an outcome the UI
-    // has no label for would render a blank chip and drop out of the counts.
-    outcome: (CALL_OUTCOMES.find((o) => o === c.outcome) ?? "qualified") as CallOutcome,
+    // Confirmed against the allow-list rather than asserted, and null when it
+    // is not one of ours — including when nobody recorded one. It used to fall
+    // back to "qualified", so an unclassified call was shown on the log as a
+    // Qualified Lead: a sales outcome nobody had decided.
+    outcome: (CALL_OUTCOMES.find((o) => o === c.outcome) ?? null) as CallOutcome | null,
     summary: c.summary ?? "",
     transcript: c.transcript.map((t) => ({
       speaker: t.role === "agent" ? ("Agent" as const) : ("Caller" as const),

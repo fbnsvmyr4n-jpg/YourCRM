@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Card } from "@/components/ui/Card";
-import { agentConfig, FINDING_META, OUTCOME_META, type Call } from "@/data/calls";
+import { agentConfig, FINDING_META, OUTCOME_META, OUTCOME_UNRECORDED, type Call } from "@/data/calls";
 import { clsx } from "@/lib/clsx";
 import { deleteCallAction, processCallAction, simulateCallAction } from "./actions";
 
@@ -260,7 +260,7 @@ export function VoiceAgentConsole({
           ) : (
             <div className="flex flex-col gap-2">
               {calls.map((call) => {
-                const meta = OUTCOME_META[call.outcome];
+                const meta = call.outcome ? OUTCOME_META[call.outcome] : OUTCOME_UNRECORDED;
                 const active = call.id === selected?.id;
                 return (
                   <button
@@ -355,7 +355,7 @@ function CallDetail({
   onProcess: () => void;
   onDelete: () => void;
 }) {
-  const meta = OUTCOME_META[call.outcome];
+  const meta = call.outcome ? OUTCOME_META[call.outcome] : OUTCOME_UNRECORDED;
   /*
      Which transcript turn the reader asked to see.
 

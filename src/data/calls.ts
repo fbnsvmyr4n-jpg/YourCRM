@@ -24,7 +24,15 @@ export type Call = {
   receivedAt: string;
   durationSec: number;
   /** What the agent concluded from the conversation. */
-  outcome: CallOutcome;
+  /**
+   * What the call came to — or null when nothing was recorded.
+   *
+   * Null is a real state: a call that ended before the agent classified it, or
+   * one logged by hand. It used to fall back to "qualified" on the way to the
+   * screen, so an unclassified call was shown as a Qualified Lead — a sales
+   * outcome nobody had decided. Found on 18 Sep 2026 driving the call log.
+   */
+  outcome: CallOutcome | null;
   summary: string;
   transcript: { speaker: "Agent" | "Caller"; text: string }[];
   /** Populated once the automation has run. */
@@ -87,6 +95,13 @@ export const FINDING_META: Record<FindingKind, { label: string; color: string; s
   budget: { label: "Budget", color: "var(--green)", soft: "var(--green-soft)" },
   timeline: { label: "Timeline", color: "var(--purple)", soft: "var(--purple-soft)" },
 };
+
+/** Shown when a call carries no recorded outcome. Neutral on purpose. */
+export const OUTCOME_UNRECORDED = {
+  label: "No outcome recorded",
+  color: "var(--text-muted)",
+  soft: "var(--raise)",
+} as const;
 
 export const OUTCOME_META: Record<
   CallOutcome,

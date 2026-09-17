@@ -66,7 +66,7 @@ async function main() {
     for (const table of [
       "audit_events", "invoice_payments", "document_lines", "documents", "retainers", "tickets",
       "todos", "message_templates", "contact_tags", "contact_views", "tags", "activities",
-      "messages", "meetings", "deals", "contacts", "companies",
+      "price_items", "calls", "messages", "meetings", "deals", "contacts", "companies",
     ]) {
       if (table === "audit_events") {
         await db.query(`ALTER TABLE audit_events DISABLE TRIGGER audit_events_append_only`);
@@ -175,6 +175,33 @@ async function main() {
       [sub.id]
     );
 
+    /* The price list: two live rates and one withdrawn. */
+    await db.query(
+      `INSERT INTO price_items (id, sub_account_id, name, description, unit, unit_cents, active) VALUES
+         ('pi-labour',  $1, 'Site labour',      'Per person, per day',   'day',   180000,  TRUE),
+         ('pi-paving',  $1, 'Paving stone',     'Supplied and laid',     'm²',     45000,  TRUE),
+         ('pi-old',     $1, 'Old crane rate',   'Replaced in July',      'day',   250000,  FALSE)`,
+      [sub.id]
+    );
+
+    /* Notes somebody typed, on a contact and on a job. */
+    await db.query(
+      `INSERT INTO activities (id, sub_account_id, entity_type, entity_id, kind, title, detail, actor_user_id, at) VALUES
+         ('ac-n1', $1, 'contact', 'ct-amara', 'note', 'Note', 'Prefers WhatsApp before 9am.', $2, ${day(3)}),
+         ('ac-n2', $1, 'contact', 'ct-pieter','note', 'Note', 'Wants hardwood, not pine.',    $2, ${day(5)}),
+         ('ac-n3', $1, 'deal',    'd-paving', 'note', 'Note', 'Access is through the lane.',  $2, ${day(4)})`,
+      [sub.id, owner.id]
+    );
+
+    /* Calls the voice agent handled: two became records, one has not. */
+    await db.query(
+      `INSERT INTO calls (id, sub_account_id, contact_id, created_deal_id, caller_name, phone, received_at, duration_sec, outcome, summary, topic) VALUES
+         ('cl-1', $1, 'ct-sarah',  'd-garage', 'Sarah Adams',  '+27 82 555 0106', ${day(6)}, 240, 'meeting-booked', 'Asked about converting a garage.', 'Garage conversion'),
+         ('cl-2', $1, 'ct-pieter', 'd-deck',   'Pieter Venter','+27 82 555 0105', ${day(8)}, 180, 'qualified',      'Wants a timber deck quoted.',      'Timber deck'),
+         ('cl-3', $1, NULL,        NULL,       'Unknown caller','+27 82 555 0199', ${day(1)}, 95, NULL,           'Asked whether we do retaining walls.', 'Retaining walls')`,
+      [sub.id]
+    );
+
     await db.query("COMMIT");
   } catch (err) {
     await db.query("ROLLBACK");
@@ -197,6 +224,10 @@ async function main() {
     Tasks due (today + late) 3             1 late, 2 today
     Tickets open             1             overdue, urgent
     Invoices                 2             INV-1001 paid, INV-1002 overdue
+    Companies                2             Dube (roof + solar), Khumalo (fence)
+    Price list               3             2 live, 1 withdrawn
+    Notes                    3             2 on contacts, 1 on a job
+    Calls                    3             1 still to be processed, and one with no outcome recorded
 `);
   await db.end();
 }
