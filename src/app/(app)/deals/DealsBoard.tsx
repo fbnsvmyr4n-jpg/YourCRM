@@ -631,7 +631,11 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
           wide
           icon={<GripVertical className="h-5 w-5" />}
           label="Total Deals"
-          sub="Across all stages"
+          /* NOT "Across all stages". Lost deals are deliberately kept off this
+             board — see the note in `page.tsx` — and lost is a stage, so the
+             tile was counting seven and claiming eight. It counts what is on
+             the board, and now says so. */
+          sub="Every stage on this board"
           value={String(summary.count)}
           tone="var(--accent)"
           soft="var(--accent-soft)"

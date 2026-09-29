@@ -2993,6 +2993,32 @@ CREATE POLICY audit_events_tenant_isolation ON audit_events
   WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
 
 -- ---------------------------------------------------------------------------
+-- Which stages a deal has actually been through.
+--
+-- "How likely is a deal sitting in Demo to close?" is the question a pipeline
+-- exists to answer, and nothing in this database could. A deal carries the
+-- stage it is in NOW; the moment it is won that stage becomes `won`, and the
+-- moment it is lost it becomes `lost`. Every closed deal has therefore
+-- forgotten the route it took, so "of the deals that reached Demo, how many
+-- were won" had no data behind it at all.
+--
+-- An array on the deal rather than a history table: a row per deal per stage
+-- would be a second name for a fact the deal already owns, and would need its
+-- own policy, its own grants and its own index. `unnest` aggregates this
+-- perfectly well and the tenant policy on `deals` already covers it.
+--
+-- DELIBERATELY NOT BACKFILLED. A deal that existed before this column did has
+-- no recorded route, and filling it in from the stage the deal happens to be
+-- in now would be an invention: every already-won deal would look as though it
+-- reached `won` without ever passing through Demo, and Demo would read 0%.
+-- NULL means "nobody was watching". The rate is computed only from deals where
+-- it is NOT null, and the screen says there is not enough history until there
+-- are enough of them.
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS stages_reached TEXT[];
+
+-- ---------------------------------------------------------------------------
 -- What the application's own database role may do.
 --
 -- KEEP THIS THE LAST BLOCK IN THE FILE: `GRANT … ON ALL TABLES` covers only the

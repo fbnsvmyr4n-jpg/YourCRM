@@ -197,12 +197,16 @@ export async function createDeal(q: TenantQuery, input: NewDeal): Promise<DealRe
     `WITH inserted AS (
        INSERT INTO deals
          (id, sub_account_id, contact_id, company_id, owner_user_id, title, value_cents, stage,
-          source, pain_points, referred_by_contact_id, won_at)
+          source, pain_points, referred_by_contact_id, won_at, stages_reached)
        VALUES ($2, $1, $3,
                (SELECT c.company_id FROM contacts c
                  WHERE c.id = $3 AND c.sub_account_id = $1 AND c.deleted_at IS NULL),
                $4, $5, $6, $7, $8, $9::jsonb, $10,
-               CASE WHEN $7 = 'won' THEN now() ELSE NULL END)
+               CASE WHEN $7 = 'won' THEN now() ELSE NULL END,
+               -- The route begins here. A deal created straight into won has
+               -- genuinely only ever been at won, and is counted that way.
+               -- (No backticks in here: this SQL is inside a template literal.)
+               ARRAY[$7])
        RETURNING *
      )
      ${SELECT.replace("FROM deals d", "FROM inserted d")}`,
@@ -334,6 +338,15 @@ export async function moveStage(
     `WITH updated AS (
        UPDATE deals SET
          stage = $3,
+         -- The route, appended once per stage and never rewritten. NULL
+         -- stays NULL: a deal from before this column existed has no
+         -- recorded route, and starting one midway would claim it began
+         -- at whatever stage it happened to be moved to next.
+         stages_reached = CASE
+           WHEN stages_reached IS NULL THEN NULL
+           WHEN $3 = ANY(stages_reached) THEN stages_reached
+           ELSE stages_reached || $3
+         END,
          won_at = CASE
            WHEN $3 = 'won' AND won_at IS NULL THEN now()
            WHEN $3 IN ('delivery', 'referral') THEN won_at

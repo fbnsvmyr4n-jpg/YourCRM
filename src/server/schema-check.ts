@@ -113,6 +113,13 @@ export const EXPECTED_COLUMNS: ReadonlyArray<[string, string]> = [
   ["users", "job_title"],
   ["users", "phone"],
   ["users", "scope"],
+  /* The route a deal took, which the stage-by-stage win rate is computed
+     from. Deliberately NOT in the shared deals SELECT — nothing shows one
+     deal's own route — so an unmigrated database costs the pipeline forecast
+     and the board's per-stage rates, not the board itself. It is still named
+     here because a figure that silently never appears is worse to diagnose
+     than one that fails loudly. */
+  ["deals", "stages_reached"],
   /* Projects. Named in the SELECT the deals repo and the projects page both
      use, so an unmigrated database breaks the pipeline board, not one page. */
   ["deals", "company_id"],

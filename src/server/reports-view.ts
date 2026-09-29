@@ -1,6 +1,7 @@
 import { reportData } from "./analytics";
 import { meetingAnalytics, type MeetingAnalytics } from "./meeting-analytics";
 import { stageMeta } from "@/data/pipeline";
+import { stageOdds, weightedPipeline, FORECAST_STAGES } from "./stage-odds";
 import { changeAgainst, type Period } from "./report-period";
 import type { AvatarColor } from "@/components/ui/Avatar";
 import type { TenantQuery } from "./tenant";
@@ -58,6 +59,15 @@ export type ReportView = {
   wonCount: number;
   openPipeline: number;
   openCount: number;
+  /**
+   * The open pipeline weighted by how deals at each stage have actually
+   * gone, and the part of it no measured rate covers yet.
+   *
+   * Both, always, because one without the other is misleading: a forecast
+   * that quietly leaves out the stages it cannot speak for looks like a
+   * statement about the whole pipeline.
+   */
+  forecast: { weighted: number; unweighted: number } | null;
   winRate: number | null;
   /** What the win rate is out of — won plus lost, never open. */
   decidedCount: number;
@@ -113,6 +123,27 @@ export async function reportView(q: TenantQuery, period?: Period): Promise<Repor
   const before = period?.previous
     ? await reportData(q, { from: period.previous.from, to: period.previous.to })
     : null;
+  /**
+   * The forecast: open money weighted by measured outcomes.
+   *
+   * Read outside the period window on purpose, for the same reason the Open
+   * Pipeline tile is: there is no such thing as the open pipeline of July.
+   * The rates, equally, are everything this workspace has ever closed — a
+   * month's worth of deals is not enough to measure a stage by.
+   */
+  const odds = await stageOdds(q);
+  const openDeals = await q.rows<{ stage: string; value_cents: string }>(
+    `SELECT stage, value_cents
+       FROM deals
+      WHERE sub_account_id = $1 AND deleted_at IS NULL
+        AND won_at IS NULL AND stage = ANY($2)`,
+    [q.ctx.subAccountId, [...FORECAST_STAGES]]
+  );
+  const forecast = weightedPipeline(
+    openDeals.map((d) => ({ stage: d.stage as (typeof FORECAST_STAGES)[number], valueCents: Number(d.value_cents) })),
+    odds
+  );
+
   const meetings = await meetingAnalytics(q);
   const tenant = q.ctx.subAccountId;
 
@@ -231,6 +262,15 @@ export async function reportView(q: TenantQuery, period?: Period): Promise<Repor
     wonCount: r.revenue.wonCount,
     openPipeline: toUnits(r.revenue.openPipelineCents),
     openCount: r.revenue.openCount,
+    forecast:
+      odds.some((o) => o.winRate !== null)
+        ? {
+            weighted: toUnits(forecast.weightedCents),
+            unweighted: toUnits(forecast.unweightedCents),
+          }
+        : /* No stage has enough closed deals behind it yet, so there is no
+             forecast to give — not a forecast of zero. */
+          null,
     winRate: r.winRate,
     decidedCount: r.decidedCount,
     avgDealSize: r.revenue.avgWonDealCents === null ? null : toUnits(r.revenue.avgWonDealCents),

@@ -6,6 +6,7 @@ import {
   HelpCircle,
   Radar,
   Share2,
+  Target,
   TrendingUp,
   Trophy,
   UserPlus,
@@ -149,6 +150,26 @@ export default async function ReportsPage({
       sub: `${r.openCount} deal${r.openCount === 1 ? "" : "s"} in play${r.period ? " · right now" : ""}`,
       tone: "var(--accent)",
       soft: "var(--accent-soft)",
+    },
+    {
+      icon: <Target className="h-5 w-5" />,
+      label: "Forecast",
+      /* The tile above weighted by how deals at each stage have actually
+         gone in this workspace. Nothing is assigned: no stage carries a
+         percentage somebody typed in, and a stage without enough closed
+         deals behind it contributes nothing rather than a guess.
+
+         An em dash until there is history, never a figure: a forecast of
+         R0 would read as a prediction that nothing will close. */
+      value: r.forecast === null ? "—" : money(r.forecast.weighted),
+      sub:
+        r.forecast === null
+          ? "Once enough deals have closed"
+          : r.forecast.unweighted > 0
+            ? `${money(r.forecast.unweighted)} not yet forecastable`
+            : "Weighted by your own win history",
+      tone: "var(--green)",
+      soft: "var(--green-soft)",
     },
     {
       icon: <TrendingUp className="h-5 w-5" />,
