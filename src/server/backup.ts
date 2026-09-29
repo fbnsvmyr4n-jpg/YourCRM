@@ -87,6 +87,44 @@ export async function tableOrder(client: PoolClient): Promise<string[]> {
   return out;
 }
 
+/**
+ * The columns to read, with DATE columns taken as text.
+ *
+ * A DATE has no time and no time zone — it is the day something is due, and
+ * that is all. `pg` parses one into a JavaScript Date, which IS an instant, so
+ * a due date of the 28th became midnight on the 28th in the server's zone,
+ * went into the file as "2026-09-27T22:00:00.000Z", and came back as the 27th.
+ * Every due date and every invoice date in a backup moved a day earlier on the
+ * way home.
+ *
+ * Found on 2026-09-30 by restoring a real backup and reading the verification,
+ * which reported nine differences and was right about all nine. The round-trip
+ * tests never saw it because nothing in their fixture had a DATE column — they
+ * cover timestamps, money, JSON and unicode, and all of those were fine.
+ *
+ * Cast in the query rather than converted afterwards, so the file holds
+ * "2026-09-28" — which is what the value actually is, and what Postgres reads
+ * back unambiguously in whatever zone somebody restores it in. Used by the
+ * comparison as well as the backup, or the two would read the same row in two
+ * different shapes and every date would look like a difference.
+ */
+async function selectList(client: PoolClient, table: string): Promise<string> {
+  const { rows } = await client.query<{ column_name: string; data_type: string }>(
+    `SELECT column_name, data_type FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = $1
+      ORDER BY ordinal_position`,
+    [table]
+  );
+  if (!rows.some((c) => c.data_type === "date")) return "*";
+  return rows
+    .map((c) =>
+      c.data_type === "date"
+        ? `to_char(${quote(c.column_name)}, 'YYYY-MM-DD') AS ${quote(c.column_name)}`
+        : quote(c.column_name)
+    )
+    .join(", ");
+}
+
 /** Read every row of every table. */
 export async function takeBackup(client: PoolClient): Promise<Backup> {
   const tables = await tableOrder(client);
@@ -106,8 +144,9 @@ export async function takeBackup(client: PoolClient): Promise<Backup> {
      * Found by rehearsing against real data, where a table with a composite key
      * actually had rows in it.
      */
+    const select = await selectList(client, table);
     const { rows: data } = await client.query(
-      `SELECT * FROM ${quote(table)} ORDER BY ${quote(table)}::text`
+      `SELECT ${select} FROM ${quote(table)} ORDER BY ${quote(table)}::text`
     );
     rows[table] = data;
     rowCounts[table] = data.length;
@@ -133,6 +172,13 @@ export async function restoreBackup(
   opts: { overwrite?: boolean } = {}
 ): Promise<{ restored: Record<string, number>; skipped: Record<string, number> }> {
   const order = await tableOrder(client);
+
+  /** Tables whose key the database insists on generating — see the INSERT below. */
+  const { rows: identityRows } = await client.query<{ table_name: string }>(
+    `SELECT table_name FROM information_schema.columns
+      WHERE table_schema = 'public' AND is_identity = 'YES' AND identity_generation = 'ALWAYS'`
+  );
+  const identity = new Set(identityRows.map((r) => r.table_name));
 
   /**
    * Tables in the backup that this database does not have.
@@ -184,6 +230,40 @@ export async function restoreBackup(
    * is kept because that stops being true the moment one constraint is added
    * without a cascade — and the failure then is a restore that dies halfway.
    */
+  /**
+   * The application's own triggers are off for the whole restore.
+   *
+   * Two of them make a restore impossible otherwise, and they fail for the
+   * same underlying reason. `audit_events` is append-only, so its BEFORE
+   * UPDATE OR DELETE trigger refuses the wipe — "audit entries cannot be
+   * changed or removed". And `tickets` asserts that its thread has messages,
+   * which is not a foreign key, so the FK-derived order below knows nothing
+   * about it and inserts the ticket first.
+   *
+   * The general point, which took two failures to see: these triggers assert
+   * things about the relationships BETWEEN rows, and a restore puts rows back
+   * one at a time. Half-way through a restore those assertions are legitimately
+   * false. No ordering fixes that in general — trigger dependencies can be
+   * cyclic where foreign keys cannot — so the guards have to be off for the
+   * duration. They are right about live editing and wrong about recovery: a
+   * table nobody can put back is not protected data, it is lost data with a
+   * grace period.
+   *
+   * What does NOT go off is the constraints. Foreign keys are enforced by
+   * SYSTEM triggers, which `DISABLE TRIGGER USER` deliberately leaves alone,
+   * so a backup that references a row that is not there is still refused — and
+   * `compareToBackup` checks the result against the file afterwards.
+   *
+   * `ALTER TABLE` is transactional in Postgres and the caller wraps the whole
+   * restore in one transaction, so a failure rolls the triggers back on with
+   * everything else. It needs table ownership, which the documented recovery
+   * path has: restores run as the migration role, never as the restricted
+   * application role.
+   */
+  for (const table of order) {
+    await client.query(`ALTER TABLE ${quote(table)} DISABLE TRIGGER USER`);
+  }
+
   for (const table of [...order].reverse()) {
     await client.query(`DELETE FROM ${quote(table)}`);
   }
@@ -200,7 +280,21 @@ export async function restoreBackup(
     // undefined rather than letting the default apply.
     const columns = Object.keys(data[0]);
     const placeholders = columns.map((_, i) => `$${i + 1}`).join(", ");
-    const sql = `INSERT INTO ${quote(table)} (${columns.map(quote).join(", ")}) VALUES (${placeholders})`;
+    /**
+     * The original key, not a new one.
+     *
+     * `audit_events.id` is GENERATED ALWAYS AS IDENTITY, and Postgres refuses
+     * a value for such a column — "cannot insert a non-DEFAULT value into
+     * column id" — unless the statement says it means it. Without this the
+     * restore died on the first audit row, which meant the audit log could be
+     * backed up and never put back.
+     *
+     * Read from the catalogue rather than listed here, so a table that gains
+     * an identity column later is covered without anybody remembering to
+     * come back.
+     */
+    const overriding = identity.has(table) ? " OVERRIDING SYSTEM VALUE" : "";
+    const sql = `INSERT INTO ${quote(table)} (${columns.map(quote).join(", ")})${overriding} VALUES (${placeholders})`;
 
     for (const row of data) {
       await client.query(
@@ -218,6 +312,13 @@ export async function restoreBackup(
       );
       restored[table]++;
     }
+  }
+
+  /* Back on, so the live guards are exactly as they were. A restore that
+     quietly left the audit log editable would trade one silent failure for a
+     worse one. */
+  for (const table of order) {
+    await client.query(`ALTER TABLE ${quote(table)} ENABLE TRIGGER USER`);
   }
 
   return { restored, skipped };
@@ -244,9 +345,10 @@ export async function compareToBackup(
     // A table this database does not have was reported as skipped by the
     // restore; comparing it would fail on a difference nobody can act on.
     if (!present.has(table)) continue;
-    // The same total order the backup was written in; see `takeBackup`.
+    // The same total order AND the same column shapes the backup was written
+    // with; see `takeBackup` and `selectList`.
     const { rows } = await client.query(
-      `SELECT * FROM ${quote(table)} ORDER BY ${quote(table)}::text`
+      `SELECT ${await selectList(client, table)} FROM ${quote(table)} ORDER BY ${quote(table)}::text`
     );
     const expected = backup.rows[table] ?? [];
 

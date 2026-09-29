@@ -96,6 +96,98 @@ describe("the round trip", () => {
     expect(check.ok).toBe(true);
   });
 
+  it("PUTS THE AUDIT LOG BACK — an append-only table is still recoverable", async () => {
+    /**
+     * The audit log could be backed up and never restored, on two counts, and
+     * neither showed up until the CLI was actually run: `audit_events.id` is
+     * GENERATED ALWAYS, so Postgres refused the original key outright, and the
+     * append-only trigger refused the wipe that precedes a restore.
+     *
+     * Both guards are right about live editing and wrong about recovery. A
+     * table nobody can put back is not protected data, it is lost data with a
+     * grace period. Found on 2026-09-30 running `db:backup` and then
+     * `db:restore` against a real database for the first time.
+     */
+    await db.seed(`
+      INSERT INTO contacts (id, sub_account_id, first_name, last_name)
+        VALUES ('c_audit', '${TENANT_A}', 'Ana', 'Silva');
+    `);
+    await withClient((c) =>
+      c.query(
+        `INSERT INTO audit_events (sub_account_id, actor_name, action, entity, entity_id, detail)
+         VALUES ($1, 'Demo Owner', 'update', 'contact', 'c_audit', 'Phone number')`,
+        [TENANT_A]
+      )
+    );
+
+    const taken = await withClient((c) => backup.takeBackup(c));
+    expect(taken.manifest.rowCounts.audit_events).toBe(1);
+
+    const result = await withClient((c) => backup.restoreBackup(c, taken, { overwrite: true }));
+    expect(result.restored.audit_events, "the audit log did not come back").toBe(1);
+
+    /* And with the same id, not a fresh one: an entry that changed its key on
+       the way back is a different record claiming to be the same one. */
+    const check = await withClient((c) => backup.compareToBackup(c, taken));
+    expect(check.differences, check.differences.join("\n")).toEqual([]);
+  });
+
+  it("KEEPS A DATE ON THE DAY IT WAS — not a day earlier", async () => {
+    /**
+     * A DATE has no time and no time zone: it is the day a job starts or an
+     * invoice falls due. `pg` parses one into a JavaScript Date, which is an
+     * instant, so the 28th became midnight on the 28th in the server's zone,
+     * was written to the file as "...27T22:00:00.000Z" and read back as the
+     * 27th. Every due date in the backup moved a day earlier on the way home.
+     *
+     * The fixture above covers timestamps, money, JSON and unicode, and every
+     * one of those was fine — which is exactly why this survived: no test
+     * data had a DATE column in it.
+     */
+    await db.seed(`
+      INSERT INTO contacts (id, sub_account_id, first_name, last_name)
+        VALUES ('c_dates', '${TENANT_A}', 'Ana', 'Silva');
+      INSERT INTO deals (id, sub_account_id, contact_id, title, value_cents, stage, starts_on, due_on)
+        VALUES ('d_dates', '${TENANT_A}', 'c_dates', 'Dated', 1000, 'prospect',
+                '2026-09-28', '2026-12-31');
+    `);
+
+    const taken = await withClient((c) => backup.takeBackup(c));
+    const deal = taken.rows.deals.find((d) => d.id === "d_dates")!;
+    /* In the file as the day itself, so it cannot be re-read in another zone
+       and land somewhere else. */
+    expect(deal.starts_on).toBe("2026-09-28");
+    expect(deal.due_on).toBe("2026-12-31");
+
+    await withClient((c) => backup.restoreBackup(c, taken, { overwrite: true }));
+    const check = await withClient((c) => backup.compareToBackup(c, taken));
+    expect(check.differences, check.differences.join("\n")).toEqual([]);
+
+    const back = await withClient((c) =>
+      c.query<{ starts_on: string }>(
+        `SELECT to_char(starts_on, 'YYYY-MM-DD') AS starts_on FROM deals WHERE id = 'd_dates'`
+      )
+    );
+    expect(back.rows[0].starts_on, "the day moved on the way back").toBe("2026-09-28");
+  });
+
+  it("leaves the append-only guard working once the restore is done", async () => {
+    /* The triggers go back on. A restore that quietly left the audit log
+       editable would trade one silent failure for a worse one. */
+    const taken = await withClient((c) => backup.takeBackup(c));
+    await withClient((c) => backup.restoreBackup(c, taken, { overwrite: true }));
+
+    await expect(
+      withClient(async (c) => {
+        await c.query(
+          `INSERT INTO audit_events (sub_account_id, action, entity) VALUES ($1, 'update', 'contact')`,
+          [TENANT_A]
+        );
+        await c.query(`DELETE FROM audit_events`);
+      })
+    ).rejects.toThrow(/cannot be changed or removed/);
+  });
+
   it("keeps a timestamp to the millisecond", async () => {
     /**
      * The failure a row count sails past. A timestamp that comes back an hour
