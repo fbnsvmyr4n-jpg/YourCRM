@@ -107,6 +107,12 @@ export async function stageOdds(q: TenantQuery): Promise<StageOdds[]> {
        CROSS JOIN LATERAL unnest(d.stages_reached) AS s(stage)
       WHERE d.sub_account_id = $1
         AND d.deleted_at IS NULL
+        -- Belt and braces, and worth being honest about which is which:
+        -- an untracked deal is already excluded by the join, because
+        -- unnest(NULL) produces no rows at all. Mutation testing proved it —
+        -- removing this line changes no result. It stays because the rule it
+        -- states is the whole basis of the figure, and a reader should not
+        -- have to know that unnest quirk to see that untracked deals are out.
         AND d.stages_reached IS NOT NULL
         AND (d.won_at IS NOT NULL OR d.stage = 'lost')
       GROUP BY s.stage`,

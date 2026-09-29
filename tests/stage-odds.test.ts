@@ -17,6 +17,7 @@ import type { TenantContext, TenantQuery } from "../src/server/tenant";
 let db: TestDb;
 let withTenant: typeof import("../src/server/tenant").withTenant;
 let stageOdds: typeof import("../src/server/stage-odds").stageOdds;
+let moveStage: typeof import("../src/server/repos/deals").moveStage;
 let closePool: typeof import("../src/server/db").closePool;
 
 const ctx: TenantContext = { agencyId: AGENCY, subAccountId: TENANT_A, userId: USER_A, role: "owner" };
@@ -29,6 +30,7 @@ beforeAll(async () => {
   ({ withTenant } = await import("../src/server/tenant"));
   ({ closePool } = await import("../src/server/db"));
   ({ stageOdds } = await import("../src/server/stage-odds"));
+  ({ moveStage } = await import("../src/server/repos/deals"));
 });
 
 afterAll(async () => {
@@ -142,6 +144,48 @@ describe("what the database counts", () => {
     `);
     const odds = await inA((q) => stageOdds(q));
     expect(odds.find((o) => o.stage === "demo")!.decided).toBe(6);
+  });
+
+  it("A DEAL THAT WAS NEVER TRACKED STAYS UNTRACKED when it is moved", async () => {
+    /* The other half of "not backfilled", and the one mutation testing found
+       nothing was checking. Starting a route the first time a legacy deal is
+       moved would claim the deal began at whatever stage it was moved to —
+       so a deal that has been running for months would enter the maths as
+       though its whole life were one step. */
+    await db.seed(`
+      INSERT INTO deals (id, sub_account_id, title, value_cents, stage, source, stages_reached)
+      VALUES ('legacy_open', '${TENANT_A}', 'Legacy', 5000, 'discovery', 'website', NULL);
+    `);
+    await inA((q) => moveStage(q, "legacy_open", "demo"));
+    const route = await inA((q) =>
+      q.one<{ stages_reached: string[] | null }>(
+        `SELECT stages_reached FROM deals WHERE id = 'legacy_open' AND sub_account_id = $1`,
+        [TENANT_A]
+      )
+    );
+    expect(route?.stages_reached, "a route was invented for a deal nobody was watching").toBe(null);
+  });
+
+  it("RECORDS A STAGE ONCE, however many times a deal goes back to it", async () => {
+    /* Deals go backwards. "Of the deals that reached Demo" is a question about
+       whether it got there, not how many times — counting a stage twice would
+       weight one indecisive deal as two. */
+    await db.seed(`
+      INSERT INTO deals (id, sub_account_id, title, value_cents, stage, source, stages_reached)
+      VALUES ('wobbler', '${TENANT_A}', 'Wobbler', 5000, 'discovery', 'website', ARRAY['discovery']);
+    `);
+    await inA(async (q) => {
+      await moveStage(q, "wobbler", "demo");
+      await moveStage(q, "wobbler", "discovery");
+      await moveStage(q, "wobbler", "demo");
+    });
+    const route = await inA((q) =>
+      q.one<{ stages_reached: string[] }>(
+        `SELECT stages_reached FROM deals WHERE id = 'wobbler' AND sub_account_id = $1`,
+        [TENANT_A]
+      )
+    );
+    expect(route?.stages_reached).toEqual(["discovery", "demo"]);
   });
 
   it("never counts another workspace's deals", async () => {
