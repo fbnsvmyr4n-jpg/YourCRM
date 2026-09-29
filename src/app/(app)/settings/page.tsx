@@ -338,6 +338,7 @@ export default async function SettingsPage({
           automations={automations}
           runs={automationRuns.map((run) => ({ ...run, when: shortWhen(run.at, settings.timeZone) }))}
           team={assignable}
+          tasksFromMessages={settings.tasksFromMessages}
           canManage={roleCan(user.role, "manage_users")}
         />
       ),

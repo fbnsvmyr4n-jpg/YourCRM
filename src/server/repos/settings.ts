@@ -34,6 +34,12 @@ export type Settings = {
   invoicePayTo: string | null;
   /** The currency every amount in this workspace is in. See `lib/money.ts`. */
   currency: CurrencyCode;
+  /**
+   * Whether an incoming message that asks for something becomes a task.
+   *
+   * On unless somebody turns it off — see the note in `schema.sql`.
+   */
+  tasksFromMessages: boolean;
   updatedAt: string | null;
 };
 
@@ -55,6 +61,9 @@ export const DEFAULT_SETTINGS: Settings = {
      worse than one that omits payment details entirely. */
   invoicePayTo: null,
   currency: DEFAULT_CURRENCY,
+  /* On for a workspace that has never saved anything, so the default here
+     agrees with the column default rather than quietly disagreeing with it. */
+  tasksFromMessages: true,
   updatedAt: null,
 };
 
@@ -64,10 +73,11 @@ type Row = {
   time_zone: string;
   invoice_pay_to: string | null;
   currency: string;
+  tasks_from_messages: boolean;
   updated_at: Date;
 };
 
-const COLUMNS = `monthly_target_cents, weekly_capacity, time_zone, invoice_pay_to, currency, updated_at`;
+const COLUMNS = `monthly_target_cents, weekly_capacity, time_zone, invoice_pay_to, currency, tasks_from_messages, updated_at`;
 
 /** Rejects anything `Intl` cannot resolve, rather than storing a typo. */
 export function isValidTimeZone(zone: string): boolean {
@@ -88,6 +98,7 @@ function toSettings(r: Row): Settings {
     /* A code this build does not know — added by a newer deployment, say —
        shows as the default rather than breaking every page that prints money. */
     currency: isCurrency(r.currency) ? r.currency : DEFAULT_CURRENCY,
+    tasksFromMessages: r.tasks_from_messages,
     updatedAt: r.updated_at.toISOString(),
   };
 }
@@ -126,6 +137,7 @@ export async function updateSettings(
     timeZone?: string;
     invoicePayTo?: string | null;
     currency?: CurrencyCode;
+    tasksFromMessages?: boolean;
   }
 ): Promise<Settings> {
   if (patch.currency !== undefined && !isCurrency(patch.currency)) {
@@ -151,14 +163,18 @@ export async function updateSettings(
   // Upsert: the first save for a sub-account must not require a separate
   // "create settings" step that something has to remember to run.
   const row = await q.one<Row>(
-    `INSERT INTO settings (sub_account_id, monthly_target_cents, weekly_capacity, time_zone, invoice_pay_to, currency)
+    `INSERT INTO settings (sub_account_id, monthly_target_cents, weekly_capacity, time_zone, invoice_pay_to, currency, tasks_from_messages)
      VALUES ($1, COALESCE($2, 0), COALESCE($3, ${DEFAULT_SETTINGS.weeklyCapacity}), COALESCE($4, 'UTC'), $5,
-             COALESCE($7, '${DEFAULT_CURRENCY}'))
+             COALESCE($7, '${DEFAULT_CURRENCY}'), COALESCE($8, TRUE))
      ON CONFLICT (sub_account_id) DO UPDATE SET
        monthly_target_cents = COALESCE($2, settings.monthly_target_cents),
        weekly_capacity      = COALESCE($3, settings.weekly_capacity),
        time_zone            = COALESCE($4, settings.time_zone),
        currency             = COALESCE($7, settings.currency),
+       -- COALESCE is right here and wrong for invoice_pay_to below: a boolean
+       -- that was not mentioned is null, which means leave it, and false is a
+       -- real value that COALESCE keeps.
+       tasks_from_messages  = COALESCE($8, settings.tasks_from_messages),
        -- $6 says whether the caller mentioned it at all, so an empty box
        -- CLEARS the details rather than being mistaken for "leave as they
        -- were", which is what COALESCE alone would do and would make removing
@@ -174,6 +190,7 @@ export async function updateSettings(
       patch.invoicePayTo ?? null,
       patch.invoicePayTo !== undefined,
       patch.currency ?? null,
+      patch.tasksFromMessages ?? null,
     ]
   );
   if (!row) throw new Error("Settings were not saved.");

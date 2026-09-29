@@ -49,7 +49,10 @@ const META: Record<SettingsSectionId, { label: string; icon: LucideIcon; blurb: 
   account: { label: "Account", icon: UserRound, blurb: "Your name, sign-in and password" },
   team: { label: "Team", icon: Users, blurb: "Everyone who works here, by department" },
   clients: { label: "Clients", icon: Briefcase, blurb: "Who is looking after whom" },
-  automations: { label: "Automations", icon: Zap, blurb: "What happens on its own when a lead or deal changes" },
+  /* Not "when a lead or deal changes" any more: an arriving message raises a
+     task from this screen too, and a blurb that lists only half of what the
+     area does sends somebody looking for the other half elsewhere. */
+  automations: { label: "Automations", icon: Zap, blurb: "What this workspace does on its own" },
   templates: { label: "Templates", icon: MessageSquareText, blurb: "Messages you send again and again" },
   preferences: { label: "Preferences", icon: SlidersHorizontal, blurb: "Targets, working calendar and theme" },
   billing: { label: "Billing", icon: CreditCard, blurb: "Plan, workspaces, usage and referrals" },

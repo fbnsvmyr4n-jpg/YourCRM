@@ -120,6 +120,10 @@ export const EXPECTED_COLUMNS: ReadonlyArray<[string, string]> = [
      here because a figure that silently never appears is worse to diagnose
      than one that fails loudly. */
   ["deals", "stages_reached"],
+  /* The toggle for turning inbound messages into tasks. Read on every message
+     that arrives, so an unmigrated database breaks receiving mail, not a
+     checkbox in Settings. */
+  ["settings", "tasks_from_messages"],
   /* Projects. Named in the SELECT the deals repo and the projects page both
      use, so an unmigrated database breaks the pipeline board, not one page. */
   ["deals", "company_id"],

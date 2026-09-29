@@ -3019,6 +3019,27 @@ CREATE POLICY audit_events_tenant_isolation ON audit_events
 ALTER TABLE deals ADD COLUMN IF NOT EXISTS stages_reached TEXT[];
 
 -- ---------------------------------------------------------------------------
+-- Whether an incoming message that asks for something becomes a task.
+--
+-- A client writes "can you quote me for the paving" and that is a job to do,
+-- but it lived only in the Inbox: read, then remembered or not. The classifier
+-- already worked out what each message was, and nothing acted on it.
+--
+-- ON by default, because a workspace that has never opened this setting is
+-- better served by the reminder than by silence — and every task it raises
+-- says where it came from and can be deleted in one click. Off is one toggle
+-- under Settings → Automations for anybody who works differently.
+--
+-- A column rather than an automation rule. A rule would default to OFF (no
+-- rule, no behaviour), which is the opposite of what this needs, and a rule
+-- that must exist for the product to behave normally is a setting wearing a
+-- costume. The rules engine stays for "when THIS happens, do THAT" decisions
+-- somebody actually composes.
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS tasks_from_messages BOOLEAN NOT NULL DEFAULT TRUE;
+
+-- ---------------------------------------------------------------------------
 -- What the application's own database role may do.
 --
 -- KEEP THIS THE LAST BLOCK IN THE FILE: `GRANT … ON ALL TABLES` covers only the

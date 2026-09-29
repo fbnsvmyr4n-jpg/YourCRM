@@ -1,7 +1,9 @@
+import { randomUUID } from "node:crypto";
 import { classifyMessage } from "../inbox-classify";
 import type { MsgCategory } from "@/data/inbox";
 import type { TenantQuery } from "../tenant";
 import { recordOnTicket } from "./tickets";
+import { messageTaskKey, taskFromMessage } from "../message-task";
 
 /**
  * Inbox messages.
@@ -279,7 +281,69 @@ export async function createMessage(q: TenantQuery, input: NewMessage): Promise<
   /* The ticket on this thread, if there is one, learns in the same
      transaction: their message starts the clock, ours stops it. */
   await recordOnTicket(q, record.threadId, record.direction, record.sentAt);
+  await raiseTaskForMessage(q, record);
   return record;
+}
+
+/**
+ * A task for a message that asks for something — see `message-task.ts`.
+ *
+ * In the same transaction as the message, so there is never a message that
+ * should have raised a task and did not. The insert is ON CONFLICT DO
+ * NOTHING against `todos.source_key`, which is what makes it one task per
+ * conversation however many emails arrive on it.
+ */
+async function raiseTaskForMessage(q: TenantQuery, record: MessageRecord): Promise<void> {
+  const settings = await q.one<{ tasks_from_messages: boolean }>(
+    `SELECT tasks_from_messages FROM settings WHERE sub_account_id = $1`,
+    [q.ctx.subAccountId]
+  );
+  /* No settings row means nobody has saved anything here, and the column
+     default is on — so the absence agrees with the default rather than
+     quietly disabling the feature for every new workspace. */
+  const enabled = settings?.tasks_from_messages ?? true;
+
+  const sender = record.contactId
+    ? await q.one<{ name: string; owner_user_id: string | null }>(
+        `SELECT trim(first_name || ' ' || last_name) AS name, owner_user_id
+           FROM contacts WHERE id = $2 AND sub_account_id = $1 AND deleted_at IS NULL`,
+        [q.ctx.subAccountId, record.contactId]
+      )
+    : null;
+
+  const task = taskFromMessage(
+    {
+      direction: record.direction,
+      category: record.category,
+      subject: record.subject,
+      senderName: sender?.name ?? null,
+    },
+    enabled
+  );
+  if (!task) return;
+
+  await q.rows(
+    `INSERT INTO todos
+       (id, sub_account_id, title, notes, due_on, assignee_user_id, contact_id, deal_id, source_key)
+     VALUES ($1, $2, $3, $4, NULL, $5, $6, $7, $8)
+     ON CONFLICT (sub_account_id, source_key) WHERE source_key IS NOT NULL DO NOTHING`,
+    [
+      /* The shape `createTodo` makes, so a task is a task whatever raised it.
+         `newId` would slugify the thread id into the task's, which reads like
+         a relationship that does not exist. */
+      `td_${randomUUID().replace(/-/g, "")}`,
+      q.ctx.subAccountId,
+      task.title,
+      task.notes,
+      /* Whoever owns the person who wrote in. Nobody, rather than a guess,
+         when the contact has no owner — an unassigned task shows on the
+         team's list where somebody will pick it up. */
+      sender?.owner_user_id ?? null,
+      record.contactId,
+      record.dealId,
+      messageTaskKey(record.threadId),
+    ]
+  );
 }
 
 export async function setUnread(

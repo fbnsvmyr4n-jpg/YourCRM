@@ -64,8 +64,22 @@ const RULES: Intent[] = [
   },
   {
     id: "Enquiries",
-    keywords: ["interested", "enquiry", "enquiries", "inquiry", "pricing", "price", "cost", "information", "learn", "curious", "wondering"],
-    phrases: ["love to learn", "more about", "how do you", "could you tell", "looking for"],
+    /* "quote" and its relatives earn their place here: asking what something
+       costs is the most common thing a client writes in about, and the list
+       went without them entirely. "Could you quote me for the driveway paving"
+       scored nothing and came out uncategorised — which, now that a
+       categorised message raises a task, is the difference between this
+       feature working and it being theatre. Found on 2026-09-30 by running the
+       classifier over the sentences a client actually sends. */
+    keywords: [
+      "interested", "enquiry", "enquiries", "inquiry", "pricing", "price", "cost",
+      "quote", "quotation", "quoting", "estimate", "tender",
+      "information", "learn", "curious", "wondering",
+    ],
+    phrases: [
+      "love to learn", "more about", "how do you", "could you tell", "looking for",
+      "quote me", "quote us", "quote for", "how much",
+    ],
   },
 ];
 

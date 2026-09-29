@@ -23,6 +23,7 @@ import {
   createAutomationAction,
   deleteAutomationAction,
   setAutomationEnabledAction,
+  setTasksFromMessagesAction,
 } from "./automation-actions";
 
 /**
@@ -45,12 +46,15 @@ export function AutomationsCard({
   runs,
   team,
   canManage,
+  tasksFromMessages,
 }: {
   automations: Automation[];
   runs: RunView[];
   /** Everybody a rule may hand work to. Also names the people on existing rules. */
   team: Person[];
   canManage: boolean;
+  /** Whether a message that asks for something raises a task. */
+  tasksFromMessages: boolean;
 }) {
   const nameOf = (personId: string) => team.find((p) => p.id === personId)?.name;
   const on = automations.filter((a) => a.enabled).length;
@@ -63,6 +67,8 @@ export function AutomationsCard({
           icon={<Zap className="h-[18px] w-[18px] text-accent" />}
           action={automations.length > 0 ? <CardMeta value={on}>on</CardMeta> : undefined}
         />
+
+        <MessageTasksToggle enabled={tasksFromMessages} canManage={canManage} />
 
         {automations.length === 0 ? (
           <p className="mb-4 text-xs text-faint">
@@ -400,5 +406,62 @@ function RunsCard({ runs }: { runs: RunView[] }) {
         ))}
       </ul>
     </Card>
+  );
+}
+
+/**
+ * The one behaviour that runs without anybody composing a rule.
+ *
+ * It sits above the rules rather than among them because it is not a rule: it
+ * has no "when this, then that" to fill in, and it is on until somebody turns
+ * it off. Written as a sentence about what the product does, so the toggle
+ * reads as the answer to "why did this task appear?" — which is the question
+ * somebody will arrive at this screen holding.
+ */
+function MessageTasksToggle({ enabled, canManage }: { enabled: boolean; canManage: boolean }) {
+  const { state, onSubmit, pending } = useKeptForm<FormState>(setTasksFromMessagesAction, undefined);
+
+  return (
+    <div className="mb-4 rounded-xl px-3.5 py-3" style={{ background: "var(--surface-2)" }}>
+      <div className="flex items-center gap-3">
+        <div className={clsx("min-w-0 flex-1 leading-tight", !enabled && "opacity-60")}>
+          <p className="text-sm font-medium">A message that asks for something becomes a task</p>
+          <p className="mt-0.5 text-xs text-muted">
+            One task per conversation, for whoever owns that client. Quotes and enquiries only —
+            replies and confirmations are left alone.
+          </p>
+        </div>
+
+        {canManage ? (
+          <form onSubmit={onSubmit} className="flex shrink-0">
+            <input type="hidden" name="enabled" value={enabled ? "false" : "true"} />
+            <button
+              type="submit"
+              role="switch"
+              aria-checked={enabled}
+              aria-label="A message that asks for something becomes a task"
+              disabled={pending}
+              className="focus-ring relative h-6 w-10 rounded-full transition-colors disabled:opacity-60"
+              style={{ background: enabled ? "var(--accent)" : "var(--border-strong)" }}
+            >
+              <span
+                className={clsx(
+                  "absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-[left] motion-reduce:transition-none",
+                  enabled ? "left-[18px]" : "left-0.5"
+                )}
+              />
+            </button>
+          </form>
+        ) : (
+          <span className="shrink-0 text-xs text-faint">{enabled ? "On" : "Off"}</span>
+        )}
+      </div>
+
+      {state && (
+        <div className="mt-2.5">
+          <Banner state={state} />
+        </div>
+      )}
+    </div>
   );
 }

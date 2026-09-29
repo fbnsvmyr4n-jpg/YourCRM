@@ -11,6 +11,7 @@ import {
   listAutomations,
   setAutomationEnabled,
 } from "@/server/repos/automations";
+import { updateSettings } from "@/server/repos/settings";
 import { id as validId } from "@/server/validate";
 import { logWrite } from "@/server/log";
 import type { FormState } from "./actions";
@@ -93,5 +94,35 @@ export async function deleteAutomationAction(_prev: FormState, formData: FormDat
     logWrite("delete", "automation", { id: automationId, actor: q.ctx.userId });
     revalidateApp();
     return { ok: "Deleted." };
+  });
+}
+
+/**
+ * Turn "a message that asks for something becomes a task" on or off.
+ *
+ * A workspace setting rather than a rule, and it sits here rather than under
+ * Preferences because this is where somebody looks for "what does this
+ * product do on its own". See the note in `schema.sql` for why it is not one
+ * of the rules above: a rule defaults to off, and this needs to default to on.
+ */
+export async function setTasksFromMessagesAction(
+  _prev: FormState,
+  formData: FormData
+): Promise<FormState> {
+  return withCurrentTenant(async (q) => {
+    if (!roleCan(q.ctx.role, "manage_users")) return { error: NOT_YOURS };
+    const enabled = formData.get("enabled") === "true";
+    await updateSettings(q, { tasksFromMessages: enabled });
+    logWrite("update", "settings", {
+      id: q.ctx.subAccountId,
+      actor: q.ctx.userId,
+      detail: enabled ? "Tasks from messages on" : "Tasks from messages off",
+    });
+    revalidateApp();
+    return {
+      ok: enabled
+        ? "A message that asks for something will raise a task."
+        : "Messages will no longer raise tasks.",
+    };
   });
 }
