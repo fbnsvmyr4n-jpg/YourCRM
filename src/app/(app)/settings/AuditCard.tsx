@@ -25,6 +25,19 @@ const VERB: Record<string, string> = {
 
 const plain = (entity: string) => entity.replace(/_/g, " ");
 
+/**
+ * "a contact", "an invoice", "settings".
+ *
+ * The article was chosen on the first letter alone, which reads correctly
+ * right up until the entity is already plural: the log said somebody "changed
+ * a settings". A name that ends in s takes no article.
+ */
+const naming = (entity: string) => {
+  const word = plain(entity);
+  if (/s$/.test(word)) return word;
+  return `${/^[aeiou]/i.test(word) ? "an" : "a"} ${word}`;
+};
+
 export function AuditCard({ events, timeZone, pageSize }: { events: AuditEvent[]; timeZone: string; pageSize: number }) {
   const [who, setWho] = useState("");
   const [what, setWhat] = useState("");
@@ -71,18 +84,31 @@ export function AuditCard({ events, timeZone, pageSize }: { events: AuditEvent[]
               ))}
             </select>
           </div>
+          {/* Each row is stacked on a phone and three columns once there is
+              room for them.
+
+              As one wrapping row at every width, the date (112px, fixed) and
+              the record id (never allowed to shrink) took the whole line
+              between them and left the sentence — the part somebody is
+              actually reading — about 70px, so it came out one or two words
+              per line down a narrow channel. The id also carries `min-w-0`
+              now, because `truncate` does nothing to a box that refuses to be
+              smaller than its own text. */}
           <ul className="flex flex-col divide-y divide-[var(--border)]">
             {shown.map((e) => (
-              <li key={e.id} className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 py-2.5 text-sm">
-                <span className="w-28 shrink-0 text-xs tabular-nums text-faint">{when(e.at)}</span>
+              <li
+                key={e.id}
+                className="flex flex-col gap-y-0.5 py-2.5 text-sm @min-[420px]:flex-row @min-[420px]:flex-wrap @min-[420px]:items-baseline @min-[420px]:gap-x-3"
+              >
+                <span className="text-xs tabular-nums text-faint @min-[420px]:w-28 @min-[420px]:shrink-0">{when(e.at)}</span>
                 <span className="min-w-0 flex-1">
                   <span className="font-medium">{e.actorName ?? (e.detail?.startsWith("Public visitor") ? "Public visitor" : "The system")}</span>{" "}
                   <span className="text-muted">
-                    {VERB[e.action] ?? e.action} {plain(e.entity).match(/^[aeiou]/i) ? "an" : "a"} {plain(e.entity)}
+                    {VERB[e.action] ?? e.action} {naming(e.entity)}
                   </span>
                   {e.detail && !e.detail.startsWith("Public visitor") && <span className="text-faint"> — {e.detail}</span>}
                 </span>
-                {e.entityId && <code className="shrink-0 truncate text-[11px] text-faint">{e.entityId}</code>}
+                {e.entityId && <code className="min-w-0 truncate text-[11px] text-faint">{e.entityId}</code>}
               </li>
             ))}
           </ul>

@@ -8,6 +8,7 @@ import { createResetToken } from "@/server/repos/auth";
 import { createUser, removeTeamMember, setUserRole, updateProfile } from "@/server/repos/users";
 import { requireActivePlan } from "@/server/plan-gate";
 import { revalidateApp } from "@/server/revalidate";
+import { logWrite } from "@/server/log";
 import { ROLES, withSystem } from "@/server/tenant";
 import { requireTenant, withCurrentTenant } from "@/server/tenant-session";
 import { drain, queueJob } from "@/server/outbox";
@@ -98,6 +99,17 @@ export async function inviteMemberAction(_prev: FormState, formData: FormData): 
       jobTitle,
     })
   );
+  if (created.user) {
+    /* Recorded after the write rather than inside it: `createUser` is also
+       the signup path, which has no workspace to write an audit row to. */
+    await withSystem(async () => {
+      logWrite("create", "team_member", {
+        id: created.user!.id,
+        actor: me.userId,
+        detail: `Invited as ${role}`,
+      });
+    }, me);
+  }
   if (created.error || !created.user) {
     return { error: created.error ?? "That invitation could not be created." };
   }
@@ -239,12 +251,22 @@ export async function setMemberRoleAction(_prev: FormState, formData: FormData):
     if (!outranks(me.role, person.role)) return { ok: false as const, refused: true as const };
 
     const changed = await setUserRole(q, me.agencyId, userId, role);
-    if (changed) return { ok: true as const, name: changed.name };
+    if (changed) {
+      /* The role somebody held and the role they hold now: the most
+         consequential change on this screen, and the one an audit log is
+         most often opened to answer. */
+      logWrite("update", "team_member", {
+        id: userId,
+        actor: me.userId,
+        detail: `Role ${person.role} to ${role}`,
+      });
+      return { ok: true as const, name: changed.name };
+    }
     /* The write is the guard for the last-owner rule; reaching here means it
        refused, and the only reason it can refuse a row that existed a moment
        ago is that this is the final owner. */
     return { ok: false as const, lastOwner: true as const };
-  });
+  }, me);
 
   if (!updated.ok) {
     if ("gone" in updated) return { error: "That person is no longer on this account." };
@@ -294,12 +316,13 @@ export async function removeMemberAction(_prev: FormState, formData: FormData): 
       return { ok: false as const, refused: true as const, name: person.name };
     }
     const removed = await removeTeamMember(q, me.agencyId, userId);
+    if (removed) logWrite("delete", "team_member", { id: userId, actor: me.userId, detail: "Access removed" });
     /* Reaching here with `removed` false means the write's own guard refused a
        row that existed a moment ago, and the only thing that guard refuses is
        the last owner. Read from the outcome rather than from the role, so the
        message cannot claim a reason the database did not act on. */
     return { ok: removed, name: person.name };
-  });
+  }, me);
 
   if (!outcome.ok) {
     if ("gone" in outcome) return { error: "That person is no longer on this account." };
@@ -360,10 +383,11 @@ export async function updateStaffAction(_prev: FormState, formData: FormData): P
       return { ok: false as const, refused: true as const, name: person.name };
     }
     const result = await updateProfile(q, userId, patch);
+    if (result.user) logWrite("update", "team_member", { id: userId, actor: me.userId, detail: "Directory entry" });
     return result.user
       ? { ok: true as const, name: result.user.name }
       : { ok: false as const, failed: result.error ?? "Those details were not saved.", name: "" };
-  });
+  }, me);
 
   if (!outcome.ok) {
     if ("gone" in outcome) return { error: "That person is no longer on this account." };

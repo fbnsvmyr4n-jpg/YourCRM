@@ -231,8 +231,24 @@ export interface SystemQuery {
  * That is the safety property: if this is ever pointed at a CRM table by
  * mistake, it returns empty rather than everything.
  */
-export async function withSystem<T>(fn: (q: SystemQuery) => Promise<T>): Promise<T> {
-  return systemTransaction(null, fn);
+export async function withSystem<T>(
+  fn: (q: SystemQuery) => Promise<T>,
+  /**
+   * The workspace whose audit log should receive anything `fn` records.
+   *
+   * Team membership lives on `users`, which is an AGENCY-level table, so
+   * inviting somebody, changing their role and removing them all run through
+   * `withSystem` — and `logWrite` inside a system transaction had nowhere to
+   * put its entry, so those three vanished from the workspace's audit log
+   * entirely. They are the events an audit log most exists for.
+   *
+   * Passing the context here writes them in the SAME transaction as the
+   * change, exactly as `withTenant` does, so the record and the act stand or
+   * fall together.
+   */
+  auditFor?: TenantContext
+): Promise<T> {
+  return systemTransaction(null, fn, auditFor);
 }
 
 /**
@@ -257,7 +273,8 @@ export async function withPublicLookup<T>(
 
 async function systemTransaction<T>(
   lookup: { name: "app.public_slug" | "app.pay_token"; value: string } | null,
-  fn: (q: SystemQuery) => Promise<T>
+  fn: (q: SystemQuery) => Promise<T>,
+  auditFor?: TenantContext
 ): Promise<T> {
   const client = await getPool().connect();
   try {
@@ -274,7 +291,26 @@ async function systemTransaction<T>(
         return rows[0] ?? null;
       },
     } as SystemQuery;
-    const result = await fn(q);
+
+    if (!auditFor) {
+      const result = await fn(q);
+      await client.query("COMMIT");
+      return result;
+    }
+
+    /* Collected the same way `withTenant` collects, so `logWrite` stays the
+       one call site and knows nothing about which kind of transaction it is
+       inside. */
+    const entries: AuditEntry[] = [];
+    const result = await auditScope.run(entries, () => fn(q));
+    if (entries.length) {
+      /* The tenant is set only NOW, after `fn` has finished — never while the
+         work runs, or this would stop being an untenanted transaction and the
+         safety property above would be gone. The audit table's policy needs
+         it, and nothing but the insert and the COMMIT follow. */
+      await client.query("SELECT set_config('app.sub_account_id', $1, true)", [auditFor.subAccountId]);
+      await writeAudit(client, auditFor, entries);
+    }
     await client.query("COMMIT");
     return result;
   } catch (err) {

@@ -1,5 +1,6 @@
 "use server";
 
+import { logWrite } from "@/server/log";
 import { revalidateApp } from "@/server/revalidate";
 import { isValidTimeZone, updateSettings } from "@/server/repos/settings";
 import { isCurrency } from "@/lib/money";
@@ -79,6 +80,8 @@ export async function updateTargetsAction(_prev: FormState, formData: FormData):
       ...(timeZone ? { timeZone } : {}),
       ...(currency && isCurrency(currency) ? { currency } : {}),
     });
+
+    logWrite("update", "settings", { id: q.ctx.subAccountId, actor: q.ctx.userId, detail: "Targets and capacity" });
 
     // Several pages read these, so refresh the group rather than just Settings.
     revalidateApp();
@@ -196,6 +199,10 @@ export async function saveBookingLinkAction(
     );
     if ("error" in result) return { error: result.error };
 
+    /* A published link and the hours behind it decide what the outside
+       world can book, so a change to either belongs in the record. */
+    logWrite("update", "booking_link", { id: q.ctx.subAccountId, actor: q.ctx.userId, detail: enabled ? "Published" : "Not published" });
+
     revalidateApp();
     /* Short, because the card states what is live itself, right underneath.
        Repeating it here printed the same sentence twice. */
@@ -227,6 +234,10 @@ export async function updateProfileAction(_prev: FormState, formData: FormData):
   const result = await withSystem((q) => updateProfile(q, me.userId, { name, email, ...details }));
   if (result.error) return { error: result.error };
 
+  await withSystem(async () => {
+    logWrite("update", "profile", { id: me.userId, actor: me.userId });
+  }, me);
+
   // Revalidate the layout so the sidebar/topbar pick up the new name,
   // without navigating the user away from Settings.
   revalidateApp();
@@ -243,7 +254,15 @@ export async function changePasswordAction(_prev: FormState, formData: FormData)
   if (!current || !next) return { error: "Fill in both password fields." };
   if (next !== confirm) return { error: "New passwords do not match." };
 
-  const result = await withSystem((q) => changePassword(q, me.userId, current, next));
+  const result = await withSystem(async (q) => {
+    const out = await changePassword(q, me.userId, current, next);
+    /* The event, and nothing whatever about the value: no password, no
+       hash, no length, no hint. `log.ts` redacts those field names anyway,
+       and this passes none of them. Somebody asking "when did my password
+       last change?" is exactly who this record is for. */
+    if (!out.error) logWrite("update", "password", { id: me.userId, actor: me.userId });
+    return out;
+  }, me);
   if (result.error) return { error: result.error };
 
   return { ok: "Password changed." };
@@ -439,6 +458,10 @@ export async function restoreDeletedAction(kind: string, id: string): Promise<Fo
     if (!restored) {
       return { error: "That record is no longer in the deleted list." };
     }
+    /* `logging.test.ts` makes every delete record itself. An undelete is
+       just as much a change to what the workspace holds, and a log that
+       carries only the destruction tells half the story. */
+    logWrite("restore", kind, { id: recordId, actor: q.ctx.userId });
 
     // It reappears on its own page, not this one, so refresh the group.
     revalidateApp();

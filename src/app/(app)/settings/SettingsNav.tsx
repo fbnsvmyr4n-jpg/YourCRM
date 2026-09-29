@@ -240,7 +240,12 @@ function Chip({
       onClick={() => onSelect(id)}
       aria-pressed={active}
       className={clsx(
-        "focus-ring flex flex-col items-center gap-1.5 rounded-xl px-1.5 py-2.5 text-[11px] font-semibold transition-colors",
+        /* `px-1`, not `px-1.5`. At 375px the four-column row gives each chip
+           79px, which left 65px of label — and "Automations" needs 67, so it
+           rendered "Automatio…". The one area whose name could not be read was
+           the one somebody had not used before. Four pixels back is the whole
+           fix; `truncate` stays as the net under any longer label. */
+        "focus-ring flex flex-col items-center gap-1.5 rounded-xl px-1 py-2.5 text-[11px] font-semibold transition-colors",
         active ? "text-accent" : "btn-soft text-muted"
       )}
       style={active ? { background: "var(--accent-soft)" } : undefined}
