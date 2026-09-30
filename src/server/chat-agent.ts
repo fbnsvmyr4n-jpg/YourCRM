@@ -6,6 +6,7 @@ import { BOARD_STAGES as STAGES } from "@/data/pipeline";
 import { listContacts } from "./repos/contacts";
 import { listDeals } from "./repos/deals";
 import { listMeetings } from "./repos/meetings";
+import { outstandingInvoices } from "./repos/invoices";
 import { listMessages, unreadCount } from "./repos/inbox";
 import type { ChatMessage } from "./repos/chat";
 import { listCalls } from "./repos/calls";
@@ -65,6 +66,7 @@ export async function buildCrmContext(q: TenantQuery) {
     (m) => instantToWallClock(m.scheduledAt, settings.timeZone)?.date === todayKey
   );
   const unread = await unreadCount(q);
+  const invoices = await outstandingInvoices(q);
 
   // Progress against target is computed exactly the way the Sales Target page
   // computes it — same source, same month boundary — so the assistant can never
@@ -114,7 +116,9 @@ export async function buildCrmContext(q: TenantQuery) {
     /* Whether there is a model behind the assistant at all. The deterministic
        answers below are the ones a user sees when there is not, so they are
        the ones that have to be able to say so. */
+    invoices,
     aiLive: aiConfigured(),
+    timeZone: settings.timeZone,
     currency: settings.currency,
     monthlyTarget,
     wonThisMonth,
@@ -455,14 +459,34 @@ function answerFor(id: string, ctx: CrmContext): string {
     case "meetings": {
       if (!ctx.meetings.length) return "Nothing scheduled at the moment.";
       const today = ctx.todayMeetings;
+      /**
+       * Coming up means AHEAD. This listed every meeting on file in
+       * whatever order the repository returned them, so the audit fixture's
+       * follow-up call from two days ago was offered as something coming up,
+       * above a site visit that really was.
+       */
+      const now = Date.now();
+      const ahead = ctx.meetings
+        .filter((m) => Date.parse(m.scheduledAt) >= now)
+        .sort((a, b) => Date.parse(a.scheduledAt) - Date.parse(b.scheduledAt));
       return [
         today.length
           ? `You have **${today.length} meeting${today.length === 1 ? "" : "s"} today**:`
-          : "Nothing today. Coming up:",
+          : ahead.length
+            ? "Nothing today. Coming up:"
+            : "Nothing today, and nothing booked ahead.",
         "",
-        ...(today.length ? today : ctx.meetings.slice(0, 5)).map((m) => {
+        ...(today.length ? today : ahead.slice(0, 5)).map((m) => {
           const person = ctx.contacts.find((c) => c.id === m.contactId);
-          const at = new Date(m.scheduledAt).toISOString().slice(11, 16);
+          const when = instantToWallClock(m.scheduledAt, ctx.timeZone);
+          /* The day as well as the time, in the workspace's own zone. Three
+             meetings on three different days all read "07:15" with nothing
+             to tell them apart — and the time alone was UTC besides, so it
+             disagreed with every other screen. Today's list needs no date,
+             because it has already said today. */
+          const at = today.length
+            ? (when?.time ?? "")
+            : `${when?.date ?? m.scheduledAt.slice(0, 10)} ${when?.time ?? ""}`.trim();
           return `• **${at}** — ${person ? `${person.firstName} ${person.lastName}` : "unassigned"} — ${m.topic} · ${m.kind}`;
         }),
       ].join("\n");
@@ -600,14 +624,49 @@ function answerFor(id: string, ctx: CrmContext): string {
        */
       return "I can't help with attachments yet — files aren't stored anywhere in the CRM, so there's nothing for me to read.";
 
+    case "invoices": {
+      /* Real balances from real documents — issued, unsettled, and reduced by
+         anything already received. Nothing here is a forecast. */
+      if (!ctx.invoices.length) {
+        return "Nothing outstanding — every invoice you have issued has been paid.";
+      }
+      const total = ctx.invoices.reduce((sum, i) => sum + i.outstandingCents, 0) / 100;
+      const today = new Date().toISOString().slice(0, 10);
+      const late = ctx.invoices.filter((i) => i.dueOn && i.dueOn < today);
+      return [
+        `**${money(total)}** outstanding across ${ctx.invoices.length} invoice${ctx.invoices.length === 1 ? "" : "s"}` +
+          (late.length ? `, of which **${late.length}** ${late.length === 1 ? "is" : "are"} past due.` : "."),
+        "",
+        ...ctx.invoices.map((i) => {
+          const overdue = i.dueOn && i.dueOn < today;
+          const when = i.dueOn ? `due ${i.dueOn}${overdue ? " — overdue" : ""}` : "no due date";
+          return `• **${i.number}** — ${i.party ?? "no client named"} — ${money(i.outstandingCents / 100)} (${when})`;
+        }),
+      ].join("\n");
+    }
+
     case "performance": {
-      const closable = ctx.deals.length;
-      const winRate = closable ? Math.round((ctx.wonDeals.length / closable) * 100) : null;
+      /**
+       * Out of DECIDED deals — won plus lost, never open.
+       *
+       * This divided by every deal on file, so an open deal counted as a loss
+       * and the rate fell each time work was added. On the audit fixture it
+       * answered "43% (3 won of 7 deals)" while Reports, three clicks away,
+       * said 75% of 4 decided — the same workspace, the same instant, two
+       * different numbers, and the assistant's was the wrong one.
+       *
+       * Reports had this exact bug and it was fixed there; the note beside it
+       * reads "an open deal is neither a win nor a loss and is no part of a
+       * win rate". Naming the denominator aloud, as this answer does, made it
+       * more convincing rather than less.
+       */
+      const decided = ctx.deals.filter((d) => d.wonAt !== null || d.stage === "lost").length;
+      const winRate = decided ? Math.round((ctx.wonDeals.length / decided) * 100) : null;
       const avg = ctx.wonDeals.length ? ctx.wonValue / ctx.wonDeals.length : 0;
       return [
         "How you're performing:",
         "",
-        `• **Win rate:** ${winRate === null ? "—" : `${winRate}%`} (${ctx.wonDeals.length} won of ${closable} deals)`,
+        `• **Win rate:** ${winRate === null ? "—" : `${winRate}%`} (${ctx.wonDeals.length} won of ${decided} decided)`,
         `• **Revenue won:** ${money(ctx.wonValue)}`,
         `• **Average deal size:** ${ctx.wonDeals.length ? money(avg) : "—"}`,
         `• **Open pipeline:** ${money(ctx.openValue)}`,
@@ -658,6 +717,26 @@ function answerFor(id: string, ctx: CrmContext): string {
   }
 }
 
+/** Words that ask for a period this assistant cannot yet filter by. */
+const PERIOD = /\b(this|last|next)\s+(year|month|quarter|week)\b|\b(ytd|year to date|so far this)\b/i;
+
+/**
+ * Say so when a question asked for a period and the answer is all-time.
+ *
+ * "How much have I won this year?" was answered with the all-time figure and
+ * no mention that the year had been ignored — which reads as a direct answer
+ * to the question asked, and is the most quietly wrong kind of reply: right
+ * number, wrong question, nothing to notice.
+ *
+ * Saying it plainly, and naming the screen that CAN do it, rather than
+ * teaching this path to parse dates — Reports already has period filters and
+ * does the arithmetic properly.
+ */
+function withPeriodCaveat(question: string, answer: string): string {
+  if (!PERIOD.test(question)) return answer;
+  return `${answer}\n\n_These are all-time figures — I can't filter by period yet. Reports can._`;
+}
+
 function localAnswer(question: string, ctx: CrmContext): string {
   // A named person, company or deal beats a topic — "how is Alex Carter doing"
   // is a question about Alex, not about contacts in general.
@@ -667,7 +746,7 @@ function localAnswer(question: string, ctx: CrmContext): string {
   const ranked = rankIntents(question, INTENTS);
   const best = ranked[0];
 
-  if (best && best.score >= CONFIDENT) return answerFor(best.id, ctx);
+  if (best && best.score >= CONFIDENT) return withPeriodCaveat(question, answerFor(best.id, ctx));
 
   // Weak match: offer the closest readings rather than confidently answering
   // the wrong question. Guessing is worse than asking.

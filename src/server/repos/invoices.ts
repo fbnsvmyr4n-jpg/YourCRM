@@ -127,3 +127,55 @@ export async function markInvoiceSent(q: TenantQuery, documentId: string): Promi
   );
   return Boolean(row);
 }
+
+/**
+ * Invoices sent and not yet settled, with what is still owed on each.
+ *
+ * "What invoices are outstanding?" had no data behind it, so the assistant
+ * answered it with the follow-up list — a confident answer to a different
+ * question, which is worse than saying it did not know. Found on 2026-09-30
+ * by asking it the questions a business owner actually asks.
+ *
+ * The balance is the invoice's lines less what has been received against it,
+ * the same arithmetic the pay page uses. A part-paid invoice therefore appears
+ * with what is left, not with its face value.
+ */
+export async function outstandingInvoices(
+  q: TenantQuery
+): Promise<{ number: string; party: string | null; dueOn: string | null; outstandingCents: number }[]> {
+  const rows = await q.rows<{
+    number: string;
+    party: string | null;
+    due_on: string | null;
+    outstanding_cents: string;
+  }>(
+    `SELECT d.number, d.party, d.due_on::text AS due_on,
+            (COALESCE(lines.total, 0) - COALESCE(paid.total, 0))::bigint::text AS outstanding_cents
+       FROM documents d
+       LEFT JOIN LATERAL (
+         SELECT SUM(ROUND(l.quantity * l.unit_cents)) AS total
+           FROM document_lines l
+          WHERE l.sub_account_id = d.sub_account_id AND l.document_id = d.id
+       ) lines ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT SUM(p.amount_cents) AS total
+           FROM invoice_payments p
+          WHERE p.sub_account_id = d.sub_account_id AND p.document_id = d.id
+       ) paid ON TRUE
+      WHERE d.sub_account_id = $1
+        AND d.kind = 'invoice'
+        AND d.deleted_at IS NULL
+        -- Issued and not settled. A draft has not been asked for yet, and a
+        -- cancelled one is not owed.
+        AND d.status = 'sent'
+        AND (COALESCE(lines.total, 0) - COALESCE(paid.total, 0)) > 0
+      ORDER BY d.due_on NULLS LAST, d.number`,
+    [q.ctx.subAccountId]
+  );
+  return rows.map((r) => ({
+    number: r.number,
+    party: r.party,
+    dueOn: r.due_on,
+    outstandingCents: Number(r.outstanding_cents),
+  }));
+}

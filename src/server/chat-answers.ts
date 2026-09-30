@@ -90,9 +90,27 @@ export const INTENTS: Intent[] = [
     keywords: ["call", "calls", "voice", "phone", "caller", "voicemail", "agent"],
   },
   {
+    /* Money already asked for and not yet received, which is a different
+       question from the pipeline ("might arrive") and from follow-ups
+       ("who to call"). Without it, "what invoices are outstanding" scored
+       followups at 0.707 and was answered, confidently, with a list of
+       people. */
+    id: "invoices",
+    /* "outstanding" is shared with follow-ups on purpose: on its own the word
+       IS ambiguous. Carrying it here as well means "what invoices are
+       outstanding" matches this intent on two words and follow-ups on one,
+       so the more specific reading wins instead of the two tying at 0.707 and
+       the answer coming down to sort order. */
+    keywords: ["invoice", "invoices", "unpaid", "owed", "owe", "owes", "outstanding", "billed", "billing", "debtors", "receivable", "receivables"],
+    phrases: ["owes me", "owe me", "not been paid", "still owed", "who owes", "outstanding invoice"],
+  },
+  {
     id: "performance",
-    keywords: ["conversion", "winrate", "rate", "performance", "showrate", "ratio", "percent", "percentage"],
-    phrases: ["how am i doing", "win rate", "show rate"],
+    keywords: ["conversion", "winrate", "rate", "performance", "showrate", "ratio", "percent", "percentage", "average", "avg"],
+    /* "What is my average deal size?" answered with the deals LIST, because
+       "deal" pulled it there while this intent — which states the average
+       in its first three lines — had no word for it. */
+    phrases: ["how am i doing", "win rate", "show rate", "average deal", "deal size", "avg deal"],
   },
   {
     id: "target",
