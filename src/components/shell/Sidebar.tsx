@@ -66,6 +66,11 @@ export function Sidebar({
             <ul className="space-y-0.5">
               {section.items.map((item) => {
                 const active = isActive(pathname, item.href);
+                /* The parent row does not light up for a child's page —
+                   /quotes is not /projects — so the group counts as open
+                   when the parent OR any child is where the reader is. */
+                const childrenOpen =
+                  active || (item.children?.some((c) => isActive(pathname, c.href)) ?? false);
                 const Icon = item.icon;
                 // The config names a count; the value comes from the database.
                 const unread =
@@ -113,6 +118,38 @@ export function Sidebar({
                         <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-[var(--accent)]" />
                       )}
                     </Link>
+
+                    {/* Nested pages, shown when this area is the one being
+                        used — and never while collapsed, where there is no
+                        room to say what they are. Expanded by where the
+                        reader IS rather than by a toggle they have to find
+                        and remember: arriving on /quotes should not leave
+                        the sidebar looking like nothing is selected. */}
+                    {item.children?.length && !collapsed && childrenOpen ? (
+                      <ul className="mt-0.5 space-y-0.5 pl-[30px]">
+                        {item.children.map((child) => {
+                          const childActive = isActive(pathname, child.href);
+                          const ChildIcon = child.icon;
+                          return (
+                            <li key={child.href}>
+                              <Link
+                                href={child.href}
+                                onClick={onMobileClose}
+                                className={[
+                                  "focus-ring relative flex items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] transition-colors",
+                                  childActive
+                                    ? "font-medium text-accent"
+                                    : "text-muted hover:text-[var(--text)]",
+                                ].join(" ")}
+                              >
+                                <ChildIcon className="h-[15px] w-[15px] shrink-0" />
+                                <span>{child.label}</span>
+                              </Link>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    ) : null}
                   </li>
                 );
               })}

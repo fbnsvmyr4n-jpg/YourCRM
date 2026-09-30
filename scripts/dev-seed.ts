@@ -174,6 +174,26 @@ async function main() {
          ('dl-due',  $1, 'inv-due',  'Paving — phase 1',  1, 1500000, 0)`,
       [sub.id]
     );
+    /* Quotations and purchase orders on the paving job, chosen so every rule
+       in `stage-money.ts` is exercised and every figure can be checked on
+       paper: one quote that counts and one that must not, one order that
+       counts and one that must not. */
+    await db.query(
+      `INSERT INTO documents (id, sub_account_id, deal_id, kind, number, status, party, party_contact_id, issued_on, sent_at) VALUES
+         ('q-accepted', $1, 'd-paving', 'quote', 'Q-1001', 'accepted', 'Ben Cole', 'ct-ben', (${day(30)})::date, ${day(30)}),
+         ('q-sent',     $1, 'd-paving', 'quote', 'Q-1002', 'sent',     'Ben Cole', 'ct-ben', (${day(8)})::date,  ${day(8)}),
+         ('po-live',    $1, 'd-paving', 'purchase_order', 'PO-1001', 'sent',      'Stone Yard', NULL, (${day(25)})::date, ${day(25)}),
+         ('po-off',     $1, 'd-paving', 'purchase_order', 'PO-1002', 'cancelled', 'Stone Yard', NULL, (${day(24)})::date, ${day(24)})`,
+      [sub.id]
+    );
+    await db.query(
+      `INSERT INTO document_lines (id, sub_account_id, document_id, description, quantity, unit_cents, position) VALUES
+         ('dl-q1', $1, 'q-accepted', 'Paving stone, supplied and laid', 100, 45000, 0),
+         ('dl-q2', $1, 'q-sent',     'Extra drainage',                   1, 1000000, 0),
+         ('dl-p1', $1, 'po-live',    'Paving stone from the yard',     100, 20000, 0),
+         ('dl-p2', $1, 'po-off',     'Sand, cancelled',                  1,  500000, 0)`,
+      [sub.id]
+    );
     await db.query(
       `INSERT INTO invoice_payments (id, sub_account_id, document_id, provider, reference, amount_cents, currency, paid_at)
        VALUES ('pay-1', $1, 'inv-paid', 'paystack', 'yc_inv-paid_000000000001', 2000000, 'ZAR', ${day(19)})`,
@@ -229,6 +249,14 @@ async function main() {
     Tasks due (today + late) 3             1 late, 2 today
     Tickets open             1             overdue, urgent
     Invoices                 2             INV-1001 paid, INV-1002 overdue
+
+  On the Paving — phase 1 project (value R60,000):
+    Quoted and accepted      R45,000       Q-1001 only: 100 x R450. Q-1002 is sent, not accepted
+    Committed                R20,000       PO-1001 only: 100 x R200. PO-1002 is cancelled
+    Margin                   R25,000       45,000 - 20,000  (56% of quoted)
+    Invoiced                 R35,000       20,000 paid + 15,000 sent
+    Paid                     R20,000
+    Outstanding              R15,000
     Companies                2             Dube (roof + solar), Khumalo (fence)
     Price list               3             2 live, 1 withdrawn
     Notes                    3             2 on contacts, 1 on a job

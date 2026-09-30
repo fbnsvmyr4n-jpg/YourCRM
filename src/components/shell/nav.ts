@@ -2,6 +2,8 @@ import {
   BarChart3,
   Briefcase,
   CalendarDays,
+  ClipboardList,
+  FileText,
   Handshake,
   Headphones,
   Home,
@@ -41,6 +43,16 @@ export type NavItem = {
    * genuinely about the account rather than its customers say otherwise.
    */
   needsCrm?: false;
+  /**
+   * Pages that belong under this one, shown nested beneath it.
+   *
+   * Grouping only. The children are TOP-LEVEL routes — `/quotes`, not
+   * `/projects/quotes` — because `/projects/[id]` already owns that space:
+   * a static child silently wins over the dynamic segment, and a project
+   * whose id matched would become unreachable with nothing to explain why.
+   * The hierarchy a reader needs is in this sidebar, not in the path.
+   */
+  children?: NavItem[];
 };
 
 export type NavSection = {
@@ -63,7 +75,18 @@ export const NAV: NavSection[] = [
          the front door is the projects and the company is how they are filed.
          Companies itself is still a screen, reached from Projects, because
          renaming and tidying them did not stop being necessary. */
-      { label: "Projects", href: "/projects", icon: Briefcase },
+      {
+        label: "Projects",
+        href: "/projects",
+        icon: Briefcase,
+        /* The paperwork a job produces, each as its own list across every
+           project — because "where is that quote" is a question asked
+           without remembering which job it was on. */
+        children: [
+          { label: "Quotes", href: "/quotes", icon: FileText },
+          { label: "Purchase orders", href: "/purchase-orders", icon: ClipboardList },
+        ],
+      },
       { label: "Inbox", href: "/inbox", icon: Inbox, count: "inbox" },
       { label: "Calendar", href: "/calendar", icon: CalendarDays, count: "calendarToday" },
       /* Beside the Calendar: both answer "what is on today". The badge is the
@@ -114,6 +137,14 @@ export function visibleNav(crmAccess: boolean): NavSection[] {
   if (crmAccess) return NAV;
   return NAV.map((section) => ({
     ...section,
-    items: section.items.filter((item) => item.needsCrm === false),
+    items: section.items
+      .filter((item) => item.needsCrm === false)
+      /* Children are filtered on the same rule. A child left under a hidden
+         parent would be a row nobody can open; one under a VISIBLE parent that
+         needs CRM access would be worse. */
+      .map((item) => ({
+        ...item,
+        children: item.children?.filter((child) => child.needsCrm === false),
+      })),
   })).filter((section) => section.items.length > 0);
 }
