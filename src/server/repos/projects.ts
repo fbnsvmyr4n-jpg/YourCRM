@@ -167,6 +167,15 @@ export async function projectPeople(q: TenantQuery, dealId: string): Promise<Pro
   }));
 }
 
+/**
+ * Stages where new paperwork still makes sense.
+ *
+ * The same set `projects-view.ts` calls live: everything open, plus won and
+ * delivery — a delivered-but-unfinished job is the most live thing a company
+ * has. Kept here rather than imported to avoid a repo depending on a view.
+ */
+export const LIVE_PROJECT_STAGES = ["prospect", "discovery", "demo", "won", "delivery"] as const;
+
 /* ---------------- quotations and purchase orders ---------------- */
 
 export type DocumentKind = "quote" | "purchase_order" | "invoice";
@@ -475,4 +484,38 @@ export async function projectTimeline(
     at: r.at.toISOString(),
     amountCents: r.amount_cents === null ? null : Number(r.amount_cents),
   }));
+}
+
+/**
+ * The jobs a quotation or purchase order can be filed against.
+ *
+ * `documents.deal_id` is NOT NULL, and rightly: a quotation is for a piece of
+ * work, and one belonging to nothing could never reach a project's margin. So
+ * raising one from the cross-project screens has to start by choosing a job,
+ * and this is the list to choose from.
+ *
+ * Live work only — the same `isLive` rule the projects screen uses — because
+ * quoting a job that was lost last year is almost always a misfiled document
+ * rather than an intention. A lost job's existing paperwork still shows on the
+ * project itself; this governs what new paperwork can be added to.
+ *
+ * Ordered by the most recently touched, so the job somebody is working on is
+ * the one at the top of the list rather than the oldest one they ever won.
+ */
+export async function quotableProjects(
+  q: TenantQuery
+): Promise<{ id: string; title: string; client: string | null }[]> {
+  return q.rows<{ id: string; title: string; client: string | null }>(
+    `SELECT d.id, d.title,
+            NULLIF(trim(coalesce(c.first_name, '') || ' ' || coalesce(c.last_name, '')), '') AS client
+       FROM deals d
+       LEFT JOIN contacts c
+              ON c.id = d.contact_id AND c.sub_account_id = d.sub_account_id
+             AND c.deleted_at IS NULL
+      WHERE d.sub_account_id = $1
+        AND d.deleted_at IS NULL
+        AND d.stage = ANY($2)
+      ORDER BY d.updated_at DESC, d.title`,
+    [q.ctx.subAccountId, [...LIVE_PROJECT_STAGES]]
+  );
 }

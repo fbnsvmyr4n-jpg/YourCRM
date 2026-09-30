@@ -151,7 +151,7 @@ export async function nextDocumentNumber(
 /** The prefix each kind is numbered with, and the words used about it. */
 export const LEDGERS = {
   quote: {
-    kind: "quote" as DocumentKind,
+    kind: "quote" as const,
     prefix: "Q",
     title: "Quotes",
     one: "quotation",
@@ -161,7 +161,7 @@ export const LEDGERS = {
     partyLabel: "Client",
   },
   purchase_order: {
-    kind: "purchase_order" as DocumentKind,
+    kind: "purchase_order" as const,
     prefix: "PO",
     title: "Purchase orders",
     one: "purchase order",
