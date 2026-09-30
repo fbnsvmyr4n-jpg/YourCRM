@@ -5,6 +5,7 @@ import { listFields, valuesFor } from "@/server/repos/custom-fields";
 import { displayValue, type FieldEntity } from "@/server/custom-field-rules";
 import type { TenantQuery } from "@/server/tenant";
 import { listMeetings } from "@/server/repos/meetings";
+import { getSettings } from "@/server/repos/settings";
 import { listTags, tagIdsByContact } from "@/server/repos/tags";
 import { toCsv } from "@/server/csv";
 import { canAccessCrm } from "@/server/permissions";
@@ -129,6 +130,13 @@ export async function GET(
       }
       case "deals": {
         const [deals, contacts] = [await listDeals(q), await listContacts(q)];
+        /* The column says which money it is. A bare "120000.00" in a file
+           that has left the building cannot be read back with confidence —
+           this workspace keeps rand, the next one dollars, and the number
+           looks identical. The figure stays a plain decimal so a spreadsheet
+           still sums it; the unit goes in the header, where it cannot turn
+           a number into text. */
+        const { currency } = await getSettings(q);
         // Joined here rather than in SQL: the export is for a person reading a
         // spreadsheet, and a column of `ct-a1b2` ids helps nobody.
         const nameOf = new Map(
@@ -136,7 +144,7 @@ export async function GET(
         );
         const custom = await customColumns(q, "deal", deals.map((d) => d.id));
         return toCsv(
-          ["Title", "Contact", "Value", "Stage", "Source", "Lost reason", "Won at", "Created", ...custom.headers],
+          [`Title`, `Contact`, `Value (${currency})`, `Stage`, `Source`, `Lost reason`, `Won at`, `Created`, ...custom.headers],
           deals.map((d) => [
             d.title,
             d.contactId ? nameOf.get(d.contactId) ?? "" : "",

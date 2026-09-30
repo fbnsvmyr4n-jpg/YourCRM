@@ -36,8 +36,41 @@ export type CsvTable = {
  * arrives mangled — the same customer data, made wrong by the act of exporting
  * it.
  */
+/**
+ * A cell a spreadsheet treats as a formula rather than as text.
+ *
+ * Excel and Google Sheets evaluate any cell whose first character is one of
+ * these. QUOTING DOES NOT PREVENT IT: the quotes are CSV syntax and are
+ * stripped before the cell is parsed, so `"=1+1"` arrives as a formula.
+ */
+const LOOKS_LIKE_A_FORMULA = /^[=+\-@\t\r]/;
+
+/** A plain number, which cannot be a formula whatever it begins with. */
+const PLAIN_NUMBER = /^-?\d+(\.\d+)?$/;
+
 export function toCsv(headers: string[], rows: string[][]): string {
-  const cell = (value: string) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+  /**
+   * Neutralised on the way out, because this file is opened in a spreadsheet.
+   *
+   * The export exists so somebody can take their data with them, which means
+   * it gets opened in Excel \u2014 and this CRM accepts input from strangers.
+   * Anyone can submit the public enquiry form, that becomes a contact, and
+   * contacts are exported. A name of `=1+1` evaluates when the owner opens the
+   * file; the payloads that matter read other cells and send them somewhere.
+   * Verified on 2026-09-30 by submitting the enquiry form with a formula as a
+   * name and finding it intact in the CSV.
+   *
+   * A leading apostrophe is the spreadsheet's own "this is text" marker, and
+   * what Excel itself writes when saving such a value. A plain number is left
+   * alone so a negative amount stays a number rather than becoming text:
+   * `-500.00` cannot be a formula, while `-1+A1` is not a number and is
+   * defused.
+   */
+  const cell = (value: string) => {
+    const text = String(value ?? "");
+    const safe = LOOKS_LIKE_A_FORMULA.test(text) && !PLAIN_NUMBER.test(text) ? `'${text}` : text;
+    return `"${safe.replace(/"/g, '""')}"`;
+  };
   const line = (values: string[]) => values.map(cell).join(",");
   return `\uFEFF${[line(headers), ...rows.map(line)].join("\r\n")}\r\n`;
 }
