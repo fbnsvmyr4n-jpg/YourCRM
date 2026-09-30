@@ -29,7 +29,7 @@ const actions = read("../src/app/(app)/projects/actions.ts");
 
 describe("creating one", () => {
   it("USES THE SAME ACTION THE PROJECT SCREEN USES, not a second one", () => {
-    expect(view).toMatch(/import \{ createDocumentAction \}/);
+    expect(view).toMatch(/createDocumentAction,?\s*\n?[\s\S]{0,120}from "@\/app\/\(app\)\/projects\/actions"/);
     expect(view).toMatch(/useKeptForm<FormState>\(createDocumentAction/);
   });
 

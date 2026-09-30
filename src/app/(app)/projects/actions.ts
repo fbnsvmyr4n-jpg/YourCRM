@@ -166,6 +166,52 @@ export async function removeProjectPersonAction(
  * exist with its lines half-inserted. `withCurrentTenant` runs everything
  * inside one transaction, which is what makes that true.
  */
+/**
+ * The lines on a document, read from a form.
+ *
+ * Shared by raising one and editing one, because the arithmetic that goes
+ * wrong here goes wrong the same way in both. Both of these were wrong once:
+ *
+ * `count` rounds to an integer, so a line of 3.5 days was stored as 4 — a
+ * purchase order that went out at R58,000 instead of R50,750, with the form
+ * accepting the number and silently changing it. `money` rounds to whole
+ * units, so a unit price of R12,000.50 became R12,001 before it was ever
+ * converted to cents.
+ *
+ * Three decimal places for quantity, matching NUMERIC(14,3) on the column, so
+ * nothing is accepted here and then rounded again by the database.
+ */
+function readLines(
+  formData: FormData
+): { lines: { description: string; quantity: number; unitCents: number }[] } | { error: string } {
+  const descriptions = formData.getAll("lineDescription").map((v) => text(v, 200));
+  const quantities = formData.getAll("lineQuantity");
+  const units = formData.getAll("lineUnit");
+
+  /* A line whose numbers could not be read is refused outright rather than
+     quietly priced at zero. A quotation is a document somebody signs. */
+  const unreadable = descriptions.some(
+    (description, i) =>
+      description !== "" &&
+      (decimal(quantities[i], 1_000_000, 3) === null ||
+        decimal(units[i], MAX_UNIT_PRICE, 2) === null)
+  );
+  if (unreadable) return { error: "A quantity or unit price could not be read as a number." };
+
+  const lines = descriptions
+    .map((description, i) => ({
+      description,
+      // A quantity of zero is meaningful — a line included at no charge — so
+      // only a MISSING quantity falls back to one.
+      quantity: decimal(quantities[i], 1_000_000, 3) ?? 1,
+      unitCents: Math.round((decimal(units[i], MAX_UNIT_PRICE, 2) ?? 0) * 100),
+    }))
+    .filter((l) => l.description !== "");
+
+  if (lines.length === 0) return { error: "Add at least one line, so the document has a total." };
+  return { lines };
+}
+
 export async function createDocumentAction(
   _prev: FormState,
   formData: FormData
@@ -200,47 +246,9 @@ export async function createDocumentAction(
     const issuedOn = isoDate(formData.get("issuedOn"));
     const notes = multiline(formData.get("notes"), 1000);
 
-    const descriptions = formData.getAll("lineDescription").map((v) => text(v, 200));
-    const quantities = formData.getAll("lineQuantity");
-    const units = formData.getAll("lineUnit");
-
-    /*
-       Both of these are decimals, and both were wrong.
-
-       `count` rounds to an integer, so a line of 3.5 days was stored as 4 —
-       a purchase order that went out at $58,000 instead of $50,750, with the
-       form accepting the number and silently changing it. `money` rounds to
-       whole units, so a unit price of $12,000.50 became $12,001 before it was
-       ever converted to cents.
-
-       Three decimal places for quantity, matching NUMERIC(14,3) on the column,
-       so nothing is accepted here and then rounded again by the database.
-    */
-    const lines = descriptions
-      .map((description, i) => ({
-        description,
-        // A quantity of zero is meaningful — a line included at no charge —
-        // so only a MISSING quantity falls back to one.
-        quantity: decimal(quantities[i], 1_000_000, 3) ?? 1,
-        unitCents: Math.round((decimal(units[i], MAX_UNIT_PRICE, 2) ?? 0) * 100),
-      }))
-      .filter((l) => l.description !== "");
-
-    /* A line whose numbers could not be read is refused outright rather than
-       quietly priced at zero. A quotation is a document somebody signs. */
-    const unreadable = descriptions.some(
-      (description, i) =>
-        description !== "" &&
-        (decimal(quantities[i], 1_000_000, 3) === null ||
-          decimal(units[i], MAX_UNIT_PRICE, 2) === null)
-    );
-    if (unreadable) {
-      return { error: "A quantity or unit price could not be read as a number." };
-    }
-
-    if (lines.length === 0) {
-      return { error: "Add at least one line, so the document has a total." };
-    }
+    const read = readLines(formData);
+    if ("error" in read) return read;
+    const lines = read.lines;
 
     const deal = await q.one<{ id: string; contact_id: string | null }>(
       `SELECT id, contact_id FROM deals WHERE id = $2 AND sub_account_id = $1 AND deleted_at IS NULL`,
@@ -854,5 +862,159 @@ export async function invoicePayLinkAction(documentId: string): Promise<{ url: s
     const token = await ensurePayToken(q, id);
     if (!token) return { error: "Only a sent, unpaid invoice has a pay link." };
     return { url: `${appUrl()}/pay/${token}` };
+  });
+}
+
+/**
+ * Statuses in which a document's FIGURES may still be changed.
+ *
+ * `draft` only, and the narrowness is the point. Everything else has either
+ * left the building or been agreed:
+ *
+ *  - `sent`, `accepted`, `declined`, `paid` — somebody outside holds a copy.
+ *    Changing the price here would leave the CRM and the client disagreeing,
+ *    with nothing on either side saying so. That is not an edit, it is a
+ *    second document, and it should be raised as one.
+ *  - `awaiting_approval`, `approved` — a named person has said yes to a
+ *    figure, or is being asked to. Editing the figure underneath an approval
+ *    silently reassigns their decision to numbers they never saw.
+ *  - `cancelled` — it was called off. Editing it would revive it by accident.
+ */
+const EDITABLE_STATUSES = ["draft"] as const;
+
+/**
+ * Change a document that has not gone anywhere yet.
+ *
+ * What it does NOT do is edit history. A quotation the client is holding is a
+ * record of what they were told, and a purchase order the yard is filling is
+ * what they were asked for. The narrow rule above is what keeps this an edit
+ * rather than a quiet rewrite of something somebody else relies on.
+ *
+ * Notes and the address are handled separately, below: neither changes what
+ * was agreed, and both are needed after the fact — a note to yourself, and
+ * somewhere to re-send a document that bounced.
+ */
+export async function updateDocumentAction(
+  _prev: FormState,
+  formData: FormData
+): Promise<FormState> {
+  return withCurrentTenant(async (q) => {
+    const documentId = validId(formData.get("documentId"));
+    if (!documentId) return { error: "That document could not be identified." };
+
+    const number = text(formData.get("number"), 40);
+    if (!number) return { error: "Give it a number, so it matches your accounts." };
+
+    const party = text(formData.get("party"), 120);
+    const issuedOn = isoDate(formData.get("issuedOn"));
+    const notes = multiline(formData.get("notes"), 1000);
+    const partyEmailRaw = text(formData.get("partyEmail"), 200);
+    const partyEmail = partyEmailRaw ? validEmail(partyEmailRaw) : null;
+    if (partyEmailRaw && !partyEmail) {
+      return { error: "That email address could not be read. Check it and try again." };
+    }
+
+    const read = readLines(formData);
+    if ("error" in read) return read;
+
+    const existing = await q.one<{ status: string; number: string; kind: string }>(
+      `SELECT status, number, kind FROM documents
+        WHERE id = $2 AND sub_account_id = $1 AND deleted_at IS NULL`,
+      [q.ctx.subAccountId, documentId]
+    );
+    if (!existing) return { error: "That document no longer exists." };
+
+    if (!(EDITABLE_STATUSES as readonly string[]).includes(existing.status)) {
+      /* Named plainly, with what to do instead, because the person is holding
+         a real problem — a figure that is wrong on a document somebody has. */
+      return {
+        error:
+          existing.status === "cancelled"
+            ? `${existing.number} was cancelled, so its figures are left as they were.`
+            : `${existing.number} has already gone out, so its figures cannot be changed. Raise a new one, or cancel this and start again.`,
+      };
+    }
+
+    try {
+      await q.attempt(() =>
+        q.rows(
+          `UPDATE documents
+              SET number = $3, party = $4, issued_on = $5::date, notes = $6,
+                  party_email = $7, updated_at = now()
+            WHERE id = $2 AND sub_account_id = $1 AND deleted_at IS NULL
+              AND status = 'draft'`,
+          [q.ctx.subAccountId, documentId, number, party || null, issuedOn, notes || null, partyEmail]
+        )
+      );
+    } catch (err) {
+      if (String(err).includes("documents_number_once")) {
+        return { error: `You already have a document numbered ${number}.` };
+      }
+      throw err;
+    }
+
+    /*
+       The lines are replaced wholesale, inside the same transaction.
+
+       Matching them up one by one would mean deciding what "the same line"
+       is across an edit where rows were added, removed and reordered — and
+       getting that wrong leaves a document whose total is right and whose
+       lines are somebody else's. Deleting and re-inserting is the boring
+       answer and the total can only be what the form said.
+    */
+    await q.rows(`DELETE FROM document_lines WHERE sub_account_id = $1 AND document_id = $2`, [
+      q.ctx.subAccountId,
+      documentId,
+    ]);
+    for (const [position, line] of read.lines.entries()) {
+      await q.rows(
+        `INSERT INTO document_lines
+           (id, sub_account_id, document_id, description, quantity, unit_cents, position)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [newId("l"), q.ctx.subAccountId, documentId, line.description, line.quantity, line.unitCents, position]
+      );
+    }
+
+    logWrite("update", existing.kind, { id: documentId, actor: q.ctx.userId, detail: number });
+    revalidateApp();
+    return {
+      ok: `${number} updated — ${read.lines.length} ${read.lines.length === 1 ? "line" : "lines"}.`,
+    };
+  });
+}
+
+/**
+ * The two things that stay changeable after a document has gone.
+ *
+ * Neither alters what was agreed. A note is for whoever opens it next, and the
+ * address is where a document that bounced gets re-sent — refusing to correct
+ * a typo in an email would mean the document can never arrive at all.
+ */
+export async function updateDocumentAsideAction(
+  _prev: FormState,
+  formData: FormData
+): Promise<FormState> {
+  return withCurrentTenant(async (q) => {
+    const documentId = validId(formData.get("documentId"));
+    if (!documentId) return { error: "That document could not be identified." };
+
+    const notes = multiline(formData.get("notes"), 1000);
+    const partyEmailRaw = text(formData.get("partyEmail"), 200);
+    const partyEmail = partyEmailRaw ? validEmail(partyEmailRaw) : null;
+    if (partyEmailRaw && !partyEmail) {
+      return { error: "That email address could not be read. Check it and try again." };
+    }
+
+    const row = await q.one<{ number: string }>(
+      `UPDATE documents SET notes = $3, party_email = $4, updated_at = now()
+        WHERE id = $2 AND sub_account_id = $1 AND deleted_at IS NULL
+        RETURNING number`,
+      [q.ctx.subAccountId, documentId, notes || null, partyEmail]
+    );
+    if (!row) return { error: "That document no longer exists." };
+
+    logWrite("update", "document", { id: documentId, actor: q.ctx.userId, detail: "Notes or address" });
+    revalidateApp();
+    return { ok: `${row.number} updated.` };
   });
 }

@@ -30,6 +30,9 @@ export type LedgerRow = {
   projectTitle: string;
   lineCount: number;
   totalCents: number;
+  /** Carried for editing. One value per row, unlike the lines. */
+  notes: string | null;
+  partyEmail: string | null;
   /** Whether this document's money is counted — see `stage-money.ts`. */
   counts: boolean;
 };
@@ -66,13 +69,16 @@ export async function documentLedger(q: TenantQuery, kind: DocumentKind): Promis
     party: string | null;
     issued_on: string | null;
     sent_at: Date | null;
+    notes: string | null;
+    party_email: string | null;
     project_id: string;
     project_title: string;
     line_count: string;
     total_cents: string;
   }>(
     `SELECT d.id, d.number, d.status, d.party,
-            d.issued_on::text AS issued_on, d.sent_at,
+            d.issued_on::text AS issued_on, d.sent_at, d.notes,
+            COALESCE(d.party_email, c.email) AS party_email,
             d.deal_id AS project_id, deal.title AS project_title,
             COALESCE(lines.n, 0)::text AS line_count,
             COALESCE(lines.total, 0)::bigint::text AS total_cents
@@ -80,6 +86,12 @@ export async function documentLedger(q: TenantQuery, kind: DocumentKind): Promis
        JOIN deals deal
          ON deal.id = d.deal_id AND deal.sub_account_id = d.sub_account_id
         AND deal.deleted_at IS NULL
+       /* The address it would actually be sent to — the document's own if it
+          has one, otherwise the contact's. The same precedence the send path
+          uses, so the screen shows where it is going, not where it might. */
+       LEFT JOIN contacts c
+              ON c.id = d.party_contact_id AND c.sub_account_id = d.sub_account_id
+             AND c.deleted_at IS NULL
        LEFT JOIN LATERAL (
          SELECT count(*) AS n, SUM(ROUND(l.quantity * l.unit_cents)) AS total
            FROM document_lines l
@@ -108,6 +120,8 @@ export async function documentLedger(q: TenantQuery, kind: DocumentKind): Promis
       projectTitle: r.project_title,
       lineCount: Number(r.line_count),
       totalCents,
+      notes: r.notes,
+      partyEmail: r.party_email,
       counts,
     };
   });

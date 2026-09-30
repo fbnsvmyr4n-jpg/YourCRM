@@ -73,3 +73,41 @@ export async function sendMyQuoteAction(
   revalidateApp();
   return { ok: message };
 }
+
+/**
+ * The lines on one document, fetched when somebody opens it to edit.
+ *
+ * Not carried on every row of the list. A workspace with five hundred
+ * quotations of ten lines each would render five thousand rows nobody asked
+ * for, to support an action taken on one of them — and editing is rare next to
+ * reading. So the list stays a list, and this is the cost of the edit itself.
+ *
+ * The tenant check is the FIRST statement, with the id validated inside it. A
+ * server action is a public POST endpoint, and checking an id before
+ * establishing who is asking makes that validation the only thing a stranger
+ * meets — which is why `authorisation.test.ts` reads the first line of every
+ * one of these and refuses anything else.
+ */
+export async function documentLinesAction(
+  documentId: string
+): Promise<{ lines: { description: string; quantity: number; unitCents: number }[] } | { error: string }> {
+  return withCurrentTenant(async (q) => {
+    const id = validId(documentId);
+    if (!id) return { error: "That document could not be identified." };
+    const rows = await q.rows<{ description: string; quantity: string; unit_cents: string }>(
+      `SELECT l.description, l.quantity::text, l.unit_cents::text
+         FROM document_lines l
+         JOIN documents d ON d.id = l.document_id AND d.sub_account_id = l.sub_account_id
+        WHERE l.sub_account_id = $1 AND l.document_id = $2 AND d.deleted_at IS NULL
+        ORDER BY l.position, l.id`,
+      [q.ctx.subAccountId, id]
+    );
+    return {
+      lines: rows.map((r) => ({
+        description: r.description,
+        quantity: Number(r.quantity),
+        unitCents: Number(r.unit_cents),
+      })),
+    };
+  });
+}
