@@ -336,9 +336,15 @@ export function DocumentLedgerView({
                 key={r.id}
                 className="flex flex-col gap-1 py-3 @min-[560px]:flex-row @min-[560px]:items-baseline @min-[560px]:gap-3"
               >
+                {/* The number opens THE DOCUMENT, which is what the number
+                    names — the printable sheet a client is sent, with a link
+                    onward to the job from there. It used to open the project
+                    instead, which meant the one thing this page lists was the
+                    one thing it could not show you. */}
                 <Link
-                  href={`/projects/${r.projectId}?tab=documents`}
+                  href={`/documents/${r.id}`}
                   className="focus-ring min-w-0 flex-1 rounded"
+                  title={`Open ${r.number}`}
                 >
                   <p className="text-sm font-semibold">
                     {r.number}

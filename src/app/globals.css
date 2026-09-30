@@ -2426,3 +2426,55 @@ textarea.field-input {
     text-align: center;
   }
 }
+
+/* ---------------- A document on paper ---------------- */
+
+/*
+   The printable sheet — the quotation or order a client files.
+
+   It is white and dark in BOTH themes, deliberately. Everything else in this
+   product adapts to the time of day; a document does not, because it is not a
+   screen. Printed at night the app's own colours would come out as a page of
+   solid ink, and read on screen a white sheet is what tells somebody at a
+   glance that they are looking at the thing the client will receive rather
+   than another app view.
+
+   Which is also why the colours below are literal rather than tokens: a token
+   that follows the theme is exactly what must NOT happen here.
+*/
+.doc-sheet {
+  background: #ffffff;
+  color: #10131a;
+  box-shadow: 0 18px 46px rgba(12, 18, 32, 0.28);
+}
+
+@media print {
+  /*
+     Paper.
+
+     `print-color-adjust: exact` because browsers drop background colours by
+     default, and the header rules and the sheet itself are how the document is
+     read. The app's own aurora is removed instead — a full-bleed gradient is
+     half a cartridge and reads as a smudge.
+  */
+  html,
+  body {
+    background: #ffffff !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .app-aurora {
+    display: none !important;
+  }
+
+  .doc-sheet {
+    box-shadow: none;
+  }
+
+  @page {
+    /* A margin the sheet's own padding then sits inside, so there is white
+       space a hand can hold and a hole punch can miss. */
+    margin: 14mm;
+  }
+}

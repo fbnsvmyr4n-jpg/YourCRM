@@ -105,7 +105,7 @@ export function Topbar({
        are mobile-only overrides, so every width from 640px up is byte-for-byte
        what it was.
     */
-    <header className="sticky top-0 z-20 flex items-center gap-2 px-3 py-4 sm:gap-4 sm:px-7">
+    <header className="sticky top-0 z-20 flex items-center gap-2 px-3 py-4 sm:gap-4 sm:px-7 print:hidden">
       <button
         type="button"
         aria-label="Open menu"

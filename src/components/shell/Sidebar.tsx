@@ -42,7 +42,9 @@ export function Sidebar({
     <aside
       className={clsx(
         "glass fixed inset-y-0 left-0 z-40 flex h-full flex-col rounded-none border-y-0 border-l-0 py-5 duration-300 ease-out",
-        "transition-transform lg:static lg:z-20 lg:translate-x-0 lg:transition-[width]",
+        /* `print:hidden` — navigation printed alongside a quotation is the
+           clearest sign a document was screenshotted rather than issued. */
+        "transition-transform lg:static lg:z-20 lg:translate-x-0 lg:transition-[width] print:hidden",
         mobileOpen ? "translate-x-0" : "-translate-x-full"
       )}
       style={{ width: collapsed ? 84 : 264 }}

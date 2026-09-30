@@ -34,6 +34,10 @@ export type QuoteLine = {
 export type Quote = {
   id: string;
   dealId: string;
+  /** Which sort of document this is — a printable view renders any of them. */
+  kind: string;
+  /** The date on the face of it. */
+  issuedOn: string | null;
   projectTitle: string;
   number: string;
   status: string;
@@ -66,6 +70,8 @@ export type Quote = {
 type DocRow = {
   id: string;
   deal_id: string;
+  kind: string;
+  issued_on: string | null;
   project_title: string;
   number: string;
   status: string;
@@ -108,6 +114,7 @@ function newId(prefix: string): string {
 */
 const DOC_SELECT = `
   SELECT d.id, d.deal_id, deal.title AS project_title, d.number, d.status, d.party,
+         d.kind, d.issued_on::text AS issued_on,
          /* The document's OWN address wins over the contact's. Somebody who
             typed one on this document meant it for this document — an invoice
             to a client's accounts inbox rather than to the person who signed
@@ -151,6 +158,8 @@ async function hydrate(q: TenantQuery, docs: DocRow[]): Promise<Quote[]> {
     return {
       id: d.id,
       dealId: d.deal_id,
+      kind: d.kind,
+      issuedOn: d.issued_on,
       projectTitle: d.project_title,
       number: d.number,
       status: d.status,
@@ -537,4 +546,17 @@ export async function markOrderSent(q: TenantQuery, documentId: string): Promise
     [q.ctx.subAccountId, documentId]
   );
   return row !== null;
+}
+
+/**
+ * Any document by id, whatever kind it is.
+ *
+ * `findQuote` and `findOrder` each refuse the other's kind, which is right for
+ * a send path — sending a quotation through the order door would put the wrong
+ * document in front of the wrong party. A printable view has the opposite
+ * need: it renders whatever it is handed and says what it is.
+ */
+export async function findDocument(q: TenantQuery, documentId: string): Promise<Quote | null> {
+  const docs = await q.rows<DocRow>(`${DOC_SELECT} AND d.id = $2`, [q.ctx.subAccountId, documentId]);
+  return (await hydrate(q, docs))[0] ?? null;
 }
