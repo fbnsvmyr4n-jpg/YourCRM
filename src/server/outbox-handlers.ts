@@ -10,10 +10,11 @@ import {
   inviteEmail,
   invoiceEmail,
   messageEmail,
+  purchaseOrderEmail,
   quotationEmail,
   sendEmail,
 } from "./email";
-import { findQuote, markQuoteSent } from "./repos/quotes";
+import { findQuote, findOrder, markOrderSent, markQuoteSent } from "./repos/quotes";
 import { findInvoice, markInvoiceSent } from "./repos/invoices";
 import { canSendOn, findOutgoing, setDelivery } from "./repos/inbox";
 import { findUserById } from "./repos/users";
@@ -552,6 +553,87 @@ const bookingEmailHandler: OutboxHandler = {
 };
 
 /* ------------------------------------------------------------------ */
+/* Sending a purchase order                                            */
+/* ------------------------------------------------------------------ */
+
+export const ORDER_EMAIL = "order_email";
+
+/** One job per order, so pressing Send twice cannot order twice. */
+export const orderEmailKey = (documentId: string) => `${ORDER_EMAIL}:${documentId}`;
+
+/**
+ * Put a purchase order in the supplier's inbox.
+ *
+ * The same shape as the quotation handler and deliberately not the same
+ * code: what it checks differs. A quotation may not leave without a named
+ * approver, because a price reaching a client is a commitment somebody must
+ * own. An order is a commitment too, but the thing that must be true before
+ * it goes is that it has not already gone — ordering twice arrives as two
+ * deliveries and an argument about an invoice.
+ *
+ * `draft` is a valid state to send from here, unlike a quotation: a purchase
+ * order is counted in a project's committed money from the moment it is
+ * drafted (see `stage-money.ts`), so a draft is already a decision.
+ */
+const orderEmailHandler: OutboxHandler = {
+  name: ORDER_EMAIL,
+  run: async (payload, job): Promise<JobOutcome> => {
+    const documentId = payload.documentId;
+    if (!documentId) return { ok: false, retry: false, error: "No documentId in the job" };
+
+    const order = await withTenant(job.ctx, (q) => findOrder(q, documentId));
+    if (!order) return { ok: true, note: "the purchase order no longer exists" };
+    if (order.sentAt) return { ok: true, note: "already sent" };
+    if (order.status === "cancelled" || order.status === "declined") {
+      return { ok: false, retry: false, error: `${order.number} has been called off` };
+    }
+    if (!order.partyEmail) {
+      /* Permanent as far as this job is concerned. An address added later
+         comes with a fresh press of Send. */
+      return { ok: false, retry: false, error: `${order.number} has no supplier email address` };
+    }
+
+    const workspace = await withSystem(async (sys) => {
+      /* Filtered by agency for the same reason the quotation handler is: a
+         system query carries no row-level security, and the agency filter is
+         all that stands between a lookup by id and another customer's name. */
+      const row = await sys.one<{ name: string }>(
+        `SELECT name FROM sub_accounts WHERE id = $2 AND agency_id = $1 AND deleted_at IS NULL`,
+        [job.ctx.agencyId, job.ctx.subAccountId]
+      );
+      return row?.name ?? "YourCRM";
+    });
+
+    const { currency } = await withTenant(job.ctx, (q) => getSettings(q));
+    const { subject, text, html } = purchaseOrderEmail({
+      number: order.number,
+      project: order.projectTitle,
+      raisedBy: workspace,
+      supplier: order.party,
+      notes: order.notes,
+      lines: order.lines,
+      totalCents: order.totalCents,
+      currency,
+    });
+
+    const sent = await sendEmail({
+      to: order.partyEmail,
+      subject,
+      text,
+      html,
+      idempotencyKey: job.id,
+    });
+    if (!sent.sent) {
+      return { ok: false, retry: !sent.permanent, error: sent.reason ?? "the email did not go" };
+    }
+
+    await withTenant(job.ctx, (q) => markOrderSent(q, order.id));
+    logWrite("send", "purchase_order", { id: order.id, actor: job.ctx.userId });
+    return { ok: true };
+  },
+};
+
+/* ------------------------------------------------------------------ */
 
 export const OUTBOX_HANDLERS = [
   quoteEmailHandler,
@@ -560,5 +642,6 @@ export const OUTBOX_HANDLERS = [
   invoiceEmailHandler,
   messageEmailHandler,
   bookingEmailHandler,
+  orderEmailHandler,
 ] as const;
 export const OUTBOX_REGISTRY = buildRegistry(OUTBOX_HANDLERS);

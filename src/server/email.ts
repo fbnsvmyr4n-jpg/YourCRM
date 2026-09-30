@@ -517,3 +517,78 @@ export function resetEmail(link: string) {
 </div>`,
   };
 }
+
+/**
+ * A purchase order going to a supplier.
+ *
+ * Not a quotation with the names swapped. A quotation offers to do work for a
+ * price and asks for a yes; an order is an instruction to supply, and the
+ * thing the supplier needs at the top is the order number they will put on
+ * their invoice. It carries no approver line — a supplier does not care who
+ * inside the business signed it off, and saying "sent by" on money going OUT
+ * reads as though we are seeking approval rather than placing an order.
+ *
+ * `raisedBy` is the business, not a person: the supplier's relationship is
+ * with the company, and a name here becomes a person they chase.
+ */
+export function purchaseOrderEmail(order: {
+  number: string;
+  project: string;
+  /** The business placing the order. */
+  raisedBy: string;
+  supplier: string | null;
+  notes: string | null;
+  lines: { description: string; quantity: number; unitCents: number; totalCents: number }[];
+  totalCents: number;
+  /** Required, not defaulted: an order somebody fulfils must not guess its unit. */
+  currency: CurrencyCode;
+}) {
+  const money = (cents: number) => formatMoney(cents, order.currency, "cents");
+  const qty = (n: number) => String(Number(n.toFixed(3)));
+
+  const subject = `Purchase order ${order.number} from ${order.raisedBy}`;
+
+  const text = [
+    `Purchase order ${order.number}`,
+    `From ${order.raisedBy}`,
+    ...(order.supplier ? [`To ${order.supplier}`] : []),
+    "",
+    ...order.lines.map(
+      (l) => `${l.description}\n  ${qty(l.quantity)} × ${money(l.unitCents)} = ${money(l.totalCents)}`
+    ),
+    "",
+    `Order total: ${money(order.totalCents)}`,
+    ...(order.notes ? ["", order.notes] : []),
+    "",
+    `Please quote ${order.number} on your invoice.`,
+  ].join("\n");
+
+  const rows = order.lines
+    .map(
+      (l) => `    <tr>
+      <td style="padding:8px 0;border-bottom:1px solid #e6e9f0">${escapeHtml(l.description)}</td>
+      <td style="padding:8px 0;border-bottom:1px solid #e6e9f0;text-align:right;white-space:nowrap;color:#55617a">${qty(l.quantity)} &times; ${money(l.unitCents)}</td>
+      <td style="padding:8px 0 8px 16px;border-bottom:1px solid #e6e9f0;text-align:right;white-space:nowrap;font-weight:600">${money(l.totalCents)}</td>
+    </tr>`
+    )
+    .join("\n");
+
+  const html = `<div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:560px;margin:0 auto;padding:32px 24px;color:#0b1220">
+  <h1 style="margin:0 0 4px;font-size:20px;font-weight:600">Purchase order ${escapeHtml(order.number)}</h1>
+  <p style="margin:0 0 24px;color:#55617a">From ${escapeHtml(order.raisedBy)}${order.supplier ? ` to ${escapeHtml(order.supplier)}` : ""}</p>
+  <table style="width:100%;border-collapse:collapse;font-size:14px">
+${rows}
+    <tr>
+      <td style="padding:12px 0;font-weight:600">Order total</td>
+      <td></td>
+      <td style="padding:12px 0 12px 16px;text-align:right;font-weight:700;font-size:16px">${money(order.totalCents)}</td>
+    </tr>
+  </table>
+  ${order.notes ? `<p style="margin:20px 0 0;line-height:1.6;color:#55617a;white-space:pre-line">${escapeHtml(order.notes)}</p>` : ""}
+  <p style="margin:28px 0 0;font-size:13px;color:#8a94a8">
+    Please quote ${escapeHtml(order.number)} on your invoice.
+  </p>
+</div>`;
+
+  return { subject, text, html };
+}

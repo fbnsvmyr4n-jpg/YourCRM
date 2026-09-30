@@ -74,14 +74,22 @@ describe("approving by hand", () => {
 
 describe("what the screen offers", () => {
   it("shows Send only where sending is possible", () => {
-    expect(view).toMatch(/const SENDABLE: readonly DocumentStatus\[\] = \["draft", "awaiting_approval", "approved"\]/);
-    expect(view).toMatch(/SENDABLE\.includes\(r\.status\)/);
+    expect(view).toMatch(/const SENDABLE_QUOTE: readonly DocumentStatus\[\] = \["draft", "awaiting_approval", "approved"\]/);
+    expect(view).toMatch(/SENDABLE_QUOTE : SENDABLE_ORDER\)\.includes\(r\.status\)/);
   });
 
-  it("NEVER OFFERS SEND ON A PURCHASE ORDER — there is no address on one", () => {
-    /* A supplier is a name on a purchase order, not a contact, so the button
-       would offer something that cannot work. */
-    expect(view).toMatch(/copy\.kind === "quote" && SENDABLE\.includes/);
+  it("NEVER OFFERS SEND ON ONE THAT HAS ALREADY GONE", () => {
+    /* Two deliveries and an argument about an invoice. The action refuses
+       it again — a control is tidiness, the refusal in the server is the
+       rule — but offering the button at all invites the second press. */
+    expect(view).toMatch(/&& !r\.sentAt/);
+  });
+
+  it("lets an order go from a wider set of states than a quotation", () => {
+    /* A quotation must be approved before it leaves. An order is counted in
+       a project's committed money from the moment it is drafted, so
+       drafting one WAS the decision. */
+    expect(view).toMatch(/const SENDABLE_ORDER: readonly DocumentStatus\[\] = \["draft", "approved", "accepted"\]/);
   });
 });
 
@@ -91,7 +99,7 @@ describe("a quotation knows who it is addressed to", () => {
        emailed to. Without it a quotation was approved and then refused with
        "no email address on file" about somebody who has one. */
     expect(createAction).toMatch(/const partyContactId = kind === "purchase_order" \? null : deal\.contact_id;/);
-    expect(createAction).toMatch(/party_contact_id\)/);
+    expect(createAction).toMatch(/party_contact_id, party_email\)/);
   });
 
   it("does not address a purchase order to the client paying for the work", () => {

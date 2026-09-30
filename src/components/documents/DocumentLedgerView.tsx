@@ -13,6 +13,7 @@ import type { DocumentStatus } from "@/server/repos/projects";
 import type { LedgerRow } from "@/server/document-ledger";
 import { createDocumentAction } from "@/app/(app)/projects/actions";
 import { sendMyQuoteAction } from "@/app/(app)/quotes/actions";
+import { sendOrderAction } from "@/app/(app)/purchase-orders/actions";
 import type { FormState } from "@/app/(app)/projects/actions";
 
 /**
@@ -91,7 +92,16 @@ const CREATE_STATUSES = ["draft", "sent", "accepted"] as const satisfies readonl
  * history. The action checks this again — a control is tidiness, the
  * refusal in the server is the rule.
  */
-const SENDABLE: readonly DocumentStatus[] = ["draft", "awaiting_approval", "approved"];
+const SENDABLE_QUOTE: readonly DocumentStatus[] = ["draft", "awaiting_approval", "approved"];
+
+/**
+ * An order can go from any state that is not already gone or called off.
+ *
+ * Wider than a quotation's on purpose. A quotation must be approved before
+ * it leaves; an order is already counted in a project's committed money
+ * from the moment it is drafted, so drafting one WAS the decision.
+ */
+const SENDABLE_ORDER: readonly DocumentStatus[] = ["draft", "approved", "accepted"];
 
 export function DocumentLedgerView({
   ledger,
@@ -121,7 +131,12 @@ export function DocumentLedgerView({
   const [query, setQuery] = useState("");
 
   const form = useKeptForm<FormState>(createDocumentAction, undefined);
-  const send = useKeptForm<FormState>(sendMyQuoteAction, undefined);
+  /* One form per kind, chosen once rather than per row: a quotation needs
+     approving on its way out and an order does not, and the two refusals
+     read differently. */
+  const sendQuote = useKeptForm<FormState>(sendMyQuoteAction, undefined);
+  const sendOrder = useKeptForm<FormState>(sendOrderAction, undefined);
+  const send = copy.kind === "quote" ? sendQuote : sendOrder;
   const [adding, openAdd, closeAdd] = useFormDisclosure(form.state, (s: FormState) => Boolean(s?.ok));
 
   const shown = useMemo(() => {
@@ -267,18 +282,17 @@ export function DocumentLedgerView({
                 </p>
                 {/* The status, and whether its money is in the figures above —
                     so a reader never has to remember which statuses count. */}
-                {/* Only on quotations, and only from a state one can leave
-                    in. A purchase order has no address on it to send to —
-                    its supplier is a name, not a contact — so offering the
-                    button would be offering something that cannot work. */}
-                {copy.kind === "quote" && SENDABLE.includes(r.status) && (
+                {/* Only from a state the document can leave in, and never
+                    for one already gone. The action checks both again — a
+                    control is tidiness, the refusal in the server is the rule. */}
+                {(copy.kind === "quote" ? SENDABLE_QUOTE : SENDABLE_ORDER).includes(r.status) && !r.sentAt && (
                   <form onSubmit={send.onSubmit} className="shrink-0">
                     <input type="hidden" name="documentId" value={r.id} />
                     <button
                       type="submit"
                       disabled={send.pending}
                       className="focus-ring rounded-lg px-2.5 py-1 text-xs font-semibold text-accent disabled:opacity-60"
-                      title={`Approve and email ${r.number} to the client`}
+                      title={copy.kind === "quote" ? `Approve and email ${r.number} to the client` : `Email ${r.number} to the supplier`}
                     >
                       {send.pending ? "Sending…" : "Send"}
                     </button>
@@ -368,6 +382,28 @@ function NewDocumentForm({
             name="party"
             maxLength={120}
             placeholder={copy.kind === "quote" ? "Who it is for" : "Who it is to"}
+            className={field}
+          />
+        </label>
+
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-muted">
+            {copy.kind === "quote" ? "Email (optional)" : "Supplier email"}
+          </span>
+          {/* A quotation reaches the job's client through the contact the
+              job already has, so this is an override — the accounts inbox
+              rather than the person who signed it. A purchase order has no
+              contact at all, so for one of those this is the only way it can
+              ever be sent, and the placeholder says so. */}
+          <input
+            name="partyEmail"
+            type="email"
+            maxLength={200}
+            placeholder={
+              copy.kind === "quote"
+                ? "Only if not the client's usual address"
+                : "Where to send the order"
+            }
             className={field}
           />
         </label>

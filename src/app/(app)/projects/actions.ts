@@ -5,7 +5,7 @@ import { applyCustomValues, parseCustomValues } from "@/server/custom-field-form
 import { cascade } from "@/server/repos/tasks";
 import { revalidateApp } from "@/server/revalidate";
 import { requireTenant, withCurrentTenant } from "@/server/tenant-session";
-import { count, decimal, id as validId, multiline, pick, text } from "@/server/validate";
+import { email as validEmail, count, decimal, id as validId, multiline, pick, text } from "@/server/validate";
 
 /**
  * Running a project: who is on it, what it is quoted at, when it is due.
@@ -180,6 +180,23 @@ export async function createDocumentAction(
 
     const status = pick(formData.get("status"), DOC_STATUSES) ?? "draft";
     const party = text(formData.get("party"), 120);
+
+    /**
+     * Where this document is sent, when that is not somebody on file.
+     *
+     * A purchase order's supplier is a name, not a contact, so without this
+     * an order could be raised and never sent. Optional: most documents
+     * reach their client through the contact the job already has.
+     *
+     * Validated here rather than trusted — the database's own check is a
+     * floor that refuses nonsense, and this is where a person is told what
+     * is wrong with what they typed.
+     */
+    const partyEmailRaw = text(formData.get("partyEmail"), 200);
+    const partyEmail = partyEmailRaw ? validEmail(partyEmailRaw) : null;
+    if (partyEmailRaw && !partyEmail) {
+      return { error: "That email address could not be read. Check it and try again." };
+    }
     const issuedOn = isoDate(formData.get("issuedOn"));
     const notes = multiline(formData.get("notes"), 1000);
 
@@ -280,9 +297,9 @@ export async function createDocumentAction(
          failed on exactly the input a person is most likely to retry. */
       await q.attempt(() =>
         q.rows(
-          `INSERT INTO documents (id, sub_account_id, deal_id, kind, number, status, party, issued_on, notes, party_contact_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8::date, $9, $10)`,
-          [documentId, q.ctx.subAccountId, dealId, kind, number, status, party || null, issuedOn, notes || null, partyContactId]
+          `INSERT INTO documents (id, sub_account_id, deal_id, kind, number, status, party, issued_on, notes, party_contact_id, party_email)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8::date, $9, $10, $11)`,
+          [documentId, q.ctx.subAccountId, dealId, kind, number, status, party || null, issuedOn, notes || null, partyContactId, partyEmail]
         )
       );
     } catch (err) {

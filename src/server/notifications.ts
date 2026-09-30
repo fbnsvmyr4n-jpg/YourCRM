@@ -10,6 +10,7 @@ import {
   INVITE_EMAIL,
   INVOICE_EMAIL,
   MESSAGE_EMAIL,
+  ORDER_EMAIL,
   QUOTE_EMAIL,
 } from "./outbox-handlers";
 import { listDeals } from "./repos/deals";
@@ -79,6 +80,14 @@ const STUCK_META: Record<string, { noun: (n: number) => string; verb: string; hr
     noun: (n) => (n === 1 ? "invoice" : "invoices"),
     verb: "could not be sent",
     href: "/projects",
+  },
+  /* A supplier who never got the order does not know to deliver, and the
+     job it was for carries the cost as committed either way — so this is
+     money already counted against work nobody has been asked to do. */
+  [ORDER_EMAIL]: {
+    noun: (n) => (n === 1 ? "purchase order" : "purchase orders"),
+    verb: "could not be sent",
+    href: "/purchase-orders",
   },
   [MESSAGE_EMAIL]: {
     noun: (n) => (n === 1 ? "message" : "messages"),

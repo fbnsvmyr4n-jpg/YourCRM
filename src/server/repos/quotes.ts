@@ -108,7 +108,11 @@ function newId(prefix: string): string {
 */
 const DOC_SELECT = `
   SELECT d.id, d.deal_id, deal.title AS project_title, d.number, d.status, d.party,
-         c.email AS party_email, d.party_contact_id, d.notes,
+         /* The document's OWN address wins over the contact's. Somebody who
+            typed one on this document meant it for this document — an invoice
+            to a client's accounts inbox rather than to the person who signed
+            the quotation — and a purchase order has no contact at all. */
+         COALESCE(d.party_email, c.email) AS party_email, d.party_contact_id, d.notes,
          d.drafted_by_agent, d.revision, d.approved_at, d.approved_by_user_id, d.sent_at
     FROM documents d
     JOIN deals deal ON deal.id = d.deal_id
@@ -489,6 +493,46 @@ export async function discardQuote(q: TenantQuery, documentId: string): Promise<
     `UPDATE documents SET deleted_at = now(), updated_at = now()
       WHERE id = $2 AND sub_account_id = $1 AND deleted_at IS NULL
         AND kind = 'quote' AND status IN ('awaiting_approval', 'approved')
+      RETURNING id`,
+    [q.ctx.subAccountId, documentId]
+  );
+  return row !== null;
+}
+
+/* ---------------- purchase orders ---------------- */
+
+/**
+ * One purchase order, shaped exactly like a quotation for the send path.
+ *
+ * The same row, the same lines, the same totals — a document is a document,
+ * and the send machinery should not need to know which kind it is holding.
+ * What differs is the kind it will accept: asking for an order by a quotation
+ * id must come back empty rather than quietly sending the wrong thing.
+ */
+export async function findOrder(q: TenantQuery, documentId: string): Promise<Quote | null> {
+  const docs = await q.rows<DocRow>(
+    `${DOC_SELECT} AND d.id = $2 AND d.kind = 'purchase_order'`,
+    [q.ctx.subAccountId, documentId]
+  );
+  return (await hydrate(q, docs))[0] ?? null;
+}
+
+/**
+ * Mark an order as gone.
+ *
+ * No approver check, unlike a quotation: an order is counted in a project's
+ * committed money from the moment it is drafted, so the decision was made
+ * before this point rather than at it. What it does refuse is re-sending one
+ * that already went, and one that was called off.
+ */
+export async function markOrderSent(q: TenantQuery, documentId: string): Promise<boolean> {
+  const row = await q.one<{ id: string }>(
+    `UPDATE documents
+        SET status = 'sent', sent_at = now(), updated_at = now()
+      WHERE id = $2 AND sub_account_id = $1 AND deleted_at IS NULL
+        AND kind = 'purchase_order'
+        AND sent_at IS NULL
+        AND status NOT IN ('cancelled', 'declined')
       RETURNING id`,
     [q.ctx.subAccountId, documentId]
   );

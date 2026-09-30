@@ -3040,6 +3040,95 @@ ALTER TABLE deals ADD COLUMN IF NOT EXISTS stages_reached TEXT[];
 ALTER TABLE settings ADD COLUMN IF NOT EXISTS tasks_from_messages BOOLEAN NOT NULL DEFAULT TRUE;
 
 -- ---------------------------------------------------------------------------
+-- Who a document goes to, when that is not somebody on file.
+--
+-- A quotation is addressed to a CONTACT: `party_contact_id` points at the
+-- client, and their address is read from their record so it stays current if
+-- they change it. A purchase order is addressed to a SUPPLIER, who is a name
+-- typed on the order and usually not in the CRM at all — nobody files the
+-- builder's merchant as a contact to buy sand from them.
+--
+-- So an order had no address anywhere and could never be sent. This is that
+-- address. Nullable, because most documents will never need it and an empty
+-- one is the honest state rather than a placeholder.
+--
+-- It takes precedence over the contact's when both exist: somebody who typed
+-- an address ON this document meant it for this document — an invoice to a
+-- client's accounts inbox rather than to the person who signed the quote.
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS party_email TEXT;
+ALTER TABLE documents DROP CONSTRAINT IF EXISTS documents_party_email_shape;
+-- Not a full address parser — that belongs in `validate.ts`, where a person
+-- gets told what is wrong. This is the floor: a value here is either absent
+-- or has the shape of an address, so nothing downstream has to wonder.
+ALTER TABLE documents ADD CONSTRAINT documents_party_email_shape CHECK (
+  party_email IS NULL
+  OR (
+    length(party_email) BETWEEN 3 AND 200
+    AND position('@' IN party_email) > 1
+    AND position('@' IN party_email) < length(party_email)
+    AND party_email NOT LIKE '% %'
+  )
+);
+
+-- ---------------------------------------------------------------------------
+-- What the application's own database role may do.
+--
+-- KEEP THIS THE LAST BLOCK IN THE FILE: `GRANT … ON ALL TABLES` covers only the
+-- tables that exist when it runs.
+--
+-- The app connects as `yourcrm_app`, a role that can read and write rows and do
+-- nothing else — it cannot create, alter or drop anything, and above all it
+-- cannot bypass row-level security, which is the whole reason it exists (see
+-- `checkIsolation` in db.ts: on 20 Aug the app was found connecting as the
+-- owner, which Neon creates with BYPASSRLS, and every policy was inert).
+--
+-- Until 16 Sep 2026 these grants existed ONLY in the production database,
+-- typed in by hand. Production was right; the repository could not rebuild it.
+-- A restored backup, a staging branch or a new region would have come up with
+-- tables the app could not read, and every screen would have failed with
+-- "permission denied" — or somebody would have "fixed" it by connecting as
+-- the owner, which silently turns tenant isolation off.
+--
+-- What this block does NOT do is create the role. A login role needs a
+-- password, and a password does not belong in a file on GitHub. Create it once
+-- per database (Neon console → Roles, or `CREATE ROLE yourcrm_app LOGIN
+-- PASSWORD '…' NOSUPERUSER NOBYPASSRLS`), then run `npm run db:migrate`, which
+-- applies this and reports if the role is missing.
+--
+-- Written to match production exactly, as read on 16 Sep: row privileges on
+-- every table, USAGE+SELECT on sequences, USAGE (never CREATE) on the schema,
+-- and default privileges so a table added by a later migration is readable the
+-- moment it exists. The default privileges are scoped IN SCHEMA public because
+-- that is the form production holds: a rehearsal inside a rolled-back
+-- transaction showed the unscoped form ADDS two database-wide entries beside
+-- the existing ones. Scoped, re-running changes nothing.
+-- ---------------------------------------------------------------------------
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'yourcrm_app') THEN
+    RETURN;  -- a local or test database without the role; db:migrate says so
+  END IF;
+
+  -- Refuse, rather than grant, to a role that would make every policy inert.
+  -- Granting would "work": every page would load and every tenant would see
+  -- every other tenant's records.
+  IF EXISTS (SELECT 1 FROM pg_roles
+              WHERE rolname = 'yourcrm_app' AND (rolsuper OR rolbypassrls)) THEN
+    RAISE EXCEPTION 'yourcrm_app is a superuser or has BYPASSRLS, so row-level security would not apply to the app. Run: ALTER ROLE yourcrm_app NOSUPERUSER NOBYPASSRLS';
+  END IF;
+
+  GRANT USAGE ON SCHEMA public TO yourcrm_app;
+  REVOKE CREATE ON SCHEMA public FROM yourcrm_app;
+  GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO yourcrm_app;
+  GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO yourcrm_app;
+  ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO yourcrm_app;
+  ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO yourcrm_app;
+END $$;
+
+-- ---------------------------------------------------------------------------
 -- What the application's own database role may do.
 --
 -- KEEP THIS THE LAST BLOCK IN THE FILE: `GRANT … ON ALL TABLES` covers only the

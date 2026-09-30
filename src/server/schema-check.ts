@@ -124,6 +124,9 @@ export const EXPECTED_COLUMNS: ReadonlyArray<[string, string]> = [
      that arrives, so an unmigrated database breaks receiving mail, not a
      checkbox in Settings. */
   ["settings", "tasks_from_messages"],
+  /* Where a purchase order is sent. Read by the send path and the document
+     forms, so an unmigrated database breaks raising paperwork, not one field. */
+  ["documents", "party_email"],
   /* Projects. Named in the SELECT the deals repo and the projects page both
      use, so an unmigrated database breaks the pipeline board, not one page. */
   ["deals", "company_id"],
