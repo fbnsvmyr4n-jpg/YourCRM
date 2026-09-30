@@ -463,7 +463,11 @@ function NewDocumentForm({
       <button
         type="button"
         onClick={() => setLines((l) => [...l, (l[l.length - 1] ?? 0) + 1])}
-        className="focus-ring mt-2 text-xs font-semibold text-accent"
+        /* A finger needs something to land on. As a bare text link this was
+           16px tall — fine for a mouse, and on a phone the difference between
+           adding a line and pressing whatever is underneath it. The padding is
+           the target; it still reads as a link. */
+        className="focus-ring mt-1 inline-flex min-h-[44px] items-center text-xs font-semibold text-accent"
       >
         + Add a line
       </button>

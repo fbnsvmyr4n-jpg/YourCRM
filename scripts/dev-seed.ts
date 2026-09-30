@@ -86,8 +86,13 @@ async function main() {
        at all (the demo one does not), and an UPDATE then changes nothing while
        looking like it worked — every amount stayed in dollars. */
     await db.query(
-      `INSERT INTO settings (sub_account_id, currency) VALUES ($1, 'ZAR')
-       ON CONFLICT (sub_account_id) DO UPDATE SET currency = 'ZAR'`,
+      /* Every setting the fixture depends on is stated, not left as it was.
+         A toggle flipped during a test survived reseeding otherwise, and the
+         next audit read a screen that disagreed with the expected figures
+         below for a reason nothing on the page explained. */
+      `INSERT INTO settings (sub_account_id, currency, tasks_from_messages)
+            VALUES ($1, 'ZAR', TRUE)
+       ON CONFLICT (sub_account_id) DO UPDATE SET currency = 'ZAR', tasks_from_messages = TRUE`,
       [sub.id]
     );
 
