@@ -296,17 +296,32 @@ export async function listNotifications(q: TenantQuery): Promise<Notification[]>
     });
   }
 
-  // People with a deal in play — which is what a lead is now.
-  const waiting = contacts.filter((c) => c.hasOpenDeal && !c.isClient);
+  /**
+   * People with a deal in play — which is what a lead is now.
+   *
+   * `&& !c.isClient` used to be here, contradicting the sentence above it.
+   * Somebody who has bought before and has a live enquiry IS a deal in play —
+   * the likeliest sale on the board — and they were the one person the bell
+   * would not remind you about. The fixture's Amara Dube has a won roof and an
+   * open solar job: Home, Reports, the Leads page and the assistant all count
+   * her, and this said "2 leads" while every other screen said 3.
+   *
+   * Client and lead overlap on purpose. `analytics.ts` counts each from the
+   * deals independently, and a contact can be both.
+   */
+  const waiting = contacts.filter((c) => c.hasOpenDeal);
   if (waiting.length) {
+    const named = waiting.slice(0, 3).map((c) => `${c.firstName} ${c.lastName}`.trim());
     out.push({
       id: "leads-open",
       kind: "lead",
       title: `${waiting.length} lead${waiting.length === 1 ? "" : "s"} in progress`,
-      detail: waiting
-        .slice(0, 3)
-        .map((c) => `${c.firstName} ${c.lastName}`.trim())
-        .join(", "),
+      /* Says so when it is naming only some of them, rather than listing three
+         under a count of nine and leaving the reader to wonder. */
+      detail:
+        waiting.length > named.length
+          ? `${named.join(", ")} and ${waiting.length - named.length} more`
+          : named.join(", "),
       href: "/leads",
       weight: 60,
     });

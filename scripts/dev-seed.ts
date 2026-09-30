@@ -67,6 +67,11 @@ async function main() {
       "audit_events", "invoice_payments", "document_lines", "documents", "retainers", "tickets",
       "todos", "message_templates", "contact_tags", "contact_views", "tags", "activities",
       "price_items", "calls", "messages", "meetings", "deals", "contacts", "companies",
+      /* Queued and dead jobs too. A failed send from an earlier run outlives a
+         reseed otherwise, and shows up in the bell as a notification the
+         fixture does not account for — which is exactly the kind of stray item
+         an audit then has to explain away. */
+      "outbox",
     ]) {
       if (table === "audit_events") {
         await db.query(`ALTER TABLE audit_events DISABLE TRIGGER audit_events_append_only`);
