@@ -225,11 +225,27 @@ export async function createDocumentAction(
       return { error: "Add at least one line, so the document has a total." };
     }
 
-    const deal = await q.one<{ id: string }>(
-      `SELECT id FROM deals WHERE id = $2 AND sub_account_id = $1 AND deleted_at IS NULL`,
+    const deal = await q.one<{ id: string; contact_id: string | null }>(
+      `SELECT id, contact_id FROM deals WHERE id = $2 AND sub_account_id = $1 AND deleted_at IS NULL`,
       [q.ctx.subAccountId, dealId]
     );
     if (!deal) return { error: "That project no longer exists." };
+
+    /**
+     * A quotation is addressed to the job's own client.
+     *
+     * `party` is a name somebody typed; `party_contact_id` is the person it
+     * can be EMAILED to. Without it a quotation can be approved and then
+     * never sent — which is exactly what happened: the send refused with
+     * "Ben Cole has no email address on file" about a Ben Cole who has one.
+     *
+     * Taken from the deal rather than asked for, because a quotation for a
+     * job is for that job's client, and asking again is a second chance to
+     * answer differently. NOT done for a purchase order: its party is a
+     * supplier, and linking that to the client would address an order to the
+     * person paying for the work.
+     */
+    const partyContactId = kind === "purchase_order" ? null : deal.contact_id;
 
     /*
        Raised from a stage of the job: every line is filed there.
@@ -264,9 +280,9 @@ export async function createDocumentAction(
          failed on exactly the input a person is most likely to retry. */
       await q.attempt(() =>
         q.rows(
-          `INSERT INTO documents (id, sub_account_id, deal_id, kind, number, status, party, issued_on, notes)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8::date, $9)`,
-          [documentId, q.ctx.subAccountId, dealId, kind, number, status, party || null, issuedOn, notes || null]
+          `INSERT INTO documents (id, sub_account_id, deal_id, kind, number, status, party, issued_on, notes, party_contact_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8::date, $9, $10)`,
+          [documentId, q.ctx.subAccountId, dealId, kind, number, status, party || null, issuedOn, notes || null, partyContactId]
         )
       );
     } catch (err) {

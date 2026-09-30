@@ -12,6 +12,7 @@ import { useMoney } from "@/components/money/CurrencyProvider";
 import type { DocumentStatus } from "@/server/repos/projects";
 import type { LedgerRow } from "@/server/document-ledger";
 import { createDocumentAction } from "@/app/(app)/projects/actions";
+import { sendMyQuoteAction } from "@/app/(app)/quotes/actions";
 import type { FormState } from "@/app/(app)/projects/actions";
 
 /**
@@ -82,6 +83,16 @@ const statusLabel = (s: DocumentStatus) => s.replace(/_/g, " ");
  */
 const CREATE_STATUSES = ["draft", "sent", "accepted"] as const satisfies readonly DocumentStatus[];
 
+/**
+ * When Send is worth offering at all.
+ *
+ * `accepted` and `paid` happened AFTER it went; `declined` and `cancelled`
+ * are a no. Offering Send on any of those would be offering to re-send
+ * history. The action checks this again — a control is tidiness, the
+ * refusal in the server is the rule.
+ */
+const SENDABLE: readonly DocumentStatus[] = ["draft", "awaiting_approval", "approved"];
+
 export function DocumentLedgerView({
   ledger,
   copy,
@@ -110,6 +121,7 @@ export function DocumentLedgerView({
   const [query, setQuery] = useState("");
 
   const form = useKeptForm<FormState>(createDocumentAction, undefined);
+  const send = useKeptForm<FormState>(sendMyQuoteAction, undefined);
   const [adding, openAdd, closeAdd] = useFormDisclosure(form.state, (s: FormState) => Boolean(s?.ok));
 
   const shown = useMemo(() => {
@@ -213,6 +225,14 @@ export function DocumentLedgerView({
           </div>
         )}
 
+        {/* What actually happened to the send — sent, queued, or refused
+            with the reason. Never "done" for something still in a queue. */}
+        {send.state && (
+          <div className="mb-4">
+            <Banner state={send.state} />
+          </div>
+        )}
+
         {ledger.rows.length === 0 ? (
           <p className="py-10 text-center text-sm text-faint">
             {projects.length === 0
@@ -247,6 +267,23 @@ export function DocumentLedgerView({
                 </p>
                 {/* The status, and whether its money is in the figures above —
                     so a reader never has to remember which statuses count. */}
+                {/* Only on quotations, and only from a state one can leave
+                    in. A purchase order has no address on it to send to —
+                    its supplier is a name, not a contact — so offering the
+                    button would be offering something that cannot work. */}
+                {copy.kind === "quote" && SENDABLE.includes(r.status) && (
+                  <form onSubmit={send.onSubmit} className="shrink-0">
+                    <input type="hidden" name="documentId" value={r.id} />
+                    <button
+                      type="submit"
+                      disabled={send.pending}
+                      className="focus-ring rounded-lg px-2.5 py-1 text-xs font-semibold text-accent disabled:opacity-60"
+                      title={`Approve and email ${r.number} to the client`}
+                    >
+                      {send.pending ? "Sending…" : "Send"}
+                    </button>
+                  </form>
+                )}
                 <p className="shrink-0 text-xs @min-[560px]:w-36 @min-[560px]:text-right">
                   <span className="capitalize" style={{ color: STATUS_TONE[r.status] }}>
                     {statusLabel(r.status)}

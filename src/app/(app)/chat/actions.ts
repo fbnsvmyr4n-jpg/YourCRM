@@ -1,24 +1,20 @@
 "use server";
 
+import { withSystem, withTenant } from "@/server/tenant";
 import { revalidateApp } from "@/server/revalidate";
 import { answer } from "@/server/chat-agent";
 import { appendChat, clearChat, listChat } from "@/server/repos/chat";
 import { id as validId, multiline } from "@/server/validate";
 import { requireTenant, withCurrentTenant } from "@/server/tenant-session";
 import { requireActivePlan } from "@/server/plan-gate";
-import { withSystem, withTenant, type TenantContext, type TenantQuery } from "@/server/tenant";
 import { findUserById } from "@/server/repos/users";
-import { drain, queueJob } from "@/server/outbox";
-import { findJob } from "@/server/repos/outbox";
-import { OUTBOX_REGISTRY, QUOTE_EMAIL, quoteEmailKey } from "@/server/outbox-handlers";
+import { deliverQuote } from "@/server/quote-delivery";
 import {
   approveQuote,
   discardQuote,
-  findQuote,
   quotesNeedingUser,
   type Quote,
 } from "@/server/repos/quotes";
-import { emailConfigured } from "@/server/email";
 import { logWrite } from "@/server/log";
 
 /**
@@ -81,90 +77,6 @@ export async function sendChatAction(text: string) {
 export type QuoteResult = { ok?: string; error?: string; quotes: Quote[] };
 
 /**
- * Promise to put an approved quotation in the client's inbox.
- *
- * Queues the send; it does not perform it. That is the whole change, and it
- * closes a real hole: this used to POST to the mail provider and then mark the
- * quote sent, which are two systems with a gap between them. A crash in that
- * gap left a customer holding a price the CRM believed was never quoted — with
- * the Send button still on screen, so the natural next move was to send it
- * again.
- *
- * The job now goes in inside the caller's transaction, so the approval and the
- * promise to deliver it commit together or not at all, and the one job per
- * document means pressing twice cannot email twice.
- *
- * It still re-reads the quote rather than taking one as an argument: this is
- * the last gate before a price reaches a customer, and the handler will read it
- * again for the same reason.
- */
-async function promiseDelivery(q: TenantQuery, documentId: string): Promise<string | null> {
-  const quote = await findQuote(q, documentId);
-  if (!quote) return "That quotation no longer exists.";
-  if (!quote.approvedAt || quote.status !== "approved") {
-    return `${quote.number} has not been approved, so nothing was sent.`;
-  }
-
-  /* Said here as well as in the handler, because these two are worth a person
-     knowing NOW rather than finding a dead job later — both need somebody to
-     go and change something before any amount of retrying can help. */
-  if (!quote.partyEmail) {
-    return `${quote.number} is approved, but ${quote.party ?? "that contact"} has no email address on file. Add one and send it again.`;
-  }
-  if (!emailConfigured()) {
-    return `${quote.number} is approved. Email isn't switched on for this workspace yet, so nothing has been sent.`;
-  }
-
-  await queueJob(q, OUTBOX_REGISTRY, {
-    handler: QUOTE_EMAIL,
-    payload: { documentId: quote.id },
-    dedupeKey: quoteEmailKey(quote.id),
-  });
-  return null;
-}
-
-/**
- * Queue the send, then try it at once and report what actually happened.
- *
- * The queue is the guarantee, this is the immediacy — and the immediacy
- * matters here more than anywhere else in the app, because a person has just
- * pressed Approve and is owed a straight answer about whether their client has
- * the price. So the drain runs in the same request and the quote is re-read
- * afterwards: the message says what is true, not what was asked for.
- *
- * When the send has not gone yet the message says so plainly. That is a real
- * improvement on the old "try again", which was the only option when a failed
- * send left nothing behind to retry.
- */
-async function deliver(ctx: TenantContext, documentId: string): Promise<string> {
-  const refusal = await withTenant(ctx, (q) => promiseDelivery(q, documentId));
-  if (refusal) return refusal;
-
-  await drain(ctx, OUTBOX_REGISTRY, 5).catch(() => {
-    /* Swallowed: the job is durable, and the re-read below tells the truth
-       about where it got to. */
-  });
-
-  return withTenant(ctx, async (q) => {
-    const quote = await findQuote(q, documentId);
-    if (!quote) return "That quotation no longer exists.";
-    if (quote.status === "sent" || quote.sentAt) {
-      logWrite("send", "quote", { id: quote.id, actor: ctx.userId });
-      return `${quote.number} approved and emailed to ${quote.partyEmail}.`;
-    }
-
-    /* Three different truths hide behind "queued", and saying "we'll keep
-       trying" about a job that has already stopped is worse than saying
-       nothing. So the job itself is read, not assumed. */
-    const job = await findJob(q, QUOTE_EMAIL, quoteEmailKey(documentId));
-    if (job?.status === "dead") {
-      return `${quote.number} is approved, but it couldn't be sent: ${job.lastError ?? "unknown error"}. Fix that and send it again.`;
-    }
-    return `${quote.number} is approved and queued to send. It hasn't gone out yet — we'll keep trying, and you can send it again yourself.`;
-  });
-}
-
-/**
  * A person says yes, and it goes.
  *
  * The one place a quotation can leave the building. `approveQuote` stamps who
@@ -194,7 +106,7 @@ export async function approveQuoteAction(documentId: string): Promise<QuoteResul
     return { error: approval.error, quotes: await withCurrentTenant((q) => quotesNeedingUser(q)) };
   }
 
-  const message = await deliver(ctx, approval.quote.id);
+  const message = await deliverQuote(ctx, approval.quote.id);
   revalidateApp();
   return { ok: message, quotes: await withCurrentTenant((q) => quotesNeedingUser(q)) };
 }
@@ -210,7 +122,7 @@ export async function sendQuoteAction(documentId: string): Promise<QuoteResult> 
     };
   }
 
-  const message = await deliver(ctx, id);
+  const message = await deliverQuote(ctx, id);
   revalidateApp();
   return { ok: message, quotes: await withCurrentTenant((q) => quotesNeedingUser(q)) };
 }
