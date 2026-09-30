@@ -70,6 +70,18 @@ export async function loadPayPage(token: string): Promise<PayPage> {
 
     let state: "payable" | "paid" | "unavailable" = "payable";
     let reason: string | null = null;
+
+    /**
+     * "Use the payment details below" — only when there ARE details below.
+     *
+     * `invoicePayTo` is null until somebody fills it in, and it is null in
+     * production today. Both sentences pointed at it regardless, so a client
+     * who could not pay by card was sent to a blank space and left with no
+     * way to pay at all and nothing to ask about.
+     */
+    const elsewhere = invoice.payTo
+      ? "Use the payment details below."
+      : `Contact ${link.workspaceName} to arrange payment.`;
     if (invoice.status === "paid" || outstanding === 0) {
       state = "paid";
     } else if (!invoice.sentAt) {
@@ -80,10 +92,10 @@ export async function loadPayPage(token: string): Promise<PayPage> {
       reason = "This invoice has been cancelled.";
     } else if (!connection) {
       state = "unavailable";
-      reason = `${link.workspaceName} does not take card payments online. Use the payment details below.`;
+      reason = `${link.workspaceName} does not take card payments online. ${elsewhere}`;
     } else if (!paystackTakes(currency)) {
       state = "unavailable";
-      reason = `Online payment is not available in ${currency}. Use the payment details below.`;
+      reason = `Online payment is not available in ${currency}. ${elsewhere}`;
     } else if (!invoice.partyEmail) {
       state = "unavailable";
       reason = `Online payment needs an email address on file. Contact ${link.workspaceName} to pay.`;

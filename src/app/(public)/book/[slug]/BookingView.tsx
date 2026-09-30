@@ -25,8 +25,11 @@ export function BookingView({
   timeZone,
   days,
   taking,
+  emailWorks,
 }: {
   slug: string;
+  /** Whether this deployment can actually send the confirmation it offers. */
+  emailWorks: boolean;
   workspaceName: string;
   title: string;
   kind: "online" | "in_person";
@@ -79,9 +82,23 @@ export function BookingView({
           <p className="text-sm text-muted">
             {fmt.long.format(new Date(state.startsAt))} ({zoneLabel}) with {state.workspaceName}.
           </p>
-          <p className="text-xs text-faint">
-            A confirmation will be emailed to you. If you need to change it, reply to that email.
-          </p>
+          {/* Promised only where it can actually be delivered.
+
+              The sentence was unconditional, and `RESEND_API_KEY` is unset in
+              production today — so somebody who booked was told a confirmation
+              was coming and would have received nothing, with no way to tell
+              whether their booking had worked at all. Of all the places in
+              this product to say something untrue, a stranger's confirmation
+              screen is the worst one. */}
+          {emailWorks ? (
+            <p className="text-xs text-faint">
+              A confirmation will be emailed to you. If you need to change it, reply to that email.
+            </p>
+          ) : (
+            <p className="text-xs text-faint">
+              Your time is held. Make a note of it — no confirmation email is sent.
+            </p>
+          )}
         </div>
       </Shell>
     );

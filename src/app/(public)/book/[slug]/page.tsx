@@ -1,3 +1,4 @@
+import { emailConfigured } from "@/server/email";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { withPublicLookup, withTenant } from "@/server/tenant";
@@ -53,6 +54,7 @@ export default async function BookingPage({ params }: { params: Promise<{ slug: 
   return (
     <BookingView
       slug={link.slug}
+      emailWorks={emailConfigured()}
       workspaceName={link.workspaceName}
       title={link.title}
       kind={link.kind}

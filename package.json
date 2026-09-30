@@ -13,6 +13,7 @@
     "db:migrate": "tsx scripts/db-migrate.ts",
     "db:backup": "tsx scripts/db-backup.ts",
     "db:restore": "tsx scripts/db-restore.ts",
+    "check:rls": "tsx scripts/check-public-rls.ts",
     "try:quote": "tsx scripts/try-quote-agent.ts"
   },
   "dependencies": {
