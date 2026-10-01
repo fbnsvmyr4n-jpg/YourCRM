@@ -267,7 +267,12 @@ export async function listNotifications(q: TenantQuery): Promise<Notification[]>
             ? `${late.mine} yours, ${late.unassigned} unassigned`
             : late.mine
               ? "Assigned to you"
-              : "Nobody has taken them yet",
+              /* Singular when there is one. "Nobody has taken them yet" above a
+                 count of 1 is the small wrongness that makes a reader doubt the
+                 number beside it. */
+              : late.unassigned === 1
+                ? "Nobody has taken it yet"
+                : "Nobody has taken them yet",
         href: "/inbox?folder=tickets",
         weight: 96,
       });

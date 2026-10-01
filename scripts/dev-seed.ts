@@ -164,8 +164,17 @@ async function main() {
          ('m-2', $1, 'ct-ben',     'th-paving', 'received', 'Paving start date',   'When can the team start?',              TRUE,  'whatsapp', NULL,     ${day(2)}),
          ('m-3', $1, 'ct-lindiwe', 'th-fence',  'received', 'Invoice query',       'Was the last invoice paid?',            FALSE, 'email',    NULL,     ${day(4)}),
          ('m-4', $1, 'ct-pieter',  'th-deck',   'received', 'Timber options',      'Can we see samples?',                   FALSE, 'email',    NULL,     ${day(6)}),
-         ('m-5', $1, 'ct-amara',   'th-roof',   'sent',     'Re: Roof — snag list','We will be there Thursday.',            FALSE, 'email',    'sent',   ${day(1)}),
-         ('m-6', $1, 'ct-ben',     'th-paving', 'sent',     'Re: Paving start date','Pencilled in for the 3rd.',            FALSE, 'whatsapp', 'logged', ${day(2)})`,
+         /* Our reply is OLDER than their message above it: Amara wrote back
+            after we answered, which is why the roof ticket below is open with a
+            reply owed. Both sat at the same moment until the inbox audit, and
+            that is a state the product itself cannot produce — a fixture that
+            cannot happen teaches the wrong thing to whoever reads the screen. */
+         ('m-5', $1, 'ct-amara',   'th-roof',   'sent',     'Re: Roof — snag list','We will be there Thursday.',            FALSE, 'email',    'sent',   ${day(2)}),
+         /* And here the reply is the NEWER one, which is what makes the paving
+            ticket below legitimately "waiting on the customer". The two sat at
+            the same moment as well, so neither ticket's state matched its own
+            conversation. */
+         ('m-6', $1, 'ct-ben',     'th-paving', 'sent',     'Re: Paving start date','Pencilled in for the 3rd.',            FALSE, 'whatsapp', 'logged', ${day(1)})`,
       [sub.id]
     );
 

@@ -267,7 +267,10 @@ export function InboxView({
     const byFolder = (() => {
       switch (filter) {
         case "Unread":
-          return messages.filter((m) => m.unread && !m.trashed);
+          /* Received only, which is exactly what the sidebar badge counts.
+             Something you sent is not unread mail, and these two have to be one
+             definition or the folder and the number beside it disagree. */
+          return messages.filter((m) => m.unread && !m.trashed && m.direction === "received");
         case "Tickets": {
           /* One row per ticket: its conversation's latest message. */
           const latest = new Map<string, Message>();

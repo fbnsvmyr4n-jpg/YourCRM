@@ -102,12 +102,41 @@ describe("the clock follows the conversation", () => {
     expect(after.awaiting_since).not.toBeNull();
   });
 
-  it("logging an OLD message written before it was resolved does not reopen it", async () => {
+  it("REOPENS FOR A MESSAGE OF THEIRS NOBODY ANSWERED, even one sent before it was resolved", async () => {
+    /*
+       This asserted the opposite until the inbox audit, and the reversal is
+       deliberate. The old rule refused to reopen when the message predated the
+       resolution — so a reply that arrived at 09:59 and was recorded at 10:01,
+       either side of somebody pressing Resolve at 10:00, was silently dropped:
+       no clock, no bell, a customer waiting and nothing in the product saying
+       so.
+
+       A message that was ALREADY in the inbox when the ticket was resolved
+       never reaches this code, because it runs when a message is first
+       RECORDED. So "the resolution covered it" is not a case this can see. What
+       is left is whether anybody answered it — the test below.
+    */
     const out = await inA((q) => tickets.openTicket(q, "th_theirs"));
     if (!("ticket" in out)) throw new Error("not opened");
     await inA((q) => tickets.updateTicket(q, out.ticket.id, { status: "resolved" }));
     await inA((q) =>
       inbox.createMessage(q, { direction: "received", subject: "Leak", body: "earlier", threadId: "th_theirs", sentAt: ago(3) })
+    );
+    expect((await row("th_theirs")).status).toBe("open");
+  });
+
+  it("stays resolved when a reply of ours already answered that message", async () => {
+    /* Filing history after the fact: they wrote, we answered, somebody is now
+       putting the conversation into the CRM. Nothing is owed, so nothing
+       reopens — which is what the old rule was reaching for. */
+    const out = await inA((q) => tickets.openTicket(q, "th_theirs"));
+    if (!("ticket" in out)) throw new Error("not opened");
+    await inA((q) =>
+      inbox.createMessage(q, { direction: "sent", subject: "Re: Leak", body: "sorted", threadId: "th_theirs" })
+    );
+    await inA((q) => tickets.updateTicket(q, out.ticket.id, { status: "resolved" }));
+    await inA((q) =>
+      inbox.createMessage(q, { direction: "received", subject: "Leak", body: "older", threadId: "th_theirs", sentAt: ago(4) })
     );
     expect((await row("th_theirs")).status).toBe("resolved");
   });

@@ -103,28 +103,75 @@ describe("the calendar dot means something is on today", () => {
        VALUES ('${id}', '${tenant}', 'Call', ${when})`
     );
 
+  /**
+   * A moment on the WORKSPACE's day, which with no settings row is UTC.
+   *
+   * These fixtures used to say `date_trunc('day', now())`, which is midnight in
+   * whatever zone the database session happens to be in — the machine's, under
+   * this harness. That agreed with the old badge only because the badge made
+   * the same mistake. Written against the workspace's day, the fixture says
+   * what it means and the boundary tests test the boundary.
+   */
+  const utcDay = (offset: string) =>
+    `(date_trunc('day', now() AT TIME ZONE 'UTC') + interval '${offset}') AT TIME ZONE 'UTC'`;
+
   it("is off with nothing scheduled", async () => {
     expect((await withTenant(ctx(TENANT_A), (q) => navCounts(q))).calendarToday).toBe(false);
   });
 
   it("is on for a meeting later today", async () => {
-    await meeting(TENANT_A, "mt1", "date_trunc('day', now()) + interval '13 hours'");
+    await meeting(TENANT_A, "mt1", utcDay("13 hours"));
     expect((await withTenant(ctx(TENANT_A), (q) => navCounts(q))).calendarToday).toBe(true);
   });
 
   it("is off for tomorrow and for yesterday", async () => {
     // The boundaries are the whole point of a "today" dot. An inclusive upper
     // bound puts tomorrow's first meeting on today's badge.
-    await meeting(TENANT_A, "mt1", "date_trunc('day', now()) + interval '1 day'");
-    await meeting(TENANT_A, "mt2", "date_trunc('day', now()) - interval '1 second'");
+    await meeting(TENANT_A, "mt1", utcDay("1 day"));
+    await meeting(TENANT_A, "mt2", utcDay("-1 second"));
     expect((await withTenant(ctx(TENANT_A), (q) => navCounts(q))).calendarToday).toBe(false);
   });
 
   it("belongs to one workspace", async () => {
-    await meeting(TENANT_B, "mt1", "date_trunc('day', now()) + interval '13 hours'");
+    await meeting(TENANT_B, "mt1", utcDay("13 hours"));
     expect((await withTenant(ctx(TENANT_A), (q) => navCounts(q))).calendarToday).toBe(false);
     expect((await withTenant(ctx(TENANT_B), (q) => navCounts(q))).calendarToday).toBe(true);
   });
+
+  /**
+   * The day is the BUSINESS'S day.
+   *
+   * Found by the inbox audit: the dot used `date_trunc('day', now())` — the
+   * database's UTC day — while the Calendar page beside it has always used the
+   * workspace's zone. In Johannesburg those disagree until 02:00; in Auckland a
+   * 09:00 meeting is 20:00 UTC the day before, so the page showed a meeting
+   * today and the dot next to it said nothing was on.
+   *
+   * The two zones below are 25 hours apart, so whatever the server's clock
+   * says, at least one of them is on a different date from UTC — the same pair
+   * the other time-zone tests in this project use, for the same reason.
+   */
+  for (const zone of ["Pacific/Kiritimati", "Pacific/Pago_Pago"]) {
+    it(`AGREES WITH THE CALENDAR PAGE IN ${zone}`, async () => {
+      const { instantToWallClock, wallClockToInstant } = await import("../src/lib/zoned");
+      await db.seed(
+        `INSERT INTO settings (sub_account_id, time_zone) VALUES ('${TENANT_A}', '${zone}')
+         ON CONFLICT (sub_account_id) DO UPDATE SET time_zone = '${zone}'`
+      );
+      /* The business's own today, exactly as the Calendar page computes it. */
+      const today = instantToWallClock(new Date().toISOString(), zone)!.date;
+      const atNine = wallClockToInstant(today, "09:00", zone)!;
+      await meeting(TENANT_A, "mt_local", `'${atNine}'::timestamptz`);
+
+      const counts = await withTenant(ctx(TENANT_A), (q) => navCounts(q));
+      await db.seed(`DELETE FROM settings WHERE sub_account_id = '${TENANT_A}'`);
+
+      expect(
+        counts.calendarToday,
+        "the Calendar page shows a meeting today and the dot beside it does not"
+      ).toBe(true);
+    });
+  }
 });
 
 describe("the navigation config holds no invented numbers", () => {

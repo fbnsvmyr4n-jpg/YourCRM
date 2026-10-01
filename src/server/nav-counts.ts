@@ -30,6 +30,14 @@ export type NavCounts = {
 };
 
 export async function navCounts(q: TenantQuery): Promise<NavCounts> {
+  /* The business's own day, read BEFORE anything is counted against it. Both
+     the dot and the task badge are claims about "today", and today is a fact
+     about where this business is, not about where the server happens to be. */
+  const settings = await getSettings(q);
+  const today =
+    instantToWallClock(new Date().toISOString(), settings.timeZone)?.date ??
+    new Date().toISOString().slice(0, 10);
+
   const row = await q.one<{ unread: string; today: string }>(
     `SELECT
        (SELECT count(*) FROM messages
@@ -41,16 +49,19 @@ export async function navCounts(q: TenantQuery): Promise<NavCounts> {
            -- Bounded by a half-open day rather than casting the column to a
            -- date, so meetings_tenant_idx (sub_account_id, scheduled_at) is
            -- still usable.
-           AND scheduled_at >= date_trunc('day', now())
-           AND scheduled_at <  date_trunc('day', now()) + interval '1 day')::text AS today`,
-    [q.ctx.subAccountId]
+           --
+           -- THE DAY IS THE BUSINESS'S, not the database's. This read
+           -- date_trunc('day', now()) until the inbox audit, which is the UTC
+           -- day: in Johannesburg that is still yesterday until 02:00, and in
+           -- Auckland a 09:00 meeting is 20:00 UTC the day before — so the
+           -- Calendar page, which has always used the workspace's zone, showed
+           -- a meeting today while the dot beside it said there was nothing.
+           -- One question, two screens, two answers.
+           AND scheduled_at >= ($2::date::timestamp AT TIME ZONE $3)
+           AND scheduled_at <  (($2::date + 1)::timestamp AT TIME ZONE $3))::text AS today`,
+    [q.ctx.subAccountId, today, settings.timeZone]
   );
 
-  /* Due "today" in the business's calendar, the same day the Tasks page uses. */
-  const settings = await getSettings(q);
-  const today =
-    instantToWallClock(new Date().toISOString(), settings.timeZone)?.date ??
-    new Date().toISOString().slice(0, 10);
   const tasks = q.ctx.userId ? await dueForUser(q, q.ctx.userId, today) : { dueToday: 0, overdue: 0 };
 
   return {
