@@ -983,13 +983,31 @@ function MoreMenu({
 
 function NotePanel({ contactId, onDone }: { contactId: string; onDone: () => void }) {
   const [busy, setBusy] = useState(false);
+  /** Why the note did not save, and the words themselves, kept. */
+  const [problem, setProblem] = useState<string | null>(null);
+  const [keptNote, setKeptNote] = useState("");
 
   return (
     <form
       action={async (formData: FormData) => {
         setBusy(true);
+        setProblem(null);
         try {
-          await addNoteAction(contactId, formData);
+          /*
+             The panel closes only if the note was written.
+
+             It closed regardless, so a refused note — a view-only user's among
+             them — disappeared along with the box it was typed in, and the
+             timeline it was meant for simply never showed it. React 19 clears
+             the field after the action either way, so the text is put back by
+             hand.
+          */
+          const result = await addNoteAction(contactId, formData);
+          if ("error" in result) {
+            setProblem(result.error);
+            setKeptNote(String(formData.get("note") ?? ""));
+            return;
+          }
           onDone();
         } finally {
           setBusy(false);
@@ -1005,9 +1023,15 @@ function NotePanel({ contactId, onDone }: { contactId: string; onDone: () => voi
         rows={3}
         required
         autoFocus
+        defaultValue={keptNote}
         placeholder="What happened?"
         className="field-input resize-y"
       />
+      {problem && (
+        <p role="alert" className="mt-2 text-xs" style={{ color: "var(--red)" }}>
+          {problem}
+        </p>
+      )}
       <div className="mt-3 flex justify-end gap-2">
         <button type="button" onClick={onDone} className="btn-soft focus-ring rounded-xl px-4 py-2 text-sm font-medium">
           Cancel

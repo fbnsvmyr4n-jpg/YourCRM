@@ -70,6 +70,85 @@ describe("the lead form", () => {
   });
 });
 
+describe("the deals board", () => {
+  const board = read("../src/app/(app)/deals/DealsBoard.tsx");
+  const actions = read("../src/app/(app)/deals/actions.ts");
+
+  it("DOES NOT RE-PRICE A DEAL THE SERVER REFUSED TO RE-PRICE", () => {
+    /* The worst of the six: the board wrote the typed amount onto the card and
+       closed the panel without looking at the answer, so a refused change
+       showed the deal at its new value — and every total on the board with it —
+       while the database held the old one. */
+    const fn = board.slice(board.indexOf("async function handleSetValue"));
+    const refused = fn.indexOf('"error" in result');
+    const paints = fn.indexOf("setItems(");
+    expect(refused, "the result is never inspected").toBeGreaterThan(-1);
+    expect(paints, "the card is never updated").toBeGreaterThan(refused);
+  });
+
+  it("keeps the Add Deal form open when it was not added", () => {
+    const fn = board.slice(board.indexOf("async function handleAdd"), board.indexOf("async function handleSetValue"));
+    expect(fn).toMatch(/if \("error" in result\)/);
+    expect(fn.indexOf("setAddOpen(null)")).toBeGreaterThan(fn.indexOf('"error" in result'));
+  });
+
+  it("answers in one shape", () => {
+    expect(actions).toMatch(/export type DealResult/);
+    expect(actions).toMatch(/export async function addDealAction\([^)]*\): Promise<DealResult>/);
+  });
+});
+
+describe("meetings", () => {
+  const view = read("../src/app/(app)/meetings/MeetingsView.tsx");
+  const actions = read("../src/app/(app)/meetings/actions.ts");
+
+  it("DOES NOT DESTROY NOTES IT FAILED TO SAVE", () => {
+    /* Notes are typed once, from memory, straight after a meeting. This cleared
+       the local draft and printed "Saved" whatever came back. */
+    const fn = view.slice(view.indexOf("async function save()"));
+    const refused = fn.indexOf('"error" in result');
+    const cleared = fn.indexOf("clear();");
+    expect(refused).toBeGreaterThan(-1);
+    expect(cleared, "the draft is cleared before the answer is read").toBeGreaterThan(refused);
+  });
+
+  it("does not empty the booking form and claim the meeting is in the diary", () => {
+    const fn = view.slice(view.indexOf("async function confirmMeeting"), view.indexOf("async function save()"));
+    const refused = fn.indexOf('"error" in result');
+    expect(refused).toBeGreaterThan(-1);
+    expect(fn.indexOf('setName("")'), "the fields are emptied regardless").toBeGreaterThan(refused);
+    expect(fn.indexOf("setJustAdded(true)")).toBeGreaterThan(refused);
+  });
+
+  it("answers in one shape", () => {
+    expect(actions).toMatch(/export type MeetingResult/);
+    for (const fn of ["addMeetingAction", "setMeetingNotesAction"]) {
+      expect(actions).toMatch(new RegExp(`export async function ${fn}\\([\\s\\S]{0,120}Promise<MeetingResult>`));
+    }
+  });
+});
+
+describe("the two note forms", () => {
+  const contacts = read("../src/app/(app)/contacts/ContactsView.tsx");
+  const inbox = read("../src/app/(app)/inbox/InboxView.tsx");
+  const actions = read("../src/app/(app)/contacts/actions.ts");
+
+  it("KEEP THE NOTE WHEN IT WAS NOT SAVED", () => {
+    /* Both emptied the box and said it had been filed on a timeline the reader
+       would have to leave the screen to check. */
+    for (const [name, src] of [["contacts", contacts], ["inbox", inbox]] as const) {
+      expect(src, `${name} does not read the answer`).toMatch(/if \("error" in result\)/);
+      expect(src, `${name} does not put the words back`).toMatch(/setKeptNote\(/);
+      expect(src, `${name} does not show the reason`).toMatch(/defaultValue=\{keptNote\}/);
+    }
+  });
+
+  it("answers in one shape", () => {
+    expect(actions).toMatch(/export type NoteResult = \{ ok: true \} \| \{ error: string \}/);
+    expect(actions).toMatch(/export async function addNoteAction\([^)]*\): Promise<NoteResult>/);
+  });
+});
+
 describe("the greeting on Home", () => {
   const home = read("../src/app/(app)/page.tsx");
 

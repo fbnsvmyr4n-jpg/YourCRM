@@ -33,8 +33,25 @@ import { logWrite } from "@/server/log";
  */
 const toCents = (units: number) => Math.round(units * 100);
 
-export async function addDealAction(formData: FormData) {
-  return withCurrentTenant(async (q) => {
+/**
+ * One shape with two readings, so the board cannot misread the answer.
+ *
+ * This used to return the new deal's id, or nothing when the form could not be
+ * read, or the refusal object a view-only transaction hands back — three
+ * shapes, and the screen treated all of them as success: the dialog closed and
+ * no deal existed. See `tests/refusals-are-visible.test.ts`.
+ */
+export type DealResult = { ok: true; id?: string } | { error: string };
+
+/** The refusal a view-only transaction returns, if that is what came back. */
+function refusal(result: unknown): string | null {
+  return result && typeof result === "object" && "error" in result
+    ? String((result as { error: unknown }).error)
+    : null;
+}
+
+export async function addDealAction(formData: FormData): Promise<DealResult> {
+  const out = await withCurrentTenant(async (q) => {
     const title = text(formData.get("title"), 120);
     const stage = pick(formData.get("stage"), STAGES);
     const source = pick(formData.get("source"), SOURCES);
@@ -42,7 +59,7 @@ export async function addDealAction(formData: FormData) {
 
     // A deal with no title is unusable, an unknown stage would render in no
     // column at all, and a non-numeric value turns every total into NaN.
-    if (!title || !stage || value === null) return;
+    if (!title || !stage || value === null) return null;
 
     const created = await createDeal(q, {
       title,
@@ -63,8 +80,13 @@ export async function addDealAction(formData: FormData) {
     });
 
     revalidateApp();
-    return created.id;
+    return { ok: true as const, id: created.id };
   });
+  const no = refusal(out);
+  if (no) return { error: no };
+  return out
+    ? { ok: true, id: out.id }
+    : { error: "That deal could not be saved. Check the name, stage and amount." };
 }
 
 /**

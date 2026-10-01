@@ -1441,6 +1441,9 @@ function ContactCard({
   const canDial = useCanDial();
   const [noteSaved, setNoteSaved] = useState(false);
   const [savingNote, setSavingNote] = useState(false);
+  /** Why the note did not save, and the words themselves, kept. */
+  const [noteProblem, setNoteProblem] = useState<string | null>(null);
+  const [keptNote, setKeptNote] = useState("");
   const tel = message.phone.replace(/[^\d+]/g, "");
   const hasEmail = message.email && message.email !== "—";
 
@@ -1646,8 +1649,19 @@ function ContactCard({
           className="mt-4 rounded-xl border border-[var(--border)] p-3"
           action={async (formData: FormData) => {
             setSavingNote(true);
+            setNoteProblem(null);
             try {
-              await addNoteAction(contactId, formData);
+              /* "Saved to their timeline" used to be printed whatever came
+                 back. A refused note therefore emptied the box and claimed to
+                 have filed itself on a screen the reader would have to leave
+                 the inbox to check — so there was nothing to notice and nothing
+                 to recover. */
+              const result = await addNoteAction(contactId, formData);
+              if ("error" in result) {
+                setNoteProblem(result.error);
+                setKeptNote(String(formData.get("note") ?? ""));
+                return;
+              }
               /* Confirmed in place. The note lands on the contact's timeline,
                  which is a different screen — so without a word here the only
                  feedback would be the box emptying. */
@@ -1666,14 +1680,23 @@ function ContactCard({
               rows={3}
               required
               autoFocus
-              onChange={() => setNoteSaved(false)}
+              defaultValue={keptNote}
+              onChange={() => {
+                setNoteSaved(false);
+                setNoteProblem(null);
+              }}
               placeholder={`What did ${message.name.split(/\s+/)[0]} say?`}
               className="field-input mt-1.5 resize-none"
             />
           </label>
           <div className="mt-2 flex items-center justify-between gap-3">
-            <p className="text-[11px] text-faint">
-              {noteSaved ? "Saved to their timeline." : "Saved against this contact."}
+            {/* One line, answering whichever way it went. */}
+            <p
+              className="text-[11px]"
+              role={noteProblem ? "alert" : undefined}
+              style={{ color: noteProblem ? "var(--red)" : "var(--text-faint)" }}
+            >
+              {noteProblem ?? (noteSaved ? "Saved to their timeline." : "Saved against this contact.")}
             </p>
             <button
               type="submit"

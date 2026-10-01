@@ -184,8 +184,19 @@ export async function logOutreachAction(id: string, kind: "call" | "text" | "ema
   });
 }
 
-export async function addNoteAction(id: string, formData: FormData) {
-  return withCurrentTenant(async (q) => {
+/**
+ * Did the note land?
+ *
+ * This answered with the activity row, or null, or the refusal object a
+ * view-only transaction returns — and both screens that write a note threw the
+ * answer away, emptied the box and said "Saved". A note is typed once, from
+ * memory, straight after a conversation: losing one in silence is losing the
+ * only copy there was.
+ */
+export type NoteResult = { ok: true } | { error: string };
+
+export async function addNoteAction(id: string, formData: FormData): Promise<NoteResult> {
+  const out = await withCurrentTenant(async (q) => {
     const contactId = validId(id);
     const body = multiline(formData.get("note"), 2000);
     if (!contactId || !body) return null;
@@ -193,7 +204,7 @@ export async function addNoteAction(id: string, formData: FormData) {
     const contact = await getContact(q, contactId);
     if (!contact) return null;
 
-    const entry = await logActivity(q, {
+    await logActivity(q, {
       entityType: "contact",
       entityId: contactId,
       kind: "note",
@@ -202,8 +213,12 @@ export async function addNoteAction(id: string, formData: FormData) {
       actorUserId: q.ctx.userId,
     });
     revalidateApp();
-    return entry;
+    return { ok: true as const };
   });
+  const no =
+    out && typeof out === "object" && "error" in out ? String((out as { error: unknown }).error) : null;
+  if (no) return { error: no };
+  return out ? { ok: true } : { error: "That note could not be saved. It is still in the box." };
 }
 
 export async function updateContactAction(id: string, formData: FormData) {

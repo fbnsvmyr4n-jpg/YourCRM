@@ -237,6 +237,8 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
   // A refused move, said out loud. Silently snapping the card back would look
   // like the drag failed to register rather than like the server said no.
   const [moveError, setMoveError] = useState<string | null>(null);
+  /** Why the Add Deal form did not save. It stays open until it does. */
+  const [addProblem, setAddProblem] = useState<string | null>(null);
 
   /**
    * Header totals, each defined by a stage's own exit condition.
@@ -341,15 +343,21 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
     }
   }
 
+  /** Closes only if the deal was actually created — see `handleSetValue`. */
   async function handleAdd(formData: FormData) {
     setBusy(true);
+    setAddProblem(null);
     try {
       // The action returns an id, not a card: the board shows a contact's name
       // and initials, which live on the contact record rather than the deal
       // now that the link is a foreign key. Inserting a half-built card here
       // would flash a nameless row until the refresh replaced it, so the
       // revalidation the action triggers is what puts the deal on the board.
-      await addDealAction(formData);
+      const result = await addDealAction(formData);
+      if ("error" in result) {
+        setAddProblem(result.error);
+        return;
+      }
       setAddOpen(null);
     } finally {
       setBusy(false);
@@ -521,13 +529,25 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
     }
   }
 
-  async function handleSetValue(deal: Deal, formData: FormData) {
+  /**
+   * The card takes the new figure ONLY ONCE THE SERVER HAS TAKEN IT.
+   *
+   * This fired the action, ignored the answer, and then wrote the typed amount
+   * onto the card and closed the panel — so a refused change showed the deal at
+   * its new value while the database held the old one. A view-only user could
+   * "re-price" the whole pipeline on screen, and so could anyone whose change
+   * the server rejected; the lie lasted until something reloaded the page, and
+   * every total on the board was wrong in the meantime.
+   */
+  async function handleSetValue(deal: Deal, formData: FormData): Promise<string | null> {
     setBusy(true);
     try {
-      await setDealValueAction(deal.id, formData);
+      const result = await setDealValueAction(deal.id, formData);
+      if (result && "error" in result && result.error) return result.error;
       const value = Math.max(0, Math.round(Number(formData.get("value")) || 0));
       setItems((prev) => prev.map((d) => (d.id === deal.id ? { ...d, value } : d)));
       setActive(null);
+      return null;
     } finally {
       setBusy(false);
     }
@@ -804,7 +824,16 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
       </div>
 
       {addOpen !== null && (
-        <AddDealModal busy={busy} defaultStage={defaultStage} onClose={() => setAddOpen(null)} onSubmit={handleAdd} />
+        <AddDealModal
+          busy={busy}
+          defaultStage={defaultStage}
+          problem={addProblem}
+          onClose={() => {
+            setAddOpen(null);
+            setAddProblem(null);
+          }}
+          onSubmit={handleAdd}
+        />
       )}
 
       {/*
@@ -1292,7 +1321,12 @@ function DealModal({
   onClose: () => void;
   onMove: () => void;
   onPay: (formData: FormData) => Promise<string | null>;
-  onSetValue: (formData: FormData) => void | Promise<void>;
+  /* Answers the way `onPay` does — null when it saved, the reason when it did
+     not. It used to answer nothing at all, and the board wrote the new figure
+     onto the card regardless: a refused change, a view-only user's included,
+     showed the deal at its new value while the database kept the old one, until
+     something happened to reload the page. */
+  onSetValue: (formData: FormData) => Promise<string | null>;
   onPainPoints: (points: string[]) => void;
 }) {
   const { money, fullMoney, symbol } = useBoardMoney();
@@ -1450,7 +1484,14 @@ function DealModal({
           )}
 
           {canValue && (
-            <form action={onSetValue} className={clsx("rounded-xl border border-[var(--border)] p-4", payable && "mt-3")}>
+            <form
+              action={async (formData: FormData) => {
+                setError(null);
+                const problem = await onSetValue(formData);
+                if (problem) setError(problem);
+              }}
+              className={clsx("rounded-xl border border-[var(--border)] p-4", payable && "mt-3")}
+            >
               <p className="text-sm font-semibold">{deal.value === 0 ? "Set deal value" : "Update deal value"}</p>
               <p className="mt-0.5 text-xs text-muted">
                 The quoted amount for this deal.
@@ -1822,11 +1863,14 @@ function AskForReferral({ deal, busy }: { deal: Deal; busy: boolean }) {
 function AddDealModal({
   busy,
   defaultStage,
+  problem,
   onClose,
   onSubmit,
 }: {
   busy: boolean;
   defaultStage: StageId;
+  /** Why the last attempt did not save. The form stays open until it does. */
+  problem: string | null;
   onClose: () => void;
   onSubmit: (formData: FormData) => void | Promise<void>;
 }) {
@@ -1882,6 +1926,17 @@ function AddDealModal({
               )}
             </div>
           </div>
+
+          {/* Above the buttons, where somebody who just pressed Add is looking. */}
+          {problem && (
+            <p
+              role="alert"
+              className="mt-4 rounded-xl px-3.5 py-2.5 text-sm"
+              style={{ background: "var(--red-soft)", color: "var(--red)" }}
+            >
+              {problem}
+            </p>
+          )}
 
           <div className="mt-6 flex items-center justify-end gap-3">
             <button type="button" onClick={onClose} className="btn-soft focus-ring rounded-xl px-5 py-2.5 text-sm font-medium">

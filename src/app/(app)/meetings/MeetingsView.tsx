@@ -1046,6 +1046,8 @@ function Scheduler({
   const [topic, setTopic] = useState("");
   const [busy, setBusy] = useState(false);
   const [justAdded, setJustAdded] = useState(false);
+  /** Why the booking did not happen. Cleared on the next attempt. */
+  const [problem, setProblem] = useState<string | null>(null);
 
   const cells = monthGrid(view.year, view.month);
   const selDate = new Date(selected.year, selected.month, selected.day);
@@ -1062,6 +1064,7 @@ function Scheduler({
   async function confirmMeeting() {
     if (!name.trim()) return;
     setBusy(true);
+    setProblem(null);
     try {
       const fd = new FormData();
       fd.set("name", name);
@@ -1074,7 +1077,19 @@ function Scheduler({
       // derived from it server-side on every read, so it can't go stale.
       fd.set("date", dateKey(selected));
       fd.set("type", online ? "Online" : "In-Person");
-      await addMeetingAction(fd);
+      /*
+         The fields are emptied only once the meeting EXISTS.
+
+         This cleared all five and printed "✓ Meeting Scheduled" whatever came
+         back, so a refused booking — a view-only user's, or a date the server
+         could not read — wiped the name, company, email, link and topic
+         somebody had just typed and told them it was in the diary. Nothing was.
+      */
+      const result = await addMeetingAction(fd);
+      if ("error" in result) {
+        setProblem(result.error);
+        return;
+      }
       setName("");
       setCompany("");
       setEmail("");
@@ -1246,6 +1261,13 @@ function Scheduler({
         </button>
         {justAdded && (
           <p className="mt-2 text-center text-xs text-green">Added to Upcoming Meetings.</p>
+        )}
+        {/* In the same place the confirmation would have appeared, so the panel
+            answers in one spot whichever way it went. */}
+        {problem && (
+          <p role="alert" className="mt-2 text-center text-xs" style={{ color: "var(--red)" }}>
+            {problem}
+          </p>
         )}
       </Card>
 
@@ -1629,15 +1651,31 @@ function NotesEditor({ meeting }: { meeting: UpcomingMeeting }) {
   } = useTextDraft(`yourcrm:meeting-notes:${meeting.id}`, meeting.notes ?? "");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  /** Why the last save did not happen. The text stays put until it does. */
+  const [problem, setProblem] = useState<string | null>(null);
 
   const dirty = notes !== (meeting.notes ?? "");
 
   async function save() {
     setSaving(true);
+    setProblem(null);
     try {
       const fd = new FormData();
       fd.set("notes", notes);
-      await setMeetingNotesAction(meeting.id, fd);
+      const result = await setMeetingNotesAction(meeting.id, fd);
+      /*
+         THE DRAFT IS THROWN AWAY ONLY ONCE THE SERVER HAS THE TEXT.
+
+         This cleared it and printed "Saved" whatever came back, so a refused
+         save — a view-only user's, or any other — destroyed what had just been
+         typed and claimed it had worked. Notes written straight after a meeting
+         are the least recoverable thing in this product: nobody retypes what a
+         client said from memory an hour later.
+      */
+      if ("error" in result) {
+        setProblem(result.error);
+        return;
+      }
       /* The draft has served its purpose the moment the server has the text.
          Left behind it would shadow the saved copy forever, including any edit
          made from another device. */
@@ -1661,8 +1699,15 @@ function NotesEditor({ meeting }: { meeting: UpcomingMeeting }) {
         className="field-input min-h-[112px] flex-1 resize-y"
       />
       <div className="mt-2 flex shrink-0 items-center justify-between gap-2">
-        <span className="text-[11px] text-faint">
-          {saved ? "Saved." : dirty ? "Unsaved changes" : "Up to date"}
+        {/* The refusal takes the place of the status line rather than sitting
+            beside it: "Unsaved changes" and the reason they are unsaved are the
+            same sentence, and the reason is the useful half. */}
+        <span
+          className="text-[11px]"
+          role={problem ? "alert" : undefined}
+          style={{ color: problem ? "var(--red)" : "var(--text-faint)" }}
+        >
+          {problem ?? (saved ? "Saved." : dirty ? "Unsaved changes" : "Up to date")}
         </span>
         <button
           type="button"

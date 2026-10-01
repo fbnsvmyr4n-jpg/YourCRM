@@ -42,8 +42,26 @@ import { logWrite } from "@/server/log";
 const isDateKey = (v: FormDataEntryValue | null): v is string =>
   typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
 
-export async function addMeetingAction(formData: FormData) {
-  return withCurrentTenant(async (q) => {
+/**
+ * One shape with two readings, so a screen cannot mistake a refusal for a save.
+ *
+ * These returned an id, or null when the form could not be read, or the refusal
+ * object a view-only transaction hands back. The booking panel treated all
+ * three alike: it emptied every field and printed "✓ Meeting Scheduled". The
+ * one case where somebody most needs their typing back — the save that did not
+ * happen — was the case that threw it away and claimed success.
+ */
+export type MeetingResult = { ok: true; id?: string } | { error: string };
+
+/** The refusal a view-only transaction returns, if that is what came back. */
+function refusal(result: unknown): string | null {
+  return result && typeof result === "object" && "error" in result
+    ? String((result as { error: unknown }).error)
+    : null;
+}
+
+export async function addMeetingAction(formData: FormData): Promise<MeetingResult> {
+  const out = await withCurrentTenant(async (q) => {
     const name = text(formData.get("name"), 80);
     const date = formData.get("date");
     const kind = kindFromLabel(formData.get("type"));
@@ -70,8 +88,13 @@ export async function addMeetingAction(formData: FormData) {
     });
 
     revalidateApp();
-    return created.id;
+    return { ok: true as const, id: created.id };
   });
+  const no = refusal(out);
+  if (no) return { error: no };
+  return out
+    ? { ok: true, id: out.id }
+    : { error: "That meeting could not be scheduled. Check the name, date and time." };
 }
 
 /** Record what happened. This is what every rate on the page counts. */
@@ -189,13 +212,20 @@ export async function updateMeetingAction(id: string, formData: FormData) {
   });
 }
 
-export async function setMeetingNotesAction(id: string, formData: FormData) {
-  return withCurrentTenant(async (q) => {
+export async function setMeetingNotesAction(
+  id: string,
+  formData: FormData
+): Promise<MeetingResult> {
+  const out = await withCurrentTenant(async (q) => {
     const meetingId = validId(id);
-    if (!meetingId) return;
+    if (!meetingId) return null;
     await updateMeeting(q, meetingId, { notes: multiline(formData.get("notes"), 5000) });
     revalidateApp();
+    return { ok: true as const };
   });
+  const no = refusal(out);
+  if (no) return { error: no };
+  return out ? { ok: true } : { error: "Those notes could not be saved." };
 }
 
 export async function deleteMeetingAction(id: string) {
