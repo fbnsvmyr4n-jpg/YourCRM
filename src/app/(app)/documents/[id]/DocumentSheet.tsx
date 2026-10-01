@@ -126,6 +126,25 @@ export function DocumentSheet({
   const voided =
     doc.status === "cancelled" ? "Cancelled" : doc.status === "declined" ? "Declined" : null;
 
+  /*
+     What this business has not told us about itself, said HERE.
+
+     A workspace that has filled nothing in gets a clean document — a name, a
+     date, the lines and the total, with no blank labels and no invented
+     figures, which is right. The problem the empty-letterhead audit found is
+     that it is also silent: somebody prints it and sends it to a client with no
+     address on it, having never been told there was an address to add.
+
+     Said at the moment of sending rather than on a settings screen nobody has
+     opened, and `print:hidden` below, so the client never sees it — this is a
+     note to the sender about their own paperwork, not part of the document.
+  */
+  const missing = [
+    !letterhead.address && "your address",
+    !letterhead.registrationNumber && "your company registration number",
+    !letterhead.phone && !letterhead.email && "a phone number or email",
+  ].filter(Boolean) as string[];
+
   return (
     <div className="mx-auto max-w-[860px] animate-fade-up pb-10 print:pb-0">
       {/* The controls, and nothing else on screen that is not on the paper. */}
@@ -168,6 +187,20 @@ export function DocumentSheet({
           <span className="hidden @min-[520px]:inline">Print or save as PDF</span>
         </button>
       </div>
+
+      {/* A note to the sender, never to the client: `print:hidden`. */}
+      {missing.length > 0 && (
+        <p
+          className="mb-4 rounded-xl px-4 py-2.5 text-sm print:hidden"
+          style={{ background: "var(--amber-soft)", color: "var(--amber)" }}
+        >
+          This document does not show {missing.join(", ")}.{" "}
+          <Link href="/settings?s=business" className="focus-ring rounded font-semibold underline">
+            Add them under Settings → Business
+          </Link>{" "}
+          and every document picks them up.
+        </p>
+      )}
 
       <article className="doc-sheet rounded-2xl p-5 @min-[520px]:p-8 @min-[760px]:p-10 print:rounded-none print:p-0">
         <header className="flex flex-wrap items-start justify-between gap-6 border-b border-[#e3e7ef] pb-6">

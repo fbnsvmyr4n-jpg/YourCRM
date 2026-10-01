@@ -226,6 +226,31 @@ describe("what comes out of the printer", () => {
   });
 });
 
+describe("a workspace that has filled nothing in", () => {
+  it("STILL GETS A CLEAN DOCUMENT — no blank labels for what it has not said", () => {
+    /* Every letterhead line hangs off its own value, so an empty workspace gets
+       a name, a date, the lines and the total, and nothing else. A document
+       with "VAT No:" and nothing after it reads as broken. */
+    for (const field of ["address", "registrationNumber", "vatNumber"]) {
+      expect(sheetCode).toMatch(new RegExp(`\\{letterhead\\.${field} &&`));
+    }
+  });
+
+  it("IS TOLD WHAT IS MISSING, where it is about to be sent", () => {
+    /* The empty-letterhead audit's finding: the document was correct and
+       silent, so somebody prints it and sends a client a quotation with no
+       address on it, having never been told there was one to add. */
+    expect(sheetCode).toMatch(/const missing = \[/);
+    expect(sheetCode).toMatch(/This document does not show/);
+    expect(sheetCode).toMatch(/\/settings\?s=business/);
+  });
+
+  it("NEVER PRINTS THAT NOTE — it is for the sender, not the client", () => {
+    const note = sheetCode.slice(sheetCode.indexOf("{missing.length > 0 &&"));
+    expect(note.slice(0, 400)).toMatch(/print:hidden/);
+  });
+});
+
 describe("how it is reached", () => {
   it("is what the number in the list opens", () => {
     expect(view).toMatch(/href=\{`\/documents\/\$\{r\.id\}`\}/);
