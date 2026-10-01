@@ -37,6 +37,18 @@ export function LeadCardsSection({ leads }: { leads: LeadCard[] }) {
   useOpenFromQuery("new", useCallback(() => setModal("new"), []));
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /** Why the last save or delete did not happen. Null when nothing is wrong. */
+  const [problem, setProblem] = useState<string | null>(null);
+  /**
+   * What was typed, kept across a refusal.
+   *
+   * React 19 resets an uncontrolled field after EVERY form action, refused ones
+   * included — the trap `useKeptForm` exists for. This form posts through a
+   * plain `action` prop rather than `useActionState`, so the guard test that
+   * catches it never looked here: showing the reason was only half a fix, with
+   * the other half being a cleared form and a person retyping everything.
+   */
+  const [kept, setKept] = useState<Record<string, string> | null>(null);
   const [filter, setFilter] = useState<"All" | LeadStatus>("All");
   const [sort, setSort] = useState<LeadSort>("newest");
   /*
@@ -84,11 +96,34 @@ export function LeadCardsSection({ leads }: { leads: LeadCard[] }) {
     }
   }, [leads, filter, sort]);
 
+  /**
+   * Save, and close the form ONLY IF IT SAVED.
+   *
+   * This awaited the action and closed the dialog either way, without looking
+   * at what came back. A view-only user pressed Save Lead, the form closed as
+   * though it had worked, and no lead existed anywhere — and the same silence
+   * swallowed every other refusal, including a name the server could not read.
+   * Found by driving the product as a viewer rather than as an owner.
+   *
+   * A refusal now keeps the form open, with what was typed still in it and the
+   * reason sitting above the buttons.
+   */
   async function handleSubmit(formData: FormData) {
     setBusy(true);
+    setProblem(null);
     try {
-      if (modal === "new") await addLeadAction(formData);
-      else if (modal) await updateLeadAction(modal.id, formData);
+      const result =
+        modal === "new"
+          ? await addLeadAction(formData)
+          : modal
+            ? await updateLeadAction(modal.id, formData)
+            : null;
+      if (result && "error" in result) {
+        setProblem(result.error);
+        setKept(Object.fromEntries([...formData.entries()].map(([k, v]) => [k, String(v)])));
+        return;
+      }
+      setKept(null);
       setModal(null);
     } finally {
       setBusy(false);
@@ -108,7 +143,11 @@ export function LeadCardsSection({ leads }: { leads: LeadCard[] }) {
       return;
     setBusy(true);
     try {
-      await deleteLeadAction(id);
+      /* Said out loud for the same reason as the save above: a delete that was
+         refused used to look exactly like one that happened, until the next
+         reload put the lead back and nobody knew why. */
+      const result = await deleteLeadAction(id);
+      if (result && "error" in result) setProblem(result.error);
     } finally {
       setBusy(false);
     }
@@ -360,7 +399,13 @@ export function LeadCardsSection({ leads }: { leads: LeadCard[] }) {
         <LeadModal
           lead={modal === "new" ? undefined : modal}
           busy={busy}
-          onClose={() => setModal(null)}
+          problem={problem}
+          kept={kept}
+          onClose={() => {
+            setModal(null);
+            setProblem(null);
+            setKept(null);
+          }}
           onSubmit={handleSubmit}
         />
       )}
@@ -498,15 +543,23 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function LeadModal({
   lead,
   busy,
+  problem,
+  kept,
   onClose,
   onSubmit,
 }: {
   lead?: LeadCard;
   busy: boolean;
+  /** Why the last attempt did not save. The form stays open until it does. */
+  problem: string | null;
+  /** What was typed on a refused attempt, so nobody retypes it. */
+  kept: Record<string, string> | null;
   onClose: () => void;
   onSubmit: (formData: FormData) => void | Promise<void>;
 }) {
   const editing = !!lead;
+  /* What was typed wins over the record, which wins over empty. */
+  const value = (name: string, fromRecord?: string) => kept?.[name] ?? fromRecord;
   return (
     <Overlay>
       <div className="fixed inset-0 z-50 grid place-items-center p-4" role="dialog" aria-modal="true">
@@ -520,16 +573,16 @@ function LeadModal({
           </div>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <ModalField name="name" label="Name" required autoFocus className="sm:col-span-2" defaultValue={lead?.name} />
-            <ModalField name="email" label="Email" type="email" className="sm:col-span-2" defaultValue={lead?.email} />
-            <ModalField name="phone" label="Phone" defaultValue={lead?.phone} />
-            <ModalField name="location" label="Location" defaultValue={lead?.location} />
-            <ModalField name="company" label="Company (Project Info)" className="sm:col-span-2" defaultValue={lead?.company} />
+            <ModalField name="name" label="Name" required autoFocus className="sm:col-span-2" defaultValue={value("name", lead?.name)} />
+            <ModalField name="email" label="Email" type="email" className="sm:col-span-2" defaultValue={value("email", lead?.email)} />
+            <ModalField name="phone" label="Phone" defaultValue={value("phone", lead?.phone)} />
+            <ModalField name="location" label="Location" defaultValue={value("location", lead?.location)} />
+            <ModalField name="company" label="Company (Project Info)" className="sm:col-span-2" defaultValue={value("company", lead?.company)} />
             {/* From the shared list, not a copy of it. Written out here, this
                 offered four of the seven sources a deal can carry — so a lead
                 that genuinely came from the website could not be recorded as
                 one, and the panel above had no way to ever be right. */}
-            <ModalSelect name="source" label="Source" options={[...LEAD_SOURCES]} defaultValue={lead?.source} />
+            <ModalSelect name="source" label="Source" options={[...LEAD_SOURCES]} defaultValue={value("source", lead?.source)} />
           </div>
 
           {/* No status field. It used to be chosen here, which meant declaring an
@@ -541,6 +594,18 @@ function LeadModal({
               ? `Status is ${lead?.status ?? "New Lead"} — set automatically from calls, meetings and deals.`
               : "Saved as a New Lead. It moves to Follow-up Required after a call or meeting, and to Closed Won when the deal lands."}
           </p>
+
+          {/* Above the buttons, where somebody who just pressed Save is
+              already looking. */}
+          {problem && (
+            <p
+              role="alert"
+              className="mt-4 rounded-xl px-3.5 py-2.5 text-sm"
+              style={{ background: "var(--red-soft)", color: "var(--red)" }}
+            >
+              {problem}
+            </p>
+          )}
 
           <div className="mt-6 flex items-center justify-end gap-3">
             <button type="button" onClick={onClose} className="btn-soft focus-ring rounded-xl px-5 py-2.5 text-sm font-medium">

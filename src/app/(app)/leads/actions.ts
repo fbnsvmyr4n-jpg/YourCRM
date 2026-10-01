@@ -58,8 +58,32 @@ function parseLead(formData: FormData): Parsed | null {
   };
 }
 
-export async function addLeadAction(formData: FormData) {
-  return withCurrentTenant(async (q) => {
+/**
+ * What a lead form gets back.
+ *
+ * These used to return the new contact's id, or null, or — for a view-only
+ * user — the refusal object every action hands back. The one screen calling
+ * them awaited the promise and closed the dialog regardless, so a refused save
+ * looked exactly like a saved one: a viewer pressed Save Lead, the form closed,
+ * and the lead did not exist. Anything else the server refused, including a
+ * name it could not read, disappeared the same way.
+ *
+ * So the answer now has two readings and one shape, and the screen has to look
+ * at it to know which it got.
+ */
+export type LeadResult = { ok: true; id?: string } | { error: string };
+
+/** The refusal a view-only transaction hands back, if that is what this is. */
+function refusal(result: unknown): string | null {
+  return result && typeof result === "object" && "error" in result
+    ? String((result as { error: unknown }).error)
+    : null;
+}
+
+const UNREADABLE = "That could not be saved. Check the name and try again.";
+
+export async function addLeadAction(formData: FormData): Promise<LeadResult> {
+  const out = await withCurrentTenant(async (q) => {
     const input = parseLead(formData);
     if (!input) return null;
 
@@ -84,15 +108,18 @@ export async function addLeadAction(formData: FormData) {
     });
 
     revalidateApp();
-    return contact.id;
+    return { ok: true as const, id: contact.id };
   });
+  const no = refusal(out);
+  if (no) return { error: no };
+  return out ? { ok: true, id: out.id } : { error: UNREADABLE };
 }
 
-export async function updateLeadAction(id: string, formData: FormData) {
-  return withCurrentTenant(async (q) => {
+export async function updateLeadAction(id: string, formData: FormData): Promise<LeadResult> {
+  const out = await withCurrentTenant(async (q) => {
     const contactId = validId(id);
     const input = parseLead(formData);
-    if (!contactId || !input) return;
+    if (!contactId || !input) return null;
 
     await updateContact(q, contactId, {
       firstName: input.firstName,
@@ -113,13 +140,17 @@ export async function updateLeadAction(id: string, formData: FormData) {
     }
 
     revalidateApp();
+    return { ok: true as const };
   });
+  const no = refusal(out);
+  if (no) return { error: no };
+  return out ? { ok: true } : { error: UNREADABLE };
 }
 
-export async function deleteLeadAction(id: string) {
-  return withCurrentTenant(async (q) => {
+export async function deleteLeadAction(id: string): Promise<LeadResult> {
+  const out = await withCurrentTenant(async (q) => {
     const contactId = validId(id);
-    if (!contactId) return;
+    if (!contactId) return null;
 
     /**
      * Removes the person, not just their pipeline entry.
@@ -137,5 +168,9 @@ export async function deleteLeadAction(id: string) {
       logWrite("delete", "contact", { id: contactId, actor: q.ctx.userId, detail: "from Leads" });
     }
     revalidateApp();
+    return { ok: true as const };
   });
+  const no = refusal(out);
+  if (no) return { error: no };
+  return out ? { ok: true } : { error: "That lead could not be deleted." };
 }

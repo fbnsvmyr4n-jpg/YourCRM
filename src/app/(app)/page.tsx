@@ -139,6 +139,19 @@ export default async function DashboardPage() {
      by the business zone, so at 01:00 in Johannesburg the page printed
      yesterday's date beside a count of today's meetings.
   */
+  /*
+     The hour the GREETING is about, in the same zone as the date below it.
+
+     It used to be `now.getHours()` — the server's hour, which on Vercel is UTC.
+     The role-matrix audit caught the result side by side on one screen: the
+     clock said 22:01 and the line under it said "Good morning". For a business
+     in Johannesburg it would say "Good evening" from four in the afternoon.
+     The date on this page was fixed for exactly this reason; the greeting an
+     inch away was missed.
+  */
+  const businessHour = Number(
+    instantToWallClock(now.toISOString(), timeZone)?.time.slice(0, 2) ?? now.getUTCHours()
+  );
   const weekdayLabel = now.toLocaleDateString("en-GB", { weekday: "long", timeZone });
   const dateLabel = now.toLocaleDateString("en-GB", {
     day: "numeric",
@@ -297,7 +310,7 @@ export default async function DashboardPage() {
 
           <div className="order-2 @min-[820px]:order-none">
             <Hero
-              greeting={greeting(now.getHours())}
+              greeting={greeting(businessHour)}
               name={me?.name.split(" ")[0] ?? "there"}
               /* A day's summary is only a summary once there is a day to sum
                  up. "You have 0 meetings and 0 follow-ups today" was the first
