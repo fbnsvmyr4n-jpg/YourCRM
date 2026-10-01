@@ -127,6 +127,18 @@ export const EXPECTED_COLUMNS: ReadonlyArray<[string, string]> = [
   /* Where a purchase order is sent. Read by the send path and the document
      forms, so an unmigrated database breaks raising paperwork, not one field. */
   ["documents", "party_email"],
+  /* The letterhead and the tax rules. Every one of these is named in the SELECT
+     the settings repo uses, and that row is read by the layout wrapping every
+     screen — so a database missing them does not lose a field on one page, it
+     fails to render the product at all. Which is precisely what this check is
+     for: catching it before a deployment is pointed at that database. */
+  ["settings", "business_address"],
+  ["settings", "business_phone"],
+  ["settings", "business_email"],
+  ["settings", "registration_number"],
+  ["settings", "vat_number"],
+  ["settings", "vat_rate_bp"],
+  ["settings", "prices_include_vat"],
   /* Projects. Named in the SELECT the deals repo and the projects page both
      use, so an unmigrated database breaks the pipeline board, not one page. */
   ["deals", "company_id"],

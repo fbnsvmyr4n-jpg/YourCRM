@@ -24,7 +24,7 @@ import { createSubAccount } from "@/server/sub-accounts";
 import { withSystem } from "@/server/tenant";
 import { requireTenant, SUB_ACCOUNT_COOKIE, withCurrentTenant } from "@/server/tenant-session";
 import { isTrashKind, nounFor, restoreFromTrash } from "@/server/trash";
-import { count, email as validEmail, id as validId, money, multiline, pick, text } from "@/server/validate";
+import { count, decimal, email as validEmail, id as validId, money, multiline, pick, text } from "@/server/validate";
 import { cookies } from "next/headers";
 
 /**
@@ -208,6 +208,100 @@ export async function saveBookingLinkAction(
        Repeating it here printed the same sentence twice. */
     return { ok: "Saved." };
   });
+}
+
+/**
+ * Who this business is, on the documents it issues — and how it charges tax.
+ *
+ * ── Why every field is sent every time ────────────────────────────────────
+ *
+ * Empty means EMPTY. A form that skipped blank boxes could fill an address in
+ * and never take it out again, so a business that moved premises, changed
+ * bankers or deregistered for VAT would go on printing the old details on
+ * documents it hands to clients, with nothing in the product able to stop it.
+ * The repo takes each of these as a value plus "was it mentioned" for exactly
+ * this reason.
+ *
+ * ── Why the rate is read the way it is ────────────────────────────────────
+ *
+ * Somebody types "15" and means 15%. It is stored as 1500 basis points, and the
+ * conversion happens once, here, through a validator that keeps two decimal
+ * places — 8.75% is a real rate in places this is sold, and 0.15 is not a
+ * number a computer holds exactly. See `server/vat.ts`.
+ *
+ * ── Why `manage_billing` ──────────────────────────────────────────────────
+ *
+ * A VAT number and a bank account are finance's, not everybody's. It is the
+ * same gate the billing screen uses, so an owner or a finance user can set
+ * these and a member cannot quietly change the account clients are told to pay
+ * into.
+ *
+ * `crmData: false`: this is what the business says about ITSELF. Not one record
+ * about a customer is read, which is why a finance user — who cannot open
+ * Contacts at all — can still do this.
+ */
+export async function updateBusinessDetailsAction(
+  _prev: FormState,
+  formData: FormData
+): Promise<FormState> {
+  return withCurrentTenant(async (q) => {
+    if (!roleCan(q.ctx.role, "manage_billing")) {
+      return { error: "Only an owner or a finance user can change the business details." };
+    }
+
+    const vatNumber = text(formData.get("vatNumber"), 40);
+    /* Percent with a fraction, 0 to 100. `decimal` returns null for anything
+       that is not a finite non-negative number, so a pasted "fifteen" is
+       refused rather than silently becoming zero — which would be a tax line
+       quietly disappearing from every document the business sends. */
+    const ratePercent = decimal(formData.get("vatRate"), 100, 2);
+    if (ratePercent === null) {
+      return { error: "Enter a VAT rate between 0 and 100 — for example 15." };
+    }
+    const vatRateBp = Math.round(ratePercent * 100);
+
+    /* A rate with no number beside it is the state that produces an invoice a
+       revenue service will not accept: tax charged by a business that has not
+       said who is charging it. Refused at the door, naming the missing half. */
+    if (vatRateBp > 0 && !vatNumber) {
+      return { error: "Add your VAT registration number before charging VAT on documents." };
+    }
+
+    const businessEmail = validEmail(formData.get("businessEmail"));
+    if (businessEmail === null) {
+      return { error: "That business email address does not look right." };
+    }
+
+    await updateSettings(q, {
+      businessAddress: multiline(formData.get("businessAddress"), 400) || null,
+      businessPhone: text(formData.get("businessPhone"), 60) || null,
+      businessEmail: businessEmail || null,
+      registrationNumber: text(formData.get("registrationNumber"), 60) || null,
+      vatNumber: vatNumber || null,
+      vatRateBp,
+      /* An unchecked checkbox posts nothing at all, so absence IS "prices
+         exclude VAT". Read as a boolean rather than skipped when absent, or the
+         setting could be turned on and never off again. */
+      pricesIncludeVat: formData.get("pricesIncludeVat") !== null,
+      invoicePayTo: multiline(formData.get("invoicePayTo"), 600) || null,
+    });
+
+    /* No values in the log line. What a business banks with is not something
+       this product writes into a record for somebody else to read. */
+    logWrite("update", "settings", {
+      id: q.ctx.subAccountId,
+      actor: q.ctx.userId,
+      detail: "Business details",
+    });
+
+    revalidateApp();
+    return {
+      ok:
+        vatRateBp > 0
+          ? "Saved. Documents now show VAT separately."
+          : "Saved. Documents show no VAT.",
+    };
+  }, { crmData: false });
 }
 
 export async function updateProfileAction(_prev: FormState, formData: FormData): Promise<FormState> {

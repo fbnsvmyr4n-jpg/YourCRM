@@ -35,6 +35,7 @@ import { ROLES, withSystem } from "@/server/tenant";
 import { currentUser, requireTenantPage, withTenantPage } from "@/server/tenant-session";
 import { storageEngine } from "@/server/store";
 import { AutomationsCard } from "./AutomationsCard";
+import { BusinessCard } from "./BusinessCard";
 import { ClientsCard } from "./ClientsCard";
 import { CustomFieldsCard } from "./CustomFieldsCard";
 import { SettingsNav } from "./SettingsNav";
@@ -296,6 +297,15 @@ export default async function SettingsPage({
           <SignOutCard />
         </>
       ),
+    },
+    {
+      /* Who the BUSINESS is, as against who the reader is. Everything in here
+         is printed on a document somebody outside this workspace reads, which
+         is why it is an area of its own rather than another card under
+         Preferences — and it is offered to IT and accounts too, because a
+         finance user is exactly who fills it in. */
+      id: "business",
+      content: <BusinessCard settings={settings} canManage={roleCan(user.role, "manage_billing")} />,
     },
     {
       id: "team",

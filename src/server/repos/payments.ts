@@ -3,6 +3,8 @@ import type { SystemQuery, TenantQuery } from "../tenant";
 import { decryptSecret, encryptSecret } from "../secrets";
 import { addDays } from "../retainer-rules";
 import { checkKeyShape, verifySecretKey, type Verified } from "../paystack";
+import { payableCents } from "../vat";
+import { getSettings } from "./settings";
 import { logActivity } from "./activity";
 
 /**
@@ -188,7 +190,19 @@ export async function recordPaystackPayment(
 
   const received = await paidCents(q, invoice.id);
   const total = Number(invoice.total);
-  const covered = received >= total;
+  /*
+     Settled against what the CLIENT OWES — the lines plus VAT, where this
+     workspace charges tax on top of the prices it types.
+
+     Compared against the bare line total instead, an invoice would go to "paid"
+     the moment the pre-tax amount arrived: 15% short, marked settled, with
+     nothing on any screen saying money was still outstanding. One function
+     answers this for the pay page, the email, the printed sheet and this write
+     — `payableCents` in server/vat.ts — so none of them can drift.
+  */
+  const settings = await getSettings(q);
+  const due = payableCents(total, settings.vatRateBp, settings.pricesIncludeVat);
+  const covered = received >= due;
   if (covered) {
     await q.rows(
       `UPDATE documents SET status = 'paid', updated_at = now() WHERE sub_account_id = $1 AND id = $2`,
@@ -206,7 +220,7 @@ export async function recordPaystackPayment(
   });
   return covered
     ? { outcome: "paid", number: invoice.number }
-    : { outcome: "part_paid", number: invoice.number, paidCents: received, totalCents: total };
+    : { outcome: "part_paid", number: invoice.number, paidCents: received, totalCents: due };
 }
 
 /** Who a task about a project goes to: its owner, when they can still see customer records. */

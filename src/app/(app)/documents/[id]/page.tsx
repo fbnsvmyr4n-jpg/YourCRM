@@ -26,6 +26,19 @@ export default async function DocumentPage({ params }: { params: Promise<{ id: s
       ctx: q.ctx,
       currency: settings.currency,
       payTo: settings.invoicePayTo,
+      /* The letterhead, lifted off settings here rather than passed as the
+         whole settings row: a client component receives everything it is
+         given, and the rest of that row is nobody outside this workspace's
+         business. */
+      letterhead: {
+        address: settings.businessAddress,
+        phone: settings.businessPhone,
+        email: settings.businessEmail,
+        registrationNumber: settings.registrationNumber,
+        vatNumber: settings.vatNumber,
+        vatRateBp: settings.vatRateBp,
+        pricesIncludeVat: settings.pricesIncludeVat,
+      },
     };
   });
 
@@ -62,6 +75,7 @@ export default async function DocumentPage({ params }: { params: Promise<{ id: s
       currency={data.currency}
       payTo={data.payTo}
       business={who.business}
+      letterhead={data.letterhead}
       approvedBy={who.approvedBy}
       preparedBy={me?.name ?? null}
     />

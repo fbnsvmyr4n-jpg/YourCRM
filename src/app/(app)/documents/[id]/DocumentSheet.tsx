@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { ArrowLeft, Printer } from "lucide-react";
 import { formatMoney, type CurrencyCode } from "@/lib/money";
+import { rateLabel, vatBreakdown } from "@/server/vat";
 import type { Quote } from "@/server/repos/quotes";
 
 /**
@@ -48,11 +49,23 @@ function longDate(iso: string): string {
   return month ? `${Number(m[3])} ${month} ${m[1]}` : iso;
 }
 
+/** What Settings → Business says about the firm whose name is on the page. */
+export type Letterhead = {
+  address: string | null;
+  phone: string | null;
+  email: string | null;
+  registrationNumber: string | null;
+  vatNumber: string | null;
+  vatRateBp: number;
+  pricesIncludeVat: boolean;
+};
+
 export function DocumentSheet({
   doc,
   currency,
   payTo,
   business,
+  letterhead,
   approvedBy,
   preparedBy,
 }: {
@@ -60,6 +73,7 @@ export function DocumentSheet({
   currency: CurrencyCode;
   payTo: string | null;
   business: string;
+  letterhead: Letterhead;
   /** Who said yes, from the document itself — not whoever is looking at it. */
   approvedBy: string | null;
   preparedBy: string | null;
@@ -71,7 +85,34 @@ export function DocumentSheet({
      printing them all makes a whole number look like a measurement. */
   const qty = (n: number) => String(Number(n.toFixed(3)));
 
-  const title = KIND_TITLE[doc.kind] ?? "Document";
+  /*
+     The tax, if this business charges any.
+
+     Worked out in `server/vat.ts` and nowhere else, so the printed sheet, the
+     emailed copy and the online payment page cannot disagree by a cent — which
+     is enough for a bookkeeper to send an invoice back.
+
+     Null at a zero rate, and then not one word about VAT appears: a business
+     that is not registered printing "VAT 0.00" invites exactly the wrong
+     question from a client.
+  */
+  const vat =
+    doc.kind === "purchase_order"
+      ? /* NEVER on a purchase order. That is money going OUT, and the VAT on it
+           is the SUPPLIER's to charge at their rate under their number — ours
+           has nothing to do with it. Printing our 15% on an order would be
+           telling a supplier what to invoice us, and would overstate a
+           committed cost by the rate in our own figures. */
+        null
+      : vatBreakdown(doc.totalCents, letterhead.vatRateBp, letterhead.pricesIncludeVat);
+
+  /* "Tax invoice" is the required heading in South Africa and reads correctly
+     everywhere else; without a VAT number it would be a claim this business
+     has not made, so the plain word stands. */
+  const title =
+    doc.kind === "invoice" && letterhead.vatNumber
+      ? "Tax invoice"
+      : (KIND_TITLE[doc.kind] ?? "Document");
   const isOrder = doc.kind === "purchase_order";
   /*
      A document that is no longer live says so ON THE PAPER.
@@ -141,9 +182,26 @@ export function DocumentSheet({
             </h1>
             <p className="mt-1 text-sm text-[#5a6478]">{doc.number}</p>
           </div>
-          <div className="min-w-0 text-left sm:text-right">
+          {/* The letterhead. Every line is omitted when the workspace has not
+              supplied it — a document with a blank "VAT No:" on it reads as
+              broken, and an invented one is worse than either. */}
+          <div className="min-w-0 text-left @min-[520px]:text-right">
             {business && <p className="font-semibold">{business}</p>}
-            {doc.issuedOn && <p className="mt-1 text-sm text-[#5a6478]">{longDate(doc.issuedOn)}</p>}
+            {letterhead.address && (
+              <p className="mt-1 whitespace-pre-line text-sm text-[#5a6478]">{letterhead.address}</p>
+            )}
+            {(letterhead.phone || letterhead.email) && (
+              <p className="mt-1 text-sm text-[#5a6478]">
+                {[letterhead.phone, letterhead.email].filter(Boolean).join(" · ")}
+              </p>
+            )}
+            {letterhead.registrationNumber && (
+              <p className="mt-1 text-xs text-[#8b94a7]">Reg. {letterhead.registrationNumber}</p>
+            )}
+            {letterhead.vatNumber && (
+              <p className="text-xs text-[#8b94a7]">VAT {letterhead.vatNumber}</p>
+            )}
+            {doc.issuedOn && <p className="mt-2 text-sm text-[#5a6478]">{longDate(doc.issuedOn)}</p>}
           </div>
         </header>
 
@@ -203,20 +261,49 @@ export function DocumentSheet({
               )}
             </tbody>
             <tfoot>
+              {/* With no tax to show, one line — the figure the lines add up to.
+                  With tax, three, because a client's bookkeeper has to be able
+                  to read the amount before VAT, the VAT itself and what is
+                  payable without doing any arithmetic of their own. */}
+              {vat && (
+                <>
+                  <tr className="break-inside-avoid">
+                    <td colSpan={2} />
+                    <td className="pt-4 pl-2 text-right text-[#5a6478] @min-[520px]:pl-4">
+                      Subtotal
+                    </td>
+                    <td className="pt-4 pl-2 text-right tabular-nums @min-[520px]:pl-4">
+                      {money(vat.netCents)}
+                    </td>
+                  </tr>
+                  <tr className="break-inside-avoid">
+                    <td colSpan={2} />
+                    <td className="pt-1 pl-2 text-right text-[#5a6478] @min-[520px]:pl-4">
+                      VAT at {rateLabel(vat.rateBp)}
+                    </td>
+                    <td className="pt-1 pl-2 text-right tabular-nums @min-[520px]:pl-4">
+                      {money(vat.vatCents)}
+                    </td>
+                  </tr>
+                </>
+              )}
               <tr className="break-inside-avoid">
                 <td colSpan={2} />
                 <td className="pt-4 pl-2 text-right font-semibold @min-[520px]:pl-4">Total</td>
                 <td className="pt-4 pl-2 text-right text-base font-bold tabular-nums @min-[520px]:pl-4 @min-[520px]:text-lg">
-                  {money(doc.totalCents)}
+                  {/* The gross when there is VAT: the one number the other side
+                      actually pays. Showing the pre-tax figure here is how a
+                      client ends up transferring 15% less than the invoice. */}
+                  {money(vat ? vat.grossCents : doc.totalCents)}
                 </td>
               </tr>
             </tfoot>
           </table>
         </div>
 
-        {/* No VAT line, and no "incl. VAT" on the total. The workspace holds
-            neither a VAT number nor a rate, so either would be a tax claim made
-            on nothing. */}
+        {/* Nothing about VAT above when the workspace charges none. A business
+            that is not registered printing "VAT 0.00" invites exactly the wrong
+            question, and an invented number would be worse than either. */}
 
         {doc.notes && (
           <p className="mt-8 whitespace-pre-line border-t border-[#e3e7ef] pt-6 text-sm leading-relaxed text-[#43506a]">

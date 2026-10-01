@@ -3,6 +3,7 @@
 import { Fragment, useState } from "react";
 import {
   Briefcase,
+  Building2,
   CreditCard,
   Database,
   SlidersHorizontal,
@@ -47,6 +48,13 @@ import type { SettingsSectionId } from "./sections";
 
 const META: Record<SettingsSectionId, { label: string; icon: LucideIcon; blurb: string }> = {
   account: { label: "Account", icon: UserRound, blurb: "Your name, sign-in and password" },
+  /* "Business", not "Company" or "Letterhead" — the word somebody arrives
+     holding, and the blurb names the three things they came to type. */
+  business: {
+    label: "Business",
+    icon: Building2,
+    blurb: "Address, registration and VAT shown on your documents",
+  },
   team: { label: "Team", icon: Users, blurb: "Everyone who works here, by department" },
   clients: { label: "Clients", icon: Briefcase, blurb: "Who is looking after whom" },
   /* Not "when a lead or deal changes" any more: an arriving message raises a

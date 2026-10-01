@@ -4,6 +4,7 @@
 import { useKeptForm } from "@/lib/use-kept-form";
 import { CheckCircle2, Lock } from "lucide-react";
 import { formatMoney } from "@/lib/money";
+import { rateLabel } from "@/server/vat";
 import type { PayPage } from "@/server/pay/pay";
 import { payAction, type PayState } from "./actions";
 
@@ -64,6 +65,25 @@ export function PayView({ token, page, notice }: { token: string; page: Shown; n
                   <td className="whitespace-nowrap py-2 text-right tabular-nums">{money(l.totalCents)}</td>
                 </tr>
               ))}
+              {/* Where this business charges VAT, the client sees the two
+                  figures the total is made of rather than a number that does
+                  not match the lines above it. */}
+              {page.vat && (
+                <>
+                  <tr>
+                    <td className="pt-3 text-muted">Subtotal</td>
+                    <td className="whitespace-nowrap pt-3 text-right tabular-nums">
+                      {money(page.vat.netCents)}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="pt-1 text-muted">VAT at {rateLabel(page.vat.rateBp)}</td>
+                    <td className="whitespace-nowrap pt-1 text-right tabular-nums">
+                      {money(page.vat.vatCents)}
+                    </td>
+                  </tr>
+                </>
+              )}
               <tr>
                 <td className="pt-3 font-semibold">Total</td>
                 <td className="whitespace-nowrap pt-3 text-right font-semibold tabular-nums">{money(page.totalCents)}</td>

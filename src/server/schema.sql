@@ -3073,6 +3073,85 @@ ALTER TABLE documents ADD CONSTRAINT documents_party_email_shape CHECK (
 );
 
 -- ---------------------------------------------------------------------------
+-- Who this business IS, on the documents it issues.
+--
+-- The product could print a quotation but not a document a business could
+-- lawfully hand over. In South Africa — and in most of the countries this is
+-- sold into — a tax invoice must carry the supplier's own address, its company
+-- registration number and its VAT number, and must show the VAT separately from
+-- the amount before it. A sheet without those is a pretty page a bookkeeper
+-- cannot file, and the business goes back to Word.
+--
+-- PER WORKSPACE, never per user and never global. Two people in the same
+-- business issue the same company's paperwork; two workspaces on this platform
+-- are two different companies. `settings` is keyed by `sub_account_id` and is
+-- already the row every document reads for its currency, so it is where these
+-- belong — the alternative, copying them onto each document, would mean
+-- changing address required editing history.
+--
+-- All free text. Registration numbers are "2019/123456/07" in South Africa, an
+-- eight-digit number in the UK, an EIN in the United States; a structured field
+-- would be wrong for almost everybody. Length limits only, so a paste accident
+-- cannot fill a page.
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS business_address     TEXT;
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS business_phone       TEXT;
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS business_email       TEXT;
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS registration_number  TEXT;
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS vat_number           TEXT;
+
+ALTER TABLE settings DROP CONSTRAINT IF EXISTS settings_letterhead_lengths;
+ALTER TABLE settings ADD CONSTRAINT settings_letterhead_lengths CHECK (
+  (business_address    IS NULL OR length(business_address)    <= 400)
+  AND (business_phone  IS NULL OR length(business_phone)      <= 60)
+  AND (business_email  IS NULL OR length(business_email)      <= 200)
+  AND (registration_number IS NULL OR length(registration_number) <= 60)
+  AND (vat_number      IS NULL OR length(vat_number)          <= 40)
+);
+
+-- ---------------------------------------------------------------------------
+-- VAT, and the one question that decides every figure on a document.
+--
+-- The rate is stored in BASIS POINTS — 1500 is 15%, 875 is 8.75% — for the same
+-- reason money is stored in cents. `0.15` is not a number a computer holds
+-- exactly, and a rate that is a hundredth of a percent out is a total that is
+-- wrong by a rand on every invoice a business ever sends.
+--
+-- Zero means this workspace does not charge VAT, which is both the default and
+-- the honest state for a business that is not registered. Nothing about VAT is
+-- printed until somebody sets a rate, because a document showing "VAT 0.00" on
+-- a business that is not registered invites exactly the wrong question.
+--
+-- `prices_include_vat` is the question that must be asked out loud rather than
+-- assumed, because the same typed figure means two different things:
+--
+--   OFF (the default): R1,000 typed on a line is R1,000 before VAT. The
+--        document shows R1,000 + R150 = R1,150, and the client pays R1,150.
+--   ON:  R1,000 typed is what the client pays. The document shows R869.57 +
+--        R130.43 = R1,000.
+--
+-- Guessing this wrong does not look wrong on screen — it is a total that is 15%
+-- out, in the customer's favour or ours, on every document. Hence a column with
+-- a default that matches the commonest trade practice, and a control that
+-- states both readings in words.
+--
+-- WHAT THIS DELIBERATELY DOES NOT CHANGE: the figure a deal, the pipeline and
+-- the reports count is still the sum of the lines as typed. VAT is money
+-- collected for the revenue service, not revenue — and moving reported figures
+-- under somebody as a side effect of filling in a tax number would be the worst
+-- kind of surprise.
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS vat_rate_bp INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE settings DROP CONSTRAINT IF EXISTS settings_vat_rate_sane;
+-- 0 to 100%. The ceiling is not a guess about tax policy; it is what stops a
+-- fat-fingered "1500%" from being stored as a rate at all.
+ALTER TABLE settings ADD CONSTRAINT settings_vat_rate_sane CHECK (vat_rate_bp BETWEEN 0 AND 10000);
+
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS prices_include_vat BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- ---------------------------------------------------------------------------
 -- What the application's own database role may do.
 --
 -- KEEP THIS THE LAST BLOCK IN THE FILE: `GRANT … ON ALL TABLES` covers only the

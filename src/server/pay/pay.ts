@@ -13,6 +13,7 @@ import {
 } from "../repos/payments";
 import { initializeTransaction, paystackTakes, verifyTransaction } from "../paystack";
 import { appUrl } from "../billing/stripe";
+import { payableCents, vatBreakdown } from "../vat";
 import type { CurrencyCode } from "@/lib/money";
 import { logWrite } from "../log";
 
@@ -45,7 +46,10 @@ export type PayPage =
       dueOn: string | null;
       currency: CurrencyCode;
       lines: { description: string; quantity: number; unitCents: number; totalCents: number }[];
+      /** What is owed, tax included. Not the sum of the lines — see below. */
       totalCents: number;
+      /** The tax split, or null where this business charges none. */
+      vat: { netCents: number; vatCents: number; rateBp: number } | null;
       outstandingCents: number;
       payTo: string | null;
       testMode: boolean;
@@ -63,10 +67,23 @@ export async function loadPayPage(token: string): Promise<PayPage> {
   return withTenant(asWorkspace(link), async (q) => {
     const invoice = await findInvoice(q, link.documentId);
     if (!invoice) return { state: "not_found" as const };
-    const { currency } = await getSettings(q);
+    const settings = await getSettings(q);
+    const { currency } = settings;
     const connection = await getConnection(q);
     const received = await paidCents(q, invoice.id);
-    const outstanding = Math.max(0, invoice.totalCents - received);
+    /*
+       What is OWED is the gross, not the sum of the lines.
+
+       Where a workspace charges VAT on top of the prices it types, the lines
+       add up to the amount before tax — and billing a client that figure would
+       undercharge every invoice by the rate, silently, with the shortfall only
+       appearing in a VAT return. One function decides this for the printed
+       sheet, the email, this page and the card charge, so the four cannot
+       drift apart: `payableCents` in server/vat.ts.
+    */
+    const vat = vatBreakdown(invoice.totalCents, settings.vatRateBp, settings.pricesIncludeVat);
+    const due = payableCents(invoice.totalCents, settings.vatRateBp, settings.pricesIncludeVat);
+    const outstanding = Math.max(0, due - received);
 
     let state: "payable" | "paid" | "unavailable" = "payable";
     let reason: string | null = null;
@@ -110,7 +127,12 @@ export async function loadPayPage(token: string): Promise<PayPage> {
       dueOn: invoice.dueOn,
       currency,
       lines: invoice.lines,
-      totalCents: invoice.totalCents,
+      /* The figure the page shows as the invoice total is what the client
+         owes, so it agrees with the button beneath it and with the paper copy
+         in their hand. The breakdown goes with it, so they can see where the
+         difference from the lines above comes from. */
+      totalCents: due,
+      vat: vat ? { netCents: vat.netCents, vatCents: vat.vatCents, rateBp: vat.rateBp } : null,
       outstandingCents: outstanding,
       payTo: invoice.payTo,
       testMode: connection?.mode === "test",

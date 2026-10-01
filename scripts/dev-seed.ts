@@ -90,9 +90,30 @@ async function main() {
          A toggle flipped during a test survived reseeding otherwise, and the
          next audit read a screen that disagreed with the expected figures
          below for a reason nothing on the page explained. */
-      `INSERT INTO settings (sub_account_id, currency, tasks_from_messages)
-            VALUES ($1, 'ZAR', TRUE)
-       ON CONFLICT (sub_account_id) DO UPDATE SET currency = 'ZAR', tasks_from_messages = TRUE`,
+      /* Seeded as a VAT-REGISTERED business, deliberately: it is the harder
+         case and the one worth looking at. A quotation here shows a subtotal,
+         15% and a gross, and the printed sheet carries an address, a company
+         number and a VAT number. The other case — a business that charges no
+         VAT — is one emptied form away, and is what a brand-new account
+         already looks like without any seeding at all. */
+      `INSERT INTO settings (sub_account_id, currency, tasks_from_messages,
+                             business_address, business_phone, business_email,
+                             registration_number, vat_number, vat_rate_bp, prices_include_vat,
+                             invoice_pay_to)
+            VALUES ($1, 'ZAR', TRUE,
+                    E'12 Main Road\\nClaremont\\nCape Town, 7708', '021 555 0142', 'accounts@yourcrm.test',
+                    '2019/123456/07', '4123456789', 1500, FALSE,
+                    E'Bank: Standard Bank\\nAccount: 123 456 789\\nBranch: 051001\\nReference: your invoice number')
+       ON CONFLICT (sub_account_id) DO UPDATE SET
+            currency = 'ZAR', tasks_from_messages = TRUE,
+            business_address = EXCLUDED.business_address,
+            business_phone = EXCLUDED.business_phone,
+            business_email = EXCLUDED.business_email,
+            registration_number = EXCLUDED.registration_number,
+            vat_number = EXCLUDED.vat_number,
+            vat_rate_bp = EXCLUDED.vat_rate_bp,
+            prices_include_vat = EXCLUDED.prices_include_vat,
+            invoice_pay_to = EXCLUDED.invoice_pay_to`,
       [sub.id]
     );
 

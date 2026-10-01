@@ -40,6 +40,33 @@ export type Settings = {
    * On unless somebody turns it off — see the note in `schema.sql`.
    */
   tasksFromMessages: boolean;
+  /**
+   * The letterhead: who this business is, on the paperwork it issues.
+   *
+   * All nullable, and all omitted from a document when absent rather than
+   * printed as a label with nothing after it. A tax invoice legally needs the
+   * address, the registration number and the VAT number — but a business that
+   * is not registered has no VAT number, and inventing one would be worse than
+   * leaving it off.
+   */
+  businessAddress: string | null;
+  businessPhone: string | null;
+  businessEmail: string | null;
+  registrationNumber: string | null;
+  vatNumber: string | null;
+  /**
+   * The VAT rate in basis points: 1500 is 15%. Zero means not registered, and
+   * then nothing about VAT appears on any document. `server/vat.ts` says why
+   * basis points rather than a decimal.
+   */
+  vatRateBp: number;
+  /**
+   * Whether a price typed on a line already includes the VAT.
+   *
+   * The most consequential setting in this product: the same typed R1,000 is
+   * either R1,150 to pay or R1,000 to pay, depending on it.
+   */
+  pricesIncludeVat: boolean;
   updatedAt: string | null;
 };
 
@@ -64,6 +91,17 @@ export const DEFAULT_SETTINGS: Settings = {
   /* On for a workspace that has never saved anything, so the default here
      agrees with the column default rather than quietly disagreeing with it. */
   tasksFromMessages: true,
+  /* Nothing invented here either. A document prints what the business has told
+     us about itself and no more. */
+  businessAddress: null,
+  businessPhone: null,
+  businessEmail: null,
+  registrationNumber: null,
+  vatNumber: null,
+  /* Not registered until somebody says so. A default rate would put a tax line
+     on the documents of every business that never asked for one. */
+  vatRateBp: 0,
+  pricesIncludeVat: false,
   updatedAt: null,
 };
 
@@ -74,10 +112,19 @@ type Row = {
   invoice_pay_to: string | null;
   currency: string;
   tasks_from_messages: boolean;
+  business_address: string | null;
+  business_phone: string | null;
+  business_email: string | null;
+  registration_number: string | null;
+  vat_number: string | null;
+  vat_rate_bp: number;
+  prices_include_vat: boolean;
   updated_at: Date;
 };
 
-const COLUMNS = `monthly_target_cents, weekly_capacity, time_zone, invoice_pay_to, currency, tasks_from_messages, updated_at`;
+const COLUMNS = `monthly_target_cents, weekly_capacity, time_zone, invoice_pay_to, currency, tasks_from_messages,
+                 business_address, business_phone, business_email, registration_number, vat_number,
+                 vat_rate_bp, prices_include_vat, updated_at`;
 
 /** Rejects anything `Intl` cannot resolve, rather than storing a typo. */
 export function isValidTimeZone(zone: string): boolean {
@@ -99,6 +146,16 @@ function toSettings(r: Row): Settings {
        shows as the default rather than breaking every page that prints money. */
     currency: isCurrency(r.currency) ? r.currency : DEFAULT_CURRENCY,
     tasksFromMessages: r.tasks_from_messages,
+    businessAddress: r.business_address,
+    businessPhone: r.business_phone,
+    businessEmail: r.business_email,
+    registrationNumber: r.registration_number,
+    vatNumber: r.vat_number,
+    /* A rate outside what the column allows cannot be stored, but a row written
+       by an older build has none at all — and `undefined` × anything is NaN on
+       a document. Zero means "show no tax", which is the safe reading. */
+    vatRateBp: Number.isFinite(Number(r.vat_rate_bp)) ? Number(r.vat_rate_bp) : 0,
+    pricesIncludeVat: r.prices_include_vat === true,
     updatedAt: r.updated_at.toISOString(),
   };
 }
@@ -138,10 +195,26 @@ export async function updateSettings(
     invoicePayTo?: string | null;
     currency?: CurrencyCode;
     tasksFromMessages?: boolean;
+    businessAddress?: string | null;
+    businessPhone?: string | null;
+    businessEmail?: string | null;
+    registrationNumber?: string | null;
+    vatNumber?: string | null;
+    vatRateBp?: number;
+    pricesIncludeVat?: boolean;
   }
 ): Promise<Settings> {
   if (patch.currency !== undefined && !isCurrency(patch.currency)) {
     throw new Error("That is not a currency this workspace can use.");
+  }
+  if (patch.vatRateBp !== undefined) {
+    /* The same bounds the column enforces, checked here so the message is
+       about tax rather than a constraint name. Whole basis points only: a
+       fractional one is a rate the arithmetic cannot represent exactly, which
+       is the entire reason the rate is not stored as a decimal. */
+    if (!Number.isInteger(patch.vatRateBp) || patch.vatRateBp < 0 || patch.vatRateBp > 10000) {
+      throw new Error("A VAT rate must be between 0% and 100%.");
+    }
   }
   if (patch.monthlyTargetCents !== undefined) {
     if (!Number.isSafeInteger(patch.monthlyTargetCents) || patch.monthlyTargetCents < 0) {
@@ -163,9 +236,12 @@ export async function updateSettings(
   // Upsert: the first save for a sub-account must not require a separate
   // "create settings" step that something has to remember to run.
   const row = await q.one<Row>(
-    `INSERT INTO settings (sub_account_id, monthly_target_cents, weekly_capacity, time_zone, invoice_pay_to, currency, tasks_from_messages)
+    `INSERT INTO settings (sub_account_id, monthly_target_cents, weekly_capacity, time_zone, invoice_pay_to, currency, tasks_from_messages,
+                           business_address, business_phone, business_email, registration_number, vat_number,
+                           vat_rate_bp, prices_include_vat)
      VALUES ($1, COALESCE($2, 0), COALESCE($3, ${DEFAULT_SETTINGS.weeklyCapacity}), COALESCE($4, 'UTC'), $5,
-             COALESCE($7, '${DEFAULT_CURRENCY}'), COALESCE($8, TRUE))
+             COALESCE($7, '${DEFAULT_CURRENCY}'), COALESCE($8, TRUE),
+             $9, $11, $13, $15, $17, COALESCE($19, 0), COALESCE($20, FALSE))
      ON CONFLICT (sub_account_id) DO UPDATE SET
        monthly_target_cents = COALESCE($2, settings.monthly_target_cents),
        weekly_capacity      = COALESCE($3, settings.weekly_capacity),
@@ -180,6 +256,18 @@ export async function updateSettings(
        -- were", which is what COALESCE alone would do and would make removing
        -- bank details impossible.
        invoice_pay_to       = CASE WHEN $6::boolean THEN $5 ELSE settings.invoice_pay_to END,
+       -- Every letterhead field takes the same pair: the value, and whether it
+       -- was mentioned. A business that deregisters for VAT, moves premises or
+       -- drops a phone number must be able to EMPTY one of these, and a company
+       -- that keeps printing an address it has left is the failure this avoids.
+       business_address     = CASE WHEN $10::boolean THEN $9  ELSE settings.business_address END,
+       business_phone       = CASE WHEN $12::boolean THEN $11 ELSE settings.business_phone END,
+       business_email       = CASE WHEN $14::boolean THEN $13 ELSE settings.business_email END,
+       registration_number  = CASE WHEN $16::boolean THEN $15 ELSE settings.registration_number END,
+       vat_number           = CASE WHEN $18::boolean THEN $17 ELSE settings.vat_number END,
+       vat_rate_bp          = COALESCE($19, settings.vat_rate_bp),
+       -- Boolean, so COALESCE again: false is a real answer and must survive.
+       prices_include_vat   = COALESCE($20, settings.prices_include_vat),
        updated_at           = now()
      RETURNING ${COLUMNS}`,
     [
@@ -191,6 +279,18 @@ export async function updateSettings(
       patch.invoicePayTo !== undefined,
       patch.currency ?? null,
       patch.tasksFromMessages ?? null,
+      patch.businessAddress ?? null,
+      patch.businessAddress !== undefined,
+      patch.businessPhone ?? null,
+      patch.businessPhone !== undefined,
+      patch.businessEmail ?? null,
+      patch.businessEmail !== undefined,
+      patch.registrationNumber ?? null,
+      patch.registrationNumber !== undefined,
+      patch.vatNumber ?? null,
+      patch.vatNumber !== undefined,
+      patch.vatRateBp ?? null,
+      patch.pricesIncludeVat ?? null,
     ]
   );
   if (!row) throw new Error("Settings were not saved.");

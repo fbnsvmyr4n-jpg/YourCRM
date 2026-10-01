@@ -13,6 +13,11 @@
  */
 export const SECTION_IDS = [
   "account",
+  /* Straight after Account, because it is the same question one level up:
+     Account is who YOU are, this is who the BUSINESS is on the paperwork it
+     issues. Somebody looking for "where do I put my VAT number" looks here
+     long before they look under Preferences. */
+  "business",
   "team",
   "clients",
   "automations",

@@ -1,6 +1,7 @@
 import { logFailure } from "./log";
 import { utcOffsetLabel } from "@/lib/zoned";
 import { formatMoney, type CurrencyCode } from "@/lib/money";
+import { rateLabel } from "./vat";
 
 /**
  * Outbound email.
@@ -211,6 +212,51 @@ export function inviteEmail(link: string, inviterName: string, workspaceName: st
 }
 
 /**
+ * The tax split on a document being emailed.
+ *
+ * Worked out by the caller through `server/vat.ts` and handed in here rather
+ * than computed again: the printed sheet, the pay page and this message have to
+ * show one answer, and three places each doing the sum is three answers. Null —
+ * the normal case — means the business charges no VAT, and then not a word
+ * about it appears anywhere in the email.
+ */
+export type EmailVat = { netCents: number; vatCents: number; rateBp: number } | null;
+
+/** The two extra lines above the total, in the plain-text part. */
+function vatText(vat: EmailVat, money: (cents: number) => string): string[] {
+  if (!vat) return [];
+  return [
+    `Subtotal: ${money(vat.netCents)}`,
+    `VAT at ${rateLabel(vat.rateBp)}: ${money(vat.vatCents)}`,
+  ];
+}
+
+/** The same two lines as table rows, for the HTML part. */
+function vatRows(vat: EmailVat, money: (cents: number) => string): string {
+  if (!vat) return "";
+  return `    <tr>
+      <td style="padding:10px 0 0;color:#55617a">Subtotal</td>
+      <td></td>
+      <td style="padding:10px 0 0 16px;text-align:right;white-space:nowrap">${money(vat.netCents)}</td>
+    </tr>
+    <tr>
+      <td style="padding:2px 0 0;color:#55617a">VAT at ${rateLabel(vat.rateBp)}</td>
+      <td></td>
+      <td style="padding:2px 0 0 16px;text-align:right;white-space:nowrap">${money(vat.vatCents)}</td>
+    </tr>
+`;
+}
+
+/**
+ * What the recipient owes: the gross where there is tax, the typed total where
+ * there is none. The one figure this email, the printed sheet and the pay page
+ * all have to agree on.
+ */
+function amountDue(totalCents: number, vat: EmailVat): number {
+  return vat ? vat.netCents + vat.vatCents : totalCents;
+}
+
+/**
  * The quotation itself, as an email.
  *
  * Plain: a client reading this on a phone wants the number, the lines and the
@@ -231,8 +277,12 @@ export function quotationEmail(quote: {
   totalCents: number;
   /** Required, not defaulted: a document a client signs must not guess its unit. */
   currency: CurrencyCode;
+  /** The tax split, or null where this business charges none. */
+  vat?: EmailVat;
 }) {
   const money = (cents: number) => formatMoney(cents, quote.currency, "cents");
+  const vat = quote.vat ?? null;
+  const total = amountDue(quote.totalCents, vat);
   const qty = (n: number) => String(Number(n.toFixed(3)));
 
   const subject = `Quotation ${quote.number} — ${quote.project}`;
@@ -245,7 +295,8 @@ export function quotationEmail(quote: {
       (l) => `${l.description}\n  ${qty(l.quantity)} × ${money(l.unitCents)} = ${money(l.totalCents)}`
     ),
     "",
-    `Total: ${money(quote.totalCents)}`,
+    ...vatText(vat, money),
+    `Total: ${money(total)}`,
     ...(quote.notes ? ["", quote.notes] : []),
     "",
     `Sent by ${quote.approvedBy}, ${quote.from}.`,
@@ -266,10 +317,10 @@ export function quotationEmail(quote: {
   <p style="margin:0 0 24px;color:#55617a">${escapeHtml(quote.project)}</p>
   <table style="width:100%;border-collapse:collapse;font-size:14px">
 ${rows}
-    <tr>
+${vatRows(vat, money)}    <tr>
       <td style="padding:12px 0;font-weight:600">Total</td>
       <td></td>
-      <td style="padding:12px 0 12px 16px;text-align:right;font-weight:700;font-size:16px">${money(quote.totalCents)}</td>
+      <td style="padding:12px 0 12px 16px;text-align:right;font-weight:700;font-size:16px">${money(total)}</td>
     </tr>
   </table>
   ${quote.notes ? `<p style="margin:20px 0 0;line-height:1.6;color:#55617a;white-space:pre-line">${escapeHtml(quote.notes)}</p>` : ""}
@@ -309,8 +360,15 @@ export function invoiceEmail(invoice: {
   currency: CurrencyCode;
   /** The public Pay now link, when the business takes card payment. */
   payUrl?: string | null;
+  /** The tax split, or null where this business charges none. */
+  vat?: EmailVat;
 }) {
   const money = (cents: number) => formatMoney(cents, invoice.currency, "cents");
+  const vat = invoice.vat ?? null;
+  /* Every figure the recipient is asked to act on — the amount due, the words
+     on the Pay button — is this one, so the email cannot ask for one number and
+     the checkout charge another. */
+  const total = amountDue(invoice.totalCents, vat);
   const qty = (n: number) => String(Number(n.toFixed(3)));
 
   const subject = `Invoice ${invoice.number} — ${invoice.project}`;
@@ -323,7 +381,8 @@ export function invoiceEmail(invoice: {
       (l) => `${l.description}\n  ${qty(l.quantity)} × ${money(l.unitCents)} = ${money(l.totalCents)}`
     ),
     "",
-    `Total due: ${money(invoice.totalCents)}`,
+    ...vatText(vat, money),
+    `Total due: ${money(total)}`,
     ...(invoice.dueOn ? [`Payment due by ${invoice.dueOn}`] : []),
     ...(invoice.payUrl ? ["", `Pay by card: ${invoice.payUrl}`] : []),
     ...(invoice.payTo ? ["", "Payment details:", invoice.payTo] : []),
@@ -347,14 +406,14 @@ export function invoiceEmail(invoice: {
   <p style="margin:0 0 24px;color:#55617a">${escapeHtml(invoice.project)}</p>
   <table style="width:100%;border-collapse:collapse;font-size:14px">
 ${rows}
-    <tr>
+${vatRows(vat, money)}    <tr>
       <td style="padding:12px 0;font-weight:600">Total due</td>
       <td></td>
-      <td style="padding:12px 0 12px 16px;text-align:right;font-weight:700;font-size:16px">${money(invoice.totalCents)}</td>
+      <td style="padding:12px 0 12px 16px;text-align:right;font-weight:700;font-size:16px">${money(total)}</td>
     </tr>
   </table>
   ${invoice.dueOn ? `<p style="margin:16px 0 0;font-weight:600">Payment due by ${escapeHtml(invoice.dueOn)}</p>` : ""}
-  ${invoice.payUrl ? `<p style="margin:24px 0 0"><a href="${escapeHtml(invoice.payUrl)}" style="display:inline-block;background:#1f6feb;color:#ffffff;text-decoration:none;font-weight:600;padding:12px 22px;border-radius:10px">Pay ${money(invoice.totalCents)} now</a></p>` : ""}
+  ${invoice.payUrl ? `<p style="margin:24px 0 0"><a href="${escapeHtml(invoice.payUrl)}" style="display:inline-block;background:#1f6feb;color:#ffffff;text-decoration:none;font-weight:600;padding:12px 22px;border-radius:10px">Pay ${money(total)} now</a></p>` : ""}
   ${invoice.payTo ? `<p style="margin:20px 0 0;line-height:1.6;color:#55617a;white-space:pre-line"><strong style="color:#0b1220">Payment details</strong><br>${escapeHtml(invoice.payTo)}</p>` : ""}
   ${invoice.notes ? `<p style="margin:20px 0 0;line-height:1.6;color:#55617a;white-space:pre-line">${escapeHtml(invoice.notes)}</p>` : ""}
   <p style="margin:28px 0 0;font-size:13px;color:#8a94a8">

@@ -26,6 +26,7 @@ import { getMeeting } from "./repos/meetings";
 import { analyseCall, ANALYSIS_MODEL } from "./agent/call-analysis";
 import { saveAnalysis } from "./repos/call-analysis";
 import { logWrite } from "./log";
+import { vatBreakdown } from "./vat";
 
 /**
  * The jobs the outbox knows how to run.
@@ -127,7 +128,11 @@ const quoteEmailHandler: OutboxHandler = {
     });
 
     /* Read in its own tenant transaction, after the system read — never nested. */
-    const { currency } = await withTenant(job.ctx, (q) => getSettings(q));
+    const settings = await withTenant(job.ctx, (q) => getSettings(q));
+    const { currency } = settings;
+    /* The same split the printed sheet shows, from the same function, so the
+       client's emailed copy and the copy they file carry one total. */
+    const vat = vatBreakdown(quote.totalCents, settings.vatRateBp, settings.pricesIncludeVat);
     const { subject, text, html } = quotationEmail({
       number: quote.number,
       project: quote.projectTitle,
@@ -137,6 +142,7 @@ const quoteEmailHandler: OutboxHandler = {
       lines: quote.lines,
       totalCents: quote.totalCents,
       currency,
+      vat,
     });
 
     const sent = await sendEmail({
@@ -258,7 +264,11 @@ const invoiceEmailHandler: OutboxHandler = {
       return { workspace: row?.name ?? "YourCRM", sentBy: sender?.name ?? "YourCRM" };
     });
 
-    const { currency } = await withTenant(job.ctx, (q) => getSettings(q));
+    const settings = await withTenant(job.ctx, (q) => getSettings(q));
+    const { currency } = settings;
+    /* What the client owes, split the way the pay page and the printed sheet
+       split it — the Pay button in this email charges the same figure. */
+    const vat = vatBreakdown(invoice.totalCents, settings.vatRateBp, settings.pricesIncludeVat);
     /* A Pay now link when the business takes card payment in this currency.
        Made before sending: the email is the only place the client gets it. */
     const payUrl = await withTenant(job.ctx, async (q) => {
@@ -280,6 +290,7 @@ const invoiceEmailHandler: OutboxHandler = {
         notes: invoice.notes,
         lines: invoice.lines,
         totalCents: invoice.totalCents,
+        vat,
       }),
       idempotencyKey: job.id,
     });

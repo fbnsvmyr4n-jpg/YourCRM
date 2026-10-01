@@ -145,12 +145,39 @@ describe("on a phone", () => {
 });
 
 describe("what the sheet does not claim", () => {
-  it("MAKES NO VAT CLAIM — there is no VAT number or rate in this product", () => {
-    /* A total that says "incl. VAT" on a document somebody hands to their
-       accountant, with no registration number anywhere on it, is a tax claim
-       made on nothing. When Settings holds those fields this can print them;
-       until then it prints neither. */
-    expect(sheetCode).not.toMatch(/VAT/i);
+  it("MAKES NO VAT CLAIM A WORKSPACE HAS NOT MADE — the rate decides, nothing else", () => {
+    /* Every VAT line on the sheet hangs off `vat`, which is null at a zero
+       rate. A business that is not registered gets a document with no mention
+       of tax anywhere — not a "VAT 0.00" row inviting a client to ask why. */
+    expect(sheetCode).toMatch(/\{vat && \(/);
+    expect(sheetCode).toMatch(/vatBreakdown\(doc\.totalCents, letterhead\.vatRateBp, letterhead\.pricesIncludeVat\)/);
+  });
+
+  it("NEVER PUTS OUR VAT ON A PURCHASE ORDER", () => {
+    /* Money going OUT. The tax on it is the supplier's to charge, at their rate
+       under their number; ours has nothing to do with it. Printing 15% there
+       would be telling a supplier what to invoice us, and would overstate a
+       committed cost by the rate in our own figures. */
+    expect(sheetCode).toMatch(/doc\.kind === "purchase_order"[\s\S]{0,80}\?[\s\S]{0,40}null/);
+  });
+
+  it("prints the registration and VAT numbers only when the workspace has them", () => {
+    /* A document with a blank "VAT No:" reads as broken; an invented one is
+       worse than either. */
+    expect(sheetCode).toMatch(/\{letterhead\.registrationNumber && \(/);
+    expect(sheetCode).toMatch(/\{letterhead\.vatNumber && \(/);
+  });
+
+  it("CALLS AN INVOICE A TAX INVOICE ONLY WHEN THERE IS A VAT NUMBER ON IT", () => {
+    /* "Tax invoice" is the heading a South African tax invoice must carry —
+       and a claim this business has not made without a number to back it. */
+    expect(sheetCode).toMatch(/doc\.kind === "invoice" && letterhead\.vatNumber/);
+  });
+
+  it("bills the GROSS, so the figure on the page is the figure to pay", () => {
+    /* With tax added on top, the lines add up to the amount BEFORE it. A total
+       row showing that figure is how a client transfers 15% too little. */
+    expect(sheetCode).toMatch(/money\(vat \? vat\.grossCents : doc\.totalCents\)/);
   });
 
   it("names WHO APPROVED IT from the document, never from whoever is reading", () => {
