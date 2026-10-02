@@ -54,6 +54,7 @@ function stubMail() {
 beforeAll(async () => {
   db = await startTestDb();
   process.env.RESEND_API_KEY = "re_test_not_a_real_key";
+  process.env.EMAIL_FROM = "YourCRM <audit@yourcrm.test>";
   ({ withTenant } = await import("../src/server/tenant"));
   ({ closePool } = await import("../src/server/db"));
   raise = await import("../src/server/invoice-from-quote");
@@ -65,6 +66,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   delete process.env.RESEND_API_KEY;
+  delete process.env.EMAIL_FROM;
   await closePool?.();
   await db.stop();
 });

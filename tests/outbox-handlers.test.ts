@@ -62,6 +62,7 @@ function stubMail() {
 beforeAll(async () => {
   db = await startTestDb();
   process.env.RESEND_API_KEY = "re_test_not_a_real_key";
+  process.env.EMAIL_FROM = "YourCRM <audit@yourcrm.test>";
   ({ withTenant } = await import("../src/server/tenant"));
   ({ closePool } = await import("../src/server/db"));
   outbox = await import("../src/server/outbox");
@@ -72,6 +73,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   delete process.env.RESEND_API_KEY;
+  delete process.env.EMAIL_FROM;
   await closePool?.();
   await db.stop();
 });
@@ -253,12 +255,14 @@ describe("emailing an approved quotation", () => {
     /* A workspace that switches email on this afternoon should find its
        queued quotations go out — not find them dead. */
     delete process.env.RESEND_API_KEY;
+    delete process.env.EMAIL_FROM;
     try {
       const id = await approvedQuote();
       await queueSend(id);
       expect(await outbox.drain(CTX, handlers.OUTBOX_REGISTRY)).toMatchObject({ retried: 1 });
     } finally {
       process.env.RESEND_API_KEY = "re_test_not_a_real_key";
+      process.env.EMAIL_FROM = "YourCRM <audit@yourcrm.test>";
     }
   });
 

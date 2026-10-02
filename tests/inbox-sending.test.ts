@@ -51,6 +51,7 @@ function stubMail() {
 beforeAll(async () => {
   db = await startTestDb();
   process.env.RESEND_API_KEY = "re_test_not_a_real_key";
+  process.env.EMAIL_FROM = "YourCRM <audit@yourcrm.test>";
   ({ withTenant } = await import("../src/server/tenant"));
   ({ closePool } = await import("../src/server/db"));
   inbox = await import("../src/server/repos/inbox");
@@ -61,6 +62,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   delete process.env.RESEND_API_KEY;
+  delete process.env.EMAIL_FROM;
   await closePool?.();
   await db.stop();
 });
@@ -256,6 +258,7 @@ describe("who it goes to", () => {
     /* Production's current state. These should go out when a key is set, not
        be dead by the time it is. */
     delete process.env.RESEND_API_KEY;
+    delete process.env.EMAIL_FROM;
     try {
       const message = await write();
       await queue(message.id);
@@ -263,6 +266,7 @@ describe("who it goes to", () => {
       expect(sends).toHaveLength(0);
     } finally {
       process.env.RESEND_API_KEY = "re_test_not_a_real_key";
+      process.env.EMAIL_FROM = "YourCRM <audit@yourcrm.test>";
     }
   });
 });

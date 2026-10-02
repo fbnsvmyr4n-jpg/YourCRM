@@ -137,9 +137,15 @@ export async function GET() {
         assistant: ai
           ? "ok: a model is configured — the agent can answer and draft quotations"
           : "not configured — the assistant answers from data only and CANNOT draft a quotation (ANTHROPIC_API_KEY unset)",
+        /* Names WHICH half is missing. The two are set at different times, and
+           a key on its own reaches only the account holder — see
+           `emailConfigured`. An unqualified "not configured" sent somebody
+           looking at the piece that was already there. */
         outboundEmail: mail
           ? "ok: quotations, invites and password resets can be sent"
-          : "not configured — nothing can be emailed (RESEND_API_KEY unset)",
+          : !process.env.RESEND_API_KEY?.trim()
+            ? "not configured — nothing can be emailed (RESEND_API_KEY unset)"
+            : "not configured — a key is set but EMAIL_FROM is not, so mail would reach only the account holder (verify the domain, then set EMAIL_FROM)",
         quotations: quotationReadiness(ai, mail),
       },
       engine,

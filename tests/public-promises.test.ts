@@ -60,3 +60,37 @@ describe("a public page promises only what this deployment can do", () => {
     expect(pay).not.toMatch(/not available in \$\{currency\}\. Use the payment details below\./);
   });
 });
+
+describe("what counts as email being configured", () => {
+  const email = read("../src/server/email.ts");
+  const health = read("../src/app/api/health/route.ts");
+
+  it("A KEY ALONE IS NOT ENOUGH — the shared sender reaches only the account holder", () => {
+    /*
+       The booking audit walked straight into this. With `RESEND_API_KEY` set
+       and `EMAIL_FROM` unset, `fromAddress()` falls back to Resend's shared
+       sender, which delivers only to the account holder — so the product
+       believed email worked, told a stranger "a confirmation will be emailed to
+       you", and the job died in the outbox saying the domain was not verified.
+
+       Not a corner case: key first, domain verified afterwards is the order
+       anybody sets this up in, and it is the state this repository was in when
+       the audit found it.
+    */
+    expect(email).toMatch(/RESEND_API_KEY\?\.trim\(\) && process\.env\.EMAIL_FROM\?\.trim\(\)/);
+  });
+
+  it("still ATTEMPTS a send with whatever it has, and reports what came back", () => {
+    /* The stricter definition governs promises and status lines, not whether
+       the queue tries: a job that never tries can never report a real reason,
+       and "it would only reach you" is a reason worth hearing. */
+    const send = email.slice(email.indexOf("export async function sendEmail"));
+    expect(send).toMatch(/const key = process\.env\.RESEND_API_KEY\?\.trim\(\)/);
+    expect(send).not.toMatch(/emailConfigured\(\)/);
+  });
+
+  it("says WHICH half is missing, because the two are set at different times", () => {
+    expect(health).toMatch(/RESEND_API_KEY unset/);
+    expect(health).toMatch(/EMAIL_FROM is not/);
+  });
+});

@@ -27,12 +27,14 @@ let warned: string[] = [];
 
 beforeEach(() => {
   process.env.RESEND_API_KEY = "re_test_not_a_real_key";
+  process.env.EMAIL_FROM = "YourCRM <audit@yourcrm.test>";
   warned = [];
   vi.spyOn(console, "warn").mockImplementation((line: string) => void warned.push(String(line)));
 });
 
 afterEach(() => {
   delete process.env.RESEND_API_KEY;
+  delete process.env.EMAIL_FROM;
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -101,6 +103,7 @@ describe("the sentence a person reads", () => {
 
   it("says email is not set up, rather than naming an environment variable", async () => {
     delete process.env.RESEND_API_KEY;
+    delete process.env.EMAIL_FROM;
     const { reason, detail } = await send();
     expect(reason).not.toContain("RESEND_API_KEY");
     expect(reason).toMatch(/not set up/i);

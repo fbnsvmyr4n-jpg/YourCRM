@@ -72,8 +72,29 @@ function explainFailure(status: number, detail: string): string {
   return `the email service refused it (error ${status})`;
 }
 
+/**
+ * Can this workspace actually send mail to somebody who is not us?
+ *
+ * A KEY IS NOT ENOUGH, and that gap is what the booking audit walked into. With
+ * `RESEND_API_KEY` set and `EMAIL_FROM` unset, `fromAddress()` below falls back
+ * to Resend's shared sender, which delivers only to the account holder's own
+ * address — so the product believed email worked, told a stranger on a public
+ * booking page "a confirmation will be emailed to you", and the job died in the
+ * outbox with "sending is in test mode until this workspace's email domain is
+ * verified". The client got a promise nobody could keep.
+ *
+ * That state is not hypothetical: it is the order anybody sets this up in — key
+ * first, domain verified afterwards — and it is the state this very repository
+ * was in when the audit found it.
+ *
+ * So the question this answers is "is there a sending address of our own",
+ * which is what a verified domain gives you, rather than "is there a key".
+ * `sendEmail` below still tries with whatever it has and reports honestly if
+ * the provider refuses; this is for the promises and the status lines, where
+ * the cost of being wrong lands on somebody outside the business.
+ */
 export function emailConfigured(): boolean {
-  return Boolean(process.env.RESEND_API_KEY?.trim());
+  return Boolean(process.env.RESEND_API_KEY?.trim() && process.env.EMAIL_FROM?.trim());
 }
 
 /** The From address. Resend's shared sender works before a domain is verified. */
