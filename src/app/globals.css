@@ -2478,3 +2478,29 @@ textarea.field-input {
     margin: 14mm;
   }
 }
+
+/* ---------------- The sky does not bounce ---------------- */
+
+/*
+   No rubber band on the sign-in pages.
+
+   Photographed on a real iPhone: dragging the login screen pulled the whole
+   scene away and left a flat black band — above the logo going one way, below
+   the footer going the other. The band is the page colour behind the layout,
+   which is all there is once the sky has been dragged off the glass.
+
+   `overscroll-behavior` only applies to the element that actually scrolls, and
+   that is the document rather than the layout inside it, so this reaches up
+   from the route: while an `.orbit-sky` layout is on screen, the document does
+   not bounce. Every other page keeps the behaviour it has — the app shell has
+   its own scroller and its own reasons.
+
+   Paired with `min-h-dvh` on that layout. The dynamic unit stops the page being
+   taller than the screen in the first place, which is what gave a one-screen
+   layout something to scroll on iOS at all; this stops the bounce that shows
+   nothing even when there is nothing to scroll.
+*/
+html:has(.orbit-sky),
+html:has(.orbit-sky) body {
+  overscroll-behavior: none;
+}

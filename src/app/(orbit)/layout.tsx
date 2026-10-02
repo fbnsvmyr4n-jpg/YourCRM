@@ -24,7 +24,27 @@ import { OrbitScene } from "@/components/login/OrbitScene";
  */
 export default function OrbitLayout({ children }: { children: ReactNode }) {
   return (
-    <main className="relative flex min-h-screen w-full items-center justify-center overflow-hidden px-5 py-14">
+    /*
+       `min-h-dvh`, not `min-h-screen`.
+
+       `100vh` on iOS is the LARGE viewport — the height the page would have if
+       the browser's toolbars were hidden — so the sky was always taller than
+       the screen showing it and the whole sign-in page could be dragged. The
+       dynamic unit is the height actually on screen, which is what this layout
+       means: one screen, filled.
+
+       `orbit-sky` is the other half, and the half visible in the photographs:
+       dragging past the end rubber-banded and exposed the flat page colour
+       behind the scene — a black band above the logo and below the footer. On
+       the one screen whose whole job is to look like somewhere, the illusion
+       came apart the first second anybody touched it.
+
+       The class is a hook, not a style: `overscroll-behavior` only does
+       anything on the element that actually scrolls, which is the document, not
+       this one. `globals.css` turns the bounce off for the document WHILE this
+       layout is on screen, so every other page keeps the behaviour it has.
+    */
+    <main className="orbit-sky relative flex min-h-dvh w-full items-center justify-center overflow-hidden px-5 py-14">
       <OrbitScene />
       {children}
     </main>
