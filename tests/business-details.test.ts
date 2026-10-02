@@ -101,6 +101,48 @@ describe("saving them", () => {
   });
 });
 
+describe("how often the row is read", () => {
+  it("ONCE PER TRANSACTION, however many callers ask for it", async () => {
+    /*
+       The performance pass counted the queries behind a page load and found
+       this row fetched four times in one render of the application layout —
+       the layout's currency, the sidebar counts, the notification feed and the
+       retainer sweep each asking separately — and again by the page inside it.
+       The layout wraps every screen, so those were three redundant round trips
+       on every page view in the product.
+
+       Identity is the proof: the memo hands every caller in a transaction the
+       same promise, so the same object comes back. A second read would build a
+       second object.
+    */
+    const [first, second] = await inA(async (q) => [
+      await settings.getSettings(q),
+      await settings.getSettings(q),
+    ]);
+    expect(first).toBe(second);
+  });
+
+  it("is not carried between transactions", async () => {
+    /* A memo that outlived its transaction would serve one workspace's figures
+       to the next request. It is keyed on the query object, which lives exactly
+       as long as the transaction. */
+    const one = await inA((q) => settings.getSettings(q));
+    const two = await inA((q) => settings.getSettings(q));
+    expect(one).not.toBe(two);
+    expect(one).toEqual(two);
+  });
+
+  it("NEVER SERVES A STALE ROW after a write in the same transaction", async () => {
+    const after = await inA(async (q) => {
+      await settings.getSettings(q);
+      await settings.updateSettings(q, { vatNumber: "4999999999", vatRateBp: 1400 });
+      return settings.getSettings(q);
+    });
+    expect(after.vatNumber).toBe("4999999999");
+    expect(after.vatRateBp).toBe(1400);
+  });
+});
+
 describe("who may change them", () => {
   it("IS AN OWNER OR A FINANCE USER, not everybody", () => {
     /* The bank account clients are told to pay into is on this form. The gate

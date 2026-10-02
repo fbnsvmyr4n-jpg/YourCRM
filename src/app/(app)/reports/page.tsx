@@ -19,13 +19,11 @@ import { companyRollups } from "@/server/repos/companies";
 import { getSettings } from "@/server/repos/settings";
 import { isPeriod, resolvePeriod, type PeriodId } from "@/server/report-period";
 import { referralCredits } from "@/server/referrals";
-import { reportData } from "@/server/analytics";
 import { reportView } from "@/server/reports-view";
 import { SalesTargetCard } from "./SalesTargetCard";
 import { withTenantPage } from "@/server/tenant-session";
 import { listMeetings } from "@/server/repos/meetings";
 import { listContacts } from "@/server/repos/contacts";
-import { meetingAnalytics } from "@/server/meeting-analytics";
 import { decorateMeeting } from "@/server/decorate-meeting";
 import { instantToWallClock } from "@/lib/zoned";
 import { formatMoney } from "@/lib/money";
@@ -67,7 +65,7 @@ export default async function ReportsPage({
   const periodId: PeriodId = isPeriod(requested) ? requested : "all-time";
   // Both in one tenant transaction — a referrer's credit cannot describe deals
   // a different read would not return.
-  const { r, referrers, accounts, monthlyTarget, wonThisMonth, meetings, meetingStats, weeklyCapacity, currency } =
+  const { r, referrers, accounts, monthlyTarget, wonThisMonth, meetings, weeklyCapacity, currency } =
     await withTenantPage(async (q) => {
     // The business's own time zone, so "July" is July where they are — read in
     // the same transaction as the figures it defines.
@@ -86,10 +84,34 @@ export default async function ReportsPage({
     const monthStart = new Date();
     monthStart.setUTCDate(1);
     monthStart.setUTCHours(0, 0, 0, 0);
-    const toDate = await reportData(q);
-    const wonThisMonth = toDate.weekly
-      .filter((w) => Date.parse(w.weekStart) >= monthStart.getTime())
-      .reduce((sum, w) => sum + w.wonCents, 0);
+    /*
+       One question, one query.
+
+       This asked `reportData(q)` for the entire report — totals, by stage, by
+       source, by owner, loss reasons, voice counts, meeting stats, nine round
+       trips — and then used a single field of it. `reportView` below calls that
+       same builder again for the period the reader actually chose, so the
+       heaviest page in the product ran its whole analytics block TWICE, threw
+       most of the first away, and did it on every load. The performance pass
+       counted 35 queries behind this page and found whole blocks repeated
+       verbatim.
+
+       The two could not have shared a result even in principle: this figure is
+       month-to-date and the other follows the period control, which is exactly
+       why the card ignores that control.
+
+       Summed in the database over the same definition of a win the weekly
+       series uses — `won_at` set, not deleted — so the card and the chart above
+       it cannot disagree.
+    */
+    const monthRow = await q.one<{ cents: string }>(
+      `SELECT COALESCE(SUM(value_cents), 0)::text AS cents
+         FROM deals
+        WHERE sub_account_id = $1 AND deleted_at IS NULL
+          AND won_at IS NOT NULL AND won_at >= $2`,
+      [q.ctx.subAccountId, monthStart.toISOString()]
+    );
+    const wonThisMonth = Number(monthRow?.cents ?? 0);
 
     /* Workload & Capacity moved here from the meetings page, which is for
        booking rather than for reporting on how booked you already are. Same
@@ -117,7 +139,6 @@ export default async function ReportsPage({
       monthlyTarget: Math.round(settings.monthlyTargetCents / 100),
       wonThisMonth: Math.round(wonThisMonth / 100),
       meetings: meetingRows.map((m) => decorateMeeting(m, meetingPeople, settings.timeZone, nowKey)),
-      meetingStats: await meetingAnalytics(q),
       weeklyCapacity: settings.weeklyCapacity,
       currency: settings.currency,
     };
@@ -811,8 +832,12 @@ export default async function ReportsPage({
                     </>
                   )}
                 </Card>
+                {/* The same figures the funnel above is drawn from. This card
+                    called `meetingAnalytics` a second time for data already
+                    sitting in `r`, so one page load counted every meeting
+                    twice over — see the performance pass. */}
                 <WorkloadCapacity
-                  analytics={meetingStats}
+                  analytics={r.meetings}
                   capacity={weeklyCapacity}
                   meetings={meetings}
                 />

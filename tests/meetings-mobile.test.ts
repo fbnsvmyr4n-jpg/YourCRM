@@ -140,7 +140,11 @@ describe("workload moves to reports", () => {
   });
 
   it("gets the same inputs it always had", () => {
-    expect(reports).toMatch(/analytics=\{meetingStats\}/);
+    /* `r.meetings`, not a second `meetingAnalytics(q)`. The performance pass
+       found this card fetching figures the funnel above it had already fetched,
+       so one Reports load counted every meeting twice over. Same numbers, one
+       query — and now they cannot differ, which two reads could. */
+    expect(reports).toMatch(/analytics=\{r\.meetings\}/);
     expect(reports).toMatch(/capacity=\{weeklyCapacity\}/);
     expect(reports).toMatch(/meetings=\{meetings\}/);
     /* "Today" in the business's zone, as the meetings page does it — otherwise

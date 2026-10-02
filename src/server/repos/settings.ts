@@ -160,14 +160,47 @@ function toSettings(r: Row): Settings {
   };
 }
 
+/**
+ * Read once per transaction, not once per caller.
+ *
+ * The performance pass counted the queries behind a page load and found this
+ * row fetched FOUR times in a single render of the application layout — the
+ * layout's own currency, the sidebar counts, the notification feed and the
+ * retainer sweep each asking independently — and then again by the page inside
+ * it. The layout wraps every screen in the product, so that is three redundant
+ * round trips on every page view anybody ever loads. Against Neon each one is
+ * real latency on the wire, not a free local read.
+ *
+ * Keyed on the query object, which `withTenant` creates once per transaction,
+ * so the memo lives exactly as long as the transaction does and cannot leak
+ * between requests or workspaces. A `WeakMap` because a finished transaction's
+ * querier should be collectable.
+ *
+ * The PROMISE is stored rather than the result, so four callers starting at the
+ * same moment share one round trip instead of racing to start four.
+ *
+ * It is correct rather than merely fast: a transaction cannot see two different
+ * versions of a row it has not written, and the one thing that CAN write it —
+ * `updateSettings` — replaces the memo with what it wrote.
+ */
+const perTransaction = new WeakMap<TenantQuery, Promise<Settings>>();
+
 /** Never throws for a sub-account that has not saved anything; returns defaults. */
 export async function getSettings(q: TenantQuery): Promise<Settings> {
-  const row = await q.one<Row>(
-    `SELECT ${COLUMNS}
-     FROM settings WHERE sub_account_id = $1`,
-    [q.ctx.subAccountId]
-  );
-  return row ? toSettings(row) : { ...DEFAULT_SETTINGS };
+  const already = perTransaction.get(q);
+  if (already) return already;
+
+  const reading = (async () => {
+    const row = await q.one<Row>(
+      `SELECT ${COLUMNS}
+       FROM settings WHERE sub_account_id = $1`,
+      [q.ctx.subAccountId]
+    );
+    return row ? toSettings(row) : { ...DEFAULT_SETTINGS };
+  })();
+
+  perTransaction.set(q, reading);
+  return reading;
 }
 
 /**
@@ -294,5 +327,11 @@ export async function updateSettings(
     ]
   );
   if (!row) throw new Error("Settings were not saved.");
-  return toSettings(row);
+  const saved = toSettings(row);
+  /* The memo above is replaced with what was just written, so anything later in
+     this same transaction reads the new row rather than the one it started
+     with. Clearing it would be the other defensible answer; replacing it is the
+     same answer without a second round trip. */
+  perTransaction.set(q, Promise.resolve(saved));
+  return saved;
 }
