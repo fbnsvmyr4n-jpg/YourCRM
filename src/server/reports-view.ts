@@ -232,13 +232,24 @@ export async function reportView(q: TenantQuery, period?: Period): Promise<Repor
   );
 
   const bookedRow = await q.one<{ n: string }>(
-    // A call "booked a meeting" only if a meeting actually points at the same
-    // contact and was created after the call. Counting intent would be a guess.
-    `SELECT count(DISTINCT c.id)::text AS n
+    /*
+       A call booked a meeting when THIS CALL BOOKED THAT MEETING.
+
+       This joined any meeting with the same contact created after the call — a
+       correlation dressed as a fact, and one that could only ever flatter the
+       thing being measured. A client who phones, and is then met a month later
+       about something else, made the voice agent look as though it had booked
+       that meeting; every later meeting with a past caller counted again.
+
+       The product already records the real answer: `process-call.ts` stamps
+       `created_meeting_id` when a call books one, and the voice console reads
+       that column to tick the call off. Reading it here is the difference
+       between measuring the agent and measuring the calendar.
+    */
+    `SELECT count(*)::text AS n
      FROM calls c
-     JOIN meetings m ON m.contact_id = c.contact_id AND m.created_at >= c.received_at
-     WHERE c.sub_account_id = $1 AND c.deleted_at IS NULL AND m.deleted_at IS NULL
-       AND c.contact_id IS NOT NULL`,
+     JOIN meetings m ON m.id = c.created_meeting_id AND m.sub_account_id = c.sub_account_id
+     WHERE c.sub_account_id = $1 AND c.deleted_at IS NULL AND m.deleted_at IS NULL`,
     [tenant]
   );
 

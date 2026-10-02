@@ -72,7 +72,27 @@ export type AgentPrincipal = {
  * not.
  */
 export const TOOL_CAPABILITIES = [
+  /* Reading about THE PERSON IN FRONT OF YOU: matching an inbound number to a
+     contact, checking the diary for a free slot. Nothing it covers can be
+     aimed at somebody else. */
   "read_crm",
+  /*
+     Reading about ANYBODY: looking a name up, pulling a contact's history,
+     listing what is sitting in the pipeline.
+
+     Split out of `read_crm` by the voice audit, which found all three offered
+     to an anonymous telephone caller. `list_quotes_awaiting_approval` took no
+     arguments at all and returned every pending quotation in the workspace —
+     number, project and amount — and its own description invited the model to
+     reach for it when "a caller asks what has happened to a quote". Ringing the
+     number and saying exactly that read out the pipeline of every client that
+     business has.
+
+     A caller is unauthenticated. Caller ID is the only evidence of who they
+     are and it is spoofable, so this is a capability an agent acting for a
+     signed-in person may hold and a caller-facing agent must not.
+  */
+  "browse_crm",
   "write_activity",
   "write_contact",
   "write_task",

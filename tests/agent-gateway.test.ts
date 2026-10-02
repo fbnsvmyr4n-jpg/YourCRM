@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { startTestDb, type TestDb, AGENCY, TENANT_A, TENANT_B, USER_A } from "./helpers/pg";
+import { TOOL_CAPABILITIES } from "../src/server/agent/gateway";
 import type { TenantContext } from "../src/server/tenant";
 
 /**
@@ -31,16 +32,17 @@ const ctxFor = (subAccountId: string, role = "owner"): TenantContext => ({
 });
 const inA = <T>(fn: Parameters<typeof withTenant<T>>[1]) => withTenant(ctxFor(TENANT_A), fn);
 
-/** Everything switched on, which is the permissive case worth attacking. */
-const FULL = new Set([
-  "read_crm",
-  "write_activity",
-  "write_contact",
-  "write_task",
-  "write_meeting",
-  "draft_quote",
-  "call_control",
-] as const);
+/**
+ * Everything switched on, which is the permissive case worth attacking.
+ *
+ * Derived from the capability list rather than copied from it. Written out by
+ * hand, it fell behind the moment `browse_crm` was added — and a stale
+ * "everything" set weakens these tests in the way nobody notices: the attack
+ * they are supposed to be running stops being the permissive case.
+ */
+const FULL = new Set(TOOL_CAPABILITIES) as ReadonlySet<
+  import("../src/server/agent/gateway").ToolCapability
+>;
 
 const principal = (over: Partial<import("../src/server/agent/gateway").AgentPrincipal> = {}) => ({
   agent: "voice" as const,
@@ -322,6 +324,59 @@ describe("what the model is offered", () => {
     expect(names).toContain("identify_caller");
     expect(names).not.toContain("add_contact_note");
     expect(names).not.toContain("create_contact");
+  });
+
+  /**
+   * What somebody can get by telephoning the number.
+   *
+   * The voice audit found three tools offered to an anonymous caller that read
+   * records about people other than the caller: a name lookup, any contact's
+   * recent history, and the list of quotations awaiting approval — the last of
+   * which took no arguments and returned every client's quotation with its
+   * amount, with a description inviting the model to use it exactly when "a
+   * caller asks what has happened to a quote".
+   *
+   * Caller ID is the only evidence of who is on the line and it is spoofable,
+   * so this boundary cannot live in the prompt. It lives in the capability the
+   * voice principal is not given.
+   */
+  it("GIVES A TELEPHONE CALLER NO WAY TO READ ANOTHER CUSTOMER'S RECORDS", async () => {
+    const { VOICE_CAPABILITIES } = await import("../src/server/agent/principal");
+    const offered = gateway
+      .toolsFor(tools.CRM_TOOL_REGISTRY, principal({ capabilities: VOICE_CAPABILITIES }))
+      .map((t) => t.name);
+
+    for (const forbidden of ["search_contacts", "get_recent_activity", "list_quotes_awaiting_approval"]) {
+      expect(offered, `a caller is offered ${forbidden}`).not.toContain(forbidden);
+    }
+    /* And still does its job: knows who is ringing, and can find a slot. */
+    expect(offered).toContain("identify_caller");
+    expect(offered).toContain("check_availability");
+    /* Writing is untouched — it is attributable and somebody reviews it. */
+    expect(offered).toContain("create_meeting");
+    expect(offered).toContain("create_quote_draft");
+  });
+
+  it("refuses those tools at execution, not merely by hiding them", async () => {
+    const { VOICE_CAPABILITIES } = await import("../src/server/agent/principal");
+    const out = await run(
+      { tool: "list_quotes_awaiting_approval", input: {} },
+      principal({ capabilities: VOICE_CAPABILITIES })
+    );
+    /* A hidden tool is presentation. The gateway is the boundary, so a model
+       that names it anyway — or a redelivered call — still gets nothing. */
+    expect(out.status).not.toBe("succeeded");
+  });
+
+  it("every tool that reads about somebody other than the caller is `browse_crm`", () => {
+    /* The rule stated once, so a tool added later is held to it: if it takes a
+       name or an id that the caller did not have to prove is theirs, it is not
+       `read_crm`. */
+    for (const name of ["search_contacts", "get_recent_activity", "list_quotes_awaiting_approval"]) {
+      expect(tools.CRM_TOOL_REGISTRY.get(name)?.capability, `${name} is still read_crm`).toBe(
+        "browse_crm"
+      );
+    }
   });
 
   it("tells the model when a tool needs the caller's agreement", () => {

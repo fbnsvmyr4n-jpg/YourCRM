@@ -255,10 +255,15 @@ async function main() {
 
     /* Calls the voice agent handled: two became records, one has not. */
     await db.query(
-      `INSERT INTO calls (id, sub_account_id, contact_id, created_deal_id, caller_name, phone, received_at, duration_sec, outcome, summary, topic) VALUES
-         ('cl-1', $1, 'ct-sarah',  'd-garage', 'Sarah Adams',  '+27 82 555 0106', ${day(6)}, 240, 'meeting-booked', 'Asked about converting a garage.', 'Garage conversion'),
-         ('cl-2', $1, 'ct-pieter', 'd-deck',   'Pieter Venter','+27 82 555 0105', ${day(8)}, 180, 'qualified',      'Wants a timber deck quoted.',      'Timber deck'),
-         ('cl-3', $1, NULL,        NULL,       'Unknown caller','+27 82 555 0199', ${day(1)}, 95, NULL,           'Asked whether we do retaining walls.', 'Retaining walls')`,
+      /* `created_meeting_id` on cl-1, because its outcome is meeting-booked and
+         that is the column the product writes when a call books one. Left null,
+         the fixture described a call that says it booked a meeting while
+         pointing at none — a state `process-call.ts` cannot produce, and the
+         kind of fixture that teaches a reader the wrong thing. */
+      `INSERT INTO calls (id, sub_account_id, contact_id, created_deal_id, created_meeting_id, caller_name, phone, received_at, duration_sec, outcome, summary, topic) VALUES
+         ('cl-1', $1, 'ct-sarah',  'd-garage', 'mt-2', 'Sarah Adams',  '+27 82 555 0106', ${day(6)}, 240, 'meeting-booked', 'Asked about converting a garage.', 'Garage conversion'),
+         ('cl-2', $1, 'ct-pieter', 'd-deck',   NULL,   'Pieter Venter','+27 82 555 0105', ${day(8)}, 180, 'qualified',      'Wants a timber deck quoted.',      'Timber deck'),
+         ('cl-3', $1, NULL,        NULL,       NULL,   'Unknown caller','+27 82 555 0199', ${day(1)}, 95, NULL,           'Asked whether we do retaining walls.', 'Retaining walls')`,
       [sub.id]
     );
 
@@ -296,6 +301,8 @@ async function main() {
     Price list               3             2 live, 1 withdrawn
     Notes                    3             2 on contacts, 1 on a job
     Calls                    3             1 still to be processed, and one with no outcome recorded
+    Calls that became a lead 2             cl-1 and cl-2 each opened a deal
+    Calls that booked a time 1             cl-1 only — it is the one pointing at a meeting
 `);
   await db.end();
 }

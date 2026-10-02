@@ -156,7 +156,9 @@ const lookUpContact: ToolDefinition<{ name: string }, { matches: { contactId: st
     if (name.length < 3) return bad("Give at least three characters to search on.");
     return ok({ name });
   },
-  capability: "read_crm",
+  /* `browse_crm`, not `read_crm`: this reads about somebody other than
+     the caller — see the capability list in gateway.ts. */
+  capability: "browse_crm",
   risk: "auto",
   retryable: true,
   run: async (q, { name }) => {
@@ -242,7 +244,9 @@ const recentActivity: ToolDefinition<
     if (!contactId) return bad("Which contact?");
     return ok({ contactId });
   },
-  capability: "read_crm",
+  /* `browse_crm`, not `read_crm`: this reads about somebody other than
+     the caller — see the capability list in gateway.ts. */
+  capability: "browse_crm",
   risk: "auto",
   retryable: true,
   run: async (q, { contactId }) => {
@@ -646,7 +650,9 @@ const quotesWaiting: ToolDefinition<
   purpose: "Read pending quotations.",
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
   parse: () => ok({}),
-  capability: "read_crm",
+  /* `browse_crm`, not `read_crm`: this reads about somebody other than
+     the caller — see the capability list in gateway.ts. */
+  capability: "browse_crm",
   risk: "auto",
   retryable: true,
   run: async (q) => {

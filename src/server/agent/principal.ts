@@ -36,6 +36,21 @@ import type { AgentPrincipal, ToolCapability } from "./gateway";
  * grant.
  */
 export const VOICE_CAPABILITIES: ReadonlySet<ToolCapability> = new Set([
+  /*
+     `read_crm` and NOT `browse_crm` — the line the voice audit drew.
+
+     A caller may be identified from the number they are ringing on, and the
+     diary may be checked for a free slot. Nobody on the telephone may have a
+     name looked up, a contact's history read back, or the pending quotation
+     list recited. All three were offered here until the audit, and the last of
+     them took no arguments and returned every client's quotation with its
+     amount.
+
+     Writing stays wide open by comparison, and deliberately: a new contact, a
+     note, a meeting, a drafted quotation. A write is attributable and somebody
+     reviews it; another customer's records read down a phone line cannot be
+     taken back.
+  */
   "read_crm",
   "write_activity",
   "write_contact",
