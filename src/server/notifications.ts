@@ -162,55 +162,9 @@ export async function listNotifications(q: TenantQuery): Promise<Notification[]>
 
   const out: Notification[] = [];
 
-  /*
-     Work the system gave up on, first — above everything a person merely has
-     not got to yet.
-
-     A quotation somebody approved that never reached the client is the most
-     expensive thing this feed can carry: the decision was made, the price went
-     nowhere, and nothing else on any screen shouts about it. Until now it lived
-     in a `console.error` inside a scheduled sweep and a row nobody queries,
-     which is another way of saying the client told you.
-
-     The provider's own words are carried through rather than replaced with
-     "something went wrong". "You can only send testing emails to your own
-     address" tells somebody exactly what to fix; a friendly paraphrase does
-     not, and this is a feed for people who have to act.
-  */
-  const stuck = await deadJobs(q);
-  for (const [handler, jobs] of groupByHandler(stuck)) {
-    const meta = STUCK_META[handler] ?? FALLBACK_STUCK;
-    out.push({
-      id: `stuck-${handler}`,
-      kind: "stuck",
-      title: `${jobs.length} ${meta.noun(jobs.length)} ${meta.verb}`,
-      detail: shortenError(jobs[0].lastError) || "No reason was recorded",
-      href: meta.href,
-      // Above the most time-critical human task. Somebody's client is waiting
-      // on something this workspace believes it already sent.
-      weight: 110,
-    });
-  }
-
-  /*
-     An automation that has stopped working.
-
-     Same standing as an abandoned job: the system promised something and did
-     not do it. A rotation whose people have all left keeps leaving new leads
-     wherever they landed, and nothing else says so. Reported only while it is
-     still true — see `failingAutomations`.
-  */
-  const failing = await failingAutomations(q);
-  if (failing.count > 0) {
-    out.push({
-      id: "automations-failing",
-      kind: "stuck",
-      title: `${failing.count} automation${failing.count === 1 ? "" : "s"} could not run`,
-      detail: failing.latest ?? "No reason was recorded",
-      href: "/settings?s=automations",
-      weight: 110,
-    });
-  }
+  /* Everything the machine itself failed at, from the one place that knows,
+     so the operational bell and this feed cannot drift apart. */
+  out.push(...(await opsEntries(q)));
 
   // Meetings happening today — the most time-critical thing on the list, and
   // counted in the business's zone rather than the server's.
@@ -383,4 +337,80 @@ export async function listNotifications(q: TenantQuery): Promise<Notification[]>
   }
 
   return out.sort((a, b) => b.weight - a.weight);
+}
+
+
+/**
+ * What is BROKEN, as opposed to what is waiting.
+ *
+ * Its own feed so somebody who runs the MACHINE can be told about it without
+ * being handed the customer records. An IT admin could administer every person
+ * on the account and got an EMPTY bell, because the bell was gated on
+ * customer-record access — so "three emails could not be sent" and "a booking
+ * confirmation died in the queue" were invisible to the one role whose job that
+ * is, and the product reported all-clear while it was not.
+ *
+ * It reads the queue and the automation runs and NOTHING ELSE: no contacts, no
+ * deals, no meetings, no messages. A failed send names the handler and the
+ * reason the provider gave, never what the document said.
+ */
+export async function listOpsNotifications(q: TenantQuery): Promise<Notification[]> {
+  return (await opsEntries(q)).sort((a, b) => b.weight - a.weight);
+}
+
+/** The shared body, so neither caller can grow a troubles list of its own. */
+async function opsEntries(q: TenantQuery): Promise<Notification[]> {
+  const out: Notification[] = [];
+
+  /*
+     Work the system gave up on, first — above everything a person merely has
+     not got to yet.
+
+     A quotation somebody approved that never reached the client is the most
+     expensive thing this feed can carry: the decision was made, the price went
+     nowhere, and nothing else on any screen shouts about it. Until now it lived
+     in a `console.error` inside a scheduled sweep and a row nobody queries,
+     which is another way of saying the client told you.
+
+     The provider's own words are carried through rather than replaced with
+     "something went wrong". "You can only send testing emails to your own
+     address" tells somebody exactly what to fix; a friendly paraphrase does
+     not, and this is a feed for people who have to act.
+  */
+  const stuck = await deadJobs(q);
+  for (const [handler, jobs] of groupByHandler(stuck)) {
+    const meta = STUCK_META[handler] ?? FALLBACK_STUCK;
+    out.push({
+      id: `stuck-${handler}`,
+      kind: "stuck",
+      title: `${jobs.length} ${meta.noun(jobs.length)} ${meta.verb}`,
+      detail: shortenError(jobs[0].lastError) || "No reason was recorded",
+      href: meta.href,
+      // Above the most time-critical human task. Somebody's client is waiting
+      // on something this workspace believes it already sent.
+      weight: 110,
+    });
+  }
+
+  /*
+     An automation that has stopped working.
+
+     Same standing as an abandoned job: the system promised something and did
+     not do it. A rotation whose people have all left keeps leaving new leads
+     wherever they landed, and nothing else says so. Reported only while it is
+     still true — see `failingAutomations`.
+  */
+  const failing = await failingAutomations(q);
+  if (failing.count > 0) {
+    out.push({
+      id: "automations-failing",
+      kind: "stuck",
+      title: `${failing.count} automation${failing.count === 1 ? "" : "s"} could not run`,
+      detail: failing.latest ?? "No reason was recorded",
+      href: "/settings?s=automations",
+      weight: 110,
+    });
+  }
+
+  return out;
 }

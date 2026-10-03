@@ -78,6 +78,24 @@ const ROLE_TONE: Record<string, { color: string; soft: string }> = {
  * kept true to them by hand — which is why they say what the role is FOR rather
  * than listing capability names that would go stale silently.
  */
+/**
+ * What each role is CALLED on screen, as against what the column holds.
+ *
+ * Only one differs, and it earns its place: the column says `admin`, which a
+ * customer appointing one reads as "administrator of everything" — and then
+ * finds their new administrator cannot open Contacts. The blurb underneath
+ * already said "the IT side"; the label was fighting it. Everything else is
+ * the column name, capitalised by the stylesheet.
+ */
+const ROLE_LABEL: Record<string, string> = {
+  admin: "IT admin",
+};
+
+/** What to call a role on screen. Falls back to the stored name. */
+export function roleLabel(role: string): string {
+  return ROLE_LABEL[role] ?? role;
+}
+
 const ROLE_BLURB: Record<string, string> = {
   owner: "Everything, including the subscription and the card.",
   /* Both of these said the role could use the CRM. Neither can: IT and
@@ -246,7 +264,7 @@ export function TeamCard({
                         className="mt-0.5 accent-[var(--accent)]"
                       />
                       <span className="min-w-0 leading-tight">
-                        <span className="block text-sm font-medium capitalize">{role}</span>
+                        <span className="block text-sm font-medium capitalize">{roleLabel(role)}</span>
                         <span className="mt-0.5 block text-xs text-faint">{ROLE_BLURB[role]}</span>
                       </span>
                     </label>
@@ -396,7 +414,7 @@ function MemberRow({
                   : [member.role, ...assignable]
                 ).map((role) => (
                   <option key={role} value={role} className="capitalize">
-                    {role}
+                    {roleLabel(role)}
                   </option>
                 ))}
               </select>

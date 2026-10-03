@@ -17,6 +17,7 @@ export function AppShell({
   notifications,
   counts,
   crmAccess,
+  moneyAccess,
   currency,
 }: {
   children: React.ReactNode;
@@ -25,6 +26,8 @@ export function AppShell({
   counts: NavCounts;
   /** Decided on the server; false for IT and accounts. Presentation only. */
   crmAccess: boolean;
+  /** Quotations, orders and invoices — true for finance, false for IT. */
+  moneyAccess: boolean;
   /** The workspace's currency, for every amount on every page below. */
   currency: CurrencyCode;
 }) {
@@ -47,6 +50,7 @@ export function AppShell({
         onMobileClose={() => setMobileOpen(false)}
         counts={counts}
         crmAccess={crmAccess}
+        moneyAccess={moneyAccess}
       />
 
       {/* Mobile backdrop */}

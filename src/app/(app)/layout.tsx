@@ -5,10 +5,10 @@ import { stripeConfigured } from "@/server/billing/stripe";
 import { PlanLapsed } from "@/components/billing/PlanLapsed";
 import { AppShell } from "@/components/shell/AppShell";
 import { planState } from "@/server/plan-gate";
-import { canAccessCrm, roleCan } from "@/server/permissions";
+import { canAccessCrm, canAccessMoney, canAccessOps, roleCan } from "@/server/permissions";
 import { withSystem } from "@/server/tenant";
 import { navCounts } from "@/server/nav-counts";
-import { listNotifications } from "@/server/notifications";
+import { listNotifications, listOpsNotifications } from "@/server/notifications";
 import { raiseRetainersSafely } from "@/server/retainer-run";
 import { getSettings } from "@/server/repos/settings";
 import { currentUser, withTenantPage } from "@/server/tenant-session";
@@ -72,6 +72,11 @@ export default async function AppGroupLayout({ children }: { children: React.Rea
      product look broken rather than restricted.
   */
   const crmAccess = canAccessCrm(user.role);
+  /* Two more doors, because one boolean was answering three questions. Finance
+     gets the paperwork without the pipeline; IT gets to hear that the machine
+     is broken without reading anybody's records. See `server/permissions`. */
+  const moneyAccess = canAccessMoney(user.role);
+  const opsAccess = canAccessOps(user.role);
   /* The currency is read for everybody: it is how this business counts, not a
      record about a customer, and accounts see amounts on Billing too. */
   const { notifications, counts, currency } = await withTenantPage(
@@ -85,7 +90,24 @@ export default async function AppGroupLayout({ children }: { children: React.Rea
             notifications: (await raiseRetainersSafely(q), await listNotifications(q)),
             counts: await navCounts(q),
           }
-        : { notifications: [], counts: { inbox: 0, calendarToday: false, tasksDue: 0 } }),
+        : {
+            /*
+               An IT admin used to get an EMPTY bell.
+
+               It was gated on customer-record access, so the one role whose job
+               is "is this thing working" was never told that an email had
+               failed or a job had died — and the product showed them all-clear
+               while a client sat waiting for a confirmation. They now get the
+               operational feed, which reads the queue and the automation runs
+               and nothing about anybody's customers.
+
+               Finance gets neither: a stuck queue is not accounts' problem, and
+               the counts below are inbox, calendar and tasks, which are not
+               theirs either.
+            */
+            notifications: opsAccess ? await listOpsNotifications(q) : [],
+            counts: { inbox: 0, calendarToday: false, tasksDue: 0 },
+          }),
     }),
     { crmData: false }
   );
@@ -111,6 +133,7 @@ export default async function AppGroupLayout({ children }: { children: React.Rea
          actually stops an IT admin opening /contacts by typing the URL. Hiding
          the link keeps the sidebar honest about where they can go. */
       crmAccess={crmAccess}
+      moneyAccess={moneyAccess}
       currency={currency}
     >
       {children}

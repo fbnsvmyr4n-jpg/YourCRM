@@ -287,6 +287,15 @@ export default async function SettingsPage({
     needsCrm?: boolean;
     /** Offered only to whoever manages the team. */
     needsManageUsers?: boolean;
+    /**
+     * Offered only to whoever handles the money.
+     *
+     * Billing and Payments were open to everybody with the controls disabled,
+     * so every salesperson could read the plan, the renewal, and that the card
+     * processor was connected in live mode. Nothing secret, but it is the
+     * company's financial posture shown to people whose job it is not.
+     */
+    needsManageBilling?: boolean;
   }[] = [
     {
       id: "account",
@@ -413,6 +422,7 @@ export default async function SettingsPage({
           />
         </>
       ),
+      needsManageBilling: true,
     },
     {
       id: "payments",
@@ -425,6 +435,7 @@ export default async function SettingsPage({
           canManage={roleCan(user.role, "manage_billing")}
         />
       ),
+      needsManageBilling: true,
     },
     {
       id: "data",
@@ -470,7 +481,10 @@ export default async function SettingsPage({
      none. `initial` is re-checked against what survives, so `?s=clients` typed
      by hand opens Account rather than a tab that is not there. */
   const sections = allSections.filter(
-    (section) => (!section.needsCrm || crmAccess) && (!section.needsManageUsers || roleCan(user.role, "manage_users"))
+    (section) =>
+      (!section.needsCrm || crmAccess) &&
+      (!section.needsManageUsers || roleCan(user.role, "manage_users")) &&
+      (!section.needsManageBilling || roleCan(user.role, "manage_billing"))
   );
 
   return (

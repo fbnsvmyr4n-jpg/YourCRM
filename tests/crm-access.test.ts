@@ -148,13 +148,52 @@ describe("nothing routes around the gate", () => {
    */
   it("the shared entry points require access unless told otherwise", () => {
     const session = readFileSync(join(ROOT, "src", "server", "tenant-session.ts"), "utf8");
+    /* Still `crmData !== false`: the gate is on unless an operation names
+       itself as touching neither customers nor money. What changed is WHICH
+       door it opens — customer records by default, the money tier when the
+       caller says `money: true` — so a bookkeeper can open an invoice without
+       being handed the pipeline. The default direction is what this test exists
+       to hold, and that is unchanged. */
     expect(
       session,
-      "withCurrentTenant no longer defaults to requiring CRM access"
-    ).toMatch(/options\.crmData !== false && !canAccessCrm\(ctx\.role\)/);
-    expect(session, "withTenantPage no longer redirects a reader without access").toMatch(
-      /options\.crmData !== false && !canAccessCrm\(user\.role\)/
+      "withCurrentTenant no longer defaults to requiring access"
+    ).toMatch(/options\.crmData !== false && !mayEnter/);
+    expect(session, "the tier is no longer chosen from the role").toMatch(
+      /const mayEnter = options\.money \? canAccessMoney\(ctx\.role\) : canAccessCrm\(ctx\.role\)/
     );
+
+    expect(session, "withTenantPage no longer redirects a reader without access").toMatch(
+      /options\.crmData !== false && !mayOpen/
+    );
+    expect(session).toMatch(
+      /const mayOpen = options\.money \? canAccessMoney\(user\.role\) : canAccessCrm\(user\.role\)/
+    );
+  });
+
+  /**
+   * The money tier is a DOOR, not a skeleton key.
+   *
+   * It exists so finance can work, and the way it would quietly stop meaning
+   * anything is somebody granting it to every role — at which point IT reads
+   * the quotations. So the table is asserted here rather than left to whoever
+   * edits it next.
+   */
+  it("NAMES EXACTLY WHO MAY OPEN THE MONEY DOCUMENTS", async () => {
+    const { canAccessMoney, canAccessCrm, canAccessOps } = await import(
+      "../src/server/permissions"
+    );
+    expect(canAccessMoney("finance"), "finance still cannot open an invoice").toBe(true);
+    expect(canAccessMoney("admin"), "IT can read what the business charges").toBe(false);
+    expect(canAccessMoney("owner")).toBe(true);
+    expect(canAccessMoney("member")).toBe(true);
+    expect(canAccessMoney("nonsense"), "an unknown role is not fail-closed").toBe(false);
+
+    /* And the tiers that must stay apart: finance has no customer records, IT
+       has no money, and only IT and the owner hear the machine. */
+    expect(canAccessCrm("finance")).toBe(false);
+    expect(canAccessOps("finance")).toBe(false);
+    expect(canAccessOps("admin")).toBe(true);
+    expect(canAccessOps("member")).toBe(false);
   });
 
   it("the refusal is a named error, so a route can answer 403 rather than 500", () => {

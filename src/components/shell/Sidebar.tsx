@@ -24,6 +24,7 @@ export function Sidebar({
   onMobileClose,
   counts,
   crmAccess,
+  moneyAccess,
 }: {
   user: ShellUser;
   collapsed: boolean;
@@ -33,9 +34,11 @@ export function Sidebar({
   counts: NavCounts;
   /** Decided on the server. False for IT and accounts. */
   crmAccess: boolean;
+  /** May this reader open quotations, orders and invoices. */
+  moneyAccess: boolean;
 }) {
   const pathname = usePathname();
-  const nav = visibleNav(crmAccess);
+  const nav = visibleNav(crmAccess, moneyAccess);
   const [menuOpen, setMenuOpen] = useState(false);
 
   return (

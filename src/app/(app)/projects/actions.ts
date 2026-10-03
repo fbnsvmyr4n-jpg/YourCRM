@@ -1,5 +1,6 @@
 "use server";
 
+import { canSettleInvoice } from "@/server/permissions";
 import { logWrite } from "@/server/log";
 import { applyCustomValues, parseCustomValues } from "@/server/custom-field-form";
 import { cascade } from "@/server/repos/tasks";
@@ -347,6 +348,28 @@ export async function setDocumentStatusAction(
     const status = pick(formData.get("status"), DOC_STATUSES);
     if (!documentId) return { error: "That document could not be identified." };
     if (!status) return { error: "Choose a status." };
+
+    /*
+       DECLARING SOMETHING PAID IS NOT THE SALESPERSON'S TO DO.
+
+       Confirming that money arrived is how revenue becomes real here: it moves
+       the document, the project's figures and every report built over them. The
+       oldest control in bookkeeping is that whoever chased the sale is not
+       whoever confirms the payment, and the whole of Reports rests on this one
+       field being true.
+
+       It costs sales nothing in practice. A card payment confirms itself
+       through the provider's webhook, so a hand-marked invoice is the exception
+       — a transfer somebody watched land in the account — and that is finance's
+       desk by definition. The rest of the menu stays theirs: sent, accepted,
+       declined, cancelled.
+    */
+    if (status === "paid" && !canSettleInvoice(q.ctx.role)) {
+      return {
+        error:
+          "Only an owner or a finance user can mark something paid. Card payments record themselves.",
+      };
+    }
 
     /*
        A quotation waiting on an approval is not moved along from here.

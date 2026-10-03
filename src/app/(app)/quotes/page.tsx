@@ -23,6 +23,11 @@ export default async function QuotesPage() {
         instantToWallClock(new Date().toISOString(), settings.timeZone)?.date ??
         new Date().toISOString().slice(0, 10),
     };
+  }, {
+    /* A money document, so the MONEY tier decides who may open it — which is
+       what lets a bookkeeper work without handing them the pipeline. See
+       `canAccessMoney`. */
+    money: true,
   });
 
   return (

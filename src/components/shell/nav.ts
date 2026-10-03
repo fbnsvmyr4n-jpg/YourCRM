@@ -44,6 +44,15 @@ export type NavItem = {
    */
   needsCrm?: false;
   /**
+   * Whether this screen is MONEY PAPERWORK — a quotation, an order, an invoice.
+   *
+   * A separate question from `needsCrm` because it has a different answer for
+   * the same person: a bookkeeper may not read somebody's call history and must
+   * be able to open an unpaid invoice. Marked here, these survive the filter for
+   * a reader who holds the money tier but not the customer one.
+   */
+  isMoney?: true;
+  /**
    * Pages that belong under this one, shown nested beneath it.
    *
    * Grouping only. The children are TOP-LEVEL routes — `/quotes`, not
@@ -83,8 +92,8 @@ export const NAV: NavSection[] = [
            project — because "where is that quote" is a question asked
            without remembering which job it was on. */
         children: [
-          { label: "Quotes", href: "/quotes", icon: FileText },
-          { label: "Purchase orders", href: "/purchase-orders", icon: ClipboardList },
+          { label: "Quotes", href: "/quotes", icon: FileText, isMoney: true },
+          { label: "Purchase orders", href: "/purchase-orders", icon: ClipboardList, isMoney: true },
         ],
       },
       { label: "Inbox", href: "/inbox", icon: Inbox, count: "inbox" },
@@ -133,18 +142,32 @@ export const NAV: NavSection[] = [
  * Sections that empty out are dropped, so a reader without CRM access does not
  * see a "PIPELINE" heading with nothing under it.
  */
-export function visibleNav(crmAccess: boolean): NavSection[] {
+export function visibleNav(crmAccess: boolean, moneyAccess = crmAccess): NavSection[] {
   if (crmAccess) return NAV;
+
   return NAV.map((section) => ({
     ...section,
-    items: section.items
-      .filter((item) => item.needsCrm === false)
-      /* Children are filtered on the same rule. A child left under a hidden
-         parent would be a row nobody can open; one under a VISIBLE parent that
-         needs CRM access would be worse. */
-      .map((item) => ({
-        ...item,
-        children: item.children?.filter((child) => child.needsCrm === false),
-      })),
+    items: section.items.flatMap((item) => {
+      /* Their own account and the help pages: nothing about anybody's
+         customers, so every reader keeps them. */
+      if (item.needsCrm === false) return [{ ...item, children: undefined }];
+
+      /*
+         A PARENT THEY MAY NOT OPEN, HIDING CHILDREN THEY MAY.
+
+         Projects is customer work, and Quotes and Purchase orders hang beneath
+         it — so a bookkeeper, filtered on the parent, lost the two screens
+         their whole job happens on. The nesting is a convenience for people who
+         have both; for somebody who only has the paperwork it is a locked door
+         with their desk behind it.
+
+         So the money children are lifted to the top level instead. They are
+         top-level routes either way — see the note on `children` — so nothing
+         moves but where the row is drawn.
+      */
+      const money = (item.children ?? []).filter((child) => child.isMoney);
+      if (moneyAccess && money.length > 0) return money.map((child) => ({ ...child }));
+      return [];
+    }),
   })).filter((section) => section.items.length > 0);
 }

@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { readSessionToken, SESSION_COOKIE } from "./auth";
 import { logDenied } from "./log";
-import { canAccessCrm } from "./permissions";
+import { canAccessCrm, canAccessMoney } from "./permissions";
 import { requireActivePlan } from "./plan-gate";
 import { findUserById, type SafeUser } from "./repos/users";
 import { withSystem, withTenant, type TenantContext, type TenantQuery } from "./tenant";
@@ -151,7 +151,7 @@ export async function requireTenant(): Promise<TenantContext> {
  */
 export async function withCurrentTenant<T>(
   fn: (q: TenantQuery) => Promise<T>,
-  options: { allowInactive?: boolean; crmData?: boolean; page?: boolean } = {}
+  options: { allowInactive?: boolean; crmData?: boolean; money?: boolean; page?: boolean } = {}
 ): Promise<T> {
   const ctx = await requireTenant();
 
@@ -174,8 +174,21 @@ export async function withCurrentTenant<T>(
    * Every opt-out is listed and justified in the guard suite, exactly as
    * `allowInactive` is.
    */
-  if (options.crmData !== false && !canAccessCrm(ctx.role)) {
-    logDenied("crm-access", `${ctx.role} attempted a customer-data operation`);
+  /*
+     WHICH DOOR this operation is asking for.
+
+     Customer records by default; `money: true` for the ones that handle
+     quotations, purchase orders, invoices and payments. They are different
+     questions with different answers for the same person — a bookkeeper has no
+     business in somebody's call history and every business in an unpaid
+     invoice — and asked as one question, finance lost both.
+
+     `crmData: false` still means "neither", and still has to be claimed by
+     name.
+  */
+  const mayEnter = options.money ? canAccessMoney(ctx.role) : canAccessCrm(ctx.role);
+  if (options.crmData !== false && !mayEnter) {
+    logDenied("crm-access", `${ctx.role} attempted a ${options.money ? "money" : "customer-data"} operation`);
     throw new CrmAccessError();
   }
 
@@ -247,7 +260,7 @@ export function isReadOnlyRefusal(err: unknown): boolean {
  */
 export async function withTenantPage<T>(
   fn: (q: TenantQuery) => Promise<T>,
-  options: { crmData?: boolean } = {}
+  options: { crmData?: boolean; money?: boolean } = {}
 ): Promise<T> {
   const user = await currentUser();
   // `redirect` throws a control-flow signal Next understands, so nothing below
@@ -263,7 +276,8 @@ export async function withTenantPage<T>(
    * they go — and it opts out below, which is what stops this bouncing between
    * the two forever.
    */
-  if (options.crmData !== false && !canAccessCrm(user.role)) {
+  const mayOpen = options.money ? canAccessMoney(user.role) : canAccessCrm(user.role);
+  if (options.crmData !== false && !mayOpen) {
     redirect("/settings");
   }
 
@@ -276,7 +290,12 @@ export async function withTenantPage<T>(
    * and the layout runs before any page in the group, so there is no route that
    * skips it.
    */
-  return withCurrentTenant(fn, { allowInactive: true, crmData: options.crmData, page: true });
+  return withCurrentTenant(fn, {
+    allowInactive: true,
+    crmData: options.crmData,
+    money: options.money,
+    page: true,
+  });
 }
 
 /** Same, for a page that needs the context rather than a querier. */

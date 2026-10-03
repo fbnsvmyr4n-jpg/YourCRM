@@ -40,6 +40,11 @@ export default async function DocumentPage({ params }: { params: Promise<{ id: s
         pricesIncludeVat: settings.pricesIncludeVat,
       },
     };
+  }, {
+    /* A money document, so the MONEY tier decides who may open it — which is
+       what lets a bookkeeper work without handing them the pipeline. See
+       `canAccessMoney`. */
+    money: true,
   });
 
   if (!data) notFound();

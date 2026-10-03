@@ -68,6 +68,65 @@ export function canAccessCrm(role: string): boolean {
 }
 
 /**
+ * Who may see the MONEY DOCUMENTS: quotations, purchase orders, invoices, and
+ * the payments against them.
+ *
+ * A third table rather than a wider reading of the one above, because the two
+ * questions have different answers for the same person. Asked as one boolean,
+ * the bookkeeper lost: every document in this product sits behind the CRM gate,
+ * so a finance user could connect a card processor and pay this product's own
+ * subscription, and could not open a single invoice showing money owed TO the
+ * business. They would have to ask a salesperson to read the figures out —
+ * which is more work for two people than for the one who could have done it
+ * alone.
+ *
+ * It is a separate tier, not "finance also gets the CRM". What they get is the
+ * document and the name and address printed on it. Not that contact's calls,
+ * not their notes, not the pipeline. Enough to chase an invoice and reconcile a
+ * payment, and nothing that is somebody else's relationship with a customer.
+ */
+const MONEY_ACCESS: Record<Role, boolean> = {
+  owner: true,
+  /* IT fixes the machine; what the business charges is not theirs to read. */
+  admin: false,
+  finance: true,
+  /* Sales quote and invoice — that is the job. Whether they may declare one
+     PAID by hand is a different question, answered by `canSettleInvoice`. */
+  member: true,
+  viewer: true,
+};
+
+export function canAccessMoney(role: string): boolean {
+  return MONEY_ACCESS[role as Role] ?? false;
+}
+
+/**
+ * Who may see HOW THE MACHINE IS RUNNING: deliveries that failed, jobs stuck in
+ * the queue, the audit trail — the "is it broken, and why" view.
+ *
+ * IT could administer people and workspaces and was handed an empty
+ * notification bell, because the bell was gated on customer-record access. So
+ * "three emails could not be sent" and "a booking confirmation died in the
+ * queue" were invisible to the one role whose job that is, and the product told
+ * them everything was fine while it was not.
+ *
+ * None of it carries record CONTENT: a failed send names the document and the
+ * reason the provider gave, never what the document said.
+ */
+const OPS_ACCESS: Record<Role, boolean> = {
+  owner: true,
+  admin: true,
+  /* Accounts are not on call for a stuck queue. */
+  finance: false,
+  member: false,
+  viewer: false,
+};
+
+export function canAccessOps(role: string): boolean {
+  return OPS_ACCESS[role as Role] ?? false;
+}
+
+/**
  * Role → capability.
  *
  * A member is somebody's employee working inside one client's data. They do not
@@ -117,6 +176,24 @@ export function can(role: Role, capability: Capability): boolean {
  */
 export function roleCan(role: string, capability: Capability): boolean {
   return can(role as Role, capability);
+}
+
+/**
+ * Who may declare an invoice PAID by hand.
+ *
+ * Not the person who sold the work. Confirming that money arrived is how
+ * revenue becomes real in this product — it moves the document, the project's
+ * figures and every report built over them — and the oldest control in
+ * bookkeeping is that whoever chased the sale is not whoever confirms the
+ * payment.
+ *
+ * It costs sales nothing in practice. A card payment confirms itself through
+ * the provider's webhook, so a hand-marked invoice is the exception: a transfer
+ * somebody has watched land in the account, which is finance's desk by
+ * definition.
+ */
+export function canSettleInvoice(role: string): boolean {
+  return roleCan(role, "manage_billing");
 }
 
 /**
