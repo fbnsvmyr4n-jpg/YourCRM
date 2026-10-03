@@ -2,10 +2,11 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Briefcase, Building2, ChevronDown, Search, Settings2, Users } from "lucide-react";
+import { Briefcase, Building2, ChevronDown, Plus, Search, Users } from "lucide-react";
 import { Card, CardHeader, CardMeta } from "@/components/ui/Card";
 import { clsx } from "@/lib/clsx";
-import { useVocabulary } from "@/components/shell/Vocabulary";
+import { useCanWrite } from "@/components/shell/CanWrite";
+import { useVocabulary, useWords } from "@/components/shell/Vocabulary";
 import { stageMeta } from "@/data/pipeline";
 import { useMoney } from "@/components/money/CurrencyProvider";
 import type { CompanyProjects, Project } from "@/server/projects-view";
@@ -43,6 +44,8 @@ export function ProjectsView({
   /** Deals with no company — see `countUnfiled` for why they are counted. */
   unfiled: number;
 }) {
+  const words = useWords();
+  const canWrite = useCanWrite();
   const [query, setQuery] = useState("");
 
   /**
@@ -71,18 +74,35 @@ export function ProjectsView({
     <div className="mx-auto max-w-[1080px] animate-fade-up">
       <div className="flex flex-wrap items-end justify-between gap-3 pb-4 pt-1">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Projects</h1>
-          <p className="mt-1 text-sm text-muted">The work you are doing, by client.</p>
+          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">{words.area}</h1>
+          <p className="mt-1 text-sm text-muted">
+            The work you are doing, by {words.client.toLowerCase()}.
+          </p>
         </div>
-        {/* Companies are still a thing you rename and tidy up; that screen did
-            not stop being useful, it stopped being the front door. */}
-        <Link
-          href="/companies"
-          className="btn-soft focus-ring flex shrink-0 items-center gap-2 rounded-xl px-4 py-2 text-xs font-medium text-muted"
-        >
-          <Settings2 className="h-4 w-4" />
-          Manage companies
-        </Link>
+        {/*
+           "Add {job}", where "Manage companies" used to be.
+
+           This header offered one link, and it was to a list of companies — a
+           screen that cannot produce any work. Somebody arriving on an empty
+           Jobs page followed the only button they were given, added a company,
+           came back, and found the same empty page. Companies now has its own
+           row in the sidebar, which is where a list belongs, and this corner
+           does what the page is for.
+
+           It opens the form on the board rather than carrying a second copy of
+           it: that create path validates the money, rounds the decimals and is
+           already tested, and two ways to raise a job is two ways to get it
+           wrong. The same shape as Home's Quick Actions.
+        */}
+        {canWrite && (
+          <Link
+            href="/deals?new=1"
+            className="btn-accent focus-ring flex shrink-0 items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold"
+          >
+            <Plus className="h-4 w-4" />
+            Add {words.one.toLowerCase()}
+          </Link>
+        )}
       </div>
 
       <label className="relative mb-4 block">
@@ -127,7 +147,7 @@ export function ProjectsView({
                 {unfiled > 0 ? (
                   <>
                     <span className="font-semibold text-[var(--text)]">
-                      {unfiled} {unfiled === 1 ? "deal is" : "deals are"} not filed under a client
+                      {unfiled} {unfiled === 1 ? `${words.one.toLowerCase()} is` : `${words.many.toLowerCase()} are`} not filed under a {words.client.toLowerCase()}
                       yet.
                     </span>{" "}
                     Work appears here once its contact has a company — set one on the contact and
@@ -165,9 +185,9 @@ export function ProjectsView({
           {!query.trim() && (
             <p className="px-0.5 text-xs text-faint">
               <span className="font-semibold text-[var(--text)]">{liveCount}</span>{" "}
-              {liveCount === 1 ? "project is" : "projects are"} live across{" "}
+              {liveCount === 1 ? `${words.one.toLowerCase()} is` : `${words.many.toLowerCase()} are`} live across{" "}
               <span className="font-semibold text-[var(--text)]">{companies.length}</span>{" "}
-              {companies.length === 1 ? "client" : "clients"}.
+              {companies.length === 1 ? words.client.toLowerCase() : `${words.client.toLowerCase()}s`}.
               {/* Said here too, not only on the empty state. A page that lists
                   four clients while three deals are missing looks complete,
                   and the reader has no way to know it is not. */}
@@ -175,7 +195,7 @@ export function ProjectsView({
                 <>
                   {" "}
                   <Link href="/contacts" className="focus-ring rounded underline text-accent">
-                    {unfiled} {unfiled === 1 ? "deal is" : "deals are"} not filed under a client
+                    {unfiled} {unfiled === 1 ? `${words.one.toLowerCase()} is` : `${words.many.toLowerCase()} are`} not filed under a {words.client.toLowerCase()}
                   </Link>
                   .
                 </>

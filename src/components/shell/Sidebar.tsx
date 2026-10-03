@@ -8,6 +8,7 @@ import { visibleNav } from "./nav";
 import { Logo, Wordmark } from "./Logo";
 import { signOutAction } from "@/app/(auth)/actions";
 import { clsx } from "@/lib/clsx";
+import { useWords } from "./Vocabulary";
 import type { ShellUser } from "./AppShell";
 import type { NavCounts } from "@/server/nav-counts";
 
@@ -39,6 +40,12 @@ export function Sidebar({
 }) {
   const pathname = usePathname();
   const nav = visibleNav(crmAccess, moneyAccess);
+  /* Two rows are named by the workspace rather than by this file: the list of
+     work and the board of stages. Everything else means the same thing in
+     every trade. */
+  const words = useWords();
+  const labelFor = (item: { label: string }) =>
+    item.label === "Projects" ? words.area : item.label === "Deals" ? words.board : item.label;
   const [menuOpen, setMenuOpen] = useState(false);
 
   return (
@@ -86,7 +93,7 @@ export function Sidebar({
                     <Link
                       href={item.href}
                       onClick={onMobileClose}
-                      title={collapsed ? item.label : undefined}
+                      title={collapsed ? labelFor(item) : undefined}
                       className={[
                         "focus-ring group relative flex items-center rounded-xl px-3 py-2.5 text-sm font-medium transition-colors",
                         collapsed ? "justify-center" : "gap-3",
@@ -107,7 +114,7 @@ export function Sidebar({
                           active ? "text-accent" : "",
                         ].join(" ")}
                       />
-                      {!collapsed && <span className="relative z-10 flex-1">{item.label}</span>}
+                      {!collapsed && <span className="relative z-10 flex-1">{labelFor(item)}</span>}
                       {/* Nothing waiting, nothing shown. A badge reading 0 is
                           an invitation to check something that is already
                           clear. */}

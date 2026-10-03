@@ -1,6 +1,7 @@
 "use client";
 
 import { useCanWrite } from "@/components/shell/CanWrite";
+import { useOpenFromQuery } from "@/lib/useOpenFromQuery";
 
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -247,6 +248,11 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
      running against a card nobody is holding. */
   useEffect(() => stopEdgeScroll, [stopEdgeScroll]);
   const [addOpen, setAddOpen] = useState<StageId | true | null>(null);
+  /* Arriving from the Jobs page's "Add" button opens the form directly, the
+     same way Home's Quick Actions reach the lead form. The create path stays
+     the one that is already tested rather than a second copy on another
+     screen. */
+  useOpenFromQuery("new", useCallback(() => setAddOpen(true), []));
   const [active, setActive] = useState<Deal | null>(null);
   const [busy, setBusy] = useState(false);
   // A refused move, said out loud. Silently snapping the card back would look

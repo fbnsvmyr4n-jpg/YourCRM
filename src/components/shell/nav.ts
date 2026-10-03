@@ -1,5 +1,6 @@
 import {
   BarChart3,
+  Building2,
   Briefcase,
   CalendarDays,
   ClipboardList,
@@ -96,6 +97,12 @@ export const NAV: NavSection[] = [
           { label: "Purchase orders", href: "/purchase-orders", icon: ClipboardList, isMoney: true },
         ],
       },
+      /* Its own row at last.
+         It was reachable only from a "Manage companies" link in the Projects
+         header — a screen you had to already be somewhere else to find, for the
+         list of who every job belongs to. Beside Contacts, because that is the
+         question it answers: people, and the firms they work for. */
+      { label: "Companies", href: "/companies", icon: Building2 },
       { label: "Inbox", href: "/inbox", icon: Inbox, count: "inbox" },
       { label: "Calendar", href: "/calendar", icon: CalendarDays, count: "calendarToday" },
       /* Beside the Calendar: both answer "what is on today". The badge is the

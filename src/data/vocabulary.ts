@@ -31,8 +31,16 @@ export type Words = {
   /** One piece of work, and many. "Deal" / "Job". */
   one: string;
   many: string;
-  /** The sidebar area that lists them. */
+  /** The sidebar area that LISTS them, grouped by who they are for. */
   area: string;
+  /**
+   * The stage BOARD, which is a different screen from the list above.
+   *
+   * Both would be "Jobs" in a trades workspace, and two identical rows in one
+   * sidebar is a worse answer than either word on its own — so the board is
+   * named after what it shows rather than after what is on it.
+   */
+  board: string;
   /** What the party on a document is called: a client, or a customer. */
   client: string;
   /** The reference printed on a piece of work: D-1001, J-1001. */
@@ -47,6 +55,7 @@ const SALES: Words = {
   one: "Deal",
   many: "Deals",
   area: "Projects",
+  board: "Deals",
   client: "Client",
   prefix: "D",
   stages: {
@@ -73,6 +82,7 @@ const TRADES: Words = {
   one: "Job",
   many: "Jobs",
   area: "Jobs",
+  board: "Pipeline",
   client: "Customer",
   prefix: "J",
   stages: {
