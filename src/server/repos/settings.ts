@@ -1,6 +1,7 @@
 import type { TenantQuery } from "../tenant";
 import { DEFAULT_CURRENCY, isCurrency, type CurrencyCode } from "@/lib/money";
 import { instantToWallClock } from "@/lib/zoned";
+import { DEFAULT_VOCABULARY, isVocabulary, type VocabularyId } from "@/data/vocabulary";
 
 /**
  * Per-sub-account settings.
@@ -55,6 +56,13 @@ export type Settings = {
   registrationNumber: string | null;
   vatNumber: string | null;
   /**
+   * What this workspace calls its own work — see `data/vocabulary.ts`.
+   *
+   * Words only. The stage ids, the reports and the automations are the same
+   * whichever is chosen, so switching costs a workspace nothing.
+   */
+  vocabulary: VocabularyId;
+  /**
    * The VAT rate in basis points: 1500 is 15%. Zero means not registered, and
    * then nothing about VAT appears on any document. `server/vat.ts` says why
    * basis points rather than a decimal.
@@ -98,6 +106,10 @@ export const DEFAULT_SETTINGS: Settings = {
   businessEmail: null,
   registrationNumber: null,
   vatNumber: null,
+  /* Every existing workspace is already reading the sales words, so that is
+     the default. Defaulting to trades would rename the board under people who
+     never asked for it. */
+  vocabulary: DEFAULT_VOCABULARY,
   /* Not registered until somebody says so. A default rate would put a tax line
      on the documents of every business that never asked for one. */
   vatRateBp: 0,
@@ -119,12 +131,13 @@ type Row = {
   vat_number: string | null;
   vat_rate_bp: number;
   prices_include_vat: boolean;
+  vocabulary: string;
   updated_at: Date;
 };
 
 const COLUMNS = `monthly_target_cents, weekly_capacity, time_zone, invoice_pay_to, currency, tasks_from_messages,
                  business_address, business_phone, business_email, registration_number, vat_number,
-                 vat_rate_bp, prices_include_vat, updated_at`;
+                 vat_rate_bp, prices_include_vat, vocabulary, updated_at`;
 
 /** Rejects anything `Intl` cannot resolve, rather than storing a typo. */
 export function isValidTimeZone(zone: string): boolean {
@@ -156,6 +169,9 @@ function toSettings(r: Row): Settings {
        a document. Zero means "show no tax", which is the safe reading. */
     vatRateBp: Number.isFinite(Number(r.vat_rate_bp)) ? Number(r.vat_rate_bp) : 0,
     pricesIncludeVat: r.prices_include_vat === true,
+    /* An unknown value — written by a newer build — reads as the default
+       rather than rendering a screen of `undefined`. */
+    vocabulary: isVocabulary(r.vocabulary) ? r.vocabulary : DEFAULT_VOCABULARY,
     updatedAt: r.updated_at.toISOString(),
   };
 }
@@ -235,10 +251,14 @@ export async function updateSettings(
     vatNumber?: string | null;
     vatRateBp?: number;
     pricesIncludeVat?: boolean;
+    vocabulary?: VocabularyId;
   }
 ): Promise<Settings> {
   if (patch.currency !== undefined && !isCurrency(patch.currency)) {
     throw new Error("That is not a currency this workspace can use.");
+  }
+  if (patch.vocabulary !== undefined && !isVocabulary(patch.vocabulary)) {
+    throw new Error("That is not a set of words this product knows.");
   }
   if (patch.vatRateBp !== undefined) {
     /* The same bounds the column enforces, checked here so the message is
@@ -271,10 +291,11 @@ export async function updateSettings(
   const row = await q.one<Row>(
     `INSERT INTO settings (sub_account_id, monthly_target_cents, weekly_capacity, time_zone, invoice_pay_to, currency, tasks_from_messages,
                            business_address, business_phone, business_email, registration_number, vat_number,
-                           vat_rate_bp, prices_include_vat)
+                           vat_rate_bp, prices_include_vat, vocabulary)
      VALUES ($1, COALESCE($2, 0), COALESCE($3, ${DEFAULT_SETTINGS.weeklyCapacity}), COALESCE($4, 'UTC'), $5,
              COALESCE($7, '${DEFAULT_CURRENCY}'), COALESCE($8, TRUE),
-             $9, $11, $13, $15, $17, COALESCE($19, 0), COALESCE($20, FALSE))
+             $9, $11, $13, $15, $17, COALESCE($19, 0), COALESCE($20, FALSE),
+             COALESCE($21, 'sales'))
      ON CONFLICT (sub_account_id) DO UPDATE SET
        monthly_target_cents = COALESCE($2, settings.monthly_target_cents),
        weekly_capacity      = COALESCE($3, settings.weekly_capacity),
@@ -301,6 +322,7 @@ export async function updateSettings(
        vat_rate_bp          = COALESCE($19, settings.vat_rate_bp),
        -- Boolean, so COALESCE again: false is a real answer and must survive.
        prices_include_vat   = COALESCE($20, settings.prices_include_vat),
+       vocabulary           = COALESCE($21, settings.vocabulary),
        updated_at           = now()
      RETURNING ${COLUMNS}`,
     [
@@ -324,6 +346,7 @@ export async function updateSettings(
       patch.vatNumber !== undefined,
       patch.vatRateBp ?? null,
       patch.pricesIncludeVat ?? null,
+      patch.vocabulary ?? null,
     ]
   );
   if (!row) throw new Error("Settings were not saved.");

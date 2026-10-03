@@ -3152,6 +3152,55 @@ ALTER TABLE settings ADD CONSTRAINT settings_vat_rate_sane CHECK (vat_rate_bp BE
 ALTER TABLE settings ADD COLUMN IF NOT EXISTS prices_include_vat BOOLEAN NOT NULL DEFAULT FALSE;
 
 -- ---------------------------------------------------------------------------
+-- What this workspace calls its own work.
+--
+-- The pipeline was written in one industry's language — Prospect, Discovery,
+-- Demo — which is correct for a sales team and meaningless to a contractor, who
+-- does not demo anything. The seven states are the same either way: somebody
+-- enquired, you went and looked, you priced it, they said yes, you did the work.
+--
+-- So this column changes WORDS ONLY. Stage ids are untouched, every report and
+-- automation keeps working, and a workspace that switches has nothing to
+-- migrate. See `src/data/vocabulary.ts` for the two sets.
+--
+-- Defaulting to 'sales' because that is what every existing workspace is
+-- already reading; a default of 'trades' would silently rename the board under
+-- people who never asked.
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS vocabulary TEXT NOT NULL DEFAULT 'sales';
+ALTER TABLE settings DROP CONSTRAINT IF EXISTS settings_vocabulary_known;
+ALTER TABLE settings ADD CONSTRAINT settings_vocabulary_known
+  CHECK (vocabulary IN ('sales', 'trades'));
+
+-- ---------------------------------------------------------------------------
+-- A number for the work itself.
+--
+-- Quotations, purchase orders and invoices have carried human references since
+-- the day they existed — Q-1001, PO-1001 — and the thing they are all ABOUT had
+-- none. So a conversation about the Heineken warehouse was conducted by
+-- description ("the warehouse one, phase two") while every document under it
+-- had a number, and nothing tied a supplier's invoice to the job it was for.
+--
+-- Per workspace, not global: two customers of this product both start at 1001,
+-- and neither learns anything about the other from the sequence. The uniqueness
+-- is enforced here rather than hoped for in application code — the same shape as
+-- `documents_number_once`.
+--
+-- Nullable, because a deal created before this column existed has no number and
+-- inventing one retrospectively would put a reference on a job nobody has ever
+-- called by it. They are numbered as they are touched.
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS number TEXT;
+ALTER TABLE deals DROP CONSTRAINT IF EXISTS deals_number_shape;
+ALTER TABLE deals ADD CONSTRAINT deals_number_shape CHECK (
+  number IS NULL OR (length(number) BETWEEN 2 AND 24 AND number ~ '^[A-Za-z]+-[0-9]+$')
+);
+CREATE UNIQUE INDEX IF NOT EXISTS deals_number_once
+  ON deals (sub_account_id, number) WHERE number IS NOT NULL AND deleted_at IS NULL;
+
+-- ---------------------------------------------------------------------------
 -- What the application's own database role may do.
 --
 -- KEEP THIS THE LAST BLOCK IN THE FILE: `GRANT … ON ALL TABLES` covers only the

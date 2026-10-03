@@ -1,12 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { Building2, Landmark, Receipt } from "lucide-react";
+import { Building2, Hammer, Landmark, Receipt } from "lucide-react";
 import { Banner } from "@/components/ui/Banner";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { useKeptForm } from "@/lib/use-kept-form";
 import { formatMoney } from "@/lib/money";
 import { rateLabel, vatBreakdown } from "@/server/vat";
+import { VOCABULARIES, wordsFor, type VocabularyId } from "@/data/vocabulary";
 import type { Settings } from "@/server/repos/settings";
 import { updateBusinessDetailsAction, type FormState } from "./actions";
 
@@ -61,6 +62,9 @@ export function BusinessCard({
     settings.vatRateBp ? String(settings.vatRateBp / 100) : "0"
   );
   const [inclusive, setInclusive] = useState(settings.pricesIncludeVat);
+  /* Mirrored so the sentence under the choice updates as it is made; what is
+     SAVED is still what the form posts. */
+  const [vocabulary, setVocabulary] = useState<VocabularyId>(settings.vocabulary);
 
   const typedRate = Number(ratePercent);
   const rateBp =
@@ -84,6 +88,52 @@ export function BusinessCard({
       ) : (
         <form onSubmit={action} className="space-y-5">
           <Banner state={state} />
+
+          {/* ---- what this workspace calls its work ---- */}
+          <section className="space-y-3 rounded-xl border border-[var(--border)] p-4">
+            <p className="flex items-center gap-2 text-sm font-semibold">
+              <Hammer className="h-4 w-4 text-accent" />
+              What you call your work
+            </p>
+            <div className="grid grid-cols-1 gap-2 @min-[440px]:grid-cols-2">
+              {VOCABULARIES.map((id) => {
+                const w = wordsFor(id);
+                const chosen = vocabulary === id;
+                return (
+                  <label
+                    key={id}
+                    className="focus-ring flex cursor-pointer gap-3 rounded-xl border p-3"
+                    style={{
+                      borderColor: chosen ? "var(--accent)" : "var(--border)",
+                      background: chosen ? "var(--accent-soft)" : "transparent",
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="vocabulary"
+                      value={id}
+                      checked={chosen}
+                      onChange={() => setVocabulary(id)}
+                      className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--accent)]"
+                    />
+                    <span className="min-w-0">
+                      <span className="block text-sm font-semibold">{w.name}</span>
+                      <span className="mt-0.5 block text-xs text-faint">{w.blurb}</span>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+            {/* Said plainly, because the fear this answers is "will I lose my
+                data". Nothing moves: the stages, the reports and the
+                automations are the same seven states either way. */}
+            <p className="text-xs text-faint">
+              Changes the words on your pipeline and your paperwork — a{" "}
+              {wordsFor(vocabulary).one.toLowerCase()} rather than a{" "}
+              {wordsFor(vocabulary === "sales" ? "trades" : "sales").one.toLowerCase()}. Nothing is
+              moved or lost, and you can change it back.
+            </p>
+          </section>
 
           <section className="space-y-4">
             <p className="text-xs text-faint">

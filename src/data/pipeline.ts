@@ -1,4 +1,5 @@
 import { STAGES as STAGE_IDS, type Stage as StageId } from "@/server/repos/deals";
+import { wordsFor, type VocabularyId } from "./vocabulary";
 
 /**
  * The pipeline as it is shown on screen.
@@ -90,12 +91,29 @@ const META: Record<StageId, Omit<StageMeta, "id">> = {
  * beside live work is clutter that gets ignored — so lost deals are counted and
  * reachable, not displayed alongside the pipeline.
  */
-export const BOARD_STAGES: StageMeta[] = STAGE_IDS.filter((id) => id !== "lost").map((id) => ({
-  id,
-  ...META[id],
-}));
+/**
+ * The columns, in the words this workspace uses.
+ *
+ * The colours and the order are a property of the STAGE and stay in `META`
+ * above; the label and the exit condition are a property of the BUSINESS and
+ * come from `vocabulary.ts`. A trades workspace reads "Site visit — exits when
+ * you know the scope"; a sales one reads "Discovery — exits when qualified".
+ * Same column, same id, same database.
+ *
+ * The parameter defaults to the sales words so that a screen which has not been
+ * handed the workspace's choice yet renders what it always did, rather than
+ * nothing.
+ */
+export const boardStages = (vocabulary?: VocabularyId | string | null): StageMeta[] =>
+  STAGE_IDS.filter((id) => id !== "lost").map((id) => stageMeta(id, vocabulary));
 
-export const stageMeta = (id: StageId): StageMeta => ({ id, ...META[id] });
+export const stageMeta = (id: StageId, vocabulary?: VocabularyId | string | null): StageMeta => {
+  const words = wordsFor(vocabulary).stages[id];
+  return { id, ...META[id], label: words.label, exit: words.exit };
+};
+
+/** @deprecated Pass the workspace's vocabulary — see `boardStages`. */
+export const BOARD_STAGES: StageMeta[] = boardStages();
 
 /**
  * Stages where a figure on the card means something.

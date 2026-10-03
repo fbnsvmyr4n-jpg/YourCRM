@@ -23,6 +23,7 @@ import { Avatar } from "@/components/ui/Avatar";
 import { Banner } from "@/components/ui/Banner";
 import { Card, CardHeader, CardMeta } from "@/components/ui/Card";
 import { TimeAgo } from "@/components/ui/TimeAgo";
+import { useVocabulary } from "@/components/shell/Vocabulary";
 import { stageMeta } from "@/data/pipeline";
 import { clsx } from "@/lib/clsx";
 import { useFormDisclosure } from "@/lib/form-disclosure";
@@ -201,8 +202,9 @@ export function ProjectDetail({
   today: string;
   candidates: { staff: Candidate[]; contacts: Candidate[] };
 }) {
+  const vocabulary = useVocabulary();
   const [tab, setTab] = useState<TabId>("team");
-  const stage = stageMeta(header.stage);
+  const stage = stageMeta(header.stage, vocabulary);
 
   /*
      The money questions, answered from the documents rather than from a stored

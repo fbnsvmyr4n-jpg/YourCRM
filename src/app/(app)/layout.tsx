@@ -79,9 +79,9 @@ export default async function AppGroupLayout({ children }: { children: React.Rea
   const opsAccess = canAccessOps(user.role);
   /* The currency is read for everybody: it is how this business counts, not a
      record about a customer, and accounts see amounts on Billing too. */
-  const { notifications, counts, currency } = await withTenantPage(
+  const { notifications, counts, currency, vocabulary } = await withTenantPage(
     async (q) => ({
-      currency: (await getSettings(q)).currency,
+      ...(({ currency, vocabulary }) => ({ currency, vocabulary }))(await getSettings(q)),
       ...(crmAccess
         ? {
             /* Retainer invoices that fell due are drafted BEFORE the bell is
@@ -135,6 +135,7 @@ export default async function AppGroupLayout({ children }: { children: React.Rea
       crmAccess={crmAccess}
       moneyAccess={moneyAccess}
       currency={currency}
+      vocabulary={vocabulary}
     >
       {children}
     </AppShell>

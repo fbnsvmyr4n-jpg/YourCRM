@@ -189,7 +189,10 @@ describe("what a view-only reader is offered", () => {
   it("is not told to drag cards it cannot move", () => {
     /* The instruction is only true for somebody who can act on it. */
     expect(deals).toMatch(/draggable=\{canWrite\}/);
-    expect(deals).toMatch(/canWrite\s*\?\s*"Drag deals across stages/);
+    /* The sentence is built from the workspace's own words now — "Drag jobs"
+       for a trades business — so what is pinned is that it still sits behind
+       `canWrite`, rather than the wording itself. */
+    expect(deals).toMatch(/canWrite\s*\n?\s*\?\s*`Drag \$\{words\.many\.toLowerCase\(\)\} across stages/);
   });
 
   it("keeps the places there are to LOOK", () => {

@@ -4,7 +4,9 @@ import { useState } from "react";
 import { CurrencyProvider } from "@/components/money/CurrencyProvider";
 import { canWrite } from "@/server/permissions";
 import { CanWriteProvider } from "./CanWrite";
+import { VocabularyProvider } from "./Vocabulary";
 import type { CurrencyCode } from "@/lib/money";
+import type { VocabularyId } from "@/data/vocabulary";
 import type { NavCounts } from "@/server/nav-counts";
 import type { Notification } from "@/server/notifications";
 import { CommandPalette } from "./CommandPalette";
@@ -21,6 +23,7 @@ export function AppShell({
   crmAccess,
   moneyAccess,
   currency,
+  vocabulary,
 }: {
   children: React.ReactNode;
   user: ShellUser;
@@ -32,6 +35,8 @@ export function AppShell({
   moneyAccess: boolean;
   /** The workspace's currency, for every amount on every page below. */
   currency: CurrencyCode;
+  /** What this workspace calls its work — see `data/vocabulary.ts`. */
+  vocabulary: VocabularyId;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -41,6 +46,7 @@ export function AppShell({
     {/* One answer for every control underneath: a viewer is offered nothing
         the database will refuse. See `CanWrite`. */}
     <CanWriteProvider canWrite={canWrite(user.role)}>
+    <VocabularyProvider vocabulary={vocabulary}>
     {/* The `print:` overrides are on the shell, not on the page inside it: the app
         is a fixed-height clipped box with its own scroller, which is right on
         screen and prints exactly one screenful — the rest of a long document
@@ -107,6 +113,7 @@ export function AppShell({
 
       <CommandPalette />
     </div>
+    </VocabularyProvider>
     </CanWriteProvider>
     </CurrencyProvider>
   );

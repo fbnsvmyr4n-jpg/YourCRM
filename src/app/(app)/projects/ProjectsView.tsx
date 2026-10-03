@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Briefcase, Building2, ChevronDown, Search, Settings2, Users } from "lucide-react";
 import { Card, CardHeader, CardMeta } from "@/components/ui/Card";
 import { clsx } from "@/lib/clsx";
+import { useVocabulary } from "@/components/shell/Vocabulary";
 import { stageMeta } from "@/data/pipeline";
 import { useMoney } from "@/components/money/CurrencyProvider";
 import type { CompanyProjects, Project } from "@/server/projects-view";
@@ -259,7 +260,8 @@ function CompanyCard({ company }: { company: CompanyProjects }) {
 
 function ProjectRow({ project, muted = false }: { project: Project; muted?: boolean }) {
   const money = useCompactMoney();
-  const meta = stageMeta(project.stage);
+  const vocabulary = useVocabulary();
+  const meta = stageMeta(project.stage, vocabulary);
 
   return (
     <li>

@@ -139,6 +139,13 @@ export const EXPECTED_COLUMNS: ReadonlyArray<[string, string]> = [
   ["settings", "vat_number"],
   ["settings", "vat_rate_bp"],
   ["settings", "prices_include_vat"],
+  /* What this workspace calls its work. In the settings SELECT, which the
+     layout wrapping every page reads — so a database without it renders
+     nothing at all, which is exactly what this check is here to catch. */
+  ["settings", "vocabulary"],
+  /* The job's own reference. Named in the deals SELECT behind the pipeline and
+     every project screen. */
+  ["deals", "number"],
   /* Projects. Named in the SELECT the deals repo and the projects page both
      use, so an unmigrated database breaks the pipeline board, not one page. */
   ["deals", "company_id"],

@@ -4,6 +4,7 @@ import { logWrite } from "@/server/log";
 import { revalidateApp } from "@/server/revalidate";
 import { isValidTimeZone, updateSettings } from "@/server/repos/settings";
 import { isCurrency } from "@/lib/money";
+import { VOCABULARIES } from "@/data/vocabulary";
 import {
   parseClock,
   listWorkingHours,
@@ -272,7 +273,12 @@ export async function updateBusinessDetailsAction(
       return { error: "That business email address does not look right." };
     }
 
+    /* The words this workspace uses. Validated against the known sets rather
+       than trusted: an unknown value would render a pipeline of `undefined`. */
+    const vocabulary = pick(formData.get("vocabulary"), VOCABULARIES);
+
     await updateSettings(q, {
+      ...(vocabulary ? { vocabulary } : {}),
       businessAddress: multiline(formData.get("businessAddress"), 400) || null,
       businessPhone: text(formData.get("businessPhone"), 60) || null,
       businessEmail: businessEmail || null,

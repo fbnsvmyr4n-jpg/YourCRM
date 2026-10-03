@@ -8,7 +8,8 @@ import { edgeScrollStep, edgeScrollVelocity } from "@/lib/edge-scroll";
 import { ArrowRightLeft, Check, ChevronDown, Coins, Flame, GripVertical, HandCoins, Plus, Trash2, Undo2, Wallet, X } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Overlay } from "@/components/ui/Overlay";
-import { BOARD_STAGES as STAGES, carriesMoney } from "@/data/pipeline";
+import { boardStages, carriesMoney } from "@/data/pipeline";
+import { useVocabulary, useWords } from "@/components/shell/Vocabulary";
 import type { Stage as StageId } from "@/server/repos/deals";
 import type { Deal } from "@/server/decorate-deal";
 export type { Deal } from "@/server/decorate-deal";
@@ -85,6 +86,17 @@ const isWon = (d: Deal) => d.wonAt !== null;
 const canPay = (d: Deal) => (d.stage === "demo" || d.stage === "discovery") && d.value > 0;
 
 export function DealsBoard({ deals }: { deals: Deal[] }) {
+  /* The columns in this workspace's own words — a trades board reads "Site
+     visit" where a sales board reads "Discovery". Same seven ids, same
+     database; see `data/vocabulary.ts`.
+
+     FIRST in the component, because the collapsed-stage state below is seeded
+     from `STAGES` in a `useState` initialiser — declared after it, this was a
+     "cannot access before initialization" on the first render of the board. */
+  const vocabulary = useVocabulary();
+  const words = useWords();
+  const STAGES = boardStages(vocabulary);
+
   const { money, fullMoney } = useBoardMoney();
   const [items, setItems] = useState<Deal[]>(deals);
   const [dragId, setDragId] = useState<string | null>(null);
@@ -567,13 +579,13 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
     <div className="mx-auto flex max-w-[1600px] animate-fade-up flex-col sm:h-[calc(100vh-104px)]">
       <div className="flex flex-wrap items-start justify-between gap-4 pb-4 pt-1">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Deals Pipeline</h1>
+          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">{words.many} Pipeline</h1>
           {/* The instruction is only true for somebody who can act on it.
               Telling a view-only reader to drag cards they cannot move is the
               same lie as offering them a button that will be refused. */}
           <p className="mt-1 text-sm text-muted">
             {canWrite
-              ? "Drag deals across stages. Each column says what has to happen for a card to leave it."
+              ? `Drag ${words.many.toLowerCase()} across stages. Each column says what has to happen for a card to leave it.`
               : "Each column says what has to happen for a card to leave it."}
           </p>
         </div>
@@ -633,7 +645,11 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
              (see the note on the summary above). Two screens showing different
              money under one name is how somebody stops believing either. */
           label="In Discussion"
-          sub="Discovery and Demo"
+          /* The two columns this tile actually sums, named in the workspace's
+             own words — "Site visit and Quoted" on a trades board. A tile whose
+             subtitle names columns that are not on the screen is worse than no
+             subtitle. */
+          sub={`${words.stages.discovery.label} and ${words.stages.demo.label}`}
           value={fullMoney(summary.open)}
           tone="var(--amber)"
           soft="var(--amber-soft)"
@@ -641,7 +657,7 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
         <SummaryTile
           icon={<HandCoins className="h-5 w-5" />}
           label="In Delivery"
-          sub="Won, being delivered"
+          sub={`Won, ${words.stages.delivery.label.toLowerCase()}`}
           value={fullMoney(summary.inDelivery)}
           tone={PARTIAL}
           soft="rgba(249,115,22,0.12)"
@@ -690,7 +706,7 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
           onClick={() => setAddOpen(true)}
           className="btn-accent focus-ring flex shrink-0 items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold"
         >
-          <Plus className="h-[16px] w-[16px]" /> Add Deal
+          <Plus className="h-[16px] w-[16px]" /> Add {words.one}
         </button>
         )}
       </div>
@@ -829,7 +845,7 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
                     onClick={() => setAddOpen(stage.id)}
                     className="focus-ring flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-[var(--border)] py-2 text-xs font-medium text-faint transition-colors hover:border-[var(--border-strong)] hover:text-[var(--text)]"
                   >
-                    <Plus className="h-3.5 w-3.5" /> Add deal
+                    <Plus className="h-3.5 w-3.5" /> Add {words.one.toLowerCase()}
                   </button>
                 )}
               </div>
@@ -1050,6 +1066,7 @@ function MoveSheet({
   onClose: () => void;
   onPick: (stage: StageId) => void;
 }) {
+  const vocabulary = useVocabulary();
   return (
     <Overlay>
       <div className="fixed inset-0 z-50 grid place-items-end p-3 sm:place-items-center" role="dialog" aria-modal="true">
@@ -1073,7 +1090,7 @@ function MoveSheet({
           </div>
 
           <div className="flex flex-col gap-1.5">
-            {STAGES.map((stage) => {
+            {boardStages(vocabulary).map((stage) => {
               const here = deal.stage === stage.id;
               return (
                 <button
@@ -1893,6 +1910,7 @@ function AddDealModal({
   onClose: () => void;
   onSubmit: (formData: FormData) => void | Promise<void>;
 }) {
+  const vocabulary = useVocabulary();
   const { symbol } = useBoardMoney();
   const [stage, setStage] = useState<StageId>(defaultStage);
   const showsMoney = carriesMoney(stage);
@@ -1925,7 +1943,7 @@ function AddDealModal({
                   onChange={(e) => setStage(e.target.value as StageId)}
                   className="w-full rounded-xl border border-[var(--border)] bg-[var(--panel-solid)] px-3.5 py-2.5 text-sm outline-none transition-colors focus:border-[var(--border-strong)]"
                 >
-                  {STAGES.map((s) => (
+                  {boardStages(vocabulary).map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.label}
                     </option>
