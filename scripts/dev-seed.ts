@@ -137,14 +137,17 @@ async function main() {
     );
 
     await db.query(
-      `INSERT INTO deals (id, sub_account_id, owner_user_id, contact_id, company_id, title, value_cents, stage, source, won_at, lost_at, created_at) VALUES
-         ('d-roof',      $1, $2,      'ct-amara',   'co-dube',    'Roof replacement',   ${DEALS.won_roof * 100},          'won',       'website',  ${day(10)}, NULL,       ${day(38)}),
-         ('d-fence',     $1, 'u-sam', 'ct-lindiwe', 'co-khumalo', 'Perimeter fencing',  ${DEALS.won_fence * 100},         'won',       'referral', ${day(40)}, NULL,       ${day(60)}),
-         ('d-paving',    $1, $2,      'ct-ben',     NULL,         'Paving — phase 1',   ${DEALS.delivery_paving * 100},   'delivery',  'website',  ${day(5)},  NULL,       ${day(25)}),
-         ('d-pool',      $1, $2,      'ct-thandi',  NULL,         'Pool deck',          ${DEALS.lost_pool * 100},         'lost',      'facebook', NULL,       ${day(12)}, ${day(30)}),
-         ('d-deck',      $1, 'u-sam', 'ct-pieter',  NULL,         'Timber deck',        ${DEALS.prospect_deck * 100},     'prospect',  'website',  NULL,       NULL,       ${day(8)}),
-         ('d-garage',    $1, $2,      'ct-sarah',   NULL,         'Garage conversion',  ${DEALS.discovery_garage * 100},  'discovery', 'referral', NULL,       NULL,       ${day(6)}),
-         ('d-solar',     $1, $2,      'ct-amara',   'co-dube',    'Solar install',      ${DEALS.demo_solar * 100},        'demo',      'google_ads',   NULL,       NULL,       ${day(2)})`,
+      /* Numbered, because real work is: these are the references a person
+         reads down the phone, and a fixture without them describes a state the
+         product no longer produces. */
+      `INSERT INTO deals (id, sub_account_id, number, owner_user_id, contact_id, company_id, title, value_cents, stage, source, won_at, lost_at, created_at) VALUES
+         ('d-roof',      $1, 'J-1001', $2,      'ct-amara',   'co-dube',    'Roof replacement',   ${DEALS.won_roof * 100},          'won',       'website',  ${day(10)}, NULL,       ${day(38)}),
+         ('d-fence',     $1, 'J-1002', 'u-sam', 'ct-lindiwe', 'co-khumalo', 'Perimeter fencing',  ${DEALS.won_fence * 100},         'won',       'referral', ${day(40)}, NULL,       ${day(60)}),
+         ('d-paving',    $1, 'J-1003', $2,      'ct-ben',     NULL,         'Paving — phase 1',   ${DEALS.delivery_paving * 100},   'delivery',  'website',  ${day(5)},  NULL,       ${day(25)}),
+         ('d-pool',      $1, 'J-1004', $2,      'ct-thandi',  NULL,         'Pool deck',          ${DEALS.lost_pool * 100},         'lost',      'facebook', NULL,       ${day(12)}, ${day(30)}),
+         ('d-deck',      $1, 'J-1005', 'u-sam', 'ct-pieter',  NULL,         'Timber deck',        ${DEALS.prospect_deck * 100},     'prospect',  'website',  NULL,       NULL,       ${day(8)}),
+         ('d-garage',    $1, 'J-1006', $2,      'ct-sarah',   NULL,         'Garage conversion',  ${DEALS.discovery_garage * 100},  'discovery', 'referral', NULL,       NULL,       ${day(6)}),
+         ('d-solar',     $1, 'J-1007', $2,      'ct-amara',   'co-dube',    'Solar install',      ${DEALS.demo_solar * 100},        'demo',      'google_ads',   NULL,       NULL,       ${day(2)})`,
       [sub.id, owner.id]
     );
 

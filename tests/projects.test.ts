@@ -34,6 +34,9 @@ function row(
     company_name: company,
     domain: null,
     id: `d-${title}`,
+    /* Numbered, because real work is: the fixtures describe states the product
+       can produce, which is the lesson the ticket and call seeds taught. */
+    number: `J-${1000 + title.length}`,
     title,
     site: null,
     stage,

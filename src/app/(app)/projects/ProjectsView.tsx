@@ -302,7 +302,19 @@ function ProjectRow({ project, muted = false }: { project: Project; muted?: bool
       </span>
 
       <span className="min-w-0 flex-1 leading-tight">
-        <span className="block truncate text-sm font-medium">{project.title}</span>
+        <span className="flex min-w-0 items-baseline gap-2">
+          {/* The reference, ahead of the name, the way a quotation carries its
+              number. It is what somebody reads down the phone — "I'm calling
+              about J-1004" — and work created before numbering existed simply
+              shows the name, rather than a dash standing in for a reference
+              that was never issued. */}
+          {project.number && (
+            <span className="shrink-0 font-mono text-[11px] tracking-tight text-faint">
+              {project.number}
+            </span>
+          )}
+          <span className="block truncate text-sm font-medium">{project.title}</span>
+        </span>
         {/* Who is carrying it and who it runs through — the two facts you need
             before picking up the phone about it. Each half appears only when it
             exists, so an unassigned project says so rather than rendering a

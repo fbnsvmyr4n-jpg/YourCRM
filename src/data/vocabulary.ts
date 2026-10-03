@@ -1,4 +1,19 @@
-import { STAGES as STAGE_IDS, type Stage as StageId } from "@/server/repos/deals";
+/*
+   TYPE-ONLY, and that matters.
+
+   `repos/settings` reads this file for the default, and `repos/deals` reads
+   settings to pick a job's prefix — so a RUNTIME import of the deals repo here
+   closes a cycle: deals → settings → vocabulary → deals. A circular import does
+   not fail loudly; it leaves one module half-initialised depending on which was
+   loaded first, and what that looked like was a retainer test failing somewhere
+   else entirely.
+
+   A type import is erased at compile time, so the stage ids still come from the
+   repository — a stage cannot exist here that the database would reject — and
+   nothing is imported at run time. The order below comes from the record's own
+   keys instead.
+*/
+import type { Stage as StageId } from "@/server/repos/deals";
 
 /**
  * What a workspace calls its own work.
@@ -114,8 +129,15 @@ export function isVocabulary(value: unknown): value is VocabularyId {
   return (VOCABULARIES as readonly unknown[]).includes(value);
 }
 
-/** Every stage id, in board order, with the words for this workspace. */
+/**
+ * Every stage, in board order, with the words for this workspace.
+ *
+ * Ordered by the record's own keys rather than by the repository's array, so
+ * this file needs nothing from the deals module at run time — see the note on
+ * the import. Both sets are written in the same order, and `vocabulary.test.ts`
+ * holds them to the repository's.
+ */
 export function stagesFor(vocabulary: string | null | undefined) {
   const words = wordsFor(vocabulary);
-  return STAGE_IDS.map((id) => ({ id, ...words.stages[id] }));
+  return (Object.keys(words.stages) as StageId[]).map((id) => ({ id, ...words.stages[id] }));
 }

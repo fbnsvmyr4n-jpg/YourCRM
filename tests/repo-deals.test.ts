@@ -573,3 +573,81 @@ describe("the tenant boundary holds", () => {
     expect(mine?.painPoints).toEqual([]);
   });
 });
+
+describe("the number a job is known by", () => {
+  /**
+   * Quotations and purchase orders have carried a human reference since they
+   * existed — Q-1001, PO-1001 — and the thing they are all ABOUT had none. So
+   * the Heineken warehouse was discussed by description ("the warehouse one,
+   * phase two") while every document under it had a number, and nothing tied a
+   * supplier's invoice to the work it was for.
+   */
+  const inA = <T>(fn: Parameters<typeof withTenant<T>>[1]) => withTenant(ctxFor(TENANT_A), fn);
+
+  it("IS ALLOCATED ON CREATION, and runs in sequence", async () => {
+    const first = await inA((q) => repo.createDeal(q, { title: "Paving" }));
+    const second = await inA((q) => repo.createDeal(q, { title: "Roof" }));
+    expect(first.number).toMatch(/^[A-Z]-\d{4,}$/);
+    /* Consecutive, asserted as a step rather than as fixed values: other tests
+       in this file create work too, and a number that only holds on an empty
+       workspace is not the property worth keeping. */
+    expect(Number(second.number!.split("-")[1])).toBe(Number(first.number!.split("-")[1]) + 1);
+    /* …and the sequence starts at 1001 rather than 1, so a business's first job
+       does not announce itself as their first job to the customer reading it. */
+    expect(Number(first.number!.split("-")[1])).toBeGreaterThanOrEqual(1001);
+  });
+
+  it("TAKES ITS LETTER FROM THE WORKSPACE'S OWN WORDS", async () => {
+    /* J for a trades business, D for a sales one — the same choice that renames
+       the board. */
+    await db.seed(
+      `INSERT INTO settings (sub_account_id, vocabulary) VALUES ('${TENANT_A}', 'trades')
+       ON CONFLICT (sub_account_id) DO UPDATE SET vocabulary = 'trades'`
+    );
+    const job = await inA((q) => repo.createDeal(q, { title: "Driveway" }));
+    expect(job.number?.startsWith("J-")).toBe(true);
+    await db.seed(`UPDATE settings SET vocabulary = 'sales' WHERE sub_account_id = '${TENANT_A}'`);
+  });
+
+  it("KEEPS ONE SEQUENCE when a workspace changes its words", async () => {
+    /* Counting per prefix would restart at 1001 and put two different jobs
+       under D-1001 and J-1001 — references a person reads as the same work. */
+    await inA((q) => repo.createDeal(q, { title: "One" }));
+    await db.seed(`UPDATE settings SET vocabulary = 'trades' WHERE sub_account_id = '${TENANT_A}'`);
+    const afterSwitch = await inA((q) => repo.createDeal(q, { title: "Two" }));
+    const n = Number(afterSwitch.number?.split("-")[1]);
+    expect(afterSwitch.number?.startsWith("J-")).toBe(true);
+    expect(n).toBeGreaterThan(1001);
+    await db.seed(`UPDATE settings SET vocabulary = 'sales' WHERE sub_account_id = '${TENANT_A}'`);
+  });
+
+  it("STARTS AGAIN IN ANOTHER WORKSPACE, and cannot collide with this one", async () => {
+    /* Per workspace, not global: two customers of this product both start at
+       1001, and neither learns anything about the other from the sequence. */
+    await inA((q) => repo.createDeal(q, { title: "Ours" }));
+    const theirs = await withTenant(ctxFor(TENANT_B), (q) => repo.createDeal(q, { title: "Theirs" }));
+    expect(theirs.number).toMatch(/-1001$/);
+  });
+
+  it("refuses two jobs with the same number in one workspace", async () => {
+    await inA((q) => repo.createDeal(q, { title: "First" }));
+    await expect(
+      db.seed(
+        `INSERT INTO deals (id, sub_account_id, title, value_cents, stage, number)
+         VALUES ('d_clash', '${TENANT_A}', 'Clash', 0, 'prospect',
+                 (SELECT number FROM deals WHERE sub_account_id = '${TENANT_A}' AND number IS NOT NULL LIMIT 1))`
+      )
+    ).rejects.toThrow(/deals_number_once|duplicate key/);
+  });
+
+  it("leaves work created before the column existed unnumbered", async () => {
+    /* Numbering them retrospectively would put a reference on a job nobody has
+       ever called by it. They stay as they are and the screens show nothing. */
+    await db.seed(
+      `INSERT INTO deals (id, sub_account_id, title, value_cents, stage)
+       VALUES ('d_old', '${TENANT_A}', 'Old work', 0, 'prospect')`
+    );
+    const old = await inA((q) => repo.getDeal(q, "d_old"));
+    expect(old?.number).toBeNull();
+  });
+});

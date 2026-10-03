@@ -1,4 +1,6 @@
 import type { TenantQuery } from "../tenant";
+import { getSettings } from "./settings";
+import { wordsFor } from "@/data/vocabulary";
 import { emitDealEvent, type Chain } from "../deal-events";
 
 /**
@@ -44,6 +46,19 @@ export const CLOSED_WON_STAGES = ["won", "delivery", "referral"] as const;
 
 export type DealRecord = {
   id: string;
+  /**
+   * The reference a person uses for this piece of work: J-1001.
+   *
+   * Quotations and orders have carried one since they existed, and the thing
+   * they are all ABOUT had none — so a job was discussed by description while
+   * every document under it had a number. Allocated on creation, from the
+   * workspace's own sequence.
+   *
+   * Null on work created before the column existed. Numbering those
+   * retrospectively would put a reference on a job nobody has ever called by
+   * it, so they stay as they are and the screens simply show nothing.
+   */
+  number: string | null;
   contactId: string | null;
   /**
    * The client this piece of work is for — a project's company.
@@ -92,6 +107,7 @@ export type NewDeal = {
 
 type Row = {
   id: string;
+  number: string | null;
   contact_id: string | null;
   company_id: string | null;
   owner_user_id: string | null;
@@ -110,7 +126,7 @@ type Row = {
 };
 
 const SELECT = `
-  SELECT d.id, d.contact_id, d.company_id, d.owner_user_id, d.title, d.value_cents, d.stage,
+  SELECT d.id, d.number, d.contact_id, d.company_id, d.owner_user_id, d.title, d.value_cents, d.stage,
          d.source, d.lost_reason, d.won_at, d.pain_points,
          d.referred_by_contact_id, d.split_id, d.split_total_cents,
          d.created_at, d.updated_at
@@ -120,6 +136,7 @@ const SELECT = `
 function toRecord(r: Row): DealRecord {
   return {
     id: r.id,
+    number: r.number,
     contactId: r.contact_id,
     companyId: r.company_id,
     ownerUserId: r.owner_user_id,
@@ -187,6 +204,11 @@ export async function listDealsForContact(
 
 export async function createDeal(q: TenantQuery, input: NewDeal): Promise<DealRecord> {
   const stage = input.stage ?? "prospect";
+  /* The letter in front of the number follows the workspace's own words — J for
+     a trades business, D for a sales one. Existing jobs keep the reference they
+     were given: renumbering them would change a reference somebody has already
+     written on a quotation and said out loud on the telephone. */
+  const prefix = wordsFor((await getSettings(q)).vocabulary).prefix;
   const row = await q.one<Row>(
     /* `company_id` is read from the contact in the same statement rather than
        fetched first and passed in. Two round trips would leave a window where
@@ -196,9 +218,29 @@ export async function createDeal(q: TenantQuery, input: NewDeal): Promise<DealRe
        rather than reaching across. */
     `WITH inserted AS (
        INSERT INTO deals
-         (id, sub_account_id, contact_id, company_id, owner_user_id, title, value_cents, stage,
+         (id, sub_account_id, number, contact_id, company_id, owner_user_id, title, value_cents, stage,
           source, pain_points, referred_by_contact_id, won_at, stages_reached)
-       VALUES ($2, $1, $3,
+       VALUES ($2, $1,
+               -- The job's own reference, allocated IN THE INSERT rather than
+               -- read first and passed in: a second statement is a window in
+               -- which somebody else takes the number we just read. Two
+               -- transactions can still read the same maximum under read
+               -- committed, which is what the deals_number_once index is for —
+               -- the caller retries and gets the next one.
+               --
+               -- 1001 rather than 1, so a business's first job does not announce
+               -- itself as their first job to the customer reading it.
+               $11 || '-' || (
+                 -- Counted across EVERY prefix, not just the one in force.
+                 -- A workspace that switches its words keeps one running
+                 -- sequence — D-1003 is followed by J-1004 — where counting
+                 -- per prefix would start again at 1001 and put two jobs a
+                 -- digit apart under names people would read as the same work.
+                 SELECT COALESCE(MAX(substring(d2.number from '^[A-Za-z]+-([0-9]+)$')::bigint), 1000) + 1
+                   FROM deals d2
+                  WHERE d2.sub_account_id = $1 AND d2.number ~ '^[A-Za-z]+-[0-9]+$'
+               ),
+               $3,
                (SELECT c.company_id FROM contacts c
                  WHERE c.id = $3 AND c.sub_account_id = $1 AND c.deleted_at IS NULL),
                $4, $5, $6, $7, $8, $9::jsonb, $10,
@@ -221,6 +263,7 @@ export async function createDeal(q: TenantQuery, input: NewDeal): Promise<DealRe
       input.source ?? "other",
       JSON.stringify(input.painPoints ?? []),
       input.referredByContactId ?? null,
+      prefix,
     ]
   );
   if (!row) throw new Error("Deal was not created.");
