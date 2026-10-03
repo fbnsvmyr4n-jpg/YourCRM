@@ -93,7 +93,11 @@ describe("moving a deal without a drag", () => {
   it("leaves the desktop drag exactly as it was", () => {
     /* The control is `sm:hidden` and the drag handlers are untouched — the
        board still carries draggable cards and stage drop targets. */
-    expect(board).toMatch(/draggable\n/);
+    /* `draggable={canWrite}` rather than a bare `draggable`: a card a view-only
+       reader cannot move should not pick up under their finger. For everybody
+       who can actually move a deal — which is what this test is about — the
+       drag is exactly what it was. */
+    expect(board).toMatch(/draggable=\{canWrite\}/);
     expect(board).toMatch(/onDragStart=\{\(e\) => \{/);
     expect(board).toMatch(/onDrop=\{\(\) => handleDrop\(stage\.id\)\}/);
     expect(board).toMatch(/onDragOver=\{\(e\) => \{/);

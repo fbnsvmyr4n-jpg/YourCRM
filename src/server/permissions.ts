@@ -179,6 +179,21 @@ export function roleCan(role: string, capability: Capability): boolean {
 }
 
 /**
+ * May this reader change anything at all?
+ *
+ * The one place the word "viewer" is compared, so the screens and the server
+ * cannot drift apart — the same rule `roleCan` exists for, and the one the
+ * guard suite enforces by refusing an inline `role === "viewer"` anywhere else.
+ *
+ * It decides PRESENTATION only: which buttons are worth offering. What actually
+ * stops a viewer writing is the read-only transaction `withCurrentTenant` opens
+ * for them, and that holds whatever any screen does.
+ */
+export function canWrite(role: string): boolean {
+  return canAccessCrm(role) && role !== "viewer";
+}
+
+/**
  * Who may declare an invoice PAID by hand.
  *
  * Not the person who sold the work. Confirming that money arrived is how

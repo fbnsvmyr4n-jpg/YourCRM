@@ -8,6 +8,7 @@ import { Card, CardHeader, CardMeta } from "@/components/ui/Card";
 import { clsx } from "@/lib/clsx";
 import { useFormDisclosure } from "@/lib/form-disclosure";
 import { useKeptForm } from "@/lib/use-kept-form";
+import { useCanWrite } from "@/components/shell/CanWrite";
 import { useMoney } from "@/components/money/CurrencyProvider";
 import type { DocumentStatus } from "@/server/repos/projects";
 import type { LedgerRow } from "@/server/document-ledger";
@@ -150,6 +151,7 @@ export function DocumentLedgerView({
    */
   const money = (cents: number) => format(cents, "exact");
   const [query, setQuery] = useState("");
+  const canWrite = useCanWrite();
 
   const form = useKeptForm<FormState>(createDocumentAction, undefined);
   /* One form per kind, chosen once rather than per row: a quotation needs
@@ -257,7 +259,8 @@ export function DocumentLedgerView({
               className="focus-ring w-full rounded-lg border border-[var(--border)] bg-[var(--panel-solid)] py-2 pl-9 pr-3 text-sm"
             />
           </div>
-          {projects.length > 0 && (
+          {/* Not offered to a view-only reader — see `CanWrite`. */}
+          {canWrite && projects.length > 0 && (
             <button
               onClick={adding ? closeAdd : openAdd}
               className="btn-accent focus-ring flex shrink-0 items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold"

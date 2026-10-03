@@ -1,5 +1,8 @@
 "use client";
 
+import { useCanWrite } from "@/components/shell/CanWrite";
+
+
 import { useCallback, useMemo } from "react";
 import { useOpenFromQuery } from "@/lib/useOpenFromQuery";
 import { SortMenu } from "@/components/ui/SortMenu";
@@ -33,6 +36,7 @@ type LeadSort = (typeof LEAD_SORTS)[number]["id"];
 
 export function LeadCardsSection({ leads }: { leads: LeadCard[] }) {
   const [modal, setModal] = useState<ModalState>(null);
+  const canWrite = useCanWrite();
   // Arriving from the dashboard Quick Action opens the form directly.
   useOpenFromQuery("new", useCallback(() => setModal("new"), []));
   const [openMenu, setOpenMenu] = useState<string | null>(null);
@@ -327,12 +331,17 @@ export function LeadCardsSection({ leads }: { leads: LeadCard[] }) {
             </button>
           )}
           <SortMenu options={LEAD_SORTS} value={sort} onChange={setSort} defaultId="newest" />
+          {/* A view-only reader is not offered a form the database will refuse.
+              The refusal still exists and still fires — this only stops the
+              product asking somebody to type a lead it will not keep. */}
+          {canWrite && (
           <button
             onClick={() => setModal("new")}
             className="btn-accent focus-ring flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold"
           >
             <Plus className="h-[16px] w-[16px]" /> Add Lead
           </button>
+          )}
         </div>
       </div>
 

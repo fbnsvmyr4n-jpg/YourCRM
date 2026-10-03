@@ -1,5 +1,8 @@
 "use client";
 
+import { useCanWrite } from "@/components/shell/CanWrite";
+
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { edgeScrollStep, edgeScrollVelocity } from "@/lib/edge-scroll";
 import { ArrowRightLeft, Check, ChevronDown, Coins, Flame, GripVertical, HandCoins, Plus, Trash2, Undo2, Wallet, X } from "lucide-react";
@@ -237,6 +240,7 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
   // A refused move, said out loud. Silently snapping the card back would look
   // like the drag failed to register rather than like the server said no.
   const [moveError, setMoveError] = useState<string | null>(null);
+  const canWrite = useCanWrite();
   /** Why the Add Deal form did not save. It stays open until it does. */
   const [addProblem, setAddProblem] = useState<string | null>(null);
 
@@ -564,9 +568,13 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
       <div className="flex flex-wrap items-start justify-between gap-4 pb-4 pt-1">
         <div>
           <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Deals Pipeline</h1>
+          {/* The instruction is only true for somebody who can act on it.
+              Telling a view-only reader to drag cards they cannot move is the
+              same lie as offering them a button that will be refused. */}
           <p className="mt-1 text-sm text-muted">
-            Drag deals across stages. Each column says what has to happen for a
-            card to leave it.
+            {canWrite
+              ? "Drag deals across stages. Each column says what has to happen for a card to leave it."
+              : "Each column says what has to happen for a card to leave it."}
           </p>
         </div>
       </div>
@@ -676,12 +684,15 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
             above it, and every stage header below carries its own — a third
             copy in between would be the Lead Sources mistake again. */}
         <h2 className="text-lg font-semibold tracking-tight">Pipeline</h2>
+        {/* Not offered to a view-only reader — see `CanWrite`. */}
+        {canWrite && (
         <button
           onClick={() => setAddOpen(true)}
           className="btn-accent focus-ring flex shrink-0 items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold"
         >
           <Plus className="h-[16px] w-[16px]" /> Add Deal
         </button>
+        )}
       </div>
 
       {/*
@@ -811,12 +822,16 @@ export function DealsBoard({ deals }: { deals: Deal[] }) {
                     onPaidInFull={() => handlePaidInFull(deal)}
                   />
                 ))}
-                <button
-                  onClick={() => setAddOpen(stage.id)}
-                  className="focus-ring flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-[var(--border)] py-2 text-xs font-medium text-faint transition-colors hover:border-[var(--border-strong)] hover:text-[var(--text)]"
-                >
-                  <Plus className="h-3.5 w-3.5" /> Add deal
-                </button>
+                {/* One per column, and the same rule as the header button:
+                    not offered to a view-only reader. */}
+                {canWrite && (
+                  <button
+                    onClick={() => setAddOpen(stage.id)}
+                    className="focus-ring flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-[var(--border)] py-2 text-xs font-medium text-faint transition-colors hover:border-[var(--border-strong)] hover:text-[var(--text)]"
+                  >
+                    <Plus className="h-3.5 w-3.5" /> Add deal
+                  </button>
+                )}
               </div>
             </div>
           );
@@ -1118,6 +1133,7 @@ function DealCard({
   onDelete: () => void;
   onPaidInFull: () => void;
 }) {
+  const canWrite = useCanWrite();
   const { money, fullMoney } = useBoardMoney();
   const showsMoney = carriesMoney(deal.stage);
   const partial = isPartiallyPaid(deal);
@@ -1139,7 +1155,10 @@ function DealCard({
       role="button"
       tabIndex={0}
       aria-label={`Open ${deal.title}`}
-      draggable
+      /* A card a view-only reader cannot move should not pick up under their
+         finger. The move is refused by the database either way; this stops the
+         product pretending the gesture did something. */
+      draggable={canWrite}
       onDragStart={(e) => {
         e.dataTransfer.effectAllowed = "move";
         e.dataTransfer.setData("text/plain", deal.id);

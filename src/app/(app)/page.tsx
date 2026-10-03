@@ -11,6 +11,7 @@ import { listContacts } from "@/server/repos/contacts";
 import { listDeals } from "@/server/repos/deals";
 import { listMeetings } from "@/server/repos/meetings";
 import { listMessages, unreadCount } from "@/server/repos/inbox";
+import { canWrite } from "@/server/permissions";
 import { getSettings } from "@/server/repos/settings";
 import { dueForUser } from "@/server/repos/todos";
 import { formatMoney, type CurrencyCode } from "@/lib/money";
@@ -411,7 +412,7 @@ export default async function DashboardPage() {
             <TodaysFocus items={focus} />
           </div>
           <div className="order-4 @min-[820px]:order-none">
-            <QuickActions />
+            <QuickActions canWrite={canWrite(me?.role ?? "")} />
           </div>
           {/* The feed card is taken out of flow in the two-column layout.
               `flex: 1 1 0%` controls how leftover space is *distributed*; it
@@ -850,20 +851,26 @@ function TodaysFocus({ items }: { items: FocusItem[] }) {
  * — landing on /leads and then hunting for "Add Lead" was the slow path.
  */
 const QUICK_ACTIONS = [
-  { icon: "user-plus", label: "Add New Lead", href: "/leads?new=1" },
-  { icon: "calendar-plus", label: "Schedule Meeting", href: "/meetings?schedule=1" },
+  /* `writes` marks the three that open a FORM. A view-only reader is offered
+     the other three and not these: every one of them led to a dialog that
+     submitted and was refused, which is the shape `permissions.ts` names as
+     the thing to avoid. The two that remain — Contacts, Reports, Voice Agents
+     — are places to look, which is exactly what a viewer is for. */
+  { icon: "user-plus", label: "Add New Lead", href: "/leads?new=1", writes: true },
+  { icon: "calendar-plus", label: "Schedule Meeting", href: "/meetings?schedule=1", writes: true },
   { icon: "phone", label: "View Contacts", href: "/contacts" },
-  { icon: "file-text", label: "Compose Email", href: "/inbox?compose=1" },
+  { icon: "file-text", label: "Compose Email", href: "/inbox?compose=1", writes: true },
   { icon: "headphones", label: "Voice Agents", href: "/voice-agents" },
   { icon: "bar-chart", label: "Reports", href: "/reports" },
 ];
 
-function QuickActions() {
+function QuickActions({ canWrite }: { canWrite: boolean }) {
+  const actions = canWrite ? QUICK_ACTIONS : QUICK_ACTIONS.filter((a) => !a.writes);
   return (
     <Card>
       <CardHeader title="Quick Actions" />
       <div className="grid grid-cols-2 gap-2.5">
-        {QUICK_ACTIONS.map((a) => {
+        {actions.map((a) => {
           const Icon = iconMap[a.icon];
           return (
             <Link

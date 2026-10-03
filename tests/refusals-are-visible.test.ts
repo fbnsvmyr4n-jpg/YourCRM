@@ -162,3 +162,59 @@ describe("the greeting on Home", () => {
     expect(home).toMatch(/instantToWallClock\(now\.toISOString\(\), timeZone\)/);
   });
 });
+
+describe("what a view-only reader is offered", () => {
+  const home = read("../src/app/(app)/page.tsx");
+  const deals = read("../src/app/(app)/deals/DealsBoard.tsx");
+  const leads = read("../src/app/(app)/leads/LeadCardsSection.tsx");
+  const docs = read("../src/components/documents/DocumentLedgerView.tsx");
+  const shell = read("../src/components/shell/AppShell.tsx");
+  const permissions = read("../src/server/permissions.ts");
+
+  /**
+   * Making the refusal VISIBLE was half the fix; this is the other half.
+   *
+   * A viewer was offered every write control in the product — Add New Lead,
+   * Add Deal, Compose Email, the per-column buttons, the drag — and every one
+   * submitted and was refused. `permissions.ts` names that exact shape as the
+   * thing to avoid: "a button that is visible, submits, and is refused".
+   */
+  it("IS NOT OFFERED THE PRIMARY CREATE BUTTONS", () => {
+    expect(deals, "Add Deal is offered to a viewer").toMatch(/\{canWrite && \(\s*<button\s*onClick=\{\(\) => setAddOpen\(true\)\}/);
+    expect(leads, "Add Lead is offered to a viewer").toMatch(/\{canWrite && \(\s*<button\s*onClick=\{\(\) => setModal\("new"\)\}/);
+    expect(docs, "New quote/order is offered to a viewer").toMatch(/\{canWrite && projects\.length > 0 && \(/);
+    expect(deals, "the per-column Add deal is offered to a viewer").toMatch(/\{canWrite && \(\s*<button\s*onClick=\{\(\) => setAddOpen\(stage\.id\)\}/);
+  });
+
+  it("is not told to drag cards it cannot move", () => {
+    /* The instruction is only true for somebody who can act on it. */
+    expect(deals).toMatch(/draggable=\{canWrite\}/);
+    expect(deals).toMatch(/canWrite\s*\?\s*"Drag deals across stages/);
+  });
+
+  it("keeps the places there are to LOOK", () => {
+    /* Hiding the writes must not leave a viewer with an empty screen: the
+       navigating quick actions are exactly what the role is for. */
+    expect(home).toMatch(/label: "View Contacts", href: "\/contacts" \}/);
+    expect(home).toMatch(/label: "Reports", href: "\/reports" \}/);
+    /* …and the three that open a form carry the flag that hides them. */
+    for (const label of ["Add New Lead", "Schedule Meeting", "Compose Email"]) {
+      expect(home, `${label} is not marked as a write`).toMatch(
+        new RegExp(`label: "${label}"[^}]*writes: true`)
+      );
+    }
+  });
+
+  it("DECIDES IT IN ONE PLACE, so a screen and the server cannot disagree", () => {
+    /* The guard suite refuses an inline `role === "viewer"` anywhere else, and
+       this is the named place it points at. */
+    expect(permissions).toMatch(/export function canWrite\(role: string\): boolean/);
+    expect(shell).toMatch(/<CanWriteProvider canWrite=\{canWrite\(user\.role\)\}>/);
+  });
+
+  it("is still REFUSED by the database, which is the part that matters", () => {
+    /* Hiding a control is tidiness. A viewer who posts the action anyway meets
+       a read-only transaction, and that is unchanged. */
+    expect(read("../src/server/tenant.ts")).toMatch(/SET TRANSACTION READ ONLY/);
+  });
+});

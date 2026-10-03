@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { CurrencyProvider } from "@/components/money/CurrencyProvider";
+import { canWrite } from "@/server/permissions";
+import { CanWriteProvider } from "./CanWrite";
 import type { CurrencyCode } from "@/lib/money";
 import type { NavCounts } from "@/server/nav-counts";
 import type { Notification } from "@/server/notifications";
@@ -36,6 +38,9 @@ export function AppShell({
 
   return (
     <CurrencyProvider currency={currency}>
+    {/* One answer for every control underneath: a viewer is offered nothing
+        the database will refuse. See `CanWrite`. */}
+    <CanWriteProvider canWrite={canWrite(user.role)}>
     {/* The `print:` overrides are on the shell, not on the page inside it: the app
         is a fixed-height clipped box with its own scroller, which is right on
         screen and prints exactly one screenful — the rest of a long document
@@ -87,7 +92,7 @@ export function AppShell({
           {/* Said once, before anything is attempted. The database refuses a
               view-only person's changes regardless; this is so nobody types a
               paragraph first to find out. */}
-          {user.role === "viewer" && (
+          {!canWrite(user.role) && (
             <p
               role="status"
               className="mx-auto mb-3 max-w-[1500px] rounded-xl px-4 py-2.5 text-sm font-medium print:hidden"
@@ -102,6 +107,7 @@ export function AppShell({
 
       <CommandPalette />
     </div>
+    </CanWriteProvider>
     </CurrencyProvider>
   );
 }
