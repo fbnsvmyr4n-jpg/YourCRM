@@ -146,6 +146,10 @@ export const EXPECTED_COLUMNS: ReadonlyArray<[string, string]> = [
   /* The job's own reference. Named in the deals SELECT behind the pipeline and
      every project screen. */
   ["deals", "number"],
+  /* Who confirmed a hand-entered payment. Written on every such payment, so an
+     unmigrated database cannot record money arriving by transfer at all —
+     which, for a trades business, is most of the money it takes. */
+  ["invoice_payments", "recorded_by_user_id"],
   /* Projects. Named in the SELECT the deals repo and the projects page both
      use, so an unmigrated database breaks the pipeline board, not one page. */
   ["deals", "company_id"],

@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 import { CurrencyProvider } from "@/components/money/CurrencyProvider";
-import { canWrite } from "@/server/permissions";
+import { canSettleInvoice, canWrite } from "@/server/permissions";
 import { CanWriteProvider } from "./CanWrite";
+import { MaySettleProvider } from "./MaySettle";
 import { VocabularyProvider } from "./Vocabulary";
 import type { CurrencyCode } from "@/lib/money";
 import type { VocabularyId } from "@/data/vocabulary";
@@ -46,6 +47,9 @@ export function AppShell({
     {/* One answer for every control underneath: a viewer is offered nothing
         the database will refuse. See `CanWrite`. */}
     <CanWriteProvider canWrite={canWrite(user.role)}>
+    {/* And one answer for the payment box: confirming money arrived is
+        finance's desk, not the salesperson's. See `MaySettle`. */}
+    <MaySettleProvider maySettle={canSettleInvoice(user.role)}>
     <VocabularyProvider vocabulary={vocabulary}>
     {/* The `print:` overrides are on the shell, not on the page inside it: the app
         is a fixed-height clipped box with its own scroller, which is right on
@@ -114,6 +118,7 @@ export function AppShell({
       <CommandPalette />
     </div>
     </VocabularyProvider>
+    </MaySettleProvider>
     </CanWriteProvider>
     </CurrencyProvider>
   );

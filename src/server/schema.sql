@@ -2848,21 +2848,35 @@ CREATE POLICY documents_public_pay_lookup ON documents FOR SELECT
     AND pay_token = nullif(current_setting('app.pay_token', TRUE), '')
   );
 
--- Money that arrived for an invoice, as Paystack itself confirmed it.
+-- Money that arrived for an invoice: confirmed by Paystack, or entered by a
+-- named person who watched a transfer land in the bank account.
 CREATE TABLE IF NOT EXISTS invoice_payments (
   id              TEXT PRIMARY KEY,
   sub_account_id  TEXT NOT NULL REFERENCES sub_accounts(id) ON DELETE CASCADE,
   document_id     TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
-  provider        TEXT NOT NULL CHECK (provider IN ('paystack')),
+  provider        TEXT NOT NULL CHECK (provider IN ('paystack', 'manual')),
   -- Paystack's reference, which is also ours: we choose it when the payment starts.
+  -- For a hand-entered payment, one we mint, so the uniqueness rule below holds
+  -- for both without a bank's own numbering having to be unique or even present.
   reference       TEXT NOT NULL,
   amount_cents    BIGINT NOT NULL CHECK (amount_cents > 0),
   currency        TEXT NOT NULL CHECK (currency ~ '^[A-Z]{3}$'),
   status          TEXT NOT NULL DEFAULT 'paid' CHECK (status IN ('paid', 'disputed')),
   channel         TEXT,
   paid_at         TIMESTAMPTZ NOT NULL,
+  -- Who confirmed it, for a hand-entered payment. NULL when the provider did.
+  -- The whole reason only finance may settle an invoice is that a named person
+  -- stands behind the claim that money arrived; without this the claim is
+  -- anonymous and the control is decoration.
+  recorded_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE invoice_payments ADD COLUMN IF NOT EXISTS recorded_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL;
+-- Widened from ('paystack') when hand-entered payments arrived. Dropped and
+-- re-added rather than altered, because a CHECK cannot be changed in place and
+-- a table that already exists keeps the constraint it was created with.
+ALTER TABLE invoice_payments DROP CONSTRAINT IF EXISTS invoice_payments_provider_check;
+ALTER TABLE invoice_payments ADD CONSTRAINT invoice_payments_provider_check CHECK (provider IN ('paystack', 'manual'));
 -- One reference is one payment, however many times Paystack or a browser tells us about it.
 CREATE UNIQUE INDEX IF NOT EXISTS invoice_payments_reference_once ON invoice_payments (provider, reference);
 CREATE INDEX IF NOT EXISTS invoice_payments_document_idx ON invoice_payments (sub_account_id, document_id);

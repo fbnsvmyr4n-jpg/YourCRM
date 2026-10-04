@@ -33,6 +33,10 @@ const doc = (
     { id: `${id}-l`, description: id, quantity: 1, unitCents: totalCents, totalCents, projectTaskId: null },
   ],
   totalCents,
+  /* Neither figure matters here — this measures what counts as billed, not
+     what has been settled. */
+  receivedCents: 0,
+  dueCents: totalCents,
 });
 
 describe("what counts as billed", () => {

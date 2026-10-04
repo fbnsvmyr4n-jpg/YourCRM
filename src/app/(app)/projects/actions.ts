@@ -7,6 +7,10 @@ import { cascade } from "@/server/repos/tasks";
 import { revalidateApp } from "@/server/revalidate";
 import { requireTenant, withCurrentTenant } from "@/server/tenant-session";
 import { email as validEmail, count, decimal, id as validId, multiline, pick, text } from "@/server/validate";
+import { recordManualPayment } from "@/server/repos/payments";
+import { PAYMENT_METHODS } from "@/data/payment-methods";
+import { businessToday, getSettings } from "@/server/repos/settings";
+import { formatMoney } from "@/lib/money";
 
 /**
  * Running a project: who is on it, what it is quoted at, when it is due.
@@ -22,7 +26,15 @@ export type FormState = { ok?: string; error?: string } | undefined;
 const DOC_KINDS = ["quote", "purchase_order", "invoice"] as const;
 /** A single line item's unit price ceiling, in whole currency units. */
 const MAX_UNIT_PRICE = 100_000_000;
-const DOC_STATUSES = ["draft", "sent", "accepted", "declined", "paid", "cancelled"] as const;
+/*
+   `paid` is deliberately NOT here.
+
+   An invoice becomes paid because a payment was recorded against it — by the
+   card provider's webhook, or by a person entering a transfer they watched land
+   — and never because somebody picked the word out of a menu. See
+   `recordPaymentAction` below.
+*/
+const DOC_STATUSES = ["draft", "sent", "accepted", "declined", "cancelled"] as const;
 
 /** A `YYYY-MM-DD` from a date input, or null. Never parsed into a Date. */
 function isoDate(value: unknown): string | null {
@@ -347,29 +359,14 @@ export async function setDocumentStatusAction(
     const documentId = validId(formData.get("documentId"));
     const status = pick(formData.get("status"), DOC_STATUSES);
     if (!documentId) return { error: "That document could not be identified." };
-    if (!status) return { error: "Choose a status." };
-
-    /*
-       DECLARING SOMETHING PAID IS NOT THE SALESPERSON'S TO DO.
-
-       Confirming that money arrived is how revenue becomes real here: it moves
-       the document, the project's figures and every report built over them. The
-       oldest control in bookkeeping is that whoever chased the sale is not
-       whoever confirms the payment, and the whole of Reports rests on this one
-       field being true.
-
-       It costs sales nothing in practice. A card payment confirms itself
-       through the provider's webhook, so a hand-marked invoice is the exception
-       — a transfer somebody watched land in the account — and that is finance's
-       desk by definition. The rest of the menu stays theirs: sent, accepted,
-       declined, cancelled.
-    */
-    if (status === "paid" && !canSettleInvoice(q.ctx.role)) {
+    /* Named, rather than falling through to "Choose a status" — the word is a
+       reasonable thing to ask for and the answer is where to do it instead. */
+    if (formData.get("status") === "paid") {
       return {
-        error:
-          "Only an owner or a finance user can mark something paid. Card payments record themselves.",
+        error: "Record the payment instead — the invoice marks itself paid once the money covers it.",
       };
     }
+    if (!status) return { error: "Choose a status." };
 
     /*
        A quotation waiting on an approval is not moved along from here.
@@ -384,7 +381,7 @@ export async function setDocumentStatusAction(
     const row = await q.one<{ number: string }>(
       `UPDATE documents SET status = $3, updated_at = now()
         WHERE id = $2 AND sub_account_id = $1 AND deleted_at IS NULL
-          AND status NOT IN ('awaiting_approval', 'approved')
+          AND status NOT IN ('awaiting_approval', 'approved', 'paid')
         RETURNING number`,
       [q.ctx.subAccountId, documentId, status]
     );
@@ -395,6 +392,19 @@ export async function setDocumentStatusAction(
         [q.ctx.subAccountId, documentId]
       );
       if (!doc) return { error: "That document no longer exists." };
+      /*
+         A paid invoice is not moved back by a menu.
+
+         Its status is now a CONSEQUENCE of the payments recorded against it, so
+         setting it to "sent" would leave the document contradicting money the
+         workspace has on record — and the next payment, or a re-run of the
+         settle rule, would silently put it back. Whatever actually happened
+         (the transfer reversed, the wrong invoice) is a change to the payment,
+         not to the word.
+      */
+      if (doc.status === "paid") {
+        return { error: `${doc.number} has money recorded against it. Correct the payment, not the status.` };
+      }
       return {
         error: `${doc.number} is waiting on an approval. Approve or discard it in Chat first.`,
       };
@@ -403,6 +413,68 @@ export async function setDocumentStatusAction(
     revalidateApp();
     return { ok: `${row.number} marked ${status}.` };
   });
+}
+
+/**
+ * Money that arrived outside the card provider: an EFT, cash on site.
+ *
+ * This replaced picking "paid" out of the status menu. The menu set a word; this
+ * records what actually happened — how much, on what day, by what means, and
+ * who says so — and the invoice settles itself from the total received through
+ * the same rule the provider's webhook settles by. A client who pays half is
+ * now something the product can express, where before it could only be told a
+ * lie in either direction.
+ *
+ * Finance's desk, for the reason the status menu used to carry: whoever chased
+ * the sale is not whoever confirms it was paid, and the whole of Reports rests
+ * on that being true.
+ */
+export async function recordPaymentAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  return withCurrentTenant(
+    async (q) => {
+      if (!canSettleInvoice(q.ctx.role)) {
+        return { error: "Only an owner or a finance user can confirm that money arrived." };
+      }
+
+      const documentId = validId(formData.get("documentId"));
+      if (!documentId) return { error: "That invoice could not be identified." };
+
+      const method = pick(formData.get("method"), PAYMENT_METHODS);
+      if (!method) return { error: "Choose how the money arrived." };
+
+      const paidOn = isoDate(formData.get("paidOn"));
+      if (!paidOn) return { error: "Enter the date the money arrived." };
+      /* The date it LANDED, which cannot be in the future. A typo in the year
+         puts a payment outside every report that covers this one. */
+      if (paidOn > (await businessToday(q))) {
+        return { error: "That date has not happened yet." };
+      }
+
+      /* `decimal`, not `money` — a transfer of R1,250.50 is an ordinary amount,
+         and `money` rounds, which is how a purchase order once went out R7,250
+         wrong without saying anything. */
+      const amount = decimal(formData.get("amount"), MAX_UNIT_PRICE, 2);
+      if (amount === null || amount <= 0) return { error: "Enter the amount that arrived." };
+      const amountCents = Math.round(amount * 100);
+
+      const recorded = await recordManualPayment(q, { documentId, amountCents, paidOn, method, note: text(formData.get("note"), 120) });
+      /* Every outcome is said out loud, including the ones that changed
+         nothing — a payment box that goes quiet is one somebody enters twice. */
+      if (recorded.outcome === "ignored") return { error: recorded.reason };
+      if (recorded.outcome === "already_recorded") return { ok: "That payment was already recorded." };
+
+      revalidateApp();
+      if (recorded.outcome === "paid") return { ok: `${recorded.number} is paid in full.` };
+      return {
+        ok: `Recorded. ${recorded.number} still has ${formatMoney(
+          recorded.totalCents - recorded.paidCents,
+          (await getSettings(q)).currency,
+          "cents"
+        )} outstanding.`,
+      };
+    },
+    { money: true }
+  );
 }
 
 /* ------------------------------------------------------------------ */

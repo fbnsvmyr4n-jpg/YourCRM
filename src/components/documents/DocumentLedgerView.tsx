@@ -100,17 +100,24 @@ const CREATE_STATUSES = ["draft", "sent", "accepted"] as const satisfies readonl
 /**
  * What the row's status menu offers.
  *
- * The six `setDocumentStatusAction` accepts, and no more. The two it
+ * The five `setDocumentStatusAction` accepts, and no more. The two it
  * refuses — `awaiting_approval` and `approved` — belong to the approval
  * flow, and a menu that could set them would let somebody skip an approval
  * by choosing its outcome.
+ *
+ * `paid` is not here either, and for a related reason: an invoice is paid
+ * because a payment was recorded against it, not because the word was chosen.
+ * The menu could only ever set the word — no amount, no date, no method,
+ * nobody's name — so an invoice could read "paid" with an empty list of
+ * payments behind it, and Reports and the document would disagree by exactly
+ * the amount nobody had entered. Money arriving is recorded where the invoice
+ * is, by `RecordPayment`.
  */
 const ROW_STATUSES: readonly DocumentStatus[] = [
   "draft",
   "sent",
   "accepted",
   "declined",
-  "paid",
   "cancelled",
 ];
 

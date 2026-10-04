@@ -41,6 +41,10 @@ const doc = (
   fromRetainer: false,
   lines,
   totalCents: lines.reduce((n, l) => n + l.totalCents, 0),
+  /* Neither figure matters to what these tests measure — they are about how
+     documents group and how a stage's money adds up, not about settlement. */
+  receivedCents: 0,
+  dueCents: lines.reduce((n, l) => n + l.totalCents, 0),
 });
 
 /* Plan order is by position, not by name or by the order given. */

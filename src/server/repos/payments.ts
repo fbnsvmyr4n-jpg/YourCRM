@@ -4,6 +4,8 @@ import { decryptSecret, encryptSecret } from "../secrets";
 import { addDays } from "../retainer-rules";
 import { checkKeyShape, verifySecretKey, type Verified } from "../paystack";
 import { payableCents } from "../vat";
+import { wallClockToInstant } from "@/lib/zoned";
+import type { PaymentMethod } from "@/data/payment-methods";
 import { getSettings } from "./settings";
 import { logActivity } from "./activity";
 
@@ -188,6 +190,30 @@ export async function recordPaystackPayment(
   );
   if (inserted.length === 0) return { outcome: "already_recorded" };
 
+  return settle(q, invoice, {
+    amountCents: verified.amountCents,
+    detail: `Received through Paystack (${verified.channel ?? "online"})`,
+    actorUserId: null,
+  });
+}
+
+/** The invoice as the two recorders read it, before anything is decided about it. */
+type SettlingInvoice = { id: string; number: string; deal_id: string; total: string };
+
+/**
+ * What an arrived payment DOES to its invoice. One copy, two callers.
+ *
+ * Both the provider's webhook and a hand-entered transfer have to answer the
+ * same question — does what has now arrived cover what the client owes — and
+ * answer it identically, or the same R11,500 settles an invoice through one
+ * door and leaves it outstanding through the other. The payment row is already
+ * written when this runs; this is only the consequence of it.
+ */
+async function settle(
+  q: TenantQuery,
+  invoice: SettlingInvoice,
+  entry: { amountCents: number; detail: string; actorUserId: string | null }
+): Promise<Recorded> {
   const received = await paidCents(q, invoice.id);
   const total = Number(invoice.total);
   /*
@@ -214,13 +240,101 @@ export async function recordPaystackPayment(
     entityId: invoice.deal_id,
     kind: "updated",
     title: covered ? `${invoice.number} paid` : `Part payment on ${invoice.number}`,
-    detail: `Received through Paystack (${verified.channel ?? "online"})`,
-    amountCents: verified.amountCents,
-    actorUserId: null,
+    detail: entry.detail,
+    amountCents: entry.amountCents,
+    actorUserId: entry.actorUserId,
   });
   return covered
     ? { outcome: "paid", number: invoice.number }
     : { outcome: "part_paid", number: invoice.number, paidCents: received, totalCents: due };
+}
+
+/**
+ * Record money that arrived OUTSIDE the card provider — an EFT, cash on site.
+ *
+ * This is most of the money most of these businesses take, and until it existed
+ * the only way to say it had arrived was to pick "paid" from the status menu.
+ * That menu records a word: no amount, no date, no method, nobody's name, and no
+ * way at all to say a client paid half. The invoice then read "paid" while the
+ * payments it was supposedly paid by were an empty list, so the figure on
+ * Reports and the status on the document disagreed by exactly the amount nobody
+ * had entered.
+ *
+ * So the payment is what gets recorded and the status is what follows from it —
+ * the same rule the webhook settles by. A short payment is recorded and the
+ * invoice stays unpaid, which is the honest answer and the one the status menu
+ * could never give.
+ */
+export async function recordManualPayment(
+  q: TenantQuery,
+  entry: { documentId: string; amountCents: number; paidOn: string; method: PaymentMethod; note?: string }
+): Promise<Recorded> {
+  if (!Number.isSafeInteger(entry.amountCents) || entry.amountCents <= 0) {
+    return { outcome: "ignored", reason: "Enter the amount that arrived." };
+  }
+
+  const invoice = await q.one<SettlingInvoice & { status: string }>(
+    `SELECT d.id, d.number, d.deal_id, d.status,
+            COALESCE((SELECT sum(ROUND(l.quantity * l.unit_cents)) FROM document_lines l
+                       WHERE l.sub_account_id = d.sub_account_id AND l.document_id = d.id), 0)::bigint::text AS total
+       FROM documents d
+      WHERE d.sub_account_id = $1 AND d.id = $2 AND d.kind = 'invoice' AND d.deleted_at IS NULL
+      FOR UPDATE OF d`,
+    [q.ctx.subAccountId, entry.documentId]
+  );
+  if (!invoice) return { outcome: "ignored", reason: "That invoice no longer exists." };
+  /* A cancelled invoice is not owed. Money against one is a mistake worth
+     stopping rather than a payment worth recording. */
+  if (invoice.status === "cancelled") {
+    return { outcome: "ignored", reason: `${invoice.number} was cancelled.` };
+  }
+
+  /* Our own reference, not a bank's: two transfers can carry the same narration
+     on a statement, and a reference nobody typed cannot be mistyped into
+     collapsing two real payments into one. */
+  const reference = `man_${randomBytes(9).toString("hex")}`;
+
+  /*
+     The day read in the BUSINESS's zone, not the server's.
+
+     `paid_at` is a timestamptz and the entered value is a bare date. Casting it
+     — `'2026-09-28'::date` — gives midnight wherever the database happens to
+     think it is, and a payment the user dated 28 September came back out as the
+     27th for a business in Johannesburg. Every report that buckets by day then
+     files it under the wrong one, and the month-end total is wrong by whatever
+     landed on the first and the last.
+
+     Midday rather than midnight, through the same `wallClockToInstant` the
+     calendar uses, so the stored instant stays inside the intended day in the
+     business's zone whichever side of a DST change it falls on.
+  */
+  const settings = await getSettings(q);
+  const paidAt = wallClockToInstant(entry.paidOn, "12:00", settings.timeZone);
+  if (!paidAt) return { outcome: "ignored", reason: "That date could not be read." };
+  await q.rows(
+    `INSERT INTO invoice_payments
+       (id, sub_account_id, document_id, provider, reference, amount_cents, currency, channel, paid_at, recorded_by_user_id)
+     VALUES ($1, $2, $3, 'manual', $4, $5, $6, $7, $8::timestamptz, $9)`,
+    [
+      `pay_${randomBytes(12).toString("hex")}`,
+      q.ctx.subAccountId,
+      invoice.id,
+      reference,
+      entry.amountCents,
+      settings.currency,
+      entry.method,
+      paidAt,
+      q.ctx.userId || null,
+    ]
+  );
+
+  return settle(q, invoice, {
+    amountCents: entry.amountCents,
+    detail: entry.note?.trim()
+      ? `Received by ${entry.method} — ${entry.note.trim()}`
+      : `Received by ${entry.method}`,
+    actorUserId: q.ctx.userId || null,
+  });
 }
 
 /** Who a task about a project goes to: its owner, when they can still see customer records. */

@@ -1,5 +1,7 @@
 import type { TenantQuery } from "../tenant";
 import type { Stage } from "./deals";
+import { getSettings } from "./settings";
+import { payableCents } from "../vat";
 
 /**
  * One project, and everything hanging off it.
@@ -231,6 +233,25 @@ export type ProjectDocument = {
   fromRetainer: boolean;
   lines: DocumentLine[];
   totalCents: number;
+  /**
+   * What has actually been RECEIVED against this invoice, in cents.
+   *
+   * Carried per document rather than worked out from the status, because the
+   * status is now the consequence of this figure and not a separate claim. Zero
+   * on a quotation or an order, which are not paid against.
+   */
+  receivedCents: number;
+  /**
+   * What the client OWES on this invoice — the lines plus VAT where the
+   * workspace charges it on top.
+   *
+   * Worked out here, through the same `payableCents` the webhook settles by, so
+   * the box that records a payment offers the same figure the invoice would be
+   * settled against. Computed in one place because the alternative is a screen
+   * that suggests the pre-tax amount and an invoice that then refuses to go
+   * paid, 15% short, with nothing saying why.
+   */
+  dueCents: number;
 };
 
 type DocRow = {
@@ -292,6 +313,21 @@ export async function projectDocuments(
     [q.ctx.subAccountId, dealId]
   );
 
+  /* What has arrived against each of them. One statement for the whole screen
+     rather than a query per invoice: a job that has been billed monthly for a
+     year has twelve. */
+  const paid = new Map<string, number>();
+  for (const row of await q.rows<{ document_id: string; received: string }>(
+    `SELECT p.document_id, sum(p.amount_cents)::bigint::text AS received
+       FROM invoice_payments p
+       JOIN documents d ON d.id = p.document_id AND d.deleted_at IS NULL
+      WHERE p.sub_account_id = $1 AND d.deal_id = $2 AND p.status = 'paid'
+      GROUP BY p.document_id`,
+    [q.ctx.subAccountId, dealId]
+  )) {
+    paid.set(row.document_id, Number(row.received));
+  }
+
   const byDoc = new Map<string, DocumentLine[]>();
   for (const l of lines) {
     const line: DocumentLine = {
@@ -307,8 +343,13 @@ export async function projectDocuments(
     else byDoc.set(l.document_id, [line]);
   }
 
+  /* Read once for the whole screen. `getSettings` memoises per transaction, but
+     saying it here keeps the VAT rule visible beside the figure it decides. */
+  const { vatRateBp, pricesIncludeVat } = await getSettings(q);
+
   return docs.map((d) => {
     const docLines = byDoc.get(d.id) ?? [];
+    const totalCents = docLines.reduce((sum, l) => sum + l.totalCents, 0);
     return {
       id: d.id,
       kind: d.kind,
@@ -321,7 +362,9 @@ export async function projectDocuments(
       sentAt: d.sent_at ? d.sent_at.toISOString() : null,
       fromRetainer: d.from_retainer,
       lines: docLines,
-      totalCents: docLines.reduce((sum, l) => sum + l.totalCents, 0),
+      totalCents,
+      receivedCents: paid.get(d.id) ?? 0,
+      dueCents: payableCents(totalCents, vatRateBp, pricesIncludeVat),
     };
   });
 }

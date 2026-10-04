@@ -41,6 +41,7 @@ import type {
 } from "@/server/repos/projects";
 import type { Dependency, ProjectTask, ScheduleSummary } from "@/server/repos/tasks";
 import { DEFAULT_PROJECT_TAB, type ProjectTabId } from "./tabs";
+import { RecordPayment } from "@/components/documents/RecordPayment";
 import { ProjectSchedule } from "./ProjectSchedule";
 import { RetainerCard } from "./RetainerCard";
 import { PayLinkButton, PaymentsReady } from "./PayLinkButton";
@@ -284,7 +285,13 @@ export function ProjectDetail({
         {tab === "documents" && (
           <PaymentsReady.Provider value={paymentsReady}>
             <RetainerCard dealId={header.id} retainers={retainers} today={today} />
-            <DocumentsTab dealId={header.id} documents={documents} priceItems={priceItems} tasks={tasks} />
+            <DocumentsTab
+              dealId={header.id}
+              documents={documents}
+              priceItems={priceItems}
+              tasks={tasks}
+              today={today}
+            />
           </PaymentsReady.Provider>
         )}
         {tab === "threads" && <ThreadsTab threads={threads} />}
@@ -725,10 +732,13 @@ function DocumentsTab({
   documents,
   priceItems,
   tasks,
+  today,
 }: {
   dealId: string;
   documents: ProjectDocument[];
   priceItems: PriceItem[];
+  /** The business's own today, for the payment box's date. */
+  today: string;
   /** The job's plan, so documents can be arranged and filed by stage. */
   tasks: ProjectTask[];
 }) {
@@ -905,6 +915,7 @@ function DocumentsTab({
           onSend={send}
           sending={sending}
           onRaiseForStage={raiseForStage}
+          today={today}
         />
       ) : (
         documents.length > 0 && (
@@ -918,6 +929,7 @@ function DocumentsTab({
               busy={settingStatus}
               onSend={send}
               sending={sending}
+              today={today}
             />
             <DocumentGroup label="Purchase orders" docs={orders} tasks={tasks} onStatus={setStatus} busy={settingStatus} />
           </div>
@@ -944,6 +956,7 @@ function StageView({
   onSend,
   sending,
   onRaiseForStage,
+  today,
 }: {
   grouped: DocumentsByStage;
   tasks: ProjectTask[];
@@ -952,6 +965,8 @@ function StageView({
   onSend: React.FormEventHandler<HTMLFormElement>;
   sending: boolean;
   onRaiseForStage: (task: { id: string; name: string }) => void;
+  /** The business's own today, for the payment box's date. */
+  today: string;
 }) {
   const money = useExactMoney();
   const { stages, unfiled, retainer } = grouped;
@@ -971,6 +986,7 @@ function StageView({
       busy={busy}
       onSend={e.document.kind === "invoice" ? onSend : undefined}
       sending={sending}
+      today={today}
     />
   );
 
@@ -1059,6 +1075,7 @@ function DocumentGroup({
   busy,
   onSend,
   sending,
+  today,
 }: {
   label: string;
   docs: ProjectDocument[];
@@ -1068,6 +1085,8 @@ function DocumentGroup({
   /** Only invoices can be sent from here, so only they are given this. */
   onSend?: React.FormEventHandler<HTMLFormElement>;
   sending?: boolean;
+  /** The business's own today, for the payment box's date. */
+  today?: string;
 }) {
   if (docs.length === 0) return null;
   return (
@@ -1086,6 +1105,7 @@ function DocumentGroup({
             busy={busy}
             onSend={onSend}
             sending={sending}
+            today={today}
           />
         ))}
       </ul>
@@ -1103,6 +1123,7 @@ function DocumentRow({
   busy,
   onSend,
   sending,
+  today,
 }: {
   doc: ProjectDocument;
   /** The group this row sits in. The same document can appear under several
@@ -1118,6 +1139,8 @@ function DocumentRow({
   busy: boolean;
   onSend?: React.FormEventHandler<HTMLFormElement>;
   sending?: boolean;
+  /** The business's own today, for the payment box's date. */
+  today?: string;
 }) {
   const money = useExactMoney();
   const [open, setOpen] = useState(false);
@@ -1220,6 +1243,21 @@ function DocumentRow({
             </div>
           )}
 
+          {/* Money that arrived another way.
+
+              On an invoice only, and only for whoever may confirm a payment —
+              the component decides both, so every list of documents gets the
+              same rule rather than each one remembering it. */}
+          {doc.kind === "invoice" && doc.status !== "cancelled" && today && (
+            <RecordPayment
+              documentId={doc.id}
+              number={doc.number}
+              dueCents={doc.dueCents}
+              receivedCents={doc.receivedCents}
+              today={today}
+            />
+          )}
+
           {/* A quotation waiting on an approval is not moved along from here:
               the decision belongs where the lines and the recipient are, and a
               select that cannot represent this document's own status would
@@ -1229,6 +1267,17 @@ function DocumentRow({
               {doc.status === "approved"
                 ? "Approved, waiting to be sent — finish it in Chat."
                 : "Waiting for approval in Chat."}
+            </p>
+          ) : doc.status === "paid" ? (
+            /* A settled invoice has no menu.
+
+               The select cannot express `paid`, so on a paid invoice it sat
+               there reading "Sent" beside an Update the server now refuses —
+               the exact shape `permissions.ts` names as the failure to avoid:
+               a control that is visible, submits, and is refused. Worse here,
+               because pressing it looks like it would un-pay the invoice. */
+            <p className="mt-3 text-right text-xs text-muted">
+              Settled. Its status follows the payments recorded against it.
             </p>
           ) : (
           /* Moving a document along is the change actually made day to day, so
@@ -1246,7 +1295,11 @@ function DocumentRow({
               className="focus-ring rounded-lg px-2.5 py-1.5 text-xs font-semibold capitalize disabled:opacity-60"
               style={{ background: tone.soft, color: tone.color }}
             >
-              {["draft", "sent", "accepted", "declined", "paid", "cancelled"].map((s) => (
+              {/* `paid` is not here. An invoice becomes paid because a
+                  payment was recorded against it — see `RecordPayment` — and a
+                  menu that could type the word would let somebody declare money
+                  arrived without saying how much, when, or on whose word. */}
+              {["draft", "sent", "accepted", "declined", "cancelled"].map((s) => (
                 <option key={s} value={s} className="capitalize">
                   {s}
                 </option>
