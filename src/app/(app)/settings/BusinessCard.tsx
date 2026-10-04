@@ -41,6 +41,21 @@ import { updateBusinessDetailsAction, type FormState } from "./actions";
 /** The figure the example is worked on: big enough to show cents honestly. */
 const EXAMPLE_CENTS = 100000;
 
+/**
+ * What payment details normally look like, as a placeholder.
+ *
+ * Four lines, which is why the field is five rows: an example clipped by its
+ * own box teaches nothing. A South African bank by default because that is
+ * where this product's first users are, and the field is free text precisely
+ * so it does not have to be.
+ */
+const PAY_TO_EXAMPLE = [
+  "Bank: Standard Bank",
+  "Account: 123 456 789",
+  "Branch: 051001",
+  "Reference: your invoice number",
+].join("\n");
+
 export function BusinessCard({
   settings,
   canManage,
@@ -65,6 +80,10 @@ export function BusinessCard({
   /* Mirrored so the sentence under the choice updates as it is made; what is
      SAVED is still what the form posts. */
   const [vocabulary, setVocabulary] = useState<VocabularyId>(settings.vocabulary);
+  /* Held in state only so the preview below the field can follow the typing.
+     The field is still the thing that submits — this never becomes the source
+     of what is saved, which is why it is seeded from the same default. */
+  const [payTo, setPayTo] = useState(settings.invoicePayTo ?? "");
 
   const typedRate = Number(ratePercent);
   const rateBp =
@@ -237,21 +256,53 @@ export function BusinessCard({
           </section>
 
           {/* ---- how to pay ---- */}
-          <section className="space-y-3">
+          {/* Framed like VAT above it, because it is the same kind of thing: a
+              setting whose consequence is printed on a document a client reads.
+              Flat on the page, it was the one block on this card with no edges,
+              and it read as an afterthought appended below the real settings. */}
+          <section className="space-y-3 rounded-xl border border-[var(--border)] p-4">
             <p className="flex items-center gap-2 text-sm font-semibold">
               <Landmark className="h-4 w-4 text-accent" />
               How clients pay you
             </p>
             <label className="block">
               <span className="mb-1.5 block text-xs font-medium text-muted">Payment details</span>
+              {/* Five rows for a four-line example.
+
+                  At three, the placeholder was taller than the box that held
+                  it: the guidance ended mid-sentence on "Reference: your
+                  invoice n…", which reads as a rendering fault rather than as
+                  an example. A field's default size should fit what it is
+                  telling you to type. */}
               <textarea
                 name="invoicePayTo"
-                rows={3}
+                rows={5}
                 defaultValue={settings.invoicePayTo ?? ""}
-                placeholder={"Bank: Standard Bank\nAccount: 123 456 789\nBranch: 051001\nReference: your invoice number"}
-                className="field-input resize-y"
+                placeholder={PAY_TO_EXAMPLE}
+                onChange={(e) => setPayTo(e.target.value)}
+                className="field-input resize-y font-mono text-[13px] leading-relaxed"
               />
             </label>
+
+            {/* The consequence, exactly as the client will see it — the same
+                move the VAT block makes with its worked example. These lines
+                are printed verbatim at the foot of an invoice, so the only
+                honest preview is the text itself, set the way the document
+                sets it. */}
+            {payTo.trim() ? (
+              <div className="rounded-lg bg-[var(--sunken)] p-3">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-faint">
+                  On the invoice
+                </p>
+                <p className="mt-1.5 whitespace-pre-line text-xs leading-relaxed">{payTo.trim()}</p>
+              </div>
+            ) : (
+              <p className="text-xs text-faint">
+                Left empty, invoices say nothing about how to pay — which, for a business that is
+                paid by transfer, is the line the client goes looking for.
+              </p>
+            )}
+
             <p className="text-xs text-faint">
               Printed at the foot of every invoice and shown on the online payment page. Free text,
               because every country names these differently.
