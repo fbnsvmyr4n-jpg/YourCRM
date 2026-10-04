@@ -111,6 +111,41 @@ describe("a transfer that covers the invoice", () => {
   });
 });
 
+describe("the chase task for an overdue invoice", () => {
+  /* Raised by `chaseOverdueInvoices` and, until this, never closed: the client
+     paid, the invoice read paid, and somebody was still told every morning to
+     go and chase them for it. */
+  const chase = `
+    INSERT INTO todos (id, sub_account_id, title, notes, due_on, deal_id, source_key)
+    VALUES ('td_chase', '${TENANT_A}', 'Chase INV-1001 — payment overdue',
+            'Due 2026-09-20 and not paid yet.', '2026-09-21', 'd_garden',
+            'invoice-overdue:inv-a')`;
+  const openChases = async () =>
+    (await read(`SELECT 1 FROM todos WHERE source_key = 'invoice-overdue:inv-a' AND done_at IS NULL`)).length;
+
+  it("is closed once the money covers the invoice", async () => {
+    await db.seed(chase);
+    await record(517_500);
+    expect(await openChases()).toBe(0);
+  });
+
+  it("is NOT closed by a part payment — there is still something to chase", async () => {
+    await db.seed(chase);
+    await record(200_000);
+    expect(await openChases()).toBe(1);
+  });
+
+  it("is closed rather than deleted, and marked as done by a rule, not a person", async () => {
+    await db.seed(chase);
+    await record(517_500);
+    const [row] = await read<{ done_at: Date | null; done_by_user_id: string | null }>(
+      `SELECT done_at, done_by_user_id FROM todos WHERE id = 'td_chase'`
+    );
+    expect(row.done_at).not.toBeNull();
+    expect(row.done_by_user_id).toBeNull();
+  });
+});
+
 describe("a client who pays part of it", () => {
   it("is something the product can finally say", async () => {
     const out = await record(200_000);

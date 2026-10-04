@@ -1119,18 +1119,39 @@ function RevenuePanel({ summary }: { summary?: ContactSummary }) {
   return (
     <div className="mt-6 rounded-2xl border border-[var(--border)] p-5">
       <h3 className="text-base font-semibold">Revenue</h3>
-      <div className="mt-4 grid grid-cols-2 gap-3">
-        <div className="rounded-xl px-4 py-3" style={{ background: "var(--green-soft)" }}>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.12em]" style={{ color: "var(--green)" }}>
-            Won
+
+      {/* Money received leads, and it is the big figure.
+
+          "What has this client actually paid us" is the question people come
+          to this panel to answer, and the panel used to answer a different one
+          — the value of deals marked won, which is what was AGREED. The two
+          are not the same number and the difference is money outstanding, so
+          they are shown together rather than one standing in for the other. */}
+      <div className="mt-4 rounded-xl px-4 py-3.5" style={{ background: "var(--green-soft)" }}>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.12em]" style={{ color: "var(--green)" }}>
+          Received
+        </p>
+        <p className="mt-0.5 text-2xl font-bold" style={{ color: "var(--green)" }}>
+          {money(summary.receivedCents)}
+        </p>
+        {/* Said only when there is a gap, and said as a figure rather than as a
+            caveat — a line reading "R0 outstanding" is noise on the majority of
+            clients, who are square with you. */}
+        {summary.wonValueCents > summary.receivedCents && (
+          <p className="mt-1 text-xs" style={{ color: "var(--green)" }}>
+            {money(summary.wonValueCents - summary.receivedCents)} of won work not yet paid.
           </p>
-          <p className="mt-0.5 text-xl font-bold" style={{ color: "var(--green)" }}>
-            {money(summary.wonValueCents)}
-          </p>
+        )}
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-3">
+        <div className="rounded-xl border border-[var(--border)] px-4 py-3">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-faint">Won</p>
+          <p className="mt-0.5 text-lg font-bold">{money(summary.wonValueCents)}</p>
         </div>
         <div className="rounded-xl px-4 py-3" style={{ background: "var(--accent-soft)" }}>
           <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-accent">In pipeline</p>
-          <p className="mt-0.5 text-xl font-bold text-accent">{money(summary.openValueCents)}</p>
+          <p className="mt-0.5 text-lg font-bold text-accent">{money(summary.openValueCents)}</p>
         </div>
       </div>
 

@@ -234,6 +234,26 @@ async function settle(
       `UPDATE documents SET status = 'paid', updated_at = now() WHERE sub_account_id = $1 AND id = $2`,
       [q.ctx.subAccountId, invoice.id]
     );
+    /*
+       And the chase task for it is done, because it is.
+
+       `chaseOverdueInvoices` raises one task per invoice that went past its due
+       date — "Chase INV-1002 — payment overdue" — and nothing closed it when
+       the money arrived. The client paid, the invoice read paid, and somebody
+       was still being told every morning to go and chase them for it. Left
+       alone this is worse than clutter: a list with dead items in it stops
+       being read, and the live chases go with it.
+
+       Closed rather than deleted, so the record of having chased survives.
+       `done_at` with no `done_by_user_id` is how this table says a rule did it
+       rather than a person — the same shape as a null `created_by_user_id` on
+       the way in — and the CHECK constraint permits exactly that pairing.
+    */
+    await q.rows(
+      `UPDATE todos SET done_at = now(), updated_at = now()
+        WHERE sub_account_id = $1 AND source_key = $2 AND done_at IS NULL AND deleted_at IS NULL`,
+      [q.ctx.subAccountId, `invoice-overdue:${invoice.id}`]
+    );
   }
   await logActivity(q, {
     entityType: "deal",

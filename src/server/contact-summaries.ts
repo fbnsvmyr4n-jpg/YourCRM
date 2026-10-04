@@ -33,6 +33,21 @@ export type TimelineEntry = {
 
 export type ContactSummary = {
   timeline: TimelineEntry[];
+  /**
+   * What this client has actually PAID, in cents.
+   *
+   * The figure Bradley asked for by name: "all the money that client has been
+   * confirmed to have made". Summed from the payments recorded against their
+   * invoices — a provider's confirmed charge, or a transfer a named person
+   * entered — and so it is the one number here that nobody can move by dragging
+   * a card.
+   *
+   * It is deliberately NOT the same as `wonValueCents` below, and the two
+   * disagreeing is information rather than a bug: won is the value of work
+   * agreed, received is money in the bank. A client who owes you R200,000 shows
+   * both, and the gap is the point.
+   */
+  receivedCents: number;
   /** Real money from deals actually won. Never derived from a name or a guess. */
   wonValueCents: number;
   openValueCents: number;
@@ -93,7 +108,7 @@ export async function contactSummaries(
 ): Promise<Record<string, ContactSummary>> {
   const out: Record<string, ContactSummary> = {};
   for (const id of contactIds) {
-    out[id] = { timeline: [], wonValueCents: 0, openValueCents: 0, deals: [] };
+    out[id] = { timeline: [], receivedCents: 0, wonValueCents: 0, openValueCents: 0, deals: [] };
   }
   if (contactIds.length === 0) return out;
 
@@ -138,6 +153,29 @@ export async function contactSummaries(
       amountCents: cents,
       source: "deal",
     });
+  }
+
+  // --- Money actually received ----------------------------------------------
+  /*
+     Through the DEAL, not through the invoice's addressee.
+     
+     An invoice can be addressed to whoever signs off at the client — a site
+     manager, an accounts clerk — while the relationship, and every deal on this
+     panel, belongs to the contact. Attributing the money to the addressee would
+     empty this figure for the person who actually won the work and credit it to
+     somebody with no deals at all.
+  */
+  for (const row of await q.rows<{ contact_id: string; received: string }>(
+    `SELECT d.contact_id, sum(p.amount_cents)::bigint::text AS received
+       FROM invoice_payments p
+       JOIN documents doc ON doc.id = p.document_id AND doc.deleted_at IS NULL
+       JOIN deals d ON d.id = doc.deal_id AND d.deleted_at IS NULL
+      WHERE p.sub_account_id = $1 AND d.contact_id = ANY($2) AND p.status = 'paid'
+      GROUP BY d.contact_id`,
+    [tenant, contactIds]
+  )) {
+    const summary = out[row.contact_id];
+    if (summary) summary.receivedCents = Number(row.received);
   }
 
   // --- Meetings --------------------------------------------------------------
