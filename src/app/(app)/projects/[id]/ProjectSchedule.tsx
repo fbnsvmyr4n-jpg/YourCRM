@@ -22,6 +22,7 @@ import type { Dependency, ProjectTask, ScheduleSummary } from "@/server/repos/ta
 import type { ProjectDocument } from "@/server/repos/projects";
 import { documentsForStage, type StageMoney } from "@/server/stage-money";
 
+import { useCanWrite } from "@/components/shell/CanWrite";
 import { useMoney } from "@/components/money/CurrencyProvider";
 import {
   addDependencyAction,
@@ -87,6 +88,7 @@ export function ProjectSchedule({
      dense list, and cents would add three characters to every figure for a
      precision nobody reads at this size. The document shows the exact number. */
   const { format } = useMoney();
+  const canWrite = useCanWrite();
   const money$ = (cents: number) => format(cents, "whole");
   const [editing, setEditing] = useState<ProjectTask | null>(null);
   /** Which task's "waits for" picker is open. One at a time. */
@@ -507,7 +509,10 @@ export function ProjectSchedule({
           title="Tasks"
           icon={<Check className="h-[18px] w-[18px] text-accent" />}
           action={
-            !addOpen && !editing ? (
+            /* This screen has its own task form rather than the shared
+               `NewTaskForm`, so gating that component did not cover it — found
+               by a test asserting three callers when there were two. */
+            canWrite && !addOpen && !editing ? (
               <button
                 type="button"
                 onClick={openAdd}

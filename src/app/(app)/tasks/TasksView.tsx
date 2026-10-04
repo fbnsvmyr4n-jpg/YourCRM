@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ChevronDown, ListChecks } from "lucide-react";
 import { Card } from "@/components/ui/Card";
+import { useCanWrite } from "@/components/shell/CanWrite";
 import { NewTaskForm } from "@/components/tasks/NewTaskForm";
 import { TaskItem } from "@/components/tasks/TaskItem";
 import { clsx } from "@/lib/clsx";
@@ -43,6 +44,7 @@ export function TasksView({
   currentUserId: string;
   deals: { id: string; title: string }[];
 }) {
+  const canWrite = useCanWrite();
   const [everyone, toggleEveryone] = useRememberedToggle("tasks:everyone", false);
   const [showDone, setShowDone] = useState(false);
 
@@ -59,9 +61,16 @@ export function TasksView({
         <p className="mt-1 text-sm text-muted">What needs doing, by whom and by when.</p>
       </div>
 
-      <Card className="card-q">
-        <NewTaskForm today={today} team={team} currentUserId={currentUserId} deals={deals} />
-      </Card>
+      {/* The card too, not only the form inside it.
+
+          `NewTaskForm` returns nothing for a view-only reader, which left an
+          empty bordered strip at the top of the page — a container holding
+          nothing, which reads as something that failed to load. */}
+      {canWrite && (
+        <Card className="card-q">
+          <NewTaskForm today={today} team={team} currentUserId={currentUserId} deals={deals} />
+        </Card>
+      )}
 
       <div className="mt-4 grid grid-cols-2 gap-1.5 @min-[440px]:inline-grid @min-[440px]:w-auto">
         {[
@@ -98,8 +107,12 @@ export function TasksView({
                 <ListChecks className="h-5 w-5" style={{ color: "var(--green)" }} />
               </span>
               <p className="text-sm font-medium">{everyone ? "Nothing open for anybody." : "Nothing open for you."}</p>
+              {/* Instructions for controls this reader has. Telling a viewer
+                  to "add one above" points at a form that is not there. */}
               <p className="max-w-[340px] text-xs text-faint">
-                Add one above, or from a contact under More. Automations can add them too — a call-back for every new lead, say.
+                {canWrite
+                  ? "Add one above, or from a contact under More. Automations can add them too — a call-back for every new lead, say."
+                  : "Tasks added by the team will show here."}
               </p>
             </div>
           ) : (

@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef } from "react";
+import { useCanWrite } from "@/components/shell/CanWrite";
 import { useKeptForm } from "@/lib/use-kept-form";
 import { Plus } from "lucide-react";
 import { Banner } from "@/components/ui/Banner";
@@ -39,6 +40,18 @@ export function NewTaskForm({
   compact?: boolean;
   onDone?: () => void;
 }) {
+  /*
+     Nothing at all for a view-only reader.
+
+     Gated HERE rather than at each caller, because this form appears on the
+     Tasks page, on a contact card and on a job's schedule — three places that
+     would each have had to remember, and three places where forgetting looks
+     identical to working. One component, one rule.
+
+     Before the hook, so it is the same hook order for everybody; the early
+     return below is after every hook this component has.
+  */
+  const canWrite = useCanWrite();
   const formRef = useRef<HTMLFormElement>(null);
   const { state, onSubmit, pending } = useKeptForm<TaskFormState>(async (prev, formData) => {
     const out = await createTodoAction(prev, formData);
@@ -51,6 +64,8 @@ export function NewTaskForm({
     return out;
   }, undefined);
   const meIsAssignable = team.some((p) => p.id === currentUserId);
+
+  if (!canWrite) return null;
 
   return (
     <form ref={formRef} onSubmit={onSubmit} className="space-y-3">

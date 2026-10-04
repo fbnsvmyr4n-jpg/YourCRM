@@ -6,6 +6,7 @@ import { Building2, Check, Pencil, Plus, Search, Trash2, X } from "lucide-react"
 import { Card } from "@/components/ui/Card";
 import { Overlay } from "@/components/ui/Overlay";
 import { clsx } from "@/lib/clsx";
+import { useCanWrite } from "@/components/shell/CanWrite";
 import { useWords } from "@/components/shell/Vocabulary";
 import { useMoney } from "@/components/money/CurrencyProvider";
 import type { CompanyRollup } from "@/server/repos/companies";
@@ -34,6 +35,7 @@ import {
 
 export function CompaniesView({ companies }: { companies: CompanyRollup[] }) {
   const words = useWords();
+  const canWrite = useCanWrite();
   const { format: money } = useMoney();
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
@@ -81,12 +83,15 @@ export function CompaniesView({ companies }: { companies: CompanyRollup[] }) {
             Every {words.one.toLowerCase()} for one company, across everyone who works there.
           </p>
         </div>
-        <button
-          onClick={() => setAdding(true)}
-          className="btn-accent focus-ring flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold"
-        >
-          <Plus className="h-4 w-4" /> Add company
-        </button>
+        {/* A viewer reads this list; they do not keep it. */}
+        {canWrite && (
+          <button
+            onClick={() => setAdding(true)}
+            className="btn-accent focus-ring flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold"
+          >
+            <Plus className="h-4 w-4" /> Add company
+          </button>
+        )}
       </div>
 
       {error && (
@@ -203,6 +208,7 @@ export function CompaniesView({ companies }: { companies: CompanyRollup[] }) {
                         {money(c.wonCents)}
                       </span>
 
+                      {canWrite && (
                       <div className="flex shrink-0 items-center gap-1">
                         <button
                           onClick={() => setEditing(c.id)}
@@ -219,6 +225,7 @@ export function CompaniesView({ companies }: { companies: CompanyRollup[] }) {
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
                       </div>
+                      )}
                     </>
                   )}
                 </li>

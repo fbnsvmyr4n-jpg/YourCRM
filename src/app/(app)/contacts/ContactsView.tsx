@@ -48,6 +48,7 @@ export type { Contact, ContactType } from "@/server/decorate-contact";
 import { clsx } from "@/lib/clsx";
 import { useElementWidth } from "@/lib/use-element-width";
 import { useRememberedToggle } from "@/lib/remembered-toggle";
+import { useCanWrite } from "@/components/shell/CanWrite";
 import { useCanDial } from "@/lib/useCanDial";
 import { useMoney } from "@/components/money/CurrencyProvider";
 import { CustomFieldInputs } from "@/components/custom-fields/CustomFieldInputs";
@@ -594,6 +595,7 @@ function ProfilePanel({
   const [pending, setPending] = useState(false);
   /* Whether `tel:` and `sms:` can reach anything on this device. */
   const canDial = useCanDial();
+  const canWrite = useCanWrite();
 
   const tel = contact.phone.replace(/[^\d+]/g, "");
 
@@ -651,6 +653,20 @@ function ProfilePanel({
          `mailto:` even where `mailto:` works, because the message then lives in
          the CRM's own thread history instead of in a personal mail client.
   */
+  /*
+     The actions that only LOOK. Everything else in the strip writes.
+
+     Call, Text and Email each record the outreach, and Note and More open
+     forms — for a view-only reader those are five controls that submit and are
+     refused. Revenue reads deals and payments and changes nothing, so it stays:
+     a viewer whose job is to look at the numbers should still be able to.
+
+     A deny-list would have been shorter and wrong. A new action added to this
+     strip is far more likely to write than not, so the default has to be
+     "hidden from a viewer until somebody says otherwise".
+  */
+  const READ_ONLY_ACTIONS = new Set(["Revenue"]);
+
   const actions = [
     {
       label: "Call",
@@ -705,7 +721,7 @@ function ProfilePanel({
       title: "More actions",
       onClick: () => setMore((m) => !m),
     },
-  ];
+  ].filter((a) => canWrite || READ_ONLY_ACTIONS.has(a.label));
 
   return (
     <section className={clsx("card flex flex-col overflow-y-auto p-6", className)}>
@@ -728,6 +744,10 @@ function ProfilePanel({
             );
           })}
         </div>
+        {/* Nothing to edit or delete with, for somebody who may do neither.
+            The buttons submitted and the database refused, which is the right
+            final answer and the wrong thing to offer — see `CanWrite`. */}
+        {canWrite && (
         <div className="ml-2 flex shrink-0 items-center gap-1">
           <button
             onClick={onEdit}
@@ -746,6 +766,7 @@ function ProfilePanel({
             <Trash2 className="h-[18px] w-[18px]" />
           </button>
         </div>
+        )}
       </div>
 
       <div className="relative mx-auto mt-8 mb-4">
@@ -1548,6 +1569,7 @@ function ContactsList({
   canManageTags: boolean;
   onEditTags: () => void;
 }) {
+  const canWrite = useCanWrite();
   const [menuOpen, setMenuOpen] = useState(false);
   const [sort, setSort] = useState<SortId>("recent");
   const menuRef = useRef<HTMLDivElement>(null);
@@ -1669,18 +1691,27 @@ function ContactsList({
           {/* Import lives beside Add, not only on the empty screen. An agency
               with fifty contacts still has four hundred and fifty in a
               spreadsheet, and an import they cannot find is one they do not
-              believe exists. */}
-          <button
-            onClick={onImport}
-            className="btn-soft focus-ring grid h-9 w-9 place-items-center rounded-full"
-            aria-label="Import contacts from a CSV"
-            title="Import from CSV"
-          >
-            <Upload className="h-4 w-4" />
-          </button>
-          <button onClick={onAdd} className="btn-accent focus-ring grid h-9 w-9 place-items-center rounded-full" aria-label="Add contact">
-            <Plus className="h-[18px] w-[18px]" />
-          </button>
+              believe exists.
+
+              Both are hidden from a view-only reader. The sort and filter
+              controls beside them are untouched: looking is the whole of that
+              job, and taking the tools for it away would be the other
+              failure. */}
+          {canWrite && (
+            <>
+              <button
+                onClick={onImport}
+                className="btn-soft focus-ring grid h-9 w-9 place-items-center rounded-full"
+                aria-label="Import contacts from a CSV"
+                title="Import from CSV"
+              >
+                <Upload className="h-4 w-4" />
+              </button>
+              <button onClick={onAdd} className="btn-accent focus-ring grid h-9 w-9 place-items-center rounded-full" aria-label="Add contact">
+                <Plus className="h-[18px] w-[18px]" />
+              </button>
+            </>
+          )}
 
           {menuOpen && (
             <FilterMenu
