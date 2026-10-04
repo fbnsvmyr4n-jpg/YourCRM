@@ -19,14 +19,28 @@ import { getConnection } from "@/server/repos/payments";
 import { paystackTakes } from "@/server/paystack";
 import { requireTenantPage, withTenantPage } from "@/server/tenant-session";
 import { ProjectDetail } from "./ProjectDetail";
+import { DEFAULT_PROJECT_TAB, isProjectTab } from "./tabs";
 
 /* Everything on this page is somebody else's most recent action — a reply that
    arrived, a quote that was accepted. A cached copy is a screen that is wrong
    in the one direction that matters. */
 export const dynamic = "force-dynamic";
 
-export default async function ProjectPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function ProjectPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ tab?: string }>;
+}) {
   const { id } = await params;
+
+  /* A link may name the tab to open: a quotation's "Open job" asks for the
+     documents, and arriving on Team instead means the reader has to find the
+     tab the link already named. Validated rather than cast — an address is
+     typed and shared by anyone, and an unknown tab opens the first one. */
+  const { tab } = await searchParams;
+  const initialTab = isProjectTab(tab) ? tab : DEFAULT_PROJECT_TAB;
 
   /*
      One tenant round trip for the whole screen.
@@ -106,6 +120,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
   return (
     <ProjectDetail
       header={data.header}
+      initialTab={initialTab}
       customFields={data.customFields}
       customValues={data.customValues}
       people={data.people}

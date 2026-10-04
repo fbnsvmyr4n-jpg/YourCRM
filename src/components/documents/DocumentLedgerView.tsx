@@ -192,7 +192,11 @@ export function DocumentLedgerView({
       (r) =>
         r.number.toLowerCase().includes(t) ||
         (r.party ?? "").toLowerCase().includes(t) ||
-        r.projectTitle.toLowerCase().includes(t)
+        r.projectTitle.toLowerCase().includes(t) ||
+        /* Searchable by the JOB's reference too. "Which quotes are on J-1004"
+           is the question this page is opened with, and the job's number is
+           what somebody has in front of them when they ask it. */
+        (r.projectNumber ?? "").toLowerCase().includes(t)
     );
   }, [ledger.rows, query]);
 
@@ -354,6 +358,7 @@ export function DocumentLedgerView({
                     <span className="ml-2 font-normal text-muted">{r.party ?? "—"}</span>
                   </p>
                   <p className="mt-0.5 truncate text-xs text-muted">
+                    {r.projectNumber ? `${r.projectNumber} · ` : ""}
                     {r.projectTitle}
                     {r.issuedOn ? ` · ${r.issuedOn}` : ""}
                     {` · ${r.lineCount} line${r.lineCount === 1 ? "" : "s"}`}

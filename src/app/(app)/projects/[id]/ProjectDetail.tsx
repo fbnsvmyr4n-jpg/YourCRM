@@ -40,6 +40,7 @@ import type {
   ProjectThread,
 } from "@/server/repos/projects";
 import type { Dependency, ProjectTask, ScheduleSummary } from "@/server/repos/tasks";
+import { DEFAULT_PROJECT_TAB, type ProjectTabId } from "./tabs";
 import { ProjectSchedule } from "./ProjectSchedule";
 import { RetainerCard } from "./RetainerCard";
 import { PayLinkButton, PaymentsReady } from "./PayLinkButton";
@@ -162,10 +163,15 @@ const TABS = [
   { id: "threads", label: "Emails", icon: Mail },
   { id: "history", label: "History", icon: CalendarDays },
 ] as const;
-type TabId = (typeof TABS)[number]["id"];
+/* The ids are declared once, next door, where the server can read them too —
+   the page validates the tab named in the address against that list. This type
+   is tied to it so a tab added in one place and not the other fails to
+   compile. */
+type TabId = ProjectTabId;
 
 export function ProjectDetail({
   header,
+  initialTab = DEFAULT_PROJECT_TAB,
   customFields,
   customValues,
   people,
@@ -182,6 +188,8 @@ export function ProjectDetail({
   candidates,
 }: {
   header: ProjectHeader;
+  /** Which tab to open on, when the address asked for one. */
+  initialTab?: ProjectTabId;
   /** This workspace's live custom fields for deals, and this job's values. */
   customFields: CustomField[];
   customValues: FieldValues;
@@ -203,7 +211,7 @@ export function ProjectDetail({
   candidates: { staff: Candidate[]; contacts: Candidate[] };
 }) {
   const vocabulary = useVocabulary();
-  const [tab, setTab] = useState<TabId>("team");
+  const [tab, setTab] = useState<TabId>(initialTab);
   const stage = stageMeta(header.stage, vocabulary);
 
   /*
@@ -326,6 +334,13 @@ function ProjectHeaderCard({
     <Card>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
+          {/* The reference above the name, the way a quotation carries its
+              number — it is what somebody quotes down the telephone and writes
+              on a supplier's order. Work raised before numbering shows its name
+              alone rather than a gap where a reference never existed. */}
+          {header.number && (
+            <p className="font-mono text-xs tracking-tight text-faint">{header.number}</p>
+          )}
           <h1 className="text-xl font-bold tracking-tight sm:text-2xl">{header.title}</h1>
           {/* Client and site on one line — "Heineken · Stellenbosch" is how the
               job is actually named out loud. */}

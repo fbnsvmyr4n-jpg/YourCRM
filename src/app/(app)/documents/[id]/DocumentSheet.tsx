@@ -251,6 +251,16 @@ export function DocumentSheet({
           <div className="min-w-0">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-[#8b94a7]">Job</p>
             <p className="mt-1 font-medium">{doc.projectTitle}</p>
+            {/* The job's own reference, under its name.
+
+                This is the line that lets a supplier's invoice find its way
+                back to the work: the order they are holding says J-1004 and so
+                does the job, so neither side has to match "the warehouse one,
+                phase two" by description. Absent on work raised before jobs
+                were numbered, rather than shown as a blank label. */}
+            {doc.projectNumber && (
+              <p className="font-mono text-xs text-[#8b94a7]">{doc.projectNumber}</p>
+            )}
           </div>
         </div>
 

@@ -39,6 +39,14 @@ export type Quote = {
   /** The date on the face of it. */
   issuedOn: string | null;
   projectTitle: string;
+  /**
+   * The JOB this document is for, by its own reference.
+   *
+   * What ties a supplier's invoice back to the work it was raised against:
+   * the order says J-1004 and so does the job, and neither has to be matched
+   * by description.
+   */
+  projectNumber: string | null;
   number: string;
   status: string;
   party: string | null;
@@ -73,6 +81,7 @@ type DocRow = {
   kind: string;
   issued_on: string | null;
   project_title: string;
+  project_number: string | null;
   number: string;
   status: string;
   party: string | null;
@@ -113,7 +122,7 @@ function newId(prefix: string): string {
    is the only reason this comment exists rather than that bug.
 */
 const DOC_SELECT = `
-  SELECT d.id, d.deal_id, deal.title AS project_title, d.number, d.status, d.party,
+  SELECT d.id, d.deal_id, deal.title AS project_title, deal.number AS project_number, d.number, d.status, d.party,
          d.kind, d.issued_on::text AS issued_on,
          /* The document's OWN address wins over the contact's. Somebody who
             typed one on this document meant it for this document — an invoice
@@ -161,6 +170,7 @@ async function hydrate(q: TenantQuery, docs: DocRow[]): Promise<Quote[]> {
       kind: d.kind,
       issuedOn: d.issued_on,
       projectTitle: d.project_title,
+      projectNumber: d.project_number,
       number: d.number,
       status: d.status,
       party: d.party,

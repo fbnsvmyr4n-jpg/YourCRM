@@ -23,6 +23,8 @@ import type { Stage } from "./deals";
 
 export type ProjectHeader = {
   id: string;
+  /** The reference people call this work by: J-1004. Null before numbering. */
+  number: string | null;
   title: string;
   /** Where the work is. "Heineken Stellenbosch" is the site, not the title. */
   site: string | null;
@@ -38,6 +40,7 @@ export type ProjectHeader = {
 
 type HeaderRow = {
   id: string;
+  number: string | null;
   title: string;
   site: string | null;
   stage: Stage;
@@ -69,7 +72,7 @@ const day = (value: string | null): string | null => value ?? null;
 
 export async function projectHeader(q: TenantQuery, id: string): Promise<ProjectHeader | null> {
   const row = await q.one<HeaderRow>(
-    `SELECT d.id, d.title, d.site, d.stage, d.value_cents,
+    `SELECT d.id, d.number, d.title, d.site, d.stage, d.value_cents,
             d.starts_on::text AS starts_on, d.due_on::text AS due_on,
             d.company_id, co.name AS company_name, u.name AS owner_name, d.created_at
        FROM deals d
@@ -81,6 +84,7 @@ export async function projectHeader(q: TenantQuery, id: string): Promise<Project
   if (!row) return null;
   return {
     id: row.id,
+    number: row.number,
     title: row.title,
     site: row.site,
     stage: row.stage,

@@ -28,6 +28,8 @@ export type LedgerRow = {
   sentAt: string | null;
   projectId: string;
   projectTitle: string;
+  /** The job's own reference, so a row says which work it belongs to. */
+  projectNumber: string | null;
   lineCount: number;
   totalCents: number;
   /** Carried for editing. One value per row, unlike the lines. */
@@ -73,13 +75,14 @@ export async function documentLedger(q: TenantQuery, kind: DocumentKind): Promis
     party_email: string | null;
     project_id: string;
     project_title: string;
+    project_number: string | null;
     line_count: string;
     total_cents: string;
   }>(
     `SELECT d.id, d.number, d.status, d.party,
             d.issued_on::text AS issued_on, d.sent_at, d.notes,
             COALESCE(d.party_email, c.email) AS party_email,
-            d.deal_id AS project_id, deal.title AS project_title,
+            d.deal_id AS project_id, deal.title AS project_title, deal.number AS project_number,
             COALESCE(lines.n, 0)::text AS line_count,
             COALESCE(lines.total, 0)::bigint::text AS total_cents
        FROM documents d
@@ -118,6 +121,7 @@ export async function documentLedger(q: TenantQuery, kind: DocumentKind): Promis
       sentAt: r.sent_at ? r.sent_at.toISOString() : null,
       projectId: r.project_id,
       projectTitle: r.project_title,
+      projectNumber: r.project_number,
       lineCount: Number(r.line_count),
       totalCents,
       notes: r.notes,
