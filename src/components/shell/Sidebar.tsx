@@ -47,6 +47,16 @@ export function Sidebar({
   const labelFor = (item: { label: string }) =>
     item.label === "Projects" ? words.area : item.label === "Deals" ? words.board : item.label;
   const [menuOpen, setMenuOpen] = useState(false);
+  /*
+     Groups the reader has opened or closed by hand, by parent href.
+
+     Only the ones they TOUCHED. Everything else falls back to "open if this is
+     where you are", so the sidebar still arranges itself around the current
+     page and a deliberate choice still wins over it. An empty object on every
+     load is correct: this is a decision about the next few seconds, not a
+     preference worth remembering across sessions.
+  */
+  const [toggled, setToggled] = useState<Record<string, boolean>>({});
 
   return (
     <aside
@@ -83,6 +93,9 @@ export function Sidebar({
                    when the parent OR any child is where the reader is. */
                 const childrenOpen =
                   active || (item.children?.some((c) => isActive(pathname, c.href)) ?? false);
+                /* Where the reader is, unless they have said otherwise. */
+                const expanded = toggled[item.href] ?? childrenOpen;
+                const hasChildren = Boolean(item.children?.length) && !collapsed;
                 const Icon = item.icon;
                 // The config names a count; the value comes from the database.
                 const unread =
@@ -90,12 +103,17 @@ export function Sidebar({
                 const today = item.count === "calendarToday" && counts.calendarToday;
                 return (
                   <li key={item.href}>
+                    {/* The row is a link AND, where there are nested pages, a
+                        disclosure beside it — two controls, because they do two
+                        things. Nesting a button inside the link would also be
+                        invalid markup. */}
+                    <div className="relative flex items-center">
                     <Link
                       href={item.href}
                       onClick={onMobileClose}
                       title={collapsed ? labelFor(item) : undefined}
                       className={[
-                        "focus-ring group relative flex items-center rounded-xl px-3 py-2.5 text-sm font-medium transition-colors",
+                        "focus-ring group relative flex w-full items-center rounded-xl px-3 py-2.5 text-sm font-medium transition-colors",
                         collapsed ? "justify-center" : "gap-3",
                         active
                           ? "text-[var(--text)]"
@@ -114,7 +132,14 @@ export function Sidebar({
                           active ? "text-accent" : "",
                         ].join(" ")}
                       />
-                      {!collapsed && <span className="relative z-10 flex-1">{labelFor(item)}</span>}
+                      {/* `pr-6` only where a chevron sits over the row, so a
+                          long label truncates before it reaches the control
+                          rather than sliding underneath it. */}
+                      {!collapsed && (
+                        <span className={clsx("relative z-10 flex-1 truncate", hasChildren && "pr-6")}>
+                          {labelFor(item)}
+                        </span>
+                      )}
                       {/* Nothing waiting, nothing shown. A badge reading 0 is
                           an invitation to check something that is already
                           clear. */}
@@ -131,15 +156,44 @@ export function Sidebar({
                       )}
                     </Link>
 
-                    {/* Nested pages, shown when this area is the one being
-                        used — and never while collapsed, where there is no
-                        room to say what they are. Expanded by where the
-                        reader IS rather than by a toggle they have to find
-                        and remember: arriving on /quotes should not leave
-                        the sidebar looking like nothing is selected. */}
-                    {item.children?.length && !collapsed && childrenOpen ? (
+                    {/* Says the nested pages exist, and opens them where you
+                        stand.
+
+                        Without it the only evidence that Quotes and Purchase
+                        orders exist at all was arriving on Projects — so
+                        reaching a quote from anywhere else in the product cost
+                        a navigation to a page nobody wanted, purely to find the
+                        link to the one they did. The chevron is the whole fix:
+                        it marks the row as having more under it, and opens that
+                        without going anywhere. */}
+                    {hasChildren && (
+                      <button
+                        type="button"
+                        onClick={() => setToggled((t) => ({ ...t, [item.href]: !expanded }))}
+                        aria-expanded={expanded}
+                        aria-label={`${expanded ? "Hide" : "Show"} pages under ${labelFor(item)}`}
+                        className="focus-ring absolute right-1 z-20 rounded-lg p-1.5 text-faint transition-colors hover:text-[var(--text)]"
+                      >
+                        <ChevronDown
+                          className={clsx("h-4 w-4 transition-transform", expanded && "rotate-180")}
+                          aria-hidden
+                        />
+                      </button>
+                    )}
+                    </div>
+
+                    {/* Nested pages. Never while collapsed, where there is no
+                        room to say what they are.
+
+                        Open by where the reader IS — arriving on /quotes should
+                        not leave the sidebar looking like nothing is selected —
+                        and now also openable by hand, which is what the chevron
+                        above does. The hand-made choice wins while it lasts;
+                        navigating to another area goes back to following the
+                        page, because `toggled` is keyed by this row alone. */}
+                    {hasChildren && expanded ? (
                       <ul className="mt-0.5 space-y-0.5 pl-[30px]">
-                        {item.children.map((child) => {
+                        {item.children!.map((child) => {
                           const childActive = isActive(pathname, child.href);
                           const ChildIcon = child.icon;
                           return (
