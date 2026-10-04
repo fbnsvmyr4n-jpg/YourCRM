@@ -28,6 +28,9 @@ import { useSyncExternalStore } from "react";
  */
 let now = Date.now();
 
+/** How often the clock above moves, in seconds. See `relativeLabel`. */
+const TICK_SECONDS = 30;
+
 function subscribe(onChange: () => void): () => void {
   // Refresh on mount too: the module may have loaded long before this
   // component appeared, leaving `now` stale on its first paint.
@@ -35,7 +38,7 @@ function subscribe(onChange: () => void): () => void {
   const interval = setInterval(() => {
     now = Date.now();
     onChange();
-  }, 30_000);
+  }, TICK_SECONDS * 1000);
   return () => clearInterval(interval);
 }
 
@@ -65,8 +68,24 @@ export function relativeLabel(at: string, nowMs: number): string {
   if (!Number.isFinite(then)) return "";
 
   const diff = Math.round((nowMs - then) / 1000);
-  const future = diff < 0;
-  const s = Math.abs(diff);
+  /*
+     A moment just ahead of the clock is NOW, not the future.
+
+     The shared `now` above ticks every 30 seconds, so anything created between
+     two ticks is stamped later than the clock this compares it against — and
+     `diff < 0` called it the future. Save a draft and the row said "shortly";
+     log a call and the feed said it was about to happen. Server and browser
+     clocks differing by a fraction of a second do the same thing at any moment.
+
+     So the tolerance is the tick interval: inside it, nothing can be known to
+     be ahead, and "just now" is the honest reading. Beyond it, a timestamp
+     genuinely is in the future — a meeting at four o'clock — and still says so.
+     This is the second time this label has been wrong in this direction; the
+     first was a rounded clock, noted above, and the fix there made `now` exact
+     without making it current.
+  */
+  const future = diff < -TICK_SECONDS;
+  const s = Math.abs(diff) <= TICK_SECONDS && !future ? 0 : Math.abs(diff);
 
   const say = (n: number, unit: string) => {
     const plural = `${n} ${unit}${n === 1 ? "" : "s"}`;

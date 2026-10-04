@@ -3215,6 +3215,53 @@ CREATE UNIQUE INDEX IF NOT EXISTS deals_number_once
   ON deals (sub_account_id, number) WHERE number IS NOT NULL AND deleted_at IS NULL;
 
 -- ---------------------------------------------------------------------------
+-- An email somebody started writing and has not sent.
+--
+-- The composer already kept one draft, in the browser's own storage. That is
+-- the right place for the box you are typing in this second and the wrong place
+-- for everything else about a draft: it held exactly ONE, it was invisible on
+-- any other device, and clearing site data threw away a half-written reply to a
+-- client with no trace that it had ever existed.
+--
+-- So a draft that outlives the composer lives here. The browser keeps the live
+-- box; closing it puts the writing somewhere it can be found again.
+--
+-- PERSONAL, not the team's. `user_id` is part of every read: a half-written
+-- message is a thought, not a record, and a colleague's unfinished sentence is
+-- not something the rest of the workspace should be reading over their
+-- shoulder. Tenant isolation is still the outer fence — the policy below is
+-- unchanged in shape from every other table — and the user filter sits inside
+-- it in the repository, which is the same division `todos` uses for "mine".
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS message_drafts (
+  id              TEXT PRIMARY KEY,
+  sub_account_id  TEXT NOT NULL REFERENCES sub_accounts(id) ON DELETE CASCADE,
+  -- Whose draft. CASCADE: when somebody leaves, their unfinished writing goes
+  -- with them rather than becoming an orphan nobody can open or delete.
+  user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+
+  -- All three may be empty while a message is being written. A draft with
+  -- nothing in it at all is never saved — that is the repository's rule, not a
+  -- constraint, because "empty" is a judgement about writing, not about NULL.
+  to_address      TEXT NOT NULL DEFAULT '' CHECK (length(to_address) <= 320),
+  subject         TEXT NOT NULL DEFAULT '' CHECK (length(subject) <= 200),
+  body            TEXT NOT NULL DEFAULT '' CHECK (length(body) <= 20000),
+
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  deleted_at      TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS message_drafts_mine_idx
+  ON message_drafts (sub_account_id, user_id, updated_at DESC);
+
+ALTER TABLE message_drafts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE message_drafts FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS message_drafts_tenant_isolation ON message_drafts;
+CREATE POLICY message_drafts_tenant_isolation ON message_drafts
+  USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
+  WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
+
+-- ---------------------------------------------------------------------------
 -- What the application's own database role may do.
 --
 -- KEEP THIS THE LAST BLOCK IN THE FILE: `GRANT … ON ALL TABLES` covers only the

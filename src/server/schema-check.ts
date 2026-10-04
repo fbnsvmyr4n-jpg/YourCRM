@@ -69,6 +69,9 @@ export const EXPECTED_TABLES = [
   "payment_connections",
   "invoice_payments",
   "message_templates",
+  /* Read on every inbox load, so a database without it does not lose a folder
+     — it fails to render the inbox at all. */
+  "message_drafts",
   "audit_events",
 ] as const;
 

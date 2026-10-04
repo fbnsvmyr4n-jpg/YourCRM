@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import {
@@ -52,6 +53,8 @@ import { useOpenFromQuery } from "@/lib/useOpenFromQuery";
 import { useCanDial } from "@/lib/useCanDial";
 import type { ProjectOption } from "@/server/repos/inbox";
 import { useDraft, hasContent, type Draft } from "@/lib/use-draft";
+import { worthKeeping, type Draft as SavedDraft } from "@/data/drafts";
+import { discardDraftAction, saveDraftAction } from "./actions";
 import { SwipeToDelete } from "@/components/ui/SwipeToDelete";
 import { useMoney } from "@/components/money/CurrencyProvider";
 import { TicketBar, TicketLine, TrackTicketButton } from "@/components/tickets/TicketControls";
@@ -129,6 +132,7 @@ export function InboxView({
   currentUserId = null,
   initialFolder,
   templates = [],
+  drafts = [],
   me = { name: "", business: "" },
 }: {
   messages: Message[];
@@ -151,6 +155,8 @@ export function InboxView({
   initialFolder?: InboxFilter;
   /** The workspace's message templates. */
   templates?: MessageTemplate[];
+  /** This reader's own unsent messages. Never anybody else's — see repos/drafts. */
+  drafts?: SavedDraft[];
   /** Who is writing, for {{my_name}} and {{business_name}}. */
   me?: { name: string; business: string };
 }) {
@@ -161,12 +167,23 @@ export function InboxView({
    * exists — the modal unmounts when it closes, and state that unmounts with
    * the box is exactly the state that was being lost.
    */
+  const router = useRouter();
   const { draft, save, clear } = useDraft(DRAFT_KEY);
   const draftWaiting = hasContent(draft);
   /* Whether the composer OPENED onto existing text, which is the only moment
      worth saying so. Captured when it opens rather than derived from the draft,
      or the notice would still be there after the reader had typed a page. */
   const [resumedDraft, setResumedDraft] = useState(false);
+  /*
+     Which SAVED draft the composer is editing, if it was opened from one.
+
+     Null for a message begun from scratch. Without it, closing the same piece
+     of writing twice would leave two rows in Drafts for one message — the id is
+     what makes "save" mean "replace what I was editing" rather than "add
+     another".
+  */
+  const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
+
   /* Asked before deleting, because a swipe is easy to make by accident and the
      message names what is about to go. */
   const [pendingDelete, setPendingDelete] = useState<Message | null>(null);
@@ -254,6 +271,60 @@ export function InboxView({
    * address, a provider that refused.
    */
   const [notice, setNotice] = useState<string | null>(null);
+
+  /* Declared AFTER `notice`, deliberately. A `useCallback` body that names
+     `setNotice` is fine, but these are also read during render below, and a
+     const is not initialised until its own line — the same way a stage list
+     read by a `useState` initialiser above its declaration took down the deals
+     board. Keeping them under what they use is the whole fix. */
+  /**
+   * Put what is in the composer into Drafts, if there is anything in it.
+   *
+   * The local box is cleared on the way, because the writing now lives
+   * somewhere better — leaving both would mean "Continue Draft" and the Drafts
+   * folder each holding a copy, and the two drifting apart the moment either
+   * was edited.
+   *
+   * Nothing to keep is a perfectly ordinary outcome: opened and closed, or an
+   * address filled in by the Email button and abandoned. It says nothing then,
+   * rather than announcing that it saved nothing.
+   */
+  const keepDraft = useCallback(async () => {
+    if (!worthKeeping(draft)) {
+      setEditingDraftId(null);
+      return;
+    }
+    const saved = await saveDraftAction({ id: editingDraftId, ...draft });
+    /* Only on a confirmed save. Clearing first would throw the message away
+       whenever the write failed, which is the one outcome this must not have. */
+    if (saved) {
+      clear();
+      setEditingDraftId(null);
+      router.refresh();
+    }
+  }, [draft, editingDraftId, clear, router]);
+
+  /** Open a saved draft in the composer, where it can be finished or sent. */
+  const openDraft = useCallback(
+    (d: SavedDraft) => {
+      save({ to: d.to, subject: d.subject, body: d.body });
+      setEditingDraftId(d.id);
+      setResumedDraft(true);
+      setComposeOpen(true);
+    },
+    [save]
+  );
+
+  const removeDraft = useCallback(
+    async (id: string) => {
+      const gone = await discardDraftAction(id);
+      /* Said only when it actually went. The nine call sites that ignored an
+         action's answer are why this one is checked. */
+      if (gone) router.refresh();
+      else setNotice("That draft could not be discarded. It may already be gone.");
+    },
+    [router]
+  );
 
   /**
    * How the inbox can be ordered.
@@ -348,6 +419,11 @@ export function InboxView({
         }
         setComposeOpen(false);
         setCategory(null);
+        if (editingDraftId) {
+          await discardDraftAction(editingDraftId);
+          setEditingDraftId(null);
+          router.refresh();
+        }
         if (logged.ticket) {
           setFilter("Tickets");
           setTicketStatus(logged.ticket.status);
@@ -364,6 +440,13 @@ export function InboxView({
         return false;
       }
       setComposeOpen(false);
+      /* It went, so it is not a draft any more. Done before the folder changes
+         below, so Drafts is already right when the reader looks at it. */
+      if (editingDraftId) {
+        await discardDraftAction(editingDraftId);
+        setEditingDraftId(null);
+        router.refresh();
+      }
       if (result) {
         setFilter("Sent");
         setCategory(null);
@@ -513,7 +596,9 @@ export function InboxView({
               ? messages.filter((m) => m.unread && !m.trashed).length
               : f === "Tickets"
                 ? tickets.filter((t) => t.status === "open").length
-                : undefined;
+                : f === "Drafts"
+                  ? drafts.length
+                  : undefined;
           return (
             <button
               key={f}
@@ -557,6 +642,26 @@ export function InboxView({
             <ChevronLeft className="h-4 w-4" /> All messages
           </button>
         )}
+        {/* Drafts is not a folder of messages — nothing in it has been sent or
+            received, so there is no reader, no sender card and nothing to file.
+            It gets its own panel rather than being forced through a list built
+            for mail, which would have meant inventing a sender and a date for
+            something that has neither. */}
+        {filter === "Drafts" ? (
+          <DraftList
+            /* The full width, not the 300px list column.
+
+               There is no reader and no sender card in this folder, so pinning
+               the drafts into the narrow column left two thirds of the page
+               empty beside a list of truncated subjects. `1 / -1` rather than a
+               named area: the areas are defined for the three-panel layout this
+               folder does not use. */
+            className="@min-[720px]:[grid-column:1/-1]"
+            drafts={drafts}
+            onOpen={openDraft}
+            onDiscard={removeDraft}
+          />
+        ) : (
         <MessageList
           className={clsx("@min-[720px]:[grid-area:list]", readerOnly && "hidden")}
           categories={MSG_CATEGORIES}
@@ -591,7 +696,8 @@ export function InboxView({
             },
           }}
         />
-        {selected ? (
+        )}
+        {filter !== "Drafts" && selected ? (
           <Reader
             className={clsx("@min-[720px]:[grid-area:reader]", listOnly && "hidden")}
             key={selected.id}
@@ -615,6 +721,11 @@ export function InboxView({
               setNotice(notice);
             }}
           />
+        ) : filter === "Drafts" ? (
+          /* Nothing. In Drafts the writing IS the content, and a panel saying
+             "No message selected" beside a list of drafts is answering a
+             question about mail the reader is not looking at. */
+          null
         ) : (
           /* Only where there are two columns to fill. Stacked, this card sat
              under the list saying "No message selected." — an answer to a
@@ -624,7 +735,11 @@ export function InboxView({
             No message selected.
           </div>
         )}
-        {selected ? (
+        {/* And no sender card either. It describes whoever wrote the message
+            that was open before the reader came here, which in Drafts is
+            somebody they are not looking at — a contact's revenue and phone
+            number presented as though it belonged to the draft on screen. */}
+        {filter !== "Drafts" && selected ? (
           <ContactCard
             className={clsx("@min-[720px]:[grid-area:card]", listOnly && "hidden")}
             message={selected}
@@ -632,7 +747,7 @@ export function InboxView({
             contactId={contactFor[selected.id]}
             revenue={revenueFor[contactFor[selected.id]]}
           />
-        ) : (
+        ) : filter === "Drafts" ? null : (
           /* An empty card is a desktop grid cell holding its column open, and
              nothing at all on a phone. */
           <div className="card hidden @min-[720px]:block @min-[720px]:[grid-area:card]" />
@@ -660,6 +775,13 @@ export function InboxView({
           onClose={() => {
             setComposeOpen(false);
             setComposeError(null);
+            /* Closing the box is not throwing the message away.
+
+               Saved here rather than on every keystroke: the browser already
+               holds the live text, so there is nothing to lose by waiting, and
+               a round trip per character would be a network request for every
+               letter of every email anybody writes. */
+            keepDraft();
           }}
           onSubmit={handleCompose}
           error={composeError}
@@ -2234,5 +2356,82 @@ function FileUnderProject({
           that is already visible in the control itself. */}
       {result && <span className="min-w-0 truncate text-[11px] text-faint">{result}</span>}
     </div>
+  );
+}
+
+/**
+ * The Drafts folder.
+ *
+ * Not a message list. Nothing here has been sent or received, so there is no
+ * sender, no date received and nothing to file against a job — forcing these
+ * through the mail list would have meant inventing all three.
+ *
+ * Each row is the writing itself: who it is for, what it is about, and the
+ * first of what was written, which between them are how somebody recognises a
+ * message they started last Tuesday.
+ */
+function DraftList({
+  className,
+  drafts,
+  onOpen,
+  onDiscard,
+}: {
+  className?: string;
+  drafts: SavedDraft[];
+  onOpen: (draft: SavedDraft) => void;
+  onDiscard: (id: string) => void;
+}) {
+  return (
+    <section className={clsx("glass flex min-h-0 flex-col rounded-2xl p-3", className)}>
+      <p className="px-1 pb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-faint">
+        Drafts {drafts.length > 0 && <span className="font-normal tracking-normal">({drafts.length})</span>}
+      </p>
+
+      {drafts.length === 0 ? (
+        /* What an empty folder MEANS, rather than "no drafts" — which a reader
+           can already see. */
+        <p className="px-1 py-6 text-sm text-faint">
+          Nothing started. Close the composer with something written in it and it will be kept here.
+        </p>
+      ) : (
+        <ul className="grid min-h-0 flex-1 grid-cols-1 content-start gap-1.5 overflow-y-auto @min-[720px]:grid-cols-2 @min-[1100px]:grid-cols-3">
+          {drafts.map((d) => (
+            <li key={d.id} className="overflow-hidden rounded-xl" style={{ background: "var(--surface-2)" }}>
+              <div className="flex items-start gap-2 p-3">
+                <button
+                  type="button"
+                  onClick={() => onOpen(d)}
+                  className="focus-ring min-w-0 flex-1 text-left"
+                >
+                  <span className="block truncate text-sm font-medium">
+                    {/* A draft with no subject is ordinary — it is unfinished.
+                        Named as such rather than left blank, so the row is
+                        still something a person can point at. */}
+                    {d.subject.trim() || "No subject"}
+                  </span>
+                  <span className="mt-0.5 block truncate text-xs text-faint">
+                    {d.to.trim() ? `To ${d.to.trim()}` : "No recipient yet"}
+                  </span>
+                  {d.body.trim() && (
+                    <span className="mt-1 block truncate text-xs text-muted">{d.body.trim()}</span>
+                  )}
+                </button>
+                <div className="flex shrink-0 flex-col items-end gap-1.5">
+                  <TimeAgo at={d.updatedAt} className="text-[11px] text-faint" />
+                  <button
+                    type="button"
+                    onClick={() => onDiscard(d.id)}
+                    aria-label={`Discard draft ${d.subject.trim() || "with no subject"}`}
+                    className="focus-ring rounded-lg p-1 text-faint transition-colors hover:text-red"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                  </button>
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }

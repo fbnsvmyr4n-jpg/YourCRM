@@ -107,6 +107,11 @@ export const inboxFilters = [
      promise is finally kept. */
   "Tickets",
   "Sent",
+  /* Started and not sent. A folder rather than a badge on the compose button,
+     because there can now be more than one — the browser-storage draft was a
+     single slot, so beginning a second message overwrote the first without
+     saying so. */
+  "Drafts",
   "Received",
   "Trash",
 ] as const;

@@ -1,4 +1,5 @@
 import { listMessages, projectOptions, purgeExpiredMessages } from "@/server/repos/inbox";
+import { listDrafts } from "@/server/repos/drafts";
 import { contactSummaries } from "@/server/contact-summaries";
 import { listContacts } from "@/server/repos/contacts";
 import { decorateMessage } from "@/server/decorate-message";
@@ -25,7 +26,7 @@ export default async function InboxPage({
   const business = await withSystem((sys) =>
     sys.one<{ name: string }>(`SELECT name FROM sub_accounts WHERE id = $2 AND agency_id = $1`, [ctx.agencyId, ctx.subAccountId])
   );
-  const { messages, contactFor, people, recent, revenueFor, projects, companyFor, tickets, team, templates } =
+  const { messages, contactFor, people, recent, revenueFor, projects, companyFor, tickets, team, templates, drafts } =
     await withTenantPage(async (q) => {
     /* Before reading, so nothing expired is listed and then vanishes on the
        next load. There is no scheduler in this app; the bin is emptied by
@@ -41,6 +42,9 @@ export default async function InboxPage({
       await listMessages(q, "trash"),
     ];
     const contacts = await listContacts(q);
+    /* This reader's own unsent writing. Scoped to them in the repository —
+       a half-written message is a thought, not a team record. */
+    const drafts = await listDrafts(q);
 
     const senders = contacts.map((c) => ({
       id: c.id,
@@ -146,6 +150,7 @@ export default async function InboxPage({
       tickets: await listTickets(q),
       templates: await listTemplates(q),
       team: await assignableTeam(q),
+      drafts,
       messages: rows.map((m) => decorateMessage(m, senders)),
       contactFor,
       people: addressBook,
@@ -176,6 +181,7 @@ export default async function InboxPage({
       companyFor={companyFor}
       tickets={tickets}
       team={team}
+      drafts={drafts}
       currentUserId={ctx.userId}
       templates={templates}
       me={{ name: user?.name ?? "", business: business?.name ?? "" }}

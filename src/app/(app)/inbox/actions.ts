@@ -12,6 +12,7 @@ import {
   trashMessage,
 } from "@/server/repos/inbox";
 import { getContact } from "@/server/repos/contacts";
+import { discardDraft, saveDraft, type Draft } from "@/server/repos/drafts";
 import { linkContactByName } from "@/server/link-contact";
 import { requireTenant, withCurrentTenant } from "@/server/tenant-session";
 import type { TenantContext, TenantQuery } from "@/server/tenant";
@@ -456,5 +457,50 @@ export async function logReceivedAction(
 
     revalidateApp();
     return { ok: true as const, id: created.id, ticket };
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* Drafts                                                              */
+/*                                                                     */
+/* An email somebody started and has not sent. The browser keeps the   */
+/* box being typed in; these keep what survives it closing.            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Keep what is in the composer.
+ *
+ * Returns the saved draft rather than nothing, because the composer needs the
+ * id back: without it, closing a new message twice would leave two rows for one
+ * piece of writing. This is the shape the nine toggle-and-delete call sites got
+ * wrong — an action whose result is discarded is an action whose failure is
+ * invisible — so the caller is given something to hold on to and to check.
+ */
+export async function saveDraftAction(draft: {
+  id?: string | null;
+  to: string;
+  subject: string;
+  body: string;
+}): Promise<Draft | null> {
+  return withCurrentTenant(async (q) => {
+    const saved = await saveDraft(q, {
+      id: draft.id ? validId(draft.id) : null,
+      to: text(draft.to, 320),
+      subject: text(draft.subject, 200),
+      body: multiline(draft.body, 20000),
+    });
+    if (saved) revalidateApp();
+    return saved;
+  });
+}
+
+/** Throw a draft away. Says whether it went, so the list is not told a lie. */
+export async function discardDraftAction(id: string): Promise<boolean> {
+  return withCurrentTenant(async (q) => {
+    const draftId = validId(id);
+    if (!draftId) return false;
+    const gone = await discardDraft(q, draftId);
+    if (gone) revalidateApp();
+    return gone;
   });
 }
