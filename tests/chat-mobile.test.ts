@@ -280,7 +280,12 @@ describe("the suggestions get out of the way", () => {
      *
      * An empty list is the only one that matches the server after a clear.
      */
-    expect(view).toMatch(/await clearChatAction\(\);[\s\S]{0,900}?setItems\(\[\]\)/);
+    expect(view).toMatch(/await clearChatAction\(\);[\s\S]{0,1400}?setItems\(\[\]\)/);
+    /* And only once the server has confirmed it. Emptying the screen after a
+       REFUSED clear tells the reader their conversation is gone while it is
+       still there — a reload brings the whole thread back. */
+    const reset = view.slice(view.indexOf("async function reset()"));
+    expect(reset.indexOf("setItems([])")).toBeGreaterThan(reset.indexOf("refused(result)"));
     const code = view.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
     expect(code).not.toMatch(/prev\.slice\(0, 1\)/);
     /* And the condition still keys off having ASKED, which is what ends a first

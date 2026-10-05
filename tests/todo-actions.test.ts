@@ -95,8 +95,21 @@ describe("working a task", () => {
     expect((await read<{ done: boolean }>(`SELECT done_at IS NOT NULL AS done FROM todos`))[0].done).toBe(false);
   });
 
-  it("refuses a tick that is not a yes or no", async () => {
-    expect(await actions.setTodoDoneAction("td_1", "yes" as unknown as boolean)).toEqual({ ok: false });
+  it("refuses a tick that is not a yes or no, and SAYS SO", async () => {
+    /* Was `{ ok: false }`. That shape could only ever mean "no", and the screen
+       threw it away — a refused tick flickered back with nothing said. The
+       action now answers in the same shape as every other write in the product
+       (`WriteResult`), so there is a sentence for the row to show. */
+    const out = await actions.setTodoDoneAction("td_1", "yes" as unknown as boolean);
+    expect(out).toEqual({ error: "That task could not be identified." });
+  });
+
+  it("says so when the task is not there to tick", async () => {
+    /* Deleted in another tab, or somebody else's. Reporting success here would
+       leave the box ticked over a row that does not exist. */
+    expect(await actions.setTodoDoneAction("td_gone", true)).toEqual({
+      error: "That task no longer exists.",
+    });
   });
 
   it("edits, clearing the day and the person", async () => {

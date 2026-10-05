@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidateApp } from "@/server/revalidate";
+import { type WriteResult } from "@/server/write-result";
 import { withCurrentTenant } from "@/server/tenant-session";
 import { assignableTeam } from "@/server/repos/automations";
 import { createTodo, deleteTodo, getTodo, setTodoDone, updateTodo } from "@/server/repos/todos";
@@ -88,16 +89,18 @@ export async function updateTodoAction(_prev: TaskFormState, formData: FormData)
 }
 
 /** Tick or untick. Returns whether it happened, for the optimistic checkbox. */
-export async function setTodoDoneAction(id: string, done: boolean): Promise<{ ok: boolean }> {
+export async function setTodoDoneAction(id: string, done: boolean): Promise<WriteResult> {
   return withCurrentTenant(async (q) => {
     const todoId = validId(id);
-    if (!todoId || typeof done !== "boolean") return { ok: false };
+    if (!todoId || typeof done !== "boolean") return { error: "That task could not be identified." };
     const changed = await setTodoDone(q, todoId, done);
-    if (changed) {
-      logWrite("update", "todo", { id: todoId, actor: q.ctx.userId });
-      revalidateApp();
-    }
-    return { ok: changed };
+    /* `false` means the row was not there to change — deleted in another tab,
+       or somebody else's. Said as such rather than reported as a success the
+       tick would then silently undo. */
+    if (!changed) return { error: "That task no longer exists." };
+    logWrite("update", "todo", { id: todoId, actor: q.ctx.userId });
+    revalidateApp();
+    return { ok: true };
   });
 }
 

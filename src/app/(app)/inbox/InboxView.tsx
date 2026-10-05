@@ -54,6 +54,7 @@ import { useCanDial } from "@/lib/useCanDial";
 import type { ProjectOption } from "@/server/repos/inbox";
 import { useDraft, hasContent, type Draft } from "@/lib/use-draft";
 import { worthKeeping, type Draft as SavedDraft } from "@/data/drafts";
+import { refused } from "@/server/write-result";
 import { discardDraftAction, saveDraftAction } from "./actions";
 import { SwipeToDelete } from "@/components/ui/SwipeToDelete";
 import { useMoney } from "@/components/money/CurrencyProvider";
@@ -464,7 +465,14 @@ export function InboxView({
   async function handleTrash(id: string) {
     setBusy(true);
     try {
-      await trashMessageAction(id);
+      const result = await trashMessageAction(id);
+      /* The selection moved to the next message before this, so a refused
+         delete looked exactly like a successful one — the message vanished
+         from under the reader and came back on reload. */
+      if (refused(result)) {
+        setNotice(result.error);
+        return;
+      }
       const remaining = messages.filter((m) => m.id !== id && !m.trashed);
       setSelectedId(remaining[0]?.id ?? messages[0]?.id ?? "");
     } finally {
@@ -475,7 +483,8 @@ export function InboxView({
   async function handleRestore(id: string) {
     setBusy(true);
     try {
-      await restoreMessageAction(id);
+      const result = await restoreMessageAction(id);
+      if (refused(result)) setNotice(result.error);
     } finally {
       setBusy(false);
     }

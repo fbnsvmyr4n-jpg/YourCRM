@@ -1,6 +1,7 @@
 "use server";
 
 import { withSystem, withTenant } from "@/server/tenant";
+import { type WriteResult } from "@/server/write-result";
 import { revalidateApp } from "@/server/revalidate";
 import { answer } from "@/server/chat-agent";
 import { appendChat, clearChat, listChat } from "@/server/repos/chat";
@@ -148,10 +149,11 @@ export async function discardQuoteAction(documentId: string): Promise<QuoteResul
   });
 }
 
-export async function clearChatAction() {
+export async function clearChatAction(): Promise<WriteResult> {
   return withCurrentTenant(async (q) => {
     // Clears only this person's thread — a colleague's conversation is theirs.
     await clearChat(q);
     revalidateApp();
+    return { ok: true };
   });
 }

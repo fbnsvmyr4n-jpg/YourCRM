@@ -8,6 +8,8 @@ import { Banner } from "@/components/ui/Banner";
 import { clsx } from "@/lib/clsx";
 import { useFormDisclosure } from "@/lib/form-disclosure";
 import { bucketOf, dueLabel, type Todo } from "@/server/todo-rules";
+import { refused } from "@/server/write-result";
+import { useCanWrite } from "@/components/shell/CanWrite";
 import {
   deleteTodoAction,
   setTodoDoneAction,
@@ -47,12 +49,23 @@ export function TaskItem({
   const { state: deleteState, onSubmit: remove, pending: removing } = useKeptForm<TaskFormState>(deleteTodoAction, undefined);
   const [editing, openEdit, closeEdit] = useFormDisclosure(editState, (s) => Boolean(s?.ok));
   const [confirming, setConfirming] = useState(false);
+  /* Why the tick did not stick. React reverts the optimistic value by itself
+     when the transition ends, so without this a refused tick simply flickers
+     back — which reads as a glitch rather than as an answer. */
+  const [tickProblem, setTickProblem] = useState<string | null>(null);
+  const canWrite = useCanWrite();
 
   const bucket = done ? "done" : bucketOf(todo, today);
   const tick = () =>
     startTick(async () => {
       setDone(!done);
-      await setTodoDoneAction(todo.id, !done);
+      setTickProblem(null);
+      const result = await setTodoDoneAction(todo.id, !done);
+      /* The answer was always there — `withCurrentTenant` refuses a view-only
+         reader with `{ error }` — but the action was typed as returning
+         nothing, so there was nothing a caller could legitimately inspect.
+         See `server/write-result.ts`. */
+      if (refused(result)) setTickProblem(result.error);
     });
 
   if (editing) {
@@ -147,13 +160,24 @@ export function TaskItem({
             </span>
           )}
         </p>
-        {(editState?.ok || deleteState?.error) && (
-          <p className="mt-1 text-xs" style={{ color: deleteState?.error ? "var(--red)" : "var(--green)" }}>
-            {deleteState?.error ?? editState?.ok}
+        {/* Said on the row that was pressed. A refused tick used to flicker
+            back with nothing said at all, and `role="alert"` so it reaches
+            somebody who cannot see the checkbox change its mind. */}
+        {(editState?.ok || deleteState?.error || tickProblem) && (
+          <p
+            role={deleteState?.error || tickProblem ? "alert" : undefined}
+            className="mt-1 text-xs"
+            style={{ color: deleteState?.error || tickProblem ? "var(--red)" : "var(--green)" }}
+          >
+            {tickProblem ?? deleteState?.error ?? editState?.ok}
           </p>
         )}
       </div>
 
+      {/* Edit and delete, for somebody who may do either. The tick above stays
+          and says why it was refused — it is how a viewer reads a list, and the
+          refusal is now an answer rather than a flicker. */}
+      {canWrite && (
       <div
         className={clsx(
           "flex shrink-0 items-center gap-1 transition-opacity",
@@ -188,6 +212,7 @@ export function TaskItem({
           </>
         )}
       </div>
+      )}
     </li>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { refused } from "@/server/write-result";
 import { Check, Pencil, RotateCcw, Send, Sparkles, Trash2 } from "lucide-react";
 import { instantToWallClock } from "@/lib/zoned";
 import { useMoney } from "@/components/money/CurrencyProvider";
@@ -492,7 +493,23 @@ export function ChatView({
   async function reset() {
     setBusy(true);
     try {
-      await clearChatAction();
+      const result = await clearChatAction();
+      /* Everything below empties the screen to match a server that was just
+         cleared. If it was not cleared, emptying it tells the reader their
+         conversation is gone when it is still there — and a reload brings the
+         whole thread back, which reads as the product losing track of itself. */
+      if (refused(result)) {
+        setItems((prev) => [
+          ...prev,
+          {
+            id: `refused-${Date.now()}`,
+            role: "assistant" as const,
+            text: result.error,
+            at: new Date().toISOString(),
+          },
+        ]);
+        return;
+      }
       /*
          Empty, because that is what the server now holds.
 

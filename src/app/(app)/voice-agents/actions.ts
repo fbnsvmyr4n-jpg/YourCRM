@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidateApp } from "@/server/revalidate";
+import { type WriteResult } from "@/server/write-result";
 import { CALL_OUTCOMES, type CallOutcome } from "@/data/calls";
 import { deleteCall, logCall } from "@/server/repos/calls";
 import { getSettings } from "@/server/repos/settings";
@@ -52,15 +53,16 @@ export async function processCallAction(id: string) {
   });
 }
 
-export async function deleteCallAction(id: string) {
+export async function deleteCallAction(id: string): Promise<WriteResult> {
   return withCurrentTenant(async (q) => {
     const callId = validId(id);
-    if (!callId) return;
+    if (!callId) return { error: "That call could not be identified." };
     // Soft, so a call deleted by mistake is recoverable. The records it already
     // produced are untouched either way — they are theirs now, not the call's.
     await deleteCall(q, callId);
     logWrite("delete", "call", { id: callId, actor: q.ctx.userId });
     revalidateApp();
+    return { ok: true };
   });
 }
 

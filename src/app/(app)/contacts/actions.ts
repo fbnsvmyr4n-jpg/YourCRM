@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidateApp } from "@/server/revalidate";
+import { type WriteResult } from "@/server/write-result";
 import {
   assignOwner,
   createContact,
@@ -288,18 +289,20 @@ export async function assignContactAction(id: string, ownerUserId: string | null
   });
 }
 
-export async function deleteContactAction(id: string) {
+export async function deleteContactAction(id: string): Promise<WriteResult> {
   return withCurrentTenant(async (q) => {
     const contactId = validId(id);
-    if (!contactId) return;
+    if (!contactId) return { error: "That contact could not be identified." };
 
     // Soft delete: recoverable, and the history stays. The old version removed
     // the row outright and then deleted its activity in a second lock.
     const removed = await deleteContact(q, contactId);
-    if (removed) {
-      logWrite("delete", "contact", { id: contactId, actor: q.ctx.userId });
-    }
+    /* Already gone, or never theirs to begin with. Either way the screen must
+       not take the row away as though this had done it. */
+    if (!removed) return { error: "That contact no longer exists." };
+    logWrite("delete", "contact", { id: contactId, actor: q.ctx.userId });
     revalidateApp();
+    return { ok: true };
   });
 }
 

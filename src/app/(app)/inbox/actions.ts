@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidateApp } from "@/server/revalidate";
+import { type WriteResult } from "@/server/write-result";
 import {
   CHANNELS,
   createMessage,
@@ -290,21 +291,23 @@ export async function setCategoryAction(id: string, category: string | null) {
   });
 }
 
-export async function trashMessageAction(id: string) {
+export async function trashMessageAction(id: string): Promise<WriteResult> {
   return withCurrentTenant(async (q) => {
     const messageId = validId(id);
-    if (!messageId) return;
+    if (!messageId) return { error: "That message could not be identified." };
     await trashMessage(q, messageId);
     revalidateApp();
+    return { ok: true };
   });
 }
 
-export async function restoreMessageAction(id: string) {
+export async function restoreMessageAction(id: string): Promise<WriteResult> {
   return withCurrentTenant(async (q) => {
     const messageId = validId(id);
-    if (!messageId) return;
+    if (!messageId) return { error: "That message could not be identified." };
     await restoreMessage(q, messageId);
     revalidateApp();
+    return { ok: true };
   });
 }
 

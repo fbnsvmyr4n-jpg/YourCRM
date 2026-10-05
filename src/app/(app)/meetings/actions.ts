@@ -98,7 +98,11 @@ export async function addMeetingAction(formData: FormData): Promise<MeetingResul
 }
 
 /** Record what happened. This is what every rate on the page counts. */
-export async function setMeetingOutcomeAction(id: string, outcome: string, lossReason?: string) {
+export async function setMeetingOutcomeAction(
+  id: string,
+  outcome: string,
+  lossReason?: string
+): Promise<MeetingResult> {
   return withCurrentTenant(async (q) => {
     const meetingId = validId(id);
     const value = pick(outcome, OUTCOMES);

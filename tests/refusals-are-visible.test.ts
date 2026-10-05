@@ -221,3 +221,99 @@ describe("what a view-only reader is offered", () => {
     expect(read("../src/server/tenant.ts")).toMatch(/SET TRANSACTION READ ONLY/);
   });
 });
+
+describe("the ticks, the toggles and the deletes", () => {
+  /**
+   * The other half of this file.
+   *
+   * Everything above is a FORM: somebody filled it in, pressed a button, and
+   * watched it close. The nine below are not forms — a tick, a status menu, a
+   * delete behind a confirm — so the earlier pass never looked at them, and all
+   * nine threw the server's answer away.
+   *
+   * They all failed the same way and for the same reason. `withCurrentTenant`
+   * refuses a view-only reader with `return { error: … } as T`, and the cast is
+   * what lets it do that for every action regardless of what the action
+   * returns. So an action declared `Promise<void>` really does hand back a
+   * refusal at run time while TypeScript insists there is nothing there — and a
+   * caller inspecting it is writing code the compiler calls dead.
+   *
+   * The fix was to stop the type lying. See `server/write-result.ts`.
+   */
+  const writeResult = read("../src/server/write-result.ts");
+
+  it("ANSWER IN A SHAPE THE COMPILER ADMITS EXISTS", () => {
+    expect(writeResult).toMatch(/export type WriteResult = \{ ok: true \} \| \{ error: string \}/);
+    const declared: [string, string][] = [
+      ["../src/app/(app)/tasks/actions.ts", "setTodoDoneAction"],
+      ["../src/app/(app)/inbox/actions.ts", "trashMessageAction"],
+      ["../src/app/(app)/inbox/actions.ts", "restoreMessageAction"],
+      ["../src/app/(app)/contacts/actions.ts", "deleteContactAction"],
+      ["../src/app/(app)/voice-agents/actions.ts", "deleteCallAction"],
+      ["../src/app/(app)/chat/actions.ts", "clearChatAction"],
+    ];
+    for (const [file, fn] of declared) {
+      expect(read(file), `${fn} does not promise a readable answer`).toMatch(
+        new RegExp(`export async function ${fn}\\([\\s\\S]{0,120}Promise<WriteResult>`)
+      );
+    }
+    /* Meetings keeps its own result type, which already existed — the defect
+       there was never the shape, it was that neither caller read it. */
+    expect(read("../src/app/(app)/meetings/actions.ts")).toMatch(
+      /export async function setMeetingOutcomeAction\([\s\S]{0,120}Promise<MeetingResult>/
+    );
+  });
+
+  it("DO NOT TAKE THE ROW AWAY WHEN THE DELETE WAS REFUSED", () => {
+    /* All three moved the selection on to the next record first, so a refused
+       delete looked exactly like a successful one: the thing vanished from
+       under the reader and came back on reload. */
+    const cases: [string, string, string][] = [
+      ["../src/app/(app)/contacts/ContactsView.tsx", "async function handleDelete", "setSelectedId("],
+      ["../src/app/(app)/inbox/InboxView.tsx", "async function handleTrash", "setSelectedId("],
+      ["../src/app/(app)/voice-agents/VoiceAgentConsole.tsx", "async function handleDelete", "setSelectedId("],
+    ];
+    for (const [file, fn, paints] of cases) {
+      const body = read(file).slice(read(file).indexOf(fn));
+      const checked = body.indexOf("refused(result)");
+      expect(checked, `${file} ${fn} never inspects the answer`).toBeGreaterThan(-1);
+      expect(body.indexOf(paints), `${file} ${fn} moves the selection regardless`).toBeGreaterThan(checked);
+    }
+  });
+
+  it("SAY WHY, where the control that was pressed is", () => {
+    for (const file of [
+      "../src/app/(app)/contacts/ContactsView.tsx",
+      "../src/app/(app)/inbox/InboxView.tsx",
+      "../src/app/(app)/voice-agents/VoiceAgentConsole.tsx",
+      "../src/app/(app)/meetings/MeetingsView.tsx",
+      "../src/components/tasks/TaskItem.tsx",
+    ]) {
+      expect(read(file), `${file} never shows the reason`).toMatch(/role="alert"/);
+    }
+  });
+
+  it("DO NOT EMPTY THE CHAT THE SERVER STILL HOLDS", () => {
+    const reset = read("../src/app/(app)/chat/ChatView.tsx");
+    const fn = reset.slice(reset.indexOf("async function reset()"));
+    expect(fn.indexOf("setItems([])")).toBeGreaterThan(fn.indexOf("refused(result)"));
+  });
+
+  it("DO NOT LET A REFUSED TICK LOOK LIKE A GLITCH", () => {
+    /* React reverts the optimistic value by itself when the transition ends, so
+       this one never showed a wrong state for long — it showed NOTHING, and a
+       checkbox that ticks and then quietly un-ticks reads as the product being
+       broken rather than as an answer. */
+    const item = read("../src/components/tasks/TaskItem.tsx");
+    expect(item).toMatch(/if \(refused\(result\)\) setTickProblem\(result\.error\)/);
+    expect(item).toMatch(/\{tickProblem \?\? deleteState\?\.error/);
+  });
+
+  it("DO NOT CLAIM AN OUTREACH WAS RECORDED WHEN IT WAS NOT", () => {
+    /* `logOutreachAction` returns the activity row, or null, or a refusal — and
+       a refusal is perfectly truthy, so a bare `if (!logged)` would have missed
+       the one case this is about. */
+    const view = read("../src/app/(app)/contacts/ContactsView.tsx");
+    expect(view).toMatch(/refused\(logged\) \? logged\.error : logged \? null :/);
+  });
+});

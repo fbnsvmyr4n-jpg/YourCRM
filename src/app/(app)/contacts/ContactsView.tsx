@@ -49,6 +49,7 @@ import { clsx } from "@/lib/clsx";
 import { useElementWidth } from "@/lib/use-element-width";
 import { useRememberedToggle } from "@/lib/remembered-toggle";
 import { useCanWrite } from "@/components/shell/CanWrite";
+import { refused } from "@/server/write-result";
 import { useCanDial } from "@/lib/useCanDial";
 import { useMoney } from "@/components/money/CurrencyProvider";
 import { CustomFieldInputs } from "@/components/custom-fields/CustomFieldInputs";
@@ -177,6 +178,9 @@ export function ContactsView({
      which was fine while nothing could be refused; a custom number field that
      reads "about fifty" can be, and closing would throw the edit away. */
   const [modalError, setModalError] = useState<string | null>(null);
+  /* A delete that did not happen. Its own state rather than `modalError`,
+     because there is no modal open when the row is removed from the list. */
+  const [listProblem, setListProblem] = useState<string | null>(null);
   const [filter, setFilter] = useState<ContactFilter>(EMPTY_FILTER);
   const [editingTags, setEditingTags] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -233,8 +237,16 @@ export function ContactsView({
     )
       return;
     setBusy(true);
+    setListProblem(null);
     try {
-      await deleteContactAction(id);
+      const result = await deleteContactAction(id);
+      /* The selection moved on before this, as though the contact were gone —
+         so a view-only reader watched the list skip to the next person while
+         the one they pressed delete on was still there on reload. */
+      if (refused(result)) {
+        setListProblem(result.error);
+        return;
+      }
       const remaining = contacts.filter((c) => c.id !== id);
       setSelectedId(remaining[0]?.id ?? "");
     } finally {
@@ -369,6 +381,7 @@ export function ContactsView({
         currentUserId={currentUserId}
         onEdit={() => setModal(contact)}
         onDelete={() => handleDelete(contact.id)}
+        problem={listProblem}
         panel={panel}
         setPanel={setPanel}
         busy={busy}
@@ -566,6 +579,7 @@ function ProfilePanel({
   currentUserId,
   onEdit,
   onDelete,
+  problem,
   panel,
   setPanel,
   busy,
@@ -583,6 +597,8 @@ function ProfilePanel({
   currentUserId: string | null;
   onEdit: () => void;
   onDelete: () => void;
+  /** Why a delete did not happen. Said beside the contact it was pressed on. */
+  problem?: string | null;
   panel: Panel;
   setPanel: (p: Panel) => void;
   busy: boolean;
@@ -596,6 +612,9 @@ function ProfilePanel({
   /* Whether `tel:` and `sms:` can reach anything on this device. */
   const canDial = useCanDial();
   const canWrite = useCanWrite();
+  /* Why an outreach was not written to Contact Activity. The dialler has
+     already opened by then — this is about the record, not the call. */
+  const [reachProblem, setReachProblem] = useState<string | null>(null);
 
   const tel = contact.phone.replace(/[^\d+]/g, "");
 
@@ -621,7 +640,18 @@ function ProfilePanel({
   async function reach(kind: "call" | "text" | "email") {
     setPending(true);
     try {
-      await logOutreachAction(contact.id, kind);
+      const logged = await logOutreachAction(contact.id, kind);
+      /* The call still happened — the `tel:` link opened the dialler before
+         this ran, and nothing here can undo that. What can be wrong is Contact
+         Activity quietly not recording it, which is the same class of untruth
+         as the fabricated call this logging was added to prevent. */
+      /* Two different failures, one message. `refused` is the view-only
+         transaction; `null` is a contact that is not there to log against. A
+         truthiness check alone would have missed the refusal, because
+         `{ error: … }` is perfectly truthy. */
+      setReachProblem(
+        refused(logged) ? logged.error : logged ? null : "That was not recorded on their history."
+      );
     } finally {
       setPending(false);
     }
@@ -774,6 +804,18 @@ function ProfilePanel({
           <span className="accent-text text-6xl font-bold tracking-tight">{contact.initials}</span>
         </div>
       </div>
+
+      {/* Where somebody who just pressed Delete — or Call, Text or Email — is
+          looking. Both answer the same question: did that actually happen. */}
+      {(problem || reachProblem) && (
+        <p
+          role="alert"
+          className="mt-4 rounded-xl px-3.5 py-2.5 text-center text-sm"
+          style={{ background: "var(--red-soft)", color: "var(--red)" }}
+        >
+          {problem ?? reachProblem}
+        </p>
+      )}
 
       <h1 className="mt-4 text-center text-3xl font-bold tracking-tight">
         {contact.firstName} {contact.lastName}

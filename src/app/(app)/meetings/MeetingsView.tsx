@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, useMemo } from "react";
+import { refused } from "@/server/write-result";
 import { createPortal } from "react-dom";
 import { useOpenFromQuery } from "@/lib/useOpenFromQuery";
 import {
@@ -716,6 +717,7 @@ function MeetingCard({
   const outcome: MeetingOutcome = m.outcome ?? "scheduled";
   const tone = OUTCOME_COLORS[outcome];
   const [saving, setSaving] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
 
   async function change(next: string) {
     if (next === outcome) return;
@@ -730,7 +732,12 @@ function MeetingCard({
         const idx = Number(picked) - 1;
         reason = LOSS_REASONS[idx] ?? "Other";
       }
-      await setMeetingOutcomeAction(m.id, next, reason);
+      const result = await setMeetingOutcomeAction(m.id, next, reason);
+      /* The action had reported `{ error }` since it was written and neither
+         caller looked, so a refused outcome left the select showing the new
+         value over a meeting the database still calls scheduled — and every
+         rate on the page is computed from that field. */
+      if (refused(result)) setProblem(result.error);
     } finally {
       setSaving(false);
     }
@@ -796,6 +803,15 @@ function MeetingCard({
         <p className="mt-1 text-[10px] text-faint">{m.lossReason}</p>
       )}
 
+      {/* On the card the outcome was changed on. The select shows the new
+          value until React re-renders it, so without this the only sign of a
+          refusal was the word changing back. */}
+      {problem && (
+        <p role="alert" className="mt-2 text-[11px]" style={{ color: "var(--red)" }}>
+          {problem}
+        </p>
+      )}
+
       <div className="mt-3 flex items-center gap-2">
         <button
           onClick={onEdit}
@@ -852,6 +868,7 @@ function MeetingRow({
   const outcome: MeetingOutcome = m.outcome ?? "scheduled";
   const tone = OUTCOME_COLORS[outcome];
   const [saving, setSaving] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
 
   async function change(next: string) {
     if (next === outcome) return;
@@ -868,7 +885,12 @@ function MeetingRow({
         const idx = Number(picked) - 1;
         reason = LOSS_REASONS[idx] ?? "Other";
       }
-      await setMeetingOutcomeAction(m.id, next, reason);
+      const result = await setMeetingOutcomeAction(m.id, next, reason);
+      /* The action had reported `{ error }` since it was written and neither
+         caller looked, so a refused outcome left the select showing the new
+         value over a meeting the database still calls scheduled — and every
+         rate on the page is computed from that field. */
+      if (refused(result)) setProblem(result.error);
     } finally {
       setSaving(false);
     }
@@ -941,6 +963,13 @@ function MeetingRow({
         </select>
         {outcome === "lost" && m.lossReason && (
           <p className="mt-1 text-[10px] text-faint">{m.lossReason}</p>
+        )}
+        {/* In the cell the select sits in, so the reason is beside the control
+            that was refused rather than at the top of a long table. */}
+        {problem && (
+          <p role="alert" className="mt-1 text-[10px]" style={{ color: "var(--red)" }}>
+            {problem}
+          </p>
         )}
       </td>
       <td className="py-3 text-right">

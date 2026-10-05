@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { refused } from "@/server/write-result";
 import Link from "next/link";
 import {
   ArrowUpRight,
@@ -94,6 +95,9 @@ export function VoiceAgentConsole({
 }) {
   const [selectedId, setSelectedId] = useState(calls[0]?.id ?? "");
   const [busy, setBusy] = useState(false);
+  /* Why a delete did not happen — the list used to move to the next call as
+     though it had. */
+  const [problem, setProblem] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast>(null);
 
   const selected = calls.find((c) => c.id === selectedId) ?? calls[0];
@@ -148,8 +152,13 @@ export function VoiceAgentConsole({
     )
       return;
     setBusy(true);
+    setProblem(null);
     try {
-      await deleteCallAction(id);
+      const result = await deleteCallAction(id);
+      if (refused(result)) {
+        setProblem(result.error);
+        return;
+      }
       const rest = calls.filter((c) => c.id !== id);
       setSelectedId(rest[0]?.id ?? "");
     } finally {
@@ -159,6 +168,16 @@ export function VoiceAgentConsole({
 
   return (
     <div className="mx-auto max-w-[1500px] animate-fade-up">
+      {/* Said at the top, where a reader who just pressed Delete is looking. */}
+      {problem && (
+        <p
+          role="alert"
+          className="mb-4 rounded-xl px-3.5 py-2.5 text-sm"
+          style={{ background: "var(--red-soft)", color: "var(--red)" }}
+        >
+          {problem}
+        </p>
+      )}
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-4 pb-5 pt-1">
         <div>
