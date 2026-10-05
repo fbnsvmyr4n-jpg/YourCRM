@@ -179,6 +179,10 @@ describe("the status control", () => {
   });
 
   it("offers Edit only on a draft", () => {
-    expect(view).toMatch(/\{r\.status === "draft" && \(/);
+    /* Now also behind `canWrite`: a view-only reader and a bookkeeper were
+       both being offered an Edit the server refuses. The draft rule itself is
+       unchanged — once a document has gone out, what the other side holds is
+       the record. */
+    expect(view).toMatch(/\{canWrite && r\.status === "draft" && \(/);
   });
 });

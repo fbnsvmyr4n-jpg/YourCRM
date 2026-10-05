@@ -392,7 +392,13 @@ export function DocumentLedgerView({
                     out, what the other side holds is the record, and the
                     honest move is a new document rather than a quiet
                     rewrite of the old one. */}
-                {r.status === "draft" && (
+                {/* Edit, Send and the status menu all change the document, so
+                    all three ask the same question. Until this, only "+ New"
+                    did — which meant a view-only reader AND a bookkeeper were
+                    each offered three controls the server refuses. Finance
+                    reads these two ledgers on purpose; what they act on is
+                    invoices, and that is a different gate. */}
+                {canWrite && r.status === "draft" && (
                   <button
                     type="button"
                     onClick={() => openEdit(r)}
@@ -403,7 +409,7 @@ export function DocumentLedgerView({
                   </button>
                 )}
 
-                {(copy.kind === "quote" ? SENDABLE_QUOTE : SENDABLE_ORDER).includes(r.status) && !r.sentAt && (
+                {canWrite && (copy.kind === "quote" ? SENDABLE_QUOTE : SENDABLE_ORDER).includes(r.status) && !r.sentAt && (
                   <form onSubmit={send.onSubmit} className="shrink-0">
                     <input type="hidden" name="documentId" value={r.id} />
                     <button
@@ -436,7 +442,7 @@ export function DocumentLedgerView({
                       </span>
                     )}
                   </p>
-                ) : r.status === "awaiting_approval" || r.status === "approved" ? (
+                ) : !canWrite || r.status === "awaiting_approval" || r.status === "approved" ? (
                   <p className="shrink-0 text-xs @min-[560px]:w-36 @min-[560px]:text-right">
                     <span className="capitalize" style={{ color: STATUS_TONE[r.status] }}>
                       {statusLabel(r.status)}

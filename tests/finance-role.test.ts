@@ -133,3 +133,30 @@ describe("the figures on it", () => {
     }
   });
 });
+
+describe("the quote and purchase-order ledgers", () => {
+  const view = read("src/components/documents/DocumentLedgerView.tsx");
+
+  it("OFFER NO WRITE CONTROL TO SOMEBODY THE SERVER WILL REFUSE", () => {
+    /*
+       Only "+ New" asked. Edit, Send and the status menu did not — so a
+       view-only reader AND a bookkeeper were each offered three controls that
+       submit and are refused, which is the exact shape `permissions.ts` names
+       as the thing to avoid.
+
+       Finance reads these two ledgers on purpose: money going out and what was
+       offered for it. What they ACT on is invoices, and that is a different
+       gate — `useMaySettle`, inside `RecordPayment`.
+    */
+    expect(view).toMatch(/\{canWrite && r\.status === "draft" && \(/);
+    expect(view).toMatch(/\{canWrite && \(copy\.kind === "quote" \? SENDABLE_QUOTE : SENDABLE_ORDER\)/);
+    expect(view).toMatch(/\) : !canWrite \|\| r\.status === "awaiting_approval"/);
+  });
+
+  it("still show the status, because that is information", () => {
+    /* The rule this whole pass keeps meeting from the other side: hiding a
+       write must not blind the reader. The menu goes; the word stays. */
+    const textBranch = view.slice(view.indexOf(') : !canWrite || r.status === "awaiting_approval"'));
+    expect(textBranch.slice(0, 400)).toMatch(/\{statusLabel\(r\.status\)\}/);
+  });
+});
