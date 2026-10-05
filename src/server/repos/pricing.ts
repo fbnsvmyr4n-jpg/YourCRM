@@ -22,6 +22,15 @@ export type PriceItem = {
   unitCents: number;
   /** Withdrawn items stop being offered without breaking the quotes citing them. */
   active: boolean;
+  /**
+   * Who sells it at this price, when it came from a supplier's list.
+   *
+   * Null for everything typed by hand, and for what the business prices itself
+   * — its own labour has no supplier. Carried because two merchants can now
+   * both sell paving stone at different rates, and two rows with the same name
+   * and no way to tell them apart is a worse list than one.
+   */
+  supplierName: string | null;
 };
 
 type Row = {
@@ -31,6 +40,7 @@ type Row = {
   unit: string;
   unit_cents: string;
   active: boolean;
+  supplier_name: string | null;
 };
 
 const toItem = (r: Row): PriceItem => ({
@@ -40,6 +50,7 @@ const toItem = (r: Row): PriceItem => ({
   unit: r.unit,
   unitCents: Number(r.unit_cents),
   active: r.active,
+  supplierName: r.supplier_name,
 });
 
 function newId(name: string): string {
@@ -61,11 +72,14 @@ function newId(name: string): string {
  */
 export async function listPriceItems(q: TenantQuery, activeOnly = false): Promise<PriceItem[]> {
   const rows = await q.rows<Row>(
-    `SELECT id, name, description, unit, unit_cents::text, active
-       FROM price_items
-      WHERE sub_account_id = $1 AND deleted_at IS NULL
-        AND ($2::boolean IS NOT TRUE OR active)
-      ORDER BY active DESC, lower(name)`,
+    `SELECT p.id, p.name, p.description, p.unit, p.unit_cents::text, p.active,
+            s.name AS supplier_name
+       FROM price_items p
+       LEFT JOIN suppliers s
+         ON s.id = p.supplier_id AND s.sub_account_id = p.sub_account_id AND s.deleted_at IS NULL
+      WHERE p.sub_account_id = $1 AND p.deleted_at IS NULL
+        AND ($2::boolean IS NOT TRUE OR p.active)
+      ORDER BY p.active DESC, lower(p.name), lower(COALESCE(s.name, ''))`,
     [q.ctx.subAccountId, activeOnly]
   );
   return rows.map(toItem);

@@ -1,6 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { SuppliersCard } from "@/components/pricing/SuppliersCard";
+import { SupplierImport } from "@/components/pricing/SupplierImport";
+import type { Supplier } from "@/server/repos/suppliers";
 import { useCanWrite } from "@/components/shell/CanWrite";
 import { useKeptForm } from "@/lib/use-kept-form";
 import { EyeOff, Pencil, Plus, RotateCcw, Search, Tags, Trash2 } from "lucide-react";
@@ -30,7 +33,7 @@ import {
  * from when writing a quote by hand.
  */
 
-export function PricingView({ items }: { items: PriceItem[] }) {
+export function PricingView({ items, suppliers = [] }: { items: PriceItem[]; suppliers?: Supplier[] }) {
   const canWrite = useCanWrite();
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<PriceItem | null>(null);
@@ -82,6 +85,12 @@ export function PricingView({ items }: { items: PriceItem[] }) {
           </button>
         )}
       </div>
+
+      {/* Who the prices come from, and the way to load a whole list from one.
+          Above the list itself, because loading a supplier's sheet is how most
+          of these rows get here — typing one by hand is the exception. */}
+      <SuppliersCard suppliers={suppliers} />
+      <SupplierImport suppliers={suppliers} />
 
       {formOpen && (
         <Card className="mb-4">
@@ -240,7 +249,25 @@ function Group({
             style={{ background: "var(--surface-2)", opacity: item.active ? 1 : 0.65 }}
           >
             <div className="min-w-0 flex-1 leading-tight">
-              <p className="truncate text-sm font-medium">{item.name}</p>
+              <p className="flex min-w-0 items-center gap-2 text-sm font-medium">
+                <span className="truncate">{item.name}</span>
+                {/* Whose price this is.
+
+                    Two merchants can both sell paving stone at different
+                    rates — that is the point of keeping suppliers — so two
+                    rows with the same name and nothing to tell them apart
+                    would be a worse list than the single one this replaced.
+                    Nothing is shown for a price typed by hand, because
+                    inventing a source for it would be the other failure. */}
+                {item.supplierName && (
+                  <span
+                    className="shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-semibold"
+                    style={{ background: "var(--accent-soft)", color: "var(--accent)" }}
+                  >
+                    {item.supplierName}
+                  </span>
+                )}
+              </p>
               <p className="mt-0.5 truncate text-xs text-faint">
                 {item.description ?? `Charged ${item.unit}`}
               </p>

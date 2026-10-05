@@ -9,6 +9,21 @@ import { logWrite } from "@/server/log";
 import { revalidateApp } from "@/server/revalidate";
 import { withCurrentTenant } from "@/server/tenant-session";
 import { decimal, id as validId, multiline, text } from "@/server/validate";
+import {
+  applyPriceList,
+  createSupplier,
+  deleteSupplier,
+  supplierItems,
+  updateSupplier,
+} from "@/server/repos/suppliers";
+import { businessToday } from "@/server/repos/settings";
+import {
+  describeChanges,
+  parsePriceList,
+  planChanges,
+  type PriceChange,
+  type UnreadLine,
+} from "@/server/price-import";
 
 /**
  * Maintaining the price list.
@@ -98,5 +113,127 @@ export async function deletePriceItemAction(
     logWrite("delete", "price_item", { id: itemId, actor: q.ctx.userId });
     revalidateApp();
     return { ok: "Removed from the price list." };
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* Suppliers, and loading what they charge                             */
+/*                                                                     */
+/* The price list is really a set of suppliers' lists. Nobody retypes   */
+/* forty rows, so a list arrives pasted or dropped in and is read.      */
+/* ------------------------------------------------------------------ */
+
+export async function saveSupplierAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  return withCurrentTenant(async (q) => {
+    const name = text(formData.get("name"), 120);
+    if (!name.trim()) return { error: "Give the supplier a name." };
+
+    const input = {
+      name,
+      email: text(formData.get("email"), 320) || null,
+      phone: text(formData.get("phone"), 40) || null,
+      notes: multiline(formData.get("notes"), 2000) || null,
+    };
+
+    const existingId = validId(formData.get("id"));
+    if (existingId) {
+      if (!(await updateSupplier(q, existingId, input))) {
+        return { error: "That supplier no longer exists." };
+      }
+      logWrite("update", "supplier", { id: existingId, actor: q.ctx.userId });
+      revalidateApp();
+      return { ok: `${name} saved.` };
+    }
+
+    const made = await createSupplier(q, input);
+    if (!made) return { error: "That supplier could not be saved." };
+    logWrite("create", "supplier", { id: made.id, actor: q.ctx.userId });
+    revalidateApp();
+    return { ok: `${made.name} added.` };
+  });
+}
+
+export async function deleteSupplierAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  return withCurrentTenant(async (q) => {
+    const id = validId(formData.get("id"));
+    if (!id) return { error: "That supplier could not be identified." };
+    if (!(await deleteSupplier(q, id))) return { error: "That supplier no longer exists." };
+    logWrite("delete", "supplier", { id, actor: q.ctx.userId });
+    revalidateApp();
+    /* Said out loud, because it is the question somebody asks straight after
+       pressing it. */
+    return { ok: "Supplier removed. Their prices are still on the list." };
+  });
+}
+
+export type ImportPreview = {
+  supplierId: string;
+  changes: PriceChange[];
+  unread: UnreadLine[];
+  summary: string;
+};
+
+/**
+ * Read a pasted list and say what it WOULD do. Writes nothing.
+ *
+ * Separated from applying it on purpose. A price list is what every quotation
+ * is built from, so pasting the wrong column — or last year's file — silently
+ * re-prices the whole business. "47 new, 12 with a new price, 3 we could not
+ * read" is a sentence somebody can check in five seconds, and this is what
+ * produces it.
+ */
+export async function previewPriceListAction(
+  _prev: ImportPreview | FormState,
+  formData: FormData
+): Promise<ImportPreview | FormState> {
+  return withCurrentTenant(async (q) => {
+    const supplierId = validId(formData.get("supplierId"));
+    if (!supplierId) return { error: "Choose which supplier this list is from." };
+
+    const pasted = multiline(formData.get("pasted"), 200_000);
+    if (!pasted.trim()) return { error: "Paste or drop the list in first." };
+
+    const { lines, unread } = parsePriceList(pasted);
+    if (lines.length === 0 && unread.length === 0) {
+      return { error: "There was nothing in that." };
+    }
+
+    const changes = planChanges(lines, await supplierItems(q, supplierId));
+    return { supplierId, changes, unread, summary: describeChanges(changes, unread.length) };
+  });
+}
+
+/**
+ * Apply a list that has been read and looked at.
+ *
+ * Re-reads the pasted text server-side rather than trusting a plan posted back
+ * from the browser: the preview is for a person to look at, not a payload to
+ * act on. A changed price arriving in a hidden field is a price nobody typed
+ * and nobody approved.
+ */
+export async function applyPriceListAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  return withCurrentTenant(async (q) => {
+    const supplierId = validId(formData.get("supplierId"));
+    if (!supplierId) return { error: "Choose which supplier this list is from." };
+
+    const pasted = multiline(formData.get("pasted"), 200_000);
+    if (!pasted.trim()) return { error: "Paste or drop the list in first." };
+
+    const { lines, unread } = parsePriceList(pasted);
+    const changes = planChanges(lines, await supplierItems(q, supplierId));
+    const out = await applyPriceList(q, supplierId, changes, await businessToday(q));
+
+    logWrite("update", "price_list", { id: supplierId, actor: q.ctx.userId });
+    revalidateApp();
+
+    const said = [
+      out.added && `${out.added} added`,
+      out.repriced && `${out.repriced} repriced`,
+      out.unchanged && `${out.unchanged} unchanged`,
+      /* Named again at the end, not only in the preview: the count that
+         matters most is the one somebody is about to stop thinking about. */
+      unread.length && `${unread.length} still unread`,
+    ].filter(Boolean);
+    return { ok: said.length ? `Loaded — ${said.join(", ")}.` : "Nothing in that list to apply." };
   });
 }

@@ -72,6 +72,9 @@ export const EXPECTED_TABLES = [
   /* Read on every inbox load, so a database without it does not lose a folder
      — it fails to render the inbox at all. */
   "message_drafts",
+  /* Read by the price list on every load, so a database without it does not
+     lose a grouping — it fails to render the page. */
+  "suppliers",
   "audit_events",
 ] as const;
 
@@ -153,6 +156,9 @@ export const EXPECTED_COLUMNS: ReadonlyArray<[string, string]> = [
      unmigrated database cannot record money arriving by transfer at all —
      which, for a trades business, is most of the money it takes. */
   ["invoice_payments", "recorded_by_user_id"],
+  /* Named in the price-list SELECT, so an unmigrated database breaks the
+     screen a quotation is built from. */
+  ["price_items", "supplier_id"],
   /* Projects. Named in the SELECT the deals repo and the projects page both
      use, so an unmigrated database breaks the pipeline board, not one page. */
   ["deals", "company_id"],

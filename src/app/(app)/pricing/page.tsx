@@ -1,4 +1,5 @@
 import { listPriceItems } from "@/server/repos/pricing";
+import { listSuppliers } from "@/server/repos/suppliers";
 import { withTenantPage } from "@/server/tenant-session";
 import { PricingView } from "./PricingView";
 
@@ -7,6 +8,9 @@ import { PricingView } from "./PricingView";
 export const dynamic = "force-dynamic";
 
 export default async function PricingPage() {
-  const items = await withTenantPage((q) => listPriceItems(q));
-  return <PricingView items={items} />;
+  const { items, suppliers } = await withTenantPage(async (q) => ({
+    items: await listPriceItems(q),
+    suppliers: await listSuppliers(q),
+  }));
+  return <PricingView items={items} suppliers={suppliers} />;
 }

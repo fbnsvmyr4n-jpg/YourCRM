@@ -1389,8 +1389,9 @@ ALTER TABLE price_items DROP CONSTRAINT IF EXISTS price_items_unit_cents_check;
 ALTER TABLE price_items ADD CONSTRAINT price_items_unit_cents_check
   CHECK (unit_cents >= 0);
 
--- One item per name. Two rows called "Crane hire" at different prices is a
--- question the agent cannot answer and a person should not have to.
+-- One item per name. Replaced further down by a per-SUPPLIER rule, once the
+-- column that makes that possible has been added — this file runs in order,
+-- and an index cannot name a column that does not exist yet.
 CREATE UNIQUE INDEX IF NOT EXISTS price_items_name_once
   ON price_items (sub_account_id, lower(name)) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS price_items_tenant_idx ON price_items (sub_account_id) WHERE deleted_at IS NULL;
@@ -3213,6 +3214,95 @@ ALTER TABLE deals ADD CONSTRAINT deals_number_shape CHECK (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS deals_number_once
   ON deals (sub_account_id, number) WHERE number IS NOT NULL AND deleted_at IS NULL;
+
+-- ---------------------------------------------------------------------------
+-- Who the workspace buys from.
+--
+-- A paving contractor does not invent a rate for stone: the supplier sets it,
+-- it moves, and a quotation built on last quarter's price loses money on every
+-- square metre. So prices come FROM somebody, and this is who.
+--
+-- `list_updated_on` is the point of the table as much as the name is. A price
+-- nobody has confirmed since March has to be able to SAY so — the same rule
+-- that governs every other figure in this product. A list that looks current
+-- and is not is worse than one that admits its age, because nobody checks the
+-- first one.
+--
+-- Deliberately not a `company`: companies here are the people you sell TO, with
+-- deals and projects hanging off them, and a supplier has none of that. Reusing
+-- the table would put every builder's merchant into the client list.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS suppliers (
+  id              TEXT PRIMARY KEY,
+  sub_account_id  TEXT NOT NULL REFERENCES sub_accounts(id) ON DELETE CASCADE,
+
+  name            TEXT NOT NULL CHECK (length(btrim(name)) BETWEEN 1 AND 120),
+  -- Where their price list comes from. The address a list is expected to
+  -- arrive from is what a later slice matches an incoming email against.
+  email           TEXT CHECK (email IS NULL OR length(email) <= 320),
+  phone           TEXT CHECK (phone IS NULL OR length(phone) <= 40),
+  notes           TEXT CHECK (notes IS NULL OR length(notes) <= 2000),
+
+  -- The business's own day, not a timestamp: "we loaded their list on the 4th"
+  -- is the fact, and it must not shift by a day for a workspace in Johannesburg.
+  list_updated_on DATE,
+
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  deleted_at      TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS suppliers_tenant_idx ON suppliers (sub_account_id, lower(name));
+
+ALTER TABLE suppliers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE suppliers FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS suppliers_tenant_isolation ON suppliers;
+CREATE POLICY suppliers_tenant_isolation ON suppliers
+  USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
+  WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
+
+-- Which supplier a price came from. NULL for everything typed by hand before
+-- suppliers existed, and for anything the business prices itself — its own
+-- labour has no supplier, and pretending otherwise would be a worse lie than
+-- the empty column.
+ALTER TABLE price_items ADD COLUMN IF NOT EXISTS supplier_id TEXT REFERENCES suppliers(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS price_items_supplier_idx ON price_items (sub_account_id, supplier_id);
+
+-- One item per name, PER SUPPLIER.
+--
+-- It was one per workspace, on the reasoning that two rows called "Crane hire"
+-- at different prices is a question nobody should have to answer. That holds
+-- for a list somebody types, and it stops being true the moment prices come
+-- from suppliers: two merchants both sell paving stone, at different rates,
+-- and which is cheaper this month is the entire reason for keeping both.
+--
+-- `COALESCE(supplier_id, '')` rather than the column, because Postgres treats
+-- NULLs in a unique index as distinct — so without it the hand-typed items,
+-- which have no supplier, would lose the protection they have now and a
+-- workspace could end up with four rows called "Crane hire" that nobody meant.
+DROP INDEX IF EXISTS price_items_name_once;
+CREATE UNIQUE INDEX IF NOT EXISTS price_items_name_once_per_supplier
+  ON price_items (sub_account_id, COALESCE(supplier_id, ''), lower(name))
+  WHERE deleted_at IS NULL;
+
+-- A supplier belongs to the same workspace as the price it is attached to.
+-- Same shape as every other cross-tenant guard here: the policy above stops a
+-- tenant READING another's row, and this stops one being POINTED at.
+CREATE OR REPLACE FUNCTION assert_supplier_in_tenant() RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.supplier_id IS NOT NULL AND NOT EXISTS (
+       SELECT 1 FROM suppliers s
+        WHERE s.id = NEW.supplier_id AND s.sub_account_id = NEW.sub_account_id) THEN
+    RAISE EXCEPTION 'supplier % does not belong to sub-account %', NEW.supplier_id, NEW.sub_account_id
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS price_items_supplier_in_tenant ON price_items;
+CREATE TRIGGER price_items_supplier_in_tenant
+  BEFORE INSERT OR UPDATE OF supplier_id, sub_account_id ON price_items
+  FOR EACH ROW EXECUTE FUNCTION assert_supplier_in_tenant();
 
 -- ---------------------------------------------------------------------------
 -- An email somebody started writing and has not sent.
