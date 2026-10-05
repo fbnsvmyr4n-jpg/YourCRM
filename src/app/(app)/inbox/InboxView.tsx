@@ -55,6 +55,7 @@ import type { ProjectOption } from "@/server/repos/inbox";
 import { useDraft, hasContent, type Draft } from "@/lib/use-draft";
 import { worthKeeping, type Draft as SavedDraft } from "@/data/drafts";
 import { refused } from "@/server/write-result";
+import { useCanWrite } from "@/components/shell/CanWrite";
 import { discardDraftAction, saveDraftAction } from "./actions";
 import { SwipeToDelete } from "@/components/ui/SwipeToDelete";
 import { useMoney } from "@/components/money/CurrencyProvider";
@@ -169,6 +170,7 @@ export function InboxView({
    * the box is exactly the state that was being lost.
    */
   const router = useRouter();
+  const canWrite = useCanWrite();
   const { draft, save, clear } = useDraft(DRAFT_KEY);
   const draftWaiting = hasContent(draft);
   /* Whether the composer OPENED onto existing text, which is the only moment
@@ -582,6 +584,11 @@ export function InboxView({
             Clear
           </button>
         )}
+        {/* Not drawn at all for a view-only reader, rather than hidden with a
+            class: `hidden` beside `flex` on one element is settled by
+            stylesheet order rather than by intent, which this project has
+            already been caught by once. */}
+        {canWrite && (
         <button
           onClick={() => {
             setResumedDraft(hasContent(draft));
@@ -594,6 +601,7 @@ export function InboxView({
               silently reopened someone's unfinished mail would be a surprise. */}
           {draftWaiting ? "Continue Draft" : "Create New Email"}
         </button>
+        )}
       </div>
 
         {/* Folder tabs */}
@@ -857,6 +865,7 @@ function MessageList({
     counts: Record<TicketStatus, number>;
   };
 }) {
+  const canWrite = useCanWrite();
   const inTickets = filter === "Tickets";
   const [filterOpen, setFilterOpen] = useState(false);
   const [filterAnchor, setFilterAnchor] = useState<HTMLButtonElement | null>(null);
@@ -1089,8 +1098,12 @@ function MessageList({
             </button>
           );
           /* Already in the bin: swiping to delete something deleted is a
-             gesture with nothing behind it. Trash has Restore instead. */
-          if (m.trashed) return <div key={m.id}>{row}</div>;
+             gesture with nothing behind it. Trash has Restore instead.
+
+             And a view-only reader is not offered the gesture at all — it
+             would swipe, refuse, and spring back, which is the drag on the
+             deals board all over again. */
+          if (m.trashed || !canWrite) return <div key={m.id}>{row}</div>;
           return (
             <SwipeToDelete key={m.id} label={`message from ${m.name}`} onDelete={() => onAskDelete(m)}>
               {row}
@@ -1212,6 +1225,7 @@ function Reader({
   // remounts this component — the React way to say "this is a different thing
   // now". Doing it with an effect would mean rendering the previous message's
   // open composer once before clearing it.
+  const canWrite = useCanWrite();
   const [mode, setMode] = useState<null | "reply" | "forward">(null);
   const [viewing, setViewing] = useState<Attachment | null>(null);
   const [sending, setSending] = useState(false);
@@ -1275,6 +1289,8 @@ function Reader({
             <FileUnderProject message={message} projects={projects} companyFor={companyFor} />
           </div>
         </div>
+        {/* Deleting and restoring are both writes. */}
+        {canWrite && (
         <div className="flex shrink-0 items-center gap-1">
           {message.trashed ? (
             <button
@@ -1295,6 +1311,7 @@ function Reader({
             </button>
           )}
         </div>
+        )}
       </div>
 
       <div className="-mx-1 flex-1 scroll-p-1 overflow-y-auto px-1 py-5">
@@ -1447,6 +1464,10 @@ function Reader({
         )}
       </div>
 
+      {/* Reply, Forward and Track as a ticket all write. A view-only reader
+          keeps the message itself, its thread and every attachment — reading
+          the mail is the job. */}
+      {canWrite && (
       <div className="flex items-center gap-3 border-t border-[var(--border)] pt-4">
         <button
           onClick={() => setMode(mode === "reply" ? null : "reply")}
@@ -1464,6 +1485,7 @@ function Reader({
         </button>
         {!ticket && !message.trashed && <TrackTicketButton threadId={message.threadId} />}
       </div>
+      )}
 
       {viewing && <AttachmentViewer attachment={viewing} from={message.name} onClose={() => setViewing(null)} />}
     </div>
@@ -2284,6 +2306,7 @@ function FileUnderProject({
   projects: ProjectOption[];
   companyFor: Record<string, string>;
 }) {
+  const canWrite = useCanWrite();
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const filed = projects.find((p) => p.id === message.dealId);
@@ -2308,6 +2331,28 @@ function FileUnderProject({
   /* Nothing to file against, and nothing useful to say about it. A dropdown
      with no options is a control that cannot be used. */
   if (projects.length === 0 && !message.dealId) return null;
+
+  /*
+     A view-only reader is told WHICH job this conversation belongs to, and
+     cannot move it.
+
+     The filing is part of reading the thread — "this is the Heineken warehouse
+     job" is the context the message makes sense in. So the fact stays and the
+     control goes, and a thread filed nowhere says nothing at all rather than
+     offering an empty menu.
+  */
+  if (!canWrite) {
+    const filed = projects.find((p) => p.id === message.dealId);
+    if (!filed) return null;
+    return (
+      <p className="mt-1.5 flex min-w-0 items-center gap-1.5 text-faint">
+        <Briefcase className="h-3 w-3 shrink-0" aria-hidden />
+        <span className="truncate" style={{ fontSize: "11px" }}>
+          {filed.title}
+        </span>
+      </p>
+    );
+  }
 
   async function choose(dealId: string) {
     setSaving(true);

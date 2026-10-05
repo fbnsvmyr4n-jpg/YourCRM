@@ -35,6 +35,8 @@ const GATED = [
   "src/app/(app)/contacts/ContactsView.tsx",
   "src/app/(app)/companies/CompaniesView.tsx",
   "src/components/tasks/NewTaskForm.tsx",
+  "src/app/(app)/inbox/InboxView.tsx",
+  "src/components/tickets/TicketControls.tsx",
 ];
 
 describe("the screens a viewer meets", () => {
@@ -98,5 +100,49 @@ describe("tasks", () => {
        ends up asserting its own documentation. */
     expect(schedule).not.toMatch(/<NewTaskForm[\s/>]/);
     expect(schedule).toMatch(/canWrite && !addOpen && !editing/);
+  });
+});
+
+describe("the inbox", () => {
+  const inbox = read("src/app/(app)/inbox/InboxView.tsx");
+  const tickets = read("src/components/tickets/TicketControls.tsx");
+
+  /*
+     The largest screen still untouched when this pass started: `InboxView` did
+     not consult `useCanWrite` at ALL, so a view-only reader was offered
+     compose, reply, forward, delete, restore, swipe-to-delete, the project
+     filing menu and the full set of ticket controls.
+  */
+  it("offers no way to write a message", () => {
+    expect(inbox).toMatch(/\{canWrite && \(\s*<button\s*onClick=\{\(\) => \{\s*setResumedDraft/);
+    expect(inbox).toMatch(/Reply, Forward and Track as a ticket all write/);
+  });
+
+  it("does not offer a swipe that would spring back", () => {
+    /* The same mistake as a draggable card a viewer cannot move. */
+    expect(inbox).toMatch(/if \(m\.trashed \|\| !canWrite\) return <div key=\{m\.id\}>\{row\}<\/div>;/);
+  });
+
+  it("STILL SHOWS WHAT A TICKET IS, because that is information", () => {
+    /*
+       The point this file keeps having to make from the other side: hiding the
+       writes must not blind the role. Which state a ticket is in, how urgent it
+       is and whose desk it is on are facts about the conversation on screen.
+       Three selects that refuse every change are what goes.
+    */
+    expect(tickets).toMatch(/if \(!canWrite\) \{[\s\S]{0,400}<TicketLine ticket=\{ticket\}/);
+  });
+
+  it("STILL SAYS WHICH JOB A CONVERSATION BELONGS TO", () => {
+    /* The filing is part of reading the thread — it is the context the message
+       makes sense in. The menu goes; the fact stays. */
+    expect(inbox).toMatch(/A view-only reader is told WHICH job this conversation belongs to/);
+    expect(inbox).toMatch(/if \(!canWrite\) \{\s*const filed = projects\.find/);
+  });
+
+  it("never puts `hidden` on an element that is also `flex`", () => {
+    /* How the compose button was written first time. This project's failure
+       log: the winner is decided by stylesheet order, not by intent. */
+    expect(inbox).not.toMatch(/"btn-accent[^"]*flex[^"]*",\s*!canWrite && "hidden"/);
   });
 });

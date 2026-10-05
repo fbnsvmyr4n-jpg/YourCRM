@@ -197,10 +197,15 @@ describe("swiping a message away", () => {
     expect(code).toMatch(/Keep it/);
   });
 
-  it("offers no swipe on something already deleted", () => {
+  it("offers no swipe on something already deleted, or to a reader who cannot delete", () => {
     // Trash has Restore. Swiping to delete a deleted message is a gesture with
     // nothing behind it.
-    expect(code).toMatch(/if \(m\.trashed\) return <div key=\{m\.id\}>\{row\}<\/div>;/);
+    //
+    // The same is true for a view-only reader, for a different reason: the
+    // swipe would be refused and spring back, which is the drag on the deals
+    // board all over again. Two reasons, one guard — so this now pins both
+    // rather than the one it was written for.
+    expect(code).toMatch(/if \(m\.trashed \|\| !canWrite\) return <div key=\{m\.id\}>\{row\}<\/div>;/);
   });
 });
 

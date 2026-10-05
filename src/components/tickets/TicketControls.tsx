@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useCanWrite } from "@/components/shell/CanWrite";
 import { Ticket as TicketIcon } from "lucide-react";
 import { useNow } from "@/components/ui/TimeAgo";
 import { clsx } from "@/lib/clsx";
@@ -88,6 +89,7 @@ export function TicketBar({
   team: { id: string; name: string }[];
   currentUserId: string | null;
 }) {
+  const canWrite = useCanWrite();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -106,6 +108,27 @@ export function TicketBar({
   /* Somebody no longer on the team still shows by name rather than vanishing
      into "Unassigned", which would be a different, untrue statement. */
   const inTeam = !ticket.assigneeUserId || team.some((p) => p.id === ticket.assigneeUserId);
+
+  /*
+     A view-only reader SEES the ticket and cannot set it.
+
+     Not hidden: which state a ticket is in, how urgent it is and whose desk it
+     is on are facts about the conversation on screen, and a role whose whole
+     job is to look at the work needs them. Three selects that refuse every
+     change are the thing to remove, not the information in them.
+
+     `TicketLine` is the read-only form of exactly this and already existed for
+     the list rows — so this is the same sentence the list shows, rather than a
+     second way of saying it that could drift.
+  */
+  if (!canWrite) {
+    const assignee = team.find((p) => p.id === ticket.assigneeUserId)?.name ?? null;
+    return (
+      <div className="mb-4 rounded-xl border border-[var(--border)] px-3 py-2.5">
+        <TicketLine ticket={ticket} assignee={assignee} />
+      </div>
+    );
+  }
 
   return (
     <div className="mb-4 rounded-xl border border-[var(--border)] px-3 py-2.5">
@@ -168,8 +191,12 @@ export function TicketBar({
 
 /** Start tracking this conversation. */
 export function TrackTicketButton({ threadId }: { threadId: string }) {
+  const canWrite = useCanWrite();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /* Opening a ticket is a write. Nothing stands in its place: a conversation
+     that is not tracked has nothing to say about itself. */
+  if (!canWrite) return null;
   return (
     <>
       <button
