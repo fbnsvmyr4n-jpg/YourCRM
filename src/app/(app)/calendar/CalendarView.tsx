@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useElementWidth } from "@/lib/use-element-width";
 import {
   Building2,
   Calendar as CalendarIcon,
@@ -345,6 +346,29 @@ function MonthGrid({
 }) {
   const cells = useMemo(() => monthGrid(anchor.year, anchor.month), [anchor.year, anchor.month]);
 
+  /*
+     Seven columns of a phone is 45px a day, and a meeting pill needs an icon,
+     a name and a time. On a 375px screen every one of them rendered as a
+     character or two stacked vertically — "T / h / a" — which is not a short
+     label, it is an unreadable one, and the cells were 112px tall so the month
+     ran well past the bottom of the screen as well.
+
+     So below the threshold a day shows DOTS: one per meeting, in that
+     meeting's own colour, which is what a phone calendar has always done. The
+     day is still the target and tapping it opens that day — `onPickDay`
+     already drills into the day view, so the detail nobody can read here is
+     one tap away and fully legible there.
+
+     Measured off the grid rather than the viewport, the same way the inbox
+     decides to stack: it is the width this grid actually has that decides
+     whether a pill fits, not the size of the window around it.
+  */
+  const gridRef = useRef<HTMLDivElement>(null);
+  const width = useElementWidth(gridRef);
+  /* 0 before the first measurement. Pills are the richer view, so an unmeasured
+     grid shows those rather than flashing dots on a desktop. */
+  const dotsOnly = width > 0 && width < 560;
+
   return (
     <>
       <div className="grid grid-cols-7 border-y border-[var(--border)] bg-[var(--raise)]/40">
@@ -355,7 +379,7 @@ function MonthGrid({
         ))}
       </div>
 
-      <div className="grid flex-1 grid-cols-7 grid-rows-6">
+      <div ref={gridRef} className="grid flex-1 grid-cols-7 grid-rows-6">
         {cells.map((c, i) => {
           const day: DayRef = { year: c.year, month: c.month, day: c.day };
           const dayMeetings = forDay(day);
@@ -365,7 +389,10 @@ function MonthGrid({
             <div
               key={i}
               className={clsx(
-                "group relative min-h-[112px] border-b border-r border-[var(--border)] p-1.5",
+                "group relative border-b border-r border-[var(--border)] p-1.5",
+                /* Dots need a fraction of the room pills do, and the whole
+                   month then fits a phone screen without scrolling. */
+                dotsOnly ? "min-h-[58px]" : "min-h-[112px]",
                 i % 7 === 0 && "border-l",
                 !c.inMonth && "bg-[var(--raise)]/30"
               )}
@@ -389,11 +416,35 @@ function MonthGrid({
                 {c.day}
               </p>
 
-              <div className="relative space-y-1">
-                {dayMeetings.map((m) => (
-                  <MeetingPill key={m.id} meeting={m} active={m.id === selectedId} onClick={() => onSelect(m.id)} />
-                ))}
-              </div>
+              {dotsOnly ? (
+                /* Not buttons. The cell behind them is already the target and
+                   opens the day; a 6px dot is below any reasonable touch size,
+                   so making each one its own control would be offering a tap
+                   nobody can land. */
+                <div className="pointer-events-none relative flex flex-wrap gap-1 px-0.5">
+                  {dayMeetings.slice(0, 4).map((m) => (
+                    <span
+                      key={m.id}
+                      className="h-1.5 w-1.5 rounded-full"
+                      style={{ background: TYPE_STYLE[m.type].color }}
+                    />
+                  ))}
+                  {/* A fifth meeting is said as a number rather than silently
+                      dropped — "+2" is true, four dots on a day with six is
+                      not. */}
+                  {dayMeetings.length > 4 && (
+                    <span className="text-[9px] font-semibold leading-none text-faint">
+                      +{dayMeetings.length - 4}
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <div className="relative space-y-1">
+                  {dayMeetings.map((m) => (
+                    <MeetingPill key={m.id} meeting={m} active={m.id === selectedId} onClick={() => onSelect(m.id)} />
+                  ))}
+                </div>
+              )}
             </div>
           );
         })}

@@ -230,13 +230,27 @@ export function VoiceAgentConsole({
       )}
 
       {/* Agent status + stats */}
-      <div className="grid grid-cols-1 gap-4 @min-[680px]:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]">
+      {/* Two across on a phone rather than four stacked cards.
+
+          Each of these is a number and a word, and one per row pushed the Call
+          Log — the thing the page is actually for — most of a screen down.
+
+          Not three across, on measurement rather than taste: at 375px three
+          columns leave about 47px of text beside a 44px icon, and "8m 35s"
+          needs 70. Two columns leave 107. So the pair that compare sit together
+          — calls handled against meetings booked — and talk time takes the full
+          width under them, which is the shape the deals board already uses for
+          the same reason.
+
+          Every span is `@min-[680px]:col-span-1`, so the desktop row is
+          untouched. */}
+      <div className="grid grid-cols-2 gap-4 @min-[680px]:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]">
         {/* The badge used to read LIVE over fixed office hours, both hardcoded.
             Nothing could be dialled and there were no hours — so it asserted a
             working phone line that did not exist. It now reports the real state
             of the telephony config: live only when a number is actually
             connected, and honest about being simulated when it isn't. */}
-        <Card className="flex items-center gap-4">
+        <Card className="col-span-2 flex items-center gap-4 @min-[680px]:col-span-1">
           <span
             className="relative grid h-12 w-12 shrink-0 place-items-center rounded-2xl"
             style={{ background: "var(--accent-soft)" }}
@@ -268,7 +282,14 @@ export function VoiceAgentConsole({
         </Card>
         <Stat icon={<PhoneCall className="h-5 w-5" />} value={String(calls.length)} label="Calls handled" tone="var(--accent)" soft="var(--accent-soft)" />
         <Stat icon={<CalendarPlus className="h-5 w-5" />} value={String(booked)} label="Meetings booked" tone="var(--green)" soft="var(--green-soft)" />
-        <Stat icon={<Clock className="h-5 w-5" />} value={duration(totalSec)} label="Talk time" tone="var(--purple)" soft="var(--purple-soft)" />
+        <Stat
+          className="col-span-2 @min-[680px]:col-span-1"
+          icon={<Clock className="h-5 w-5" />}
+          value={duration(totalSec)}
+          label="Talk time"
+          tone="var(--purple)"
+          soft="var(--purple-soft)"
+        />
       </div>
 
       <div className="mt-5 grid grid-cols-1 gap-5 @min-[780px]:grid-cols-[minmax(0,380px)_minmax(0,1fr)]">
@@ -349,15 +370,17 @@ function Stat({
   label,
   tone,
   soft,
+  className,
 }: {
   icon: React.ReactNode;
   value: string;
   label: string;
   tone: string;
   soft: string;
+  className?: string;
 }) {
   return (
-    <Card className="flex items-center gap-3">
+    <Card className={clsx("flex items-center gap-3", className)}>
       <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl" style={{ background: soft, color: tone }}>
         {icon}
       </span>
