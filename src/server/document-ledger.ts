@@ -1,4 +1,6 @@
 import type { DocumentKind, DocumentStatus } from "./repos/projects";
+import { getSettings } from "./repos/settings";
+import { payableCents } from "./vat";
 import { orderCounts, quoteCounts } from "./stage-money";
 import type { TenantQuery } from "./tenant";
 
@@ -37,6 +39,9 @@ export type LedgerRow = {
   partyEmail: string | null;
   /** Whether this document's money is counted — see `stage-money.ts`. */
   counts: boolean;
+  /** What has arrived against it, and what is owed. Invoices only; 0 elsewhere. */
+  receivedCents: number;
+  dueCents: number;
 };
 
 export type Ledger = {
@@ -58,8 +63,10 @@ export type Ledger = {
 export function documentCounts(kind: DocumentKind, status: DocumentStatus): boolean {
   if (kind === "quote") return quoteCounts(status);
   if (kind === "purchase_order") return orderCounts(status);
-  /* An invoice is the same money as the quotation it bills; this ledger is not
-     where that question is answered. */
+  /* For an invoice the question this ledger answers is the bookkeeper's one:
+     has the money arrived. Not "does it count as revenue" — that is the
+     quotation's job and `stage-money` answers it there. */
+  if (kind === "invoice") return status === "paid";
   return false;
 }
 
@@ -78,13 +85,15 @@ export async function documentLedger(q: TenantQuery, kind: DocumentKind): Promis
     project_number: string | null;
     line_count: string;
     total_cents: string;
+    received_cents: string;
   }>(
     `SELECT d.id, d.number, d.status, d.party,
             d.issued_on::text AS issued_on, d.sent_at, d.notes,
             COALESCE(d.party_email, c.email) AS party_email,
             d.deal_id AS project_id, deal.title AS project_title, deal.number AS project_number,
             COALESCE(lines.n, 0)::text AS line_count,
-            COALESCE(lines.total, 0)::bigint::text AS total_cents
+            COALESCE(lines.total, 0)::bigint::text AS total_cents,
+            COALESCE(paid.received, 0)::bigint::text AS received_cents
        FROM documents d
        JOIN deals deal
          ON deal.id = d.deal_id AND deal.sub_account_id = d.sub_account_id
@@ -100,18 +109,54 @@ export async function documentLedger(q: TenantQuery, kind: DocumentKind): Promis
            FROM document_lines l
           WHERE l.sub_account_id = d.sub_account_id AND l.document_id = d.id
        ) lines ON TRUE
+       /* What has actually arrived against it. Only invoices are paid against,
+          and the join costs nothing on the kinds that are not. */
+       LEFT JOIN LATERAL (
+         SELECT SUM(p.amount_cents) AS received
+           FROM invoice_payments p
+          WHERE p.sub_account_id = d.sub_account_id AND p.document_id = d.id
+            AND p.status = 'paid'
+       ) paid ON TRUE
       WHERE d.sub_account_id = $1 AND d.kind = $2 AND d.deleted_at IS NULL
       ORDER BY d.issued_on DESC NULLS LAST, d.number DESC`,
     [q.ctx.subAccountId, kind]
   );
+
+  /* Read once for the whole ledger. What a client OWES is the lines plus VAT
+     where this workspace charges it on top — the same `payableCents` the
+     webhook settles by, so the figure on this screen is the figure that
+     settles. */
+  const { vatRateBp, pricesIncludeVat } = await getSettings(q);
 
   let countedCents = 0;
   let notCountedCents = 0;
   const mapped = rows.map((r) => {
     const totalCents = Number(r.total_cents);
     const counts = documentCounts(kind, r.status);
-    if (counts) countedCents += totalCents;
-    else notCountedCents += totalCents;
+    const receivedCents = Number(r.received_cents);
+    const dueCents = kind === "invoice" ? payableCents(totalCents, vatRateBp, pricesIncludeVat) : 0;
+
+    if (kind === "invoice") {
+      /*
+         An invoice ledger counts MONEY, not statuses.
+
+         Summing the totals of invoices marked paid produced two figures that
+         contradicted the rows beneath them: "Outstanding R0" over a row saying
+         R3,000 outstanding, because the status said paid while the payments
+         against it fell short — which is exactly what happens when VAT is
+         switched on after an invoice was settled.
+
+         So this asks the payments. Received is what has arrived; outstanding
+         is what is still owed on anything not called off. The two always
+         reconcile with the list, because they are made of the same numbers.
+      */
+      countedCents += receivedCents;
+      if (r.status !== "cancelled") notCountedCents += Math.max(0, dueCents - receivedCents);
+    } else if (counts) {
+      countedCents += totalCents;
+    } else {
+      notCountedCents += totalCents;
+    }
     return {
       id: r.id,
       number: r.number,
@@ -127,6 +172,8 @@ export async function documentLedger(q: TenantQuery, kind: DocumentKind): Promis
       notes: r.notes,
       partyEmail: r.party_email,
       counts,
+      receivedCents,
+      dueCents,
     };
   });
 
@@ -177,6 +224,30 @@ export const LEDGERS = {
     countedLabel: "Accepted",
     notCountedLabel: "Not accepted yet",
     partyLabel: "Client",
+    blurb: "What you have offered clients, across every job.",
+    countedBlurb: "Agreed by the client. Counted on every project.",
+    notCountedBlurb: "Shown here, and deliberately not in any project's figures.",
+  },
+  /*
+     The bookkeeper's screen.
+
+     Invoices had no ledger at all: they existed only inside a job, which is a
+     screen the finance role cannot open — so the one person whose whole job is
+     the money coming in could see quotations and purchase orders and not a
+     single invoice. `canSettleInvoice` said they may confirm a payment, and
+     there was nowhere they could reach to do it.
+  */
+  invoice: {
+    kind: "invoice" as const,
+    prefix: "INV",
+    title: "Invoices",
+    one: "invoice",
+    countedLabel: "Received",
+    notCountedLabel: "Outstanding",
+    partyLabel: "Client",
+    blurb: "What clients owe you, and what they have paid.",
+    countedBlurb: "Money actually recorded against an invoice.",
+    notCountedBlurb: "Still owed on invoices that have not been called off.",
   },
   purchase_order: {
     kind: "purchase_order" as const,
@@ -186,5 +257,8 @@ export const LEDGERS = {
     countedLabel: "Committed",
     notCountedLabel: "Cancelled or declined",
     partyLabel: "Supplier",
+    blurb: "What you have committed to suppliers, across every job.",
+    countedBlurb: "Ordered and not called off. Counted on every project.",
+    notCountedBlurb: "Shown here, and deliberately not in any project's figures.",
   },
 } as const;

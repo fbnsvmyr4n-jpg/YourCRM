@@ -9,6 +9,7 @@ import { clsx } from "@/lib/clsx";
 import { useFormDisclosure } from "@/lib/form-disclosure";
 import { useKeptForm } from "@/lib/use-kept-form";
 import { useCanWrite } from "@/components/shell/CanWrite";
+import { RecordPayment } from "@/components/documents/RecordPayment";
 import { useMoney } from "@/components/money/CurrencyProvider";
 import type { DocumentStatus } from "@/server/repos/projects";
 import type { LedgerRow } from "@/server/document-ledger";
@@ -48,13 +49,24 @@ export type Ledger = {
 };
 
 export type LedgerCopy = {
-  kind: "quote" | "purchase_order";
+  kind: "quote" | "purchase_order" | "invoice";
   title: string;
   /** "quotation" / "purchase order", for sentences. */
   one: string;
   countedLabel: string;
   notCountedLabel: string;
   partyLabel: string;
+  /*
+     The words, owned by each ledger rather than branched on here.
+
+     These were three ternaries on `kind === "quote"`, which silently gave a
+     third ledger the purchase-order wording the day one arrived: Invoices
+     opened saying "What you have committed to suppliers". A binary standing in
+     for a set is a bug waiting for the third member.
+  */
+  blurb: string;
+  countedBlurb: string;
+  notCountedBlurb: string;
 };
 
 type Project = { id: string; title: string; client: string | null };
@@ -213,11 +225,7 @@ export function DocumentLedgerView({
     <div className="mx-auto flex max-w-[1500px] animate-fade-up flex-col gap-5">
       <div className="pt-1">
         <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">{copy.title}</h1>
-        <p className="mt-1 text-sm text-muted">
-          {copy.kind === "quote"
-            ? "What you have offered clients, across every job."
-            : "What you have committed to suppliers, across every job."}
-        </p>
+        <p className="mt-1 text-sm text-muted">{copy.blurb}</p>
       </div>
 
       {/* The two figures, kept apart.
@@ -233,11 +241,7 @@ export function DocumentLedgerView({
           <p className="mt-1 text-3xl font-bold tracking-tight tabular-nums">
             {money(ledger.countedCents)}
           </p>
-          <p className="mt-1 text-xs text-muted">
-            {copy.kind === "quote"
-              ? "Agreed by the client. Counted on every project."
-              : "Ordered and not called off. Counted on every project."}
-          </p>
+          <p className="mt-1 text-xs text-muted">{copy.countedBlurb}</p>
         </Card>
         <Card className="p-4">
           <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">
@@ -246,9 +250,7 @@ export function DocumentLedgerView({
           <p className="mt-1 text-3xl font-bold tracking-tight tabular-nums text-muted">
             {money(ledger.notCountedCents)}
           </p>
-          <p className="mt-1 text-xs text-muted">
-            Shown here, and deliberately not in any project&rsquo;s figures.
-          </p>
+          <p className="mt-1 text-xs text-muted">{copy.notCountedBlurb}</p>
         </Card>
       </div>
 
@@ -360,9 +362,15 @@ export function DocumentLedgerView({
                   className="focus-ring min-w-0 flex-1 rounded"
                   title={`Open ${r.number}`}
                 >
-                  <p className="text-sm font-semibold">
-                    {r.number}
-                    <span className="ml-2 font-normal text-muted">{r.party ?? "—"}</span>
+                  {/* The number never breaks. An invoice row carries more
+                      than a quotation's — a payment line and a box to record
+                      one — and the squeeze pushed "INV-1002" onto two lines as
+                      "INV-" and "1002", which reads as a rendering fault. The
+                      reference is the one thing on the row somebody quotes down
+                      a telephone, so it is the last thing that may wrap. */}
+                  <p className="flex min-w-0 items-baseline gap-2 text-sm font-semibold">
+                    <span className="whitespace-nowrap">{r.number}</span>
+                    <span className="truncate font-normal text-muted">{r.party ?? "—"}</span>
                   </p>
                   <p className="mt-0.5 truncate text-xs text-muted">
                     {r.projectNumber ? `${r.projectNumber} · ` : ""}
@@ -413,7 +421,22 @@ export function DocumentLedgerView({
                     `awaiting_approval` or `approved`, and a select showing
                     "draft" over a pending approval threw one away the last
                     time this was built. The server refuses it too. */}
-                {r.status === "awaiting_approval" || r.status === "approved" ? (
+                {/* An invoice's status is a CONSEQUENCE of the payments
+                    recorded against it, never a word somebody picks — the same
+                    rule the job screen follows. So it reads as text here, and
+                    the way to change it is to record money arriving. */}
+                {copy.kind === "invoice" ? (
+                  <p className="shrink-0 text-xs @min-[560px]:w-36 @min-[560px]:text-right">
+                    <span className="capitalize" style={{ color: STATUS_TONE[r.status] }}>
+                      {statusLabel(r.status)}
+                    </span>
+                    {r.status !== "paid" && r.receivedCents > 0 && (
+                      <span className="block text-[11px] text-faint">
+                        {money(r.receivedCents)} of {money(r.dueCents)}
+                      </span>
+                    )}
+                  </p>
+                ) : r.status === "awaiting_approval" || r.status === "approved" ? (
                   <p className="shrink-0 text-xs @min-[560px]:w-36 @min-[560px]:text-right">
                     <span className="capitalize" style={{ color: STATUS_TONE[r.status] }}>
                       {statusLabel(r.status)}
@@ -442,6 +465,24 @@ export function DocumentLedgerView({
                       <span className="text-[11px] text-faint">not counted</span>
                     )}
                   </form>
+                )}
+
+                {/* Where a bookkeeper actually does their job.
+
+                    `RecordPayment` decides for itself whether this reader may
+                    settle an invoice — it is a stricter gate than writing, and
+                    the one role that holds it is the one that could not reach
+                    this screen at all until it existed. */}
+                {copy.kind === "invoice" && r.status !== "cancelled" && (
+                  <div className="w-full">
+                    <RecordPayment
+                      documentId={r.id}
+                      number={r.number}
+                      dueCents={r.dueCents}
+                      receivedCents={r.receivedCents}
+                      today={today}
+                    />
+                  </div>
                 )}
               </li>
             ))}

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { CurrencyProvider } from "@/components/money/CurrencyProvider";
-import { canSettleInvoice, canWrite } from "@/server/permissions";
+import { canSettleInvoice, canWrite, isViewOnly } from "@/server/permissions";
 import { CanWriteProvider } from "./CanWrite";
 import { MaySettleProvider } from "./MaySettle";
 import { VocabularyProvider } from "./Vocabulary";
@@ -102,7 +102,7 @@ export function AppShell({
           {/* Said once, before anything is attempted. The database refuses a
               view-only person's changes regardless; this is so nobody types a
               paragraph first to find out. */}
-          {!canWrite(user.role) && (
+          {isViewOnly(user.role) && (
             <p
               role="status"
               className="mx-auto mb-3 max-w-[1500px] rounded-xl px-4 py-2.5 text-sm font-medium print:hidden"

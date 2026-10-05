@@ -5,6 +5,7 @@ import {
   CalendarDays,
   ClipboardList,
   FileText,
+  Receipt,
   Handshake,
   Headphones,
   Home,
@@ -94,6 +95,10 @@ export const NAV: NavSection[] = [
            without remembering which job it was on. */
         children: [
           { label: "Quotes", href: "/quotes", icon: FileText, isMoney: true },
+          /* The money coming IN. Had no screen of its own at all until now:
+             invoices lived only inside a job, which is the one place the
+             finance role cannot go. */
+          { label: "Invoices", href: "/invoices", icon: Receipt, isMoney: true },
           { label: "Purchase orders", href: "/purchase-orders", icon: ClipboardList, isMoney: true },
         ],
       },

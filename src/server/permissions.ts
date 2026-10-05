@@ -194,6 +194,24 @@ export function canWrite(role: string): boolean {
 }
 
 /**
+ * Is this reader ACTUALLY view-only — able to look at the product and change
+ * nothing in it?
+ *
+ * Not the same question as `canWrite`, and conflating them told a lie.
+ * `canWrite` means "may change customer records", so it is false for finance
+ * and for IT — who have no business in the pipeline — and the shell was using
+ * it to decide whether to print "View only, and changes are not saved" across
+ * the top of every page. A bookkeeper who settles invoices and manages the
+ * billing was being told their work would not save.
+ *
+ * Only the viewer role is view-only. Finance and IT write plenty; they write
+ * elsewhere.
+ */
+export function isViewOnly(role: string): boolean {
+  return role === "viewer";
+}
+
+/**
  * Who may declare an invoice PAID by hand.
  *
  * Not the person who sold the work. Confirming that money arrived is how

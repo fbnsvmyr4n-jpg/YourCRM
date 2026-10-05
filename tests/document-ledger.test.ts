@@ -123,8 +123,18 @@ describe("what a purchase order ledger totals", () => {
     expect(documentCounts("quote", "sent")).toBe(false);
     expect(documentCounts("purchase_order", "draft")).toBe(true);
     expect(documentCounts("purchase_order", "cancelled")).toBe(false);
-    /* An invoice is the same money as its quotation, seen later. */
-    expect(documentCounts("invoice", "paid")).toBe(false);
+    /*
+       An invoice's ledger answers a DIFFERENT question from a quotation's.
+
+       This said false, on the reasoning that an invoice is the same money as
+       the quotation it bills and must not be counted twice — which is still
+       true of the PROJECT's figures, and `stage-money` is where that is
+       enforced. It was never true of the bookkeeper's screen, which asks
+       whether the money has arrived. Invoices had no ledger at all when this
+       was written, so the question had not come up.
+    */
+    expect(documentCounts("invoice", "paid")).toBe(true);
+    expect(documentCounts("invoice", "sent")).toBe(false);
   });
 });
 
