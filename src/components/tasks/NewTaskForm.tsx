@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef } from "react";
+import { useRef, useState } from "react";
+import { clsx } from "@/lib/clsx";
 import { useCanWrite } from "@/components/shell/CanWrite";
 import { useKeptForm } from "@/lib/use-kept-form";
 import { Plus } from "lucide-react";
@@ -53,6 +54,21 @@ export function NewTaskForm({
   */
   const canWrite = useCanWrite();
   const formRef = useRef<HTMLFormElement>(null);
+  /*
+     Whether the day / person / job row is showing.
+
+     On a phone those three selects are always-on furniture: with the heading
+     and the tab row they filled the top third of the screen, so Tasks opened on
+     a form instead of on the tasks. The list is what the page is for.
+
+     They appear the moment somebody starts writing one, which is the moment
+     they mean anything — and they are still in the form while hidden, so a
+     one-line task posts with today, me and no job exactly as before.
+
+     Wide screens never hide them. There is room, nothing is gained, and
+     Bradley's standing rule is that mobile work does not change the desktop.
+  */
+  const [writing, setWriting] = useState(false);
   const { state, onSubmit, pending } = useKeptForm<TaskFormState>(async (prev, formData) => {
     const out = await createTodoAction(prev, formData);
     if (out?.ok) {
@@ -79,6 +95,7 @@ export function NewTaskForm({
           autoFocus={compact}
           placeholder={contactId ? "What needs doing for them?" : "Add a task…"}
           aria-label="Task"
+          onFocus={() => setWriting(true)}
           className="field-input min-w-0 flex-1"
         />
         <button
@@ -91,7 +108,20 @@ export function NewTaskForm({
           <span className="hidden @min-[440px]:inline">{pending ? "Adding…" : "Add"}</span>
         </button>
       </div>
-      <div className={compact ? "grid grid-cols-2 gap-2" : "grid grid-cols-2 gap-2 @min-[560px]:grid-cols-3"}>
+      {/* `hidden` and `grid` are never both on this element.
+
+          A note in this project's own failure log: `hidden` beside a display
+          utility is decided by stylesheet order rather than by intent. So the
+          two states are written as two complete class strings instead of a base
+          plus an override. */}
+      <div
+        className={clsx(
+          writing || compact
+            ? "grid grid-cols-2 gap-2"
+            : "hidden grid-cols-2 gap-2 @min-[560px]:grid",
+          !compact && "@min-[560px]:grid-cols-3"
+        )}
+      >
         <label className="block min-w-0">
           <span className="sr-only">Due</span>
           <select name="dueOn" defaultValue={today} aria-label="Due" className="field-input">
