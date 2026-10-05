@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import { refused } from "@/server/write-result";
+import { useCanWrite } from "@/components/shell/CanWrite";
 import { createPortal } from "react-dom";
 import { useOpenFromQuery } from "@/lib/useOpenFromQuery";
 import {
@@ -716,6 +717,7 @@ function MeetingCard({
 }) {
   const outcome: MeetingOutcome = m.outcome ?? "scheduled";
   const tone = OUTCOME_COLORS[outcome];
+  const canWrite = useCanWrite();
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
 
@@ -783,20 +785,32 @@ function MeetingCard({
           )}
           {m.type}
         </span>
-        <select
-          value={outcome}
-          disabled={saving || busy}
-          onChange={(e) => change(e.target.value)}
-          aria-label={`Outcome for the meeting with ${m.name}`}
-          className="focus-ring ml-auto cursor-pointer rounded-md border-0 px-2 py-1 text-[11px] font-semibold outline-none disabled:opacity-50"
-          style={{ background: tone.bg, color: tone.fg }}
-        >
-          {MEETING_OUTCOMES.map((o) => (
-            <option key={o} value={o}>
-              {OUTCOME_LABELS[o]}
-            </option>
-          ))}
-        </select>
+        {/* What happened at a meeting is a fact about it, so a view-only
+            reader still reads it — as a badge rather than a menu that refuses
+            every change. Same shape, same colours, nothing to press. */}
+        {canWrite ? (
+          <select
+            value={outcome}
+            disabled={saving || busy}
+            onChange={(e) => change(e.target.value)}
+            aria-label={`Outcome for the meeting with ${m.name}`}
+            className="focus-ring ml-auto cursor-pointer rounded-md border-0 px-2 py-1 text-[11px] font-semibold outline-none disabled:opacity-50"
+            style={{ background: tone.bg, color: tone.fg }}
+          >
+            {MEETING_OUTCOMES.map((o) => (
+              <option key={o} value={o}>
+                {OUTCOME_LABELS[o]}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <span
+            className="ml-auto rounded-md px-2 py-1 text-[11px] font-semibold"
+            style={{ background: tone.bg, color: tone.fg }}
+          >
+            {OUTCOME_LABELS[outcome]}
+          </span>
+        )}
       </div>
 
       {outcome === "lost" && m.lossReason && (
@@ -813,6 +827,10 @@ function MeetingCard({
       )}
 
       <div className="mt-3 flex items-center gap-2">
+        {/* Join stays for everybody — attending a meeting is not a write, and
+            it is the one thing on this card somebody might actually need in
+            the next five minutes. Reschedule and delete go. */}
+        {canWrite && (
         <button
           onClick={onEdit}
           disabled={busy}
@@ -820,6 +838,7 @@ function MeetingCard({
         >
           <Pencil className="h-3.5 w-3.5" /> Reschedule
         </button>
+        )}
         {/* Only a real stored link becomes a Join button — otherwise it would
             look actionable and do nothing. */}
         {m.link && (
@@ -832,6 +851,7 @@ function MeetingCard({
             <ExternalLink className="h-3.5 w-3.5" /> Join
           </a>
         )}
+        {canWrite && (
         <button
           onClick={onDelete}
           disabled={busy}
@@ -840,6 +860,7 @@ function MeetingCard({
         >
           <Trash2 className="h-4 w-4" />
         </button>
+        )}
       </div>
     </div>
   );
@@ -867,6 +888,7 @@ function MeetingRow({
 }) {
   const outcome: MeetingOutcome = m.outcome ?? "scheduled";
   const tone = OUTCOME_COLORS[outcome];
+  const canWrite = useCanWrite();
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
 
@@ -947,20 +969,29 @@ function MeetingRow({
         </span>
       </td>
       <td className="py-3 pr-3">
-        <select
-          value={outcome}
-          disabled={saving || busy}
-          onChange={(e) => change(e.target.value)}
-          aria-label={`Outcome for the meeting with ${m.name}`}
-          className="focus-ring cursor-pointer rounded-md border-0 px-2 py-1 text-xs font-semibold outline-none disabled:opacity-50"
-          style={{ background: tone.bg, color: tone.fg }}
-        >
-          {MEETING_OUTCOMES.map((o) => (
-            <option key={o} value={o}>
-              {OUTCOME_LABELS[o]}
-            </option>
-          ))}
-        </select>
+        {canWrite ? (
+          <select
+            value={outcome}
+            disabled={saving || busy}
+            onChange={(e) => change(e.target.value)}
+            aria-label={`Outcome for the meeting with ${m.name}`}
+            className="focus-ring cursor-pointer rounded-md border-0 px-2 py-1 text-xs font-semibold outline-none disabled:opacity-50"
+            style={{ background: tone.bg, color: tone.fg }}
+          >
+            {MEETING_OUTCOMES.map((o) => (
+              <option key={o} value={o}>
+                {OUTCOME_LABELS[o]}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <span
+            className="rounded-md px-2 py-1 text-xs font-semibold"
+            style={{ background: tone.bg, color: tone.fg }}
+          >
+            {OUTCOME_LABELS[outcome]}
+          </span>
+        )}
         {outcome === "lost" && m.lossReason && (
           <p className="mt-1 text-[10px] text-faint">{m.lossReason}</p>
         )}
@@ -974,6 +1005,8 @@ function MeetingRow({
       </td>
       <td className="py-3 text-right">
         <div className="flex items-center justify-end gap-1">
+          {canWrite && (
+          <>
           <button
             onClick={onEdit}
             disabled={busy}
@@ -990,6 +1023,8 @@ function MeetingRow({
           >
             <Trash2 className="h-4 w-4" />
           </button>
+          </>
+          )}
         </div>
       </td>
     </tr>
@@ -1015,6 +1050,14 @@ function dateKey(sel: DayRef): string {
   return `${sel.year}-${m}-${d}`;
 }
 
+/*
+   Booking, rescheduling and recording an outcome are all writes.
+
+   A view-only reader keeps everything this page is FOR: the figures, the
+   funnel, Loss Insights, who is coming up and when. What goes is the booking
+   panel, the outcome menus, Reschedule, delete and the notes box — six controls
+   that each submitted and were refused.
+*/
 function Scheduler({
   today,
   people,
@@ -1026,6 +1069,7 @@ function Scheduler({
   meetings: UpcomingMeeting[];
   className?: string;
 }) {
+  const canWrite = useCanWrite();
   const panelRef = useRef<HTMLDivElement | null>(null);
 
   // Arriving from the dashboard Quick Action: bring the scheduler into view
@@ -1133,7 +1177,12 @@ function Scheduler({
 
   return (
     <div ref={panelRef} className={clsx("flex flex-col gap-4", className)}>
-      {/* connect calendar */}
+      {/* connect calendar.
+
+          Goes with the booking panel below it: the calendar switch and the
+          Online/In-Person choice both exist to set up a meeting, and with
+          nothing to book they are two controls attached to nothing. */}
+      {canWrite && (
       <Card className="!p-4">
         <div className="flex items-center justify-between">
           <span className="text-sm font-semibold">Connect your Calendar</span>
@@ -1165,8 +1214,10 @@ function Scheduler({
           ))}
         </div>
       </Card>
+      )}
 
       {/* schedule a meeting */}
+      {canWrite && (
       <Card className="@container !p-4">
         <p className="mb-3 text-sm font-semibold">Schedule a Meeting</p>
 
@@ -1299,6 +1350,7 @@ function Scheduler({
           </p>
         )}
       </Card>
+      )}
 
       {/* Meeting notes — last in the rail, so it takes the slack.
           The grid stretches this rail to match the analytics column beside it,
@@ -1308,9 +1360,13 @@ function Scheduler({
           than into padding. Where the rail isn't stretched (under 820px the
           grid is a single column) there is no slack to take and the textarea
           falls back to its min-height, which is the size it has always been. */}
+      {/* Notes are written after a meeting, from memory. Nothing to write
+          with, for somebody who cannot save them. */}
+      {canWrite && (
       <Card className="!p-4 flex flex-1 flex-col">
         <MeetingNotes meetings={meetings} />
       </Card>
+      )}
     </div>
   );
 }

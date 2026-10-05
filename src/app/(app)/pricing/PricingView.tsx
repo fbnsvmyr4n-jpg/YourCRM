@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useCanWrite } from "@/components/shell/CanWrite";
 import { useKeptForm } from "@/lib/use-kept-form";
 import { EyeOff, Pencil, Plus, RotateCcw, Search, Tags, Trash2 } from "lucide-react";
 import { Banner } from "@/components/ui/Banner";
@@ -30,6 +31,7 @@ import {
  */
 
 export function PricingView({ items }: { items: PriceItem[] }) {
+  const canWrite = useCanWrite();
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<PriceItem | null>(null);
 
@@ -66,7 +68,10 @@ export function PricingView({ items }: { items: PriceItem[] }) {
           <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Price list</h1>
           <p className="mt-1 text-sm text-muted">What you charge, and what a quote is built from.</p>
         </div>
-        {!formOpen && (
+        {/* The price list is reference data a viewer reads — it is what a
+            quotation is built from, so knowing the rates is part of looking at
+            the work. Keeping and changing them is not. */}
+        {canWrite && !formOpen && (
           <button
             type="button"
             onClick={openAdd}
@@ -215,6 +220,7 @@ function Group({
   onRemove: React.FormEventHandler<HTMLFormElement>;
   busy: boolean;
 }) {
+  const canWrite = useCanWrite();
   /* Cents when there are any — a rate of 12.50 an hour is ordinary. */
   const { format } = useMoney();
   const money = (cents: number) => format(cents, "exact");
@@ -251,6 +257,8 @@ function Group({
                 <span className="block text-[11px] text-faint">{item.unit}</span>
               </span>
 
+              {canWrite && (
+              <>
               <button
                 type="button"
                 onClick={() => onEdit(item)}
@@ -284,6 +292,8 @@ function Group({
                   <Trash2 className="h-4 w-4" />
                 </button>
               </form>
+              </>
+              )}
             </div>
           </li>
         ))}

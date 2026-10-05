@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useCanWrite } from "@/components/shell/CanWrite";
 import { Pause, Play, Repeat, X } from "lucide-react";
 import { Banner } from "@/components/ui/Banner";
 import { Card, CardHeader } from "@/components/ui/Card";
@@ -25,6 +26,7 @@ import {
  * sending it stays a person's decision, the same as every other invoice.
  */
 export function RetainerCard({ dealId, retainers, today }: { dealId: string; retainers: Retainer[]; today: string }) {
+  const canWrite = useCanWrite();
   const create = useKeptForm<FormState>(createRetainerAction, undefined);
   const createState = create.state;
   const { state: statusState, onSubmit: setStatus, pending: settingStatus } = useKeptForm<FormState>(setRetainerStatusAction, undefined);
@@ -39,7 +41,10 @@ export function RetainerCard({ dealId, retainers, today }: { dealId: string; ret
         title="Retainer"
         icon={<Repeat className="h-[18px] w-[18px] text-accent" />}
         action={
-          !open && (
+          /* What is being billed, how often and since when stays readable —
+             it is a fact about the job. Setting one up, editing, pausing and
+             cancelling are writes. */
+          canWrite && !open && (
             <button
               type="button"
               onClick={openForm}
@@ -92,6 +97,7 @@ function RetainerRow({
   onStatus: React.FormEventHandler<HTMLFormElement>;
   busy: boolean;
 }) {
+  const canWrite = useCanWrite();
   const { format } = useMoney();
   const edit = useKeptForm<FormState>(updateRetainerAction, undefined);
   const editState = edit.state;
@@ -146,7 +152,7 @@ function RetainerRow({
         Since {dayLabel(r.startsOn)} · {r.periodsBilled} {r.periodsBilled === 1 ? "invoice" : "invoices"} raised
       </p>
 
-      {confirmCancel ? (
+      {!canWrite ? null : confirmCancel ? (
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <p className="text-xs text-muted">Cancel for good? Invoices already raised stay on the project.</p>
           <button type="button" onClick={() => setConfirmCancel(false)} className="btn-soft focus-ring rounded-lg px-2.5 py-1.5 text-xs font-medium">

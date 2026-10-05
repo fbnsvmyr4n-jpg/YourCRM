@@ -11,7 +11,7 @@ import { agencyBilling, trialDaysLeft } from "@/server/billing/checkout";
 import { PLAN_INFO, PLANS } from "@/server/billing/plans";
 import { appUrl, stripeConfigured } from "@/server/billing/stripe";
 import { entitlementsFor, limitOf } from "@/server/entitlements";
-import { canAccessCrm, outranks, roleCan } from "@/server/permissions";
+import { canAccessCrm, canWrite, outranks, roleCan } from "@/server/permissions";
 import { instantToWallClock } from "@/lib/zoned";
 import { listHolidays } from "@/server/repos/holidays";
 import { listWorkingHours } from "@/server/repos/working-hours";
@@ -379,15 +379,27 @@ export default async function SettingsPage({
       id: "preferences",
       content: (
         <>
-          <TargetsForm settings={settings} />
-          {/* Directly after the zone that gives these times their meaning, and
-              directly before the holidays that override them. */}
-          <WorkingHoursCard week={workingHours} timeZone={settings.timeZone} />
-          <HolidaysCard holidays={holidays} thisYear={thisYear} />
-          {/* After the hours and holidays it is built from, so the order on the
-              page is the order the page itself depends on. */}
-          {crmAccess && (
-            <BookingLinkCard link={bookingLinks[0] ?? null} hasHours={workingHours.length > 0} />
+          {/* These four are the WORKSPACE's settings — its targets, its working
+              hours, its public holidays and its booking link. A view-only
+              reader has no business setting any of them, and every form here
+              submitted and was refused.
+
+              Appearance is the exception and stays for everybody: the theme is
+              the reader's own, stored for them, and changes nothing anybody
+              else sees. */}
+          {canWrite(user.role) && (
+            <>
+              <TargetsForm settings={settings} />
+              {/* Directly after the zone that gives these times their meaning,
+                  and directly before the holidays that override them. */}
+              <WorkingHoursCard week={workingHours} timeZone={settings.timeZone} />
+              <HolidaysCard holidays={holidays} thisYear={thisYear} />
+              {/* After the hours and holidays it is built from, so the order on
+                  the page is the order the page itself depends on. */}
+              {crmAccess && (
+                <BookingLinkCard link={bookingLinks[0] ?? null} hasHours={workingHours.length > 0} />
+              )}
+            </>
           )}
           <AppearanceCard />
         </>

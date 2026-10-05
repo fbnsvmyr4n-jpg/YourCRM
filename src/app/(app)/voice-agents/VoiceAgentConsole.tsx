@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useCanWrite } from "@/components/shell/CanWrite";
 import { refused } from "@/server/write-result";
 import Link from "next/link";
 import {
@@ -98,6 +99,7 @@ export function VoiceAgentConsole({
   /* Why a delete did not happen — the list used to move to the next call as
      though it had. */
   const [problem, setProblem] = useState<string | null>(null);
+  const canWrite = useCanWrite();
   const [toast, setToast] = useState<Toast>(null);
 
   const selected = calls.find((c) => c.id === selectedId) ?? calls[0];
@@ -186,14 +188,18 @@ export function VoiceAgentConsole({
             {agentConfig.name} answers your calls, captures the lead, and books the meeting — automatically.
           </p>
         </div>
-        <button
-          onClick={handleSimulate}
-          disabled={busy}
-          className="btn-accent focus-ring flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold disabled:opacity-60"
-        >
-          <PhoneIncoming className="h-4 w-4" />
-          {busy ? "Handling call…" : "Simulate incoming call"}
-        </button>
+        {/* Simulating a call writes a call record, a lead and a meeting. The
+            transcripts, the findings and the analysis all stay readable. */}
+        {canWrite && (
+          <button
+            onClick={handleSimulate}
+            disabled={busy}
+            className="btn-accent focus-ring flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold disabled:opacity-60"
+          >
+            <PhoneIncoming className="h-4 w-4" />
+            {busy ? "Handling call…" : "Simulate incoming call"}
+          </button>
+        )}
       </div>
 
       {/* Automation result toast */}
@@ -374,6 +380,7 @@ function CallDetail({
   onProcess: () => void;
   onDelete: () => void;
 }) {
+  const canWrite = useCanWrite();
   const meta = call.outcome ? OUTCOME_META[call.outcome] : OUTCOME_UNRECORDED;
   /*
      Which transcript turn the reader asked to see.
@@ -403,14 +410,16 @@ function CallDetail({
           >
             {meta.label}
           </span>
-          <button
-            onClick={onDelete}
-            disabled={busy}
-            className="focus-ring grid h-9 w-9 place-items-center rounded-full text-faint transition-colors hover:text-[var(--red)] disabled:opacity-50"
-            aria-label="Delete call"
-          >
-            <Trash2 className="h-[18px] w-[18px]" />
-          </button>
+          {canWrite && (
+            <button
+              onClick={onDelete}
+              disabled={busy}
+              className="focus-ring grid h-9 w-9 place-items-center rounded-full text-faint transition-colors hover:text-[var(--red)] disabled:opacity-50"
+              aria-label="Delete call"
+            >
+              <Trash2 className="h-[18px] w-[18px]" />
+            </button>
+          )}
         </div>
       </div>
 

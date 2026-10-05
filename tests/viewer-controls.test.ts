@@ -21,6 +21,7 @@
    server to ask. Crude, and it is the difference between a rule that holds and
    a rule that was true the day somebody wrote it down.
 */
+import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
@@ -37,6 +38,12 @@ const GATED = [
   "src/components/tasks/NewTaskForm.tsx",
   "src/app/(app)/inbox/InboxView.tsx",
   "src/components/tickets/TicketControls.tsx",
+  "src/app/(app)/meetings/MeetingsView.tsx",
+  "src/app/(app)/pricing/PricingView.tsx",
+  "src/app/(app)/projects/[id]/ProjectDetail.tsx",
+  "src/app/(app)/projects/[id]/RetainerCard.tsx",
+  "src/app/(app)/voice-agents/VoiceAgentConsole.tsx",
+  "src/components/ui/TrashCard.tsx",
 ];
 
 describe("the screens a viewer meets", () => {
@@ -144,5 +151,60 @@ describe("the inbox", () => {
     /* How the compose button was written first time. This project's failure
        log: the winner is decided by stylesheet order, not by intent. */
     expect(inbox).not.toMatch(/"btn-accent[^"]*flex[^"]*",\s*!canWrite && "hidden"/);
+  });
+});
+
+describe("every screen with write controls has been through this pass", () => {
+  /**
+   * The sweep that ended the guessing.
+   *
+   * Finding these one at a time — a screenshot, a gap, a fix — was how the
+   * first three rounds went, and it was never going to finish. This lists every
+   * file that renders a server action and asserts each one either consults
+   * `useCanWrite` or is on the list below with a reason.
+   *
+   * A new screen with a write control and no gate fails here, which is the
+   * point: the next one should be caught by a test rather than by Bradley.
+   */
+  const EXEMPT: Record<string, string> = {
+    // Decided by a stricter gate than "can this person write".
+    "src/components/documents/RecordPayment.tsx": "useMaySettle — only finance confirms money arrived",
+    "src/app/(app)/settings/BusinessCard.tsx": "manage_billing, with its own ReadOnly view",
+    "src/app/(app)/settings/PaymentsCard.tsx": "manage_billing",
+    "src/components/billing/BillingCard.tsx": "manage_billing",
+    "src/components/billing/ReferralCard.tsx": "manage_billing",
+    "src/app/(app)/settings/TeamCard.tsx": "manage_users",
+    "src/app/(app)/settings/AutomationsCard.tsx": "canManage prop — manage_users",
+    "src/app/(app)/settings/TemplatesCard.tsx": "canManage prop — manage_users",
+    "src/app/(app)/settings/CustomFieldsCard.tsx": "canManage prop — manage_users",
+    "src/components/tags/Tags.tsx": "canManageTags prop",
+    // Not reachable by a signed-in viewer at all.
+    "src/components/login/ResetRequestForm.tsx": "the public login page, where there is no session",
+    // The reader's own account, which a viewer may absolutely change.
+    "src/app/(app)/settings/SettingsForms.tsx": "own profile and password, plus workspace cards gated in page.tsx",
+    // Writes nothing itself; the page decides.
+    "src/app/(app)/settings/page.tsx": "composes the cards and gates the workspace ones",
+    "src/app/(app)/projects/[id]/PayLinkButton.tsx": "a pay link for an invoice; sits inside gated document rows",
+    "src/app/(app)/chat/ChatView.tsx": "asking the assistant a question, which a viewer may do",
+  };
+
+  it("leaves no screen unaccounted for", () => {
+    const found = execSync(
+      String.raw`grep -rl 'Action[,)]\|Action(' 'src/app/(app)' src/components --include='*.tsx' || true`,
+      { cwd: process.cwd(), encoding: "utf8" }
+    )
+      .split("\n")
+      .filter(Boolean);
+
+    const ungated = found.filter((f) => !read(f).includes("useCanWrite()") && !(f in EXEMPT));
+    expect(ungated, `these render a write and neither ask useCanWrite nor give a reason: ${ungated.join(", ")}`).toEqual([]);
+  });
+
+  it("keeps the exemptions honest — each one still exists", () => {
+    /* An exemption for a file that has been deleted or renamed is a hole that
+       looks like a decision. */
+    for (const file of Object.keys(EXEMPT)) {
+      expect(() => read(file), `${file} is exempted but no longer exists`).not.toThrow();
+    }
   });
 });

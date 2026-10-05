@@ -42,6 +42,7 @@ import type {
 import type { Dependency, ProjectTask, ScheduleSummary } from "@/server/repos/tasks";
 import { DEFAULT_PROJECT_TAB, type ProjectTabId } from "./tabs";
 import { RecordPayment } from "@/components/documents/RecordPayment";
+import { useCanWrite } from "@/components/shell/CanWrite";
 import { ProjectSchedule } from "./ProjectSchedule";
 import { RetainerCard } from "./RetainerCard";
 import { PayLinkButton, PaymentsReady } from "./PayLinkButton";
@@ -331,6 +332,7 @@ function ProjectHeaderCard({
   /* Only the ones filled in, beside the owner and dates — the same rule those
      follow. "Capacity —" is a line spent saying nothing; Edit details is where
      the empty ones are. */
+  const canWrite = useCanWrite();
   const filled = customFields.filter((f) => customValues[f.id] !== undefined);
   const hasDetails = Boolean(header.site || header.startsOn || header.dueOn || filled.length);
   const { state, onSubmit: action, pending } = useKeptForm<FormState>(updateProjectAction,
@@ -405,13 +407,15 @@ function ProjectHeaderCard({
               </span>
             </span>
           ))}
-          <button
-            type="button"
-            onClick={openEdit}
-            className="focus-ring rounded-lg font-medium text-accent transition-opacity hover:opacity-80"
-          >
-            {hasDetails ? "Edit details" : customFields.length ? "Add details" : "Add site and dates"}
-          </button>
+          {canWrite && (
+            <button
+              type="button"
+              onClick={openEdit}
+              className="focus-ring rounded-lg font-medium text-accent transition-opacity hover:opacity-80"
+            >
+              {hasDetails ? "Edit details" : customFields.length ? "Add details" : "Add site and dates"}
+            </button>
+          )}
         </div>
       )}
 
@@ -550,6 +554,7 @@ function TeamTab({
   people: ProjectPerson[];
   candidates: { staff: Candidate[]; contacts: Candidate[] };
 }) {
+  const canWrite = useCanWrite();
   const { state: addState, onSubmit: add, pending: adding } = useKeptForm<FormState>(addProjectPersonAction,
     undefined);
   const { state: removeState, onSubmit: remove, pending: removing } = useKeptForm<FormState>(removeProjectPersonAction,
@@ -569,7 +574,7 @@ function TeamTab({
           title="On this job"
           icon={<Users className="h-[18px] w-[18px] text-accent" />}
           action={
-            !open && (
+            canWrite && !open && (
               <button
                 type="button"
                 onClick={openAdd}
@@ -665,6 +670,7 @@ function PeopleGroup({
   onRemove: React.FormEventHandler<HTMLFormElement>;
   busy: boolean;
 }) {
+  const canWrite = useCanWrite();
   if (people.length === 0) return null;
   return (
     <section>
@@ -704,6 +710,7 @@ function PeopleGroup({
                   <Phone className="h-4 w-4" />
                 </a>
               )}
+              {canWrite && (
               <form onSubmit={onRemove}>
                 <input type="hidden" name="id" value={p.id} />
                 <button
@@ -715,6 +722,7 @@ function PeopleGroup({
                   <Trash2 className="h-4 w-4" />
                 </button>
               </form>
+              )}
             </span>
           </li>
         ))}
@@ -742,6 +750,7 @@ function DocumentsTab({
   /** The job's plan, so documents can be arranged and filed by stage. */
   tasks: ProjectTask[];
 }) {
+  const canWrite = useCanWrite();
   const { state: createState, onSubmit: create, pending: creating } = useKeptForm<FormState>(createDocumentAction,
     undefined);
   const { state: statusState, onSubmit: setStatus, pending: settingStatus } = useKeptForm<FormState>(setDocumentStatusAction,
@@ -837,14 +846,18 @@ function DocumentsTab({
                   ))}
                 </div>
               )}
-              <button
-                type="button"
-                onClick={startNew}
-                className="btn-accent focus-ring flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-semibold"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                New
-              </button>
+              {/* "By stage / By type" is a way of LOOKING and stays for
+                  everybody. Raising a document is a write. */}
+              {canWrite && (
+                <button
+                  type="button"
+                  onClick={startNew}
+                  className="btn-accent focus-ring flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-semibold"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  New
+                </button>
+              )}
             </div>
           )
         }
@@ -1142,6 +1155,7 @@ function DocumentRow({
   /** The business's own today, for the payment box's date. */
   today?: string;
 }) {
+  const canWrite = useCanWrite();
   const money = useExactMoney();
   const [open, setOpen] = useState(false);
   const tone = DOC_STATUS_TONE[doc.status] ?? DOC_STATUS_TONE.draft;
@@ -1198,7 +1212,9 @@ function DocumentRow({
             {shown.map((l) => (
               <li key={l.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
                 <span className="min-w-0 flex-1 truncate">{l.description}</span>
-                {tasks && tasks.length > 0 && <LineStageSelect line={l} tasks={tasks} scope={scope} />}
+                {canWrite && tasks && tasks.length > 0 && (
+                  <LineStageSelect line={l} tasks={tasks} scope={scope} />
+                )}
                 <span className="shrink-0 text-faint tabular-nums">
                   {l.quantity} × {money(l.unitCents)}
                 </span>
@@ -1221,7 +1237,7 @@ function DocumentRow({
               It disappears once the invoice has gone, rather than staying and
               relying on the handler to refuse. A live button that does nothing
               is how somebody ends up pressing it three times wondering why. */}
-          {onSend && !doc.sentAt && (
+          {canWrite && onSend && !doc.sentAt && (
             <form onSubmit={onSend} className="mt-3">
               <input type="hidden" name="documentId" value={doc.id} />
               <button
@@ -1279,6 +1295,11 @@ function DocumentRow({
             <p className="mt-3 text-right text-xs text-muted">
               Settled. Its status follows the payments recorded against it.
             </p>
+          ) : !canWrite ? (
+            /* The status itself is already on the row above, as a badge. A
+               reader who cannot move the document is told where it is and
+               offered nothing to press. */
+            null
           ) : (
           /* Moving a document along is the change actually made day to day, so
              it is one control here rather than an edit screen. */

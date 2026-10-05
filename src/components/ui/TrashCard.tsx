@@ -6,6 +6,7 @@ import { Card, CardHeader } from "@/components/ui/Card";
 import { TimeAgo } from "@/components/ui/TimeAgo";
 import { Banner } from "@/components/ui/Banner";
 import { restoreDeletedAction } from "@/app/(app)/settings/actions";
+import { useCanWrite } from "@/components/shell/CanWrite";
 import type { TrashItem, TrashKind } from "@/server/trash";
 
 /**
@@ -38,6 +39,7 @@ const NOUNS: Record<TrashKind, string> = {
 };
 
 export function TrashCard({ items }: { items: TrashItem[] }) {
+  const canWrite = useCanWrite();
   // Restored rows leave the list immediately rather than waiting for the page
   // to revalidate. The row that just came back is the one thing on screen the
   // reader is certain about, and leaving it sitting there under a spinner reads
@@ -97,6 +99,10 @@ export function TrashCard({ items }: { items: TrashItem[] }) {
                       {NOUNS[item.kind]} · deleted <TimeAgo at={item.deletedAt} mode="relative" />
                     </p>
                   </div>
+                  {/* What was deleted and when stays readable — knowing a
+                      record was binned is part of knowing what happened to it.
+                      Putting it back is a write. */}
+                  {canWrite && (
                   <button
                     type="button"
                     onClick={() => restore(item)}
@@ -107,6 +113,7 @@ export function TrashCard({ items }: { items: TrashItem[] }) {
                     {busy === key ? "Restoring…" : "Restore"}
                     <span className="sr-only"> {NOUNS[item.kind]}: {item.label}</span>
                   </button>
+                  )}
                 </li>
               );
             })}
