@@ -34,7 +34,20 @@ import type { Supplier } from "@/server/repos/suppliers";
  * The lines it could not read are shown in full, never as a count alone. A row
  * dropped out of a price list is a rate somebody quotes from memory next month.
  */
-export function SupplierImport({ suppliers }: { suppliers: Supplier[] }) {
+export function SupplierImport({
+  suppliers,
+  prefill = null,
+}: {
+  suppliers: Supplier[];
+  /**
+   * A list carried here from a supplier's message.
+   *
+   * Opens the box with their text already in it and their name chosen, and
+   * then behaves exactly like a paste — same preview, same confirm. The
+   * automation removes the typing, not the looking.
+   */
+  prefill?: { supplierId: string; text: string } | null;
+}) {
   const canWrite = useCanWrite();
   const { format } = useMoney();
   const money = (cents: number) => format(cents, "exact");
@@ -53,9 +66,9 @@ export function SupplierImport({ suppliers }: { suppliers: Supplier[] }) {
      Falling back to the first means the control and the form always agree,
      whatever order the data turned up in.
   */
-  const [held, setSupplierId] = useState("");
+  const [held, setSupplierId] = useState(prefill?.supplierId ?? "");
   const supplierId = suppliers.some((s) => s.id === held) ? held : (suppliers[0]?.id ?? "");
-  const [pasted, setPasted] = useState("");
+  const [pasted, setPasted] = useState(prefill?.text ?? "");
   const [dragging, setDragging] = useState(false);
   const boxRef = useRef<HTMLTextAreaElement>(null);
 

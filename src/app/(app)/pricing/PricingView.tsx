@@ -33,7 +33,16 @@ import {
  * from when writing a quote by hand.
  */
 
-export function PricingView({ items, suppliers = [] }: { items: PriceItem[]; suppliers?: Supplier[] }) {
+export function PricingView({
+  items,
+  suppliers = [],
+  prefill = null,
+}: {
+  items: PriceItem[];
+  suppliers?: Supplier[];
+  /** A list carried here from a supplier's message — see `supplier-mail.ts`. */
+  prefill?: { supplierId: string; text: string } | null;
+}) {
   const canWrite = useCanWrite();
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<PriceItem | null>(null);
@@ -90,7 +99,7 @@ export function PricingView({ items, suppliers = [] }: { items: PriceItem[]; sup
           Above the list itself, because loading a supplier's sheet is how most
           of these rows get here — typing one by hand is the exception. */}
       <SuppliersCard suppliers={suppliers} />
-      <SupplierImport suppliers={suppliers} />
+      <SupplierImport suppliers={suppliers} prefill={prefill} />
 
       {formOpen && (
         <Card className="mb-4">

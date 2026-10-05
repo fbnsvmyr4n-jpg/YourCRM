@@ -56,6 +56,8 @@ import { useDraft, hasContent, type Draft } from "@/lib/use-draft";
 import { worthKeeping, type Draft as SavedDraft } from "@/data/drafts";
 import { refused } from "@/server/write-result";
 import { useCanWrite } from "@/components/shell/CanWrite";
+import { PriceListInMail } from "@/components/pricing/PriceListInMail";
+import { findSupplierList, type SupplierLike } from "@/server/supplier-mail";
 import { discardDraftAction, saveDraftAction } from "./actions";
 import { SwipeToDelete } from "@/components/ui/SwipeToDelete";
 import { useMoney } from "@/components/money/CurrencyProvider";
@@ -135,6 +137,7 @@ export function InboxView({
   initialFolder,
   templates = [],
   drafts = [],
+  suppliers = [],
   me = { name: "", business: "" },
 }: {
   messages: Message[];
@@ -159,6 +162,8 @@ export function InboxView({
   templates?: MessageTemplate[];
   /** This reader's own unsent messages. Never anybody else's — see repos/drafts. */
   drafts?: SavedDraft[];
+  /** Who the workspace buys from, so a merchant's price list can be spotted. */
+  suppliers?: SupplierLike[];
   /** Who is writing, for {{my_name}} and {{business_name}}. */
   me?: { name: string; business: string };
 }) {
@@ -724,6 +729,7 @@ export function InboxView({
             projects={projects}
             companyFor={companyFor}
             ticket={ticketByThread.get(selected.threadId) ?? null}
+            suppliers={suppliers}
             team={team}
             currentUserId={currentUserId}
             templates={templates}
@@ -1192,6 +1198,7 @@ function Reader({
   projects,
   companyFor,
   ticket,
+  suppliers,
   team,
   currentUserId,
   templates,
@@ -1205,6 +1212,8 @@ function Reader({
   message: Message;
   /** The ticket this conversation is, if it is one. */
   ticket: Ticket | null;
+  /** Who the workspace buys from, for spotting a price list in this message. */
+  suppliers: SupplierLike[];
   team: { id: string; name: string }[];
   currentUserId: string | null;
   templates: MessageTemplate[];
@@ -1226,6 +1235,21 @@ function Reader({
   // now". Doing it with an effect would mean rendering the previous message's
   // open composer once before clearing it.
   const canWrite = useCanWrite();
+  /* Recomputed per message rather than carried from the server: it is pure,
+     it is cheap, and the alternative is a second shape of the same fact. */
+  const priceList = useMemo(
+    () =>
+      findSupplierList(
+        {
+          direction: message.direction,
+          email: message.email,
+          subject: message.subject,
+          body: message.body,
+        },
+        suppliers
+      ),
+    [message, suppliers]
+  );
   const [mode, setMode] = useState<null | "reply" | "forward">(null);
   const [viewing, setViewing] = useState<Attachment | null>(null);
   const [sending, setSending] = useState(false);
@@ -1316,6 +1340,10 @@ function Reader({
 
       <div className="-mx-1 flex-1 scroll-p-1 overflow-y-auto px-1 py-5">
         {ticket && <TicketBar ticket={ticket} team={team} currentUserId={currentUserId} />}
+        {/* A merchant's price list, recognised. Above the subject because it
+            is the reason to open this message at all, and the message itself
+            is right underneath it either way. */}
+        {priceList && <PriceListInMail found={priceList} messageId={message.id} />}
         {/* The category sits with the subject, not in the header row — beside
             the name and the delete button it left no room for either. */}
         {message.category && (
