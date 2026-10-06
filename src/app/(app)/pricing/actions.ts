@@ -8,6 +8,7 @@ import {
 import { logWrite } from "@/server/log";
 import { revalidateApp } from "@/server/revalidate";
 import { withCurrentTenant } from "@/server/tenant-session";
+import type { TenantQuery } from "@/server/tenant";
 import { decimal, id as validId, multiline, text } from "@/server/validate";
 import {
   applyPriceList,
@@ -26,13 +27,18 @@ import {
 } from "@/server/price-import";
 
 /**
- * Maintaining the price list.
+ * Maintaining the price list, and the suppliers behind it.
  *
- * Customer data by the gate's definition — it is what this business charges,
- * and it is read straight onto quotations — so every action goes through
- * `withCurrentTenant` with no opt-out. IT and accounts are refused by
- * construction.
+ * MONEY by the gate's definition, not customer data — there is not one
+ * customer fact here. It was the customer door, which kept the finance role
+ * out of the list they need most: reconciling a supplier's invoice against the
+ * rate that supplier agreed is the job, and without this they are checking an
+ * invoice against nothing. IT is still refused, because what the business
+ * charges is no part of fixing the machine.
  */
+
+/** Every action in this file, through the MONEY door. Named once — see the inbox. */
+const withMoney = <T>(fn: (q: TenantQuery) => Promise<T>) => withCurrentTenant(fn, { money: true });
 
 export type FormState = { ok?: string; error?: string } | undefined;
 
@@ -43,7 +49,7 @@ export async function savePriceItemAction(
   _prev: FormState,
   formData: FormData
 ): Promise<FormState> {
-  return withCurrentTenant(async (q) => {
+  return withMoney(async (q) => {
     const name = text(formData.get("name"), 120);
     if (!name) return { error: "Give the item a name." };
 
@@ -81,7 +87,7 @@ export async function togglePriceItemAction(
   _prev: FormState,
   formData: FormData
 ): Promise<FormState> {
-  return withCurrentTenant(async (q) => {
+  return withMoney(async (q) => {
     const itemId = validId(formData.get("id"));
     if (!itemId) return { error: "That item could not be identified." };
     const active = formData.get("active") === "true";
@@ -99,7 +105,7 @@ export async function deletePriceItemAction(
   _prev: FormState,
   formData: FormData
 ): Promise<FormState> {
-  return withCurrentTenant(async (q) => {
+  return withMoney(async (q) => {
     const itemId = validId(formData.get("id"));
     if (!itemId) return { error: "That item could not be identified." };
 
@@ -124,7 +130,7 @@ export async function deletePriceItemAction(
 /* ------------------------------------------------------------------ */
 
 export async function saveSupplierAction(_prev: FormState, formData: FormData): Promise<FormState> {
-  return withCurrentTenant(async (q) => {
+  return withMoney(async (q) => {
     const name = text(formData.get("name"), 120);
     if (!name.trim()) return { error: "Give the supplier a name." };
 
@@ -154,7 +160,7 @@ export async function saveSupplierAction(_prev: FormState, formData: FormData): 
 }
 
 export async function deleteSupplierAction(_prev: FormState, formData: FormData): Promise<FormState> {
-  return withCurrentTenant(async (q) => {
+  return withMoney(async (q) => {
     const id = validId(formData.get("id"));
     if (!id) return { error: "That supplier could not be identified." };
     if (!(await deleteSupplier(q, id))) return { error: "That supplier no longer exists." };
@@ -186,7 +192,7 @@ export async function previewPriceListAction(
   _prev: ImportPreview | FormState,
   formData: FormData
 ): Promise<ImportPreview | FormState> {
-  return withCurrentTenant(async (q) => {
+  return withMoney(async (q) => {
     const supplierId = validId(formData.get("supplierId"));
     if (!supplierId) return { error: "Choose which supplier this list is from." };
 
@@ -212,7 +218,7 @@ export async function previewPriceListAction(
  * and nobody approved.
  */
 export async function applyPriceListAction(_prev: FormState, formData: FormData): Promise<FormState> {
-  return withCurrentTenant(async (q) => {
+  return withMoney(async (q) => {
     const supplierId = validId(formData.get("supplierId"));
     if (!supplierId) return { error: "Choose which supplier this list is from." };
 

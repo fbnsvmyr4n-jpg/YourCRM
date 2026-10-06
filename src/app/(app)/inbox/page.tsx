@@ -171,6 +171,16 @@ export default async function InboxPage({
         contacts.filter((c) => c.companyId).map((c) => [c.id, c.companyId as string])
       ),
     };
+  }, {
+    /*
+       The MAIL door, not the customer-records one.
+
+       A bookkeeper's day is made of email — supplier invoices, a client
+       querying a bill, chasing a payment — and asking the customer-records
+       question of them locked the finance role out of its own job. IT is still
+       refused: reading what a client wrote is no part of fixing the machine.
+    */
+    mail: true,
   });
 
   return (

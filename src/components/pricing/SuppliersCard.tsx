@@ -6,7 +6,7 @@ import { Card, CardHeader, CardMeta } from "@/components/ui/Card";
 import { Banner } from "@/components/ui/Banner";
 import { useKeptForm } from "@/lib/use-kept-form";
 import { useFormDisclosure } from "@/lib/form-disclosure";
-import { useCanWrite } from "@/components/shell/CanWrite";
+import { useCanHandleMoney } from "@/components/shell/Abilities";
 import { deleteSupplierAction, saveSupplierAction, type FormState } from "@/app/(app)/pricing/actions";
 import type { Supplier } from "@/server/repos/suppliers";
 
@@ -23,7 +23,7 @@ import type { Supplier } from "@/server/repos/suppliers";
  * one that admits its age, because nobody checks the first one.
  */
 export function SuppliersCard({ suppliers }: { suppliers: Supplier[] }) {
-  const canWrite = useCanWrite();
+  const canWrite = useCanHandleMoney();
   const save = useKeptForm<FormState>(saveSupplierAction, undefined);
   const remove = useKeptForm<FormState>(deleteSupplierAction, undefined);
   const [open, openForm, closeForm] = useFormDisclosure(save.state, (s) => Boolean(s?.ok));

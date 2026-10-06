@@ -6,7 +6,7 @@ import { Card, CardHeader } from "@/components/ui/Card";
 import { Banner } from "@/components/ui/Banner";
 import { useKeptForm } from "@/lib/use-kept-form";
 import { useMoney } from "@/components/money/CurrencyProvider";
-import { useCanWrite } from "@/components/shell/CanWrite";
+import { useCanHandleMoney } from "@/components/shell/Abilities";
 import { clsx } from "@/lib/clsx";
 import {
   applyPriceListAction,
@@ -48,7 +48,7 @@ export function SupplierImport({
    */
   prefill?: { supplierId: string; text: string } | null;
 }) {
-  const canWrite = useCanWrite();
+  const canWrite = useCanHandleMoney();
   const { format } = useMoney();
   const money = (cents: number) => format(cents, "exact");
 

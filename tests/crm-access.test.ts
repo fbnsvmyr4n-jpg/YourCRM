@@ -158,16 +158,40 @@ describe("nothing routes around the gate", () => {
       session,
       "withCurrentTenant no longer defaults to requiring access"
     ).toMatch(/options\.crmData !== false && !mayEnter/);
+    /*
+       Three doors now, not two. `mail: true` was added because a bookkeeper's
+       day is made of email — supplier invoices, a client querying a bill,
+       chasing a payment — and asking the customer-records question of them
+       locked the finance role out of its own job.
+
+       What is pinned is that the tier is still chosen FROM THE ROLE at this one
+       place, whichever door is asked for.
+    */
     expect(session, "the tier is no longer chosen from the role").toMatch(
-      /const mayEnter = options\.money \? canAccessMoney\(ctx\.role\) : canAccessCrm\(ctx\.role\)/
+      /const mayEnter = options\.money[\s\S]{0,160}canAccessMoney\(ctx\.role\)[\s\S]{0,160}canAccessMail\(ctx\.role\)[\s\S]{0,160}canAccessCrm\(ctx\.role\)/
     );
 
     expect(session, "withTenantPage no longer redirects a reader without access").toMatch(
       /options\.crmData !== false && !mayOpen/
     );
-    expect(session).toMatch(
-      /const mayOpen = options\.money \? canAccessMoney\(user\.role\) : canAccessCrm\(user\.role\)/
+    /* The same three doors, asked the same way, for a PAGE. Pinned separately
+       because `withTenantPage` has already drifted from `withCurrentTenant`
+       once: it forwarded `money` and not `mail`, so the inbox passed its own
+       gate and then threw from the delegate it forwards to. The property held
+       here is the one that matters — whichever door is asked for, the answer
+       comes from the role, at this one place. */
+    expect(session, "the page tier is no longer chosen from the role").toMatch(
+      /const mayOpen = options\.money[\s\S]{0,160}canAccessMoney\(user\.role\)[\s\S]{0,160}canAccessMail\(user\.role\)[\s\S]{0,160}canAccessCrm\(user\.role\)/
     );
+
+    /* And every door is forwarded to the delegate. This is the regression
+       itself, not a guess at one: a page that opened the mail door and did not
+       pass it on got through its own check and was then refused by the
+       function it hands the work to. */
+    const delegate = session.slice(session.indexOf("return withCurrentTenant(fn, {"));
+    for (const door of ["crmData: options.crmData", "money: options.money", "mail: options.mail"]) {
+      expect(delegate.slice(0, 600), `withTenantPage does not forward ${door}`).toContain(door);
+    }
   });
 
   /**

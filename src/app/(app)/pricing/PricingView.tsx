@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { SuppliersCard } from "@/components/pricing/SuppliersCard";
 import { SupplierImport } from "@/components/pricing/SupplierImport";
 import type { Supplier } from "@/server/repos/suppliers";
-import { useCanWrite } from "@/components/shell/CanWrite";
+import { useCanHandleMoney } from "@/components/shell/Abilities";
 import { useKeptForm } from "@/lib/use-kept-form";
 import { EyeOff, Pencil, Plus, RotateCcw, Search, Tags, Trash2 } from "lucide-react";
 import { Banner } from "@/components/ui/Banner";
@@ -43,7 +43,7 @@ export function PricingView({
   /** A list carried here from a supplier's message — see `supplier-mail.ts`. */
   prefill?: { supplierId: string; text: string } | null;
 }) {
-  const canWrite = useCanWrite();
+  const canWrite = useCanHandleMoney();
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<PriceItem | null>(null);
 
@@ -238,7 +238,7 @@ function Group({
   onRemove: React.FormEventHandler<HTMLFormElement>;
   busy: boolean;
 }) {
-  const canWrite = useCanWrite();
+  const canWrite = useCanHandleMoney();
   /* Cents when there are any — a rate of 12.50 an hour is ordinary. */
   const { format } = useMoney();
   const money = (cents: number) => format(cents, "exact");

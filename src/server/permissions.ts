@@ -207,6 +207,42 @@ export function canWrite(role: string): boolean {
  * Only the viewer role is view-only. Finance and IT write plenty; they write
  * elsewhere.
  */
+const MAIL_ACCESS: Record<Role, boolean> = {
+  owner: true,
+  /*
+     IT fixes the machine. Reading what a client wrote to the business is not
+     part of fixing anything, and it is the one thing in here that is somebody
+     else's correspondence rather than the company's records.
+  */
+  admin: false,
+  /*
+     A BOOKKEEPER LIVES IN EMAIL.
+
+     This was false, on the reasoning that correspondence is customer data and
+     finance has no business in it. Sat with the job for five minutes and that
+     is plainly wrong: supplier invoices arrive by email, clients query a bill
+     by email, chasing an unpaid invoice IS an email, and staff ask about a
+     purchase order the same way. A finance role with no inbox cannot do the
+     work at all — it can only read figures somebody else keyed in.
+
+     What the separation still means is intact: no pipeline, no deals, no
+     contact list to browse. Email is a tool, not a database.
+  */
+  finance: true,
+  member: true,
+  viewer: true,
+};
+
+/**
+ * Who may open the inbox and write from it.
+ *
+ * Its own question, not an inch of `canAccessCrm`. The two differ for exactly
+ * one role and that role is the one whose day is made of mail.
+ */
+export function canAccessMail(role: string): boolean {
+  return MAIL_ACCESS[role as Role] ?? false;
+}
+
 export function isViewOnly(role: string): boolean {
   return role === "viewer";
 }

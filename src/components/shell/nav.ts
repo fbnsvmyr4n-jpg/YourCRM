@@ -55,6 +55,15 @@ export type NavItem = {
    */
   isMoney?: true;
   /**
+   * Correspondence. Survives for a reader who holds the MAIL tier.
+   *
+   * One row, and it matters more than its size: a finance role without an
+   * inbox can read figures somebody else keyed in and do nothing else — no
+   * supplier invoice arriving, no client queried about a bill, no chasing a
+   * payment. See `canAccessMail`.
+   */
+  isMail?: true;
+  /**
    * Pages that belong under this one, shown nested beneath it.
    *
    * Grouping only. The children are TOP-LEVEL routes — `/quotes`, not
@@ -108,7 +117,7 @@ export const NAV: NavSection[] = [
          list of who every job belongs to. Beside Contacts, because that is the
          question it answers: people, and the firms they work for. */
       { label: "Companies", href: "/companies", icon: Building2 },
-      { label: "Inbox", href: "/inbox", icon: Inbox, count: "inbox" },
+      { label: "Inbox", href: "/inbox", icon: Inbox, count: "inbox", isMail: true },
       { label: "Calendar", href: "/calendar", icon: CalendarDays, count: "calendarToday" },
       /* Beside the Calendar: both answer "what is on today". The badge is the
          reader's own tasks due today or late — work they can clear. */
@@ -133,7 +142,9 @@ export const NAV: NavSection[] = [
       /* Reference data you maintain rather than work in, so it sits with Notes
          rather than in Pipeline — but NOT in Settings, because a price list
          grows past what a settings area should hold and needs its own search. */
-      { label: "Price list", href: "/pricing", icon: Tags },
+      /* Money, not customer records — so a bookkeeper reconciling a supplier's
+         invoice against their agreed rate can actually open it. */
+      { label: "Price list", href: "/pricing", icon: Tags, isMoney: true },
       /* The two screens an IT admin or a bookkeeper can actually use: their own
          account, the team, billing — and the help pages, which contain nothing
          at all about anybody's customers. */
@@ -154,7 +165,11 @@ export const NAV: NavSection[] = [
  * Sections that empty out are dropped, so a reader without CRM access does not
  * see a "PIPELINE" heading with nothing under it.
  */
-export function visibleNav(crmAccess: boolean, moneyAccess = crmAccess): NavSection[] {
+export function visibleNav(
+  crmAccess: boolean,
+  moneyAccess = crmAccess,
+  mailAccess = crmAccess
+): NavSection[] {
   if (crmAccess) return NAV;
 
   return NAV.map((section) => ({
@@ -179,6 +194,12 @@ export function visibleNav(crmAccess: boolean, moneyAccess = crmAccess): NavSect
       */
       const money = (item.children ?? []).filter((child) => child.isMoney);
       if (moneyAccess && money.length > 0) return money.map((child) => ({ ...child }));
+
+      /* And the top-level rows each tier keeps. The price list is money — it
+         holds what the business charges and what its suppliers charge, and not
+         one customer fact — and the inbox is mail. */
+      if (moneyAccess && item.isMoney) return [{ ...item, children: undefined }];
+      if (mailAccess && item.isMail) return [{ ...item, children: undefined }];
       return [];
     }),
   })).filter((section) => section.items.length > 0);

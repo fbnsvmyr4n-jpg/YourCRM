@@ -5,6 +5,7 @@ import { CurrencyProvider } from "@/components/money/CurrencyProvider";
 import { canSettleInvoice, canWrite, isViewOnly } from "@/server/permissions";
 import { CanWriteProvider } from "./CanWrite";
 import { MaySettleProvider } from "./MaySettle";
+import { AbilitiesProvider } from "./Abilities";
 import { VocabularyProvider } from "./Vocabulary";
 import type { CurrencyCode } from "@/lib/money";
 import type { VocabularyId } from "@/data/vocabulary";
@@ -23,6 +24,7 @@ export function AppShell({
   counts,
   crmAccess,
   moneyAccess,
+  mailAccess,
   currency,
   vocabulary,
 }: {
@@ -34,6 +36,8 @@ export function AppShell({
   crmAccess: boolean;
   /** Quotations, orders and invoices — true for finance, false for IT. */
   moneyAccess: boolean;
+  /** The inbox. True for finance, whose day is made of mail; false for IT. */
+  mailAccess: boolean;
   /** The workspace's currency, for every amount on every page below. */
   currency: CurrencyCode;
   /** What this workspace calls its work — see `data/vocabulary.ts`. */
@@ -50,6 +54,12 @@ export function AppShell({
     {/* And one answer for the payment box: confirming money arrived is
         finance's desk, not the salesperson's. See `MaySettle`. */}
     <MaySettleProvider maySettle={canSettleInvoice(user.role)}>
+    {/* One answer per door, so a mail screen asks about mail and a money
+        screen asks about money — see `Abilities`. */}
+    <AbilitiesProvider
+      mail={mailAccess && !isViewOnly(user.role)}
+      money={moneyAccess && !isViewOnly(user.role)}
+    >
     <VocabularyProvider vocabulary={vocabulary}>
     {/* The `print:` overrides are on the shell, not on the page inside it: the app
         is a fixed-height clipped box with its own scroller, which is right on
@@ -66,6 +76,7 @@ export function AppShell({
         counts={counts}
         crmAccess={crmAccess}
         moneyAccess={moneyAccess}
+            mailAccess={mailAccess}
       />
 
       {/* Mobile backdrop */}
@@ -118,6 +129,7 @@ export function AppShell({
       <CommandPalette />
     </div>
     </VocabularyProvider>
+    </AbilitiesProvider>
     </MaySettleProvider>
     </CanWriteProvider>
     </CurrencyProvider>

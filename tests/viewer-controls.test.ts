@@ -49,7 +49,12 @@ const GATED = [
 describe("the screens a viewer meets", () => {
   it("all ask whether this reader may write", () => {
     for (const file of GATED) {
-      expect(read(file), `${file} does not consult useCanWrite`).toMatch(/useCanWrite\(\)/);
+      /* Any of the three: a screen asks the gate that matches its door.
+         `useCanWrite` for customer records, `useCanWriteMail` for the inbox,
+         `useCanHandleMoney` for the price list — see `shell/Abilities`. */
+      expect(read(file), `${file} consults no access gate at all`).toMatch(
+        /use(CanWrite|CanWriteMail|CanHandleMoney)\(\)/
+      );
     }
   });
 });
@@ -196,7 +201,9 @@ describe("every screen with write controls has been through this pass", () => {
       .split("\n")
       .filter(Boolean);
 
-    const ungated = found.filter((f) => !read(f).includes("useCanWrite()") && !(f in EXEMPT));
+    const asksSomething = (src: string) =>
+      /use(CanWrite|CanWriteMail|CanHandleMoney|MaySettle)\(\)/.test(src);
+    const ungated = found.filter((f) => !asksSomething(read(f)) && !(f in EXEMPT));
     expect(ungated, `these render a write and neither ask useCanWrite nor give a reason: ${ungated.join(", ")}`).toEqual([]);
   });
 

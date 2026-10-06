@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useCanWrite } from "@/components/shell/CanWrite";
+import { useCanWriteMail } from "@/components/shell/Abilities";
 import { Ticket as TicketIcon } from "lucide-react";
 import { useNow } from "@/components/ui/TimeAgo";
 import { clsx } from "@/lib/clsx";
@@ -89,7 +89,7 @@ export function TicketBar({
   team: { id: string; name: string }[];
   currentUserId: string | null;
 }) {
-  const canWrite = useCanWrite();
+  const canWrite = useCanWriteMail();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -191,7 +191,7 @@ export function TicketBar({
 
 /** Start tracking this conversation. */
 export function TrackTicketButton({ threadId }: { threadId: string }) {
-  const canWrite = useCanWrite();
+  const canWrite = useCanWriteMail();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /* Opening a ticket is a write. Nothing stands in its place: a conversation

@@ -55,7 +55,7 @@ import type { ProjectOption } from "@/server/repos/inbox";
 import { useDraft, hasContent, type Draft } from "@/lib/use-draft";
 import { worthKeeping, type Draft as SavedDraft } from "@/data/drafts";
 import { refused } from "@/server/write-result";
-import { useCanWrite } from "@/components/shell/CanWrite";
+import { useCanWriteMail } from "@/components/shell/Abilities";
 import { PriceListInMail } from "@/components/pricing/PriceListInMail";
 import { findSupplierList, type SupplierLike } from "@/server/supplier-mail";
 import { discardDraftAction, saveDraftAction } from "./actions";
@@ -175,7 +175,7 @@ export function InboxView({
    * the box is exactly the state that was being lost.
    */
   const router = useRouter();
-  const canWrite = useCanWrite();
+  const canWrite = useCanWriteMail();
   const { draft, save, clear } = useDraft(DRAFT_KEY);
   const draftWaiting = hasContent(draft);
   /* Whether the composer OPENED onto existing text, which is the only moment
@@ -871,7 +871,7 @@ function MessageList({
     counts: Record<TicketStatus, number>;
   };
 }) {
-  const canWrite = useCanWrite();
+  const canWrite = useCanWriteMail();
   const inTickets = filter === "Tickets";
   const [filterOpen, setFilterOpen] = useState(false);
   const [filterAnchor, setFilterAnchor] = useState<HTMLButtonElement | null>(null);
@@ -1234,7 +1234,7 @@ function Reader({
   // remounts this component — the React way to say "this is a different thing
   // now". Doing it with an effect would mean rendering the previous message's
   // open composer once before clearing it.
-  const canWrite = useCanWrite();
+  const canWrite = useCanWriteMail();
   /* Recomputed per message rather than carried from the server: it is pure,
      it is cheap, and the alternative is a second shape of the same fact. */
   const priceList = useMemo(
@@ -2334,7 +2334,7 @@ function FileUnderProject({
   projects: ProjectOption[];
   companyFor: Record<string, string>;
 }) {
-  const canWrite = useCanWrite();
+  const canWrite = useCanWriteMail();
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const filed = projects.find((p) => p.id === message.dealId);

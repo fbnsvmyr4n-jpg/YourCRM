@@ -201,6 +201,16 @@ describe("every server action is authorised", () => {
           /^(const \w+ = )?await requireTenant\(\);$/.test(firstStatement ?? "") ||
           /^(return |const \w+ = )?await withCurrentTenant\(/.test(firstStatement ?? "") ||
           /^return withCurrentTenant\(/.test(firstStatement ?? "") ||
+          /*
+             `withMail` and `withMoney` are `withCurrentTenant` with one option
+             fixed — the mail door and the money door. Named once at the top of
+             their file rather than repeated at eighteen call sites, because
+             repeated eighteen times is how one of them ends up without it, and
+             that one would be an action a bookkeeper silently cannot use.
+             Same guard, same first statement, same fail-closed behaviour.
+          */
+          /^(return |const \w+ = )?await with(Mail|Money)\(/.test(firstStatement ?? "") ||
+          /^return with(Mail|Money)\(/.test(firstStatement ?? "") ||
           // Settings actions predate `requireUser` and fail closed by returning
           // an error state instead of throwing, which suits their form shape.
           firstStatement === "const me = await getCurrentUser();";

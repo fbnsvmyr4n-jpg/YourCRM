@@ -5,7 +5,7 @@ import { stripeConfigured } from "@/server/billing/stripe";
 import { PlanLapsed } from "@/components/billing/PlanLapsed";
 import { AppShell } from "@/components/shell/AppShell";
 import { planState } from "@/server/plan-gate";
-import { canAccessCrm, canAccessMoney, canAccessOps, roleCan } from "@/server/permissions";
+import { canAccessCrm, canAccessMail, canAccessMoney, canAccessOps, roleCan } from "@/server/permissions";
 import { withSystem } from "@/server/tenant";
 import { navCounts } from "@/server/nav-counts";
 import { listNotifications, listOpsNotifications } from "@/server/notifications";
@@ -76,6 +76,7 @@ export default async function AppGroupLayout({ children }: { children: React.Rea
      gets the paperwork without the pipeline; IT gets to hear that the machine
      is broken without reading anybody's records. See `server/permissions`. */
   const moneyAccess = canAccessMoney(user.role);
+  const mailAccess = canAccessMail(user.role);
   const opsAccess = canAccessOps(user.role);
   /* The currency is read for everybody: it is how this business counts, not a
      record about a customer, and accounts see amounts on Billing too. */
@@ -134,6 +135,7 @@ export default async function AppGroupLayout({ children }: { children: React.Rea
          the link keeps the sidebar honest about where they can go. */
       crmAccess={crmAccess}
       moneyAccess={moneyAccess}
+      mailAccess={mailAccess}
       currency={currency}
       vocabulary={vocabulary}
     >

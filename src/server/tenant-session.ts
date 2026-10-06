@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { readSessionToken, SESSION_COOKIE } from "./auth";
 import { logDenied } from "./log";
-import { canAccessCrm, canAccessMoney } from "./permissions";
+import { canAccessCrm, canAccessMail, canAccessMoney } from "./permissions";
 import { requireActivePlan } from "./plan-gate";
 import { findUserById, type SafeUser } from "./repos/users";
 import { withSystem, withTenant, type TenantContext, type TenantQuery } from "./tenant";
@@ -151,7 +151,7 @@ export async function requireTenant(): Promise<TenantContext> {
  */
 export async function withCurrentTenant<T>(
   fn: (q: TenantQuery) => Promise<T>,
-  options: { allowInactive?: boolean; crmData?: boolean; money?: boolean; page?: boolean } = {}
+  options: { allowInactive?: boolean; crmData?: boolean; money?: boolean; mail?: boolean; page?: boolean } = {}
 ): Promise<T> {
   const ctx = await requireTenant();
 
@@ -183,12 +183,23 @@ export async function withCurrentTenant<T>(
      business in somebody's call history and every business in an unpaid
      invoice — and asked as one question, finance lost both.
 
-     `crmData: false` still means "neither", and still has to be claimed by
-     name.
+     `mail: true` is the third: the inbox, and everything written from it. A
+     bookkeeper's day is made of email — supplier invoices, a client querying a
+     bill, chasing a payment — and asking the customer-records question of them
+     locked the finance role out of its own job. IT is refused here and allowed
+     nowhere near somebody else's correspondence.
+
+     `crmData: false` still means "none of them", and still has to be claimed
+     by name.
   */
-  const mayEnter = options.money ? canAccessMoney(ctx.role) : canAccessCrm(ctx.role);
+  const door = options.money ? "money" : options.mail ? "mail" : "customer-data";
+  const mayEnter = options.money
+    ? canAccessMoney(ctx.role)
+    : options.mail
+      ? canAccessMail(ctx.role)
+      : canAccessCrm(ctx.role);
   if (options.crmData !== false && !mayEnter) {
-    logDenied("crm-access", `${ctx.role} attempted a ${options.money ? "money" : "customer-data"} operation`);
+    logDenied("crm-access", `${ctx.role} attempted a ${door} operation`);
     throw new CrmAccessError();
   }
 
@@ -260,7 +271,7 @@ export function isReadOnlyRefusal(err: unknown): boolean {
  */
 export async function withTenantPage<T>(
   fn: (q: TenantQuery) => Promise<T>,
-  options: { crmData?: boolean; money?: boolean } = {}
+  options: { crmData?: boolean; money?: boolean; mail?: boolean } = {}
 ): Promise<T> {
   const user = await currentUser();
   // `redirect` throws a control-flow signal Next understands, so nothing below
@@ -276,7 +287,11 @@ export async function withTenantPage<T>(
    * they go — and it opts out below, which is what stops this bouncing between
    * the two forever.
    */
-  const mayOpen = options.money ? canAccessMoney(user.role) : canAccessCrm(user.role);
+  const mayOpen = options.money
+    ? canAccessMoney(user.role)
+    : options.mail
+      ? canAccessMail(user.role)
+      : canAccessCrm(user.role);
   if (options.crmData !== false && !mayOpen) {
     redirect("/settings");
   }
@@ -294,6 +309,11 @@ export async function withTenantPage<T>(
     allowInactive: true,
     crmData: options.crmData,
     money: options.money,
+    /* Every door this function knows about has to be forwarded. Adding one
+       above and forgetting it here means the page checks the right tier, hands
+       off, and is refused by the wrong one — which is precisely what happened:
+       the inbox let a bookkeeper past its own gate and then threw. */
+    mail: options.mail,
     page: true,
   });
 }

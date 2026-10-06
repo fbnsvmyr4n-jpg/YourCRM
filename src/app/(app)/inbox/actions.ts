@@ -27,6 +27,18 @@ import { assignableTeam } from "@/server/repos/automations";
 import { logWrite } from "@/server/log";
 import { TICKET_PRIORITIES, TICKET_STATUSES, type Ticket } from "@/server/ticket-rules";
 
+/*
+   EVERY action in this file opens the MAIL door rather than the customer-data
+   one — `withCurrentTenant(fn, { mail: true })`.
+
+   A bookkeeper replies to a client about an invoice, forwards a supplier's
+   statement, logs a payment remittance that arrived. Asking the
+   customer-records question of them refused all of it, which made the finance
+   role an account that can read figures somebody else keyed in and do nothing.
+   IT is refused by the same option, which is the point of it being its own
+   door rather than an opt-out.
+*/
+
 /**
  * Inbox actions.
  *
@@ -68,19 +80,19 @@ async function deliver(
     return `Logged. ${message.channel === "sms" ? "SMS" : "WhatsApp"} messages are recorded here, not sent — send it from your phone.`;
   }
 
-  const recipient = await withCurrentTenant((q) => findOutgoing(q, message.id));
+  const recipient = await withMail((q) => findOutgoing(q, message.id));
   if (!recipient?.toEmail) {
-    await withCurrentTenant((q) => setDelivery(q, message.id, "failed", "no email address on file"));
+    await withMail((q) => setDelivery(q, message.id, "failed", "no email address on file"));
     return "Saved, but not sent: there is no email address for that contact. Add one and send again.";
   }
 
-  await withCurrentTenant((q) => queueMessageEmail(q, message.id));
+  await withMail((q) => queueMessageEmail(q, message.id));
 
   /* Drained here so the common case is done before the writer looks away; the
      queue is what guarantees it happens at all. */
   await drain(ctx, OUTBOX_REGISTRY, 5).catch(() => {});
 
-  const after = await withCurrentTenant((q) => findOutgoing(q, message.id));
+  const after = await withMail((q) => findOutgoing(q, message.id));
   if (after?.delivery === "sent") return null;
   if (after?.delivery === "failed") {
     return `Saved, but it could not be sent: ${after.deliveryError ?? "unknown error"}`;
@@ -95,12 +107,23 @@ async function deliver(
  * to know, a notice. Silence means it went — a screen that says "sent" every
  * time is the same screen that said it before anything was being sent.
  */
+/**
+ * Every action in this file, through the MAIL door.
+ *
+ * Named once rather than `{ mail: true }` repeated eighteen times — and
+ * repeated eighteen times is how one of them ends up without it, which would
+ * be an action a bookkeeper silently cannot use. `authorisation.test.ts`
+ * accepts this because it IS `withCurrentTenant`: same guard, same first
+ * statement, one option fixed.
+ */
+const withMail = <T>(fn: (q: TenantQuery) => Promise<T>) => withCurrentTenant(fn, { mail: true });
+
 export async function addMessageAction(
   formData: FormData
 ): Promise<{ id: string; notice: string | null } | null> {
   const ctx = await requireTenant();
 
-  const created = await withCurrentTenant(async (q) => {
+  const created = await withMail(async (q) => {
     // The compose field accepts "Name or email address", so it stays free text
     // — bounded, not format-checked.
     const to = text(formData.get("to"), 120);
@@ -149,7 +172,7 @@ export async function replyAction(
 ): Promise<{ id: string; notice: string | null } | null> {
   const ctx = await requireTenant();
 
-  const created = await withCurrentTenant(async (q) => {
+  const created = await withMail(async (q) => {
     const messageId = validId(id);
     if (!messageId) return null;
 
@@ -198,7 +221,7 @@ export async function forwardAction(
 ): Promise<{ id: string; notice: string | null } | null> {
   const ctx = await requireTenant();
 
-  const created = await withCurrentTenant(async (q) => {
+  const created = await withMail(async (q) => {
     const messageId = validId(id);
     if (!messageId) return null;
 
@@ -256,7 +279,7 @@ export async function forwardAction(
 }
 
 export async function markReadAction(id: string) {
-  return withCurrentTenant(async (q) => {
+  return withMail(async (q) => {
     const messageId = validId(id);
     if (!messageId) return;
     await setUnread(q, messageId, false);
@@ -266,7 +289,7 @@ export async function markReadAction(id: string) {
 
 /** Deliberately available: marking something unread again is how people queue work. */
 export async function markUnreadAction(id: string) {
-  return withCurrentTenant(async (q) => {
+  return withMail(async (q) => {
     const messageId = validId(id);
     if (!messageId) return;
     await setUnread(q, messageId, true);
@@ -281,7 +304,7 @@ export async function markUnreadAction(id: string) {
  * message always has whatever the rules say it is.
  */
 export async function setCategoryAction(id: string, category: string | null) {
-  return withCurrentTenant(async (q) => {
+  return withMail(async (q) => {
     const messageId = validId(id);
     if (!messageId) return;
     const value = category ? pick(category, MSG_CATEGORIES) : null;
@@ -292,7 +315,7 @@ export async function setCategoryAction(id: string, category: string | null) {
 }
 
 export async function trashMessageAction(id: string): Promise<WriteResult> {
-  return withCurrentTenant(async (q) => {
+  return withMail(async (q) => {
     const messageId = validId(id);
     if (!messageId) return { error: "That message could not be identified." };
     await trashMessage(q, messageId);
@@ -302,7 +325,7 @@ export async function trashMessageAction(id: string): Promise<WriteResult> {
 }
 
 export async function restoreMessageAction(id: string): Promise<WriteResult> {
-  return withCurrentTenant(async (q) => {
+  return withMail(async (q) => {
     const messageId = validId(id);
     if (!messageId) return { error: "That message could not be identified." };
     await restoreMessage(q, messageId);
@@ -323,7 +346,7 @@ export async function restoreMessageAction(id: string): Promise<WriteResult> {
  * a different wrong project instead is not one.
  */
 export async function fileThreadAction(threadId: string, dealId: string | null) {
-  return withCurrentTenant(async (q) => {
+  return withMail(async (q) => {
     const thread = validId(threadId);
     if (!thread) return { error: "That conversation could not be identified." };
 
@@ -363,7 +386,7 @@ async function checkAssignee(q: TenantQuery, raw: unknown): Promise<{ id: string
 
 /** Start tracking a conversation as a ticket. */
 export async function trackTicketAction(threadId: string): Promise<TicketResult> {
-  return withCurrentTenant(async (q) => {
+  return withMail(async (q) => {
     const thread = validId(threadId);
     if (!thread) return { error: "That conversation no longer exists." };
     const out = await openTicket(q, thread);
@@ -378,7 +401,7 @@ export async function updateTicketAction(
   ticketId: string,
   patch: { status?: string; priority?: string; assigneeUserId?: string | null }
 ): Promise<TicketResult> {
-  return withCurrentTenant(async (q) => {
+  return withMail(async (q) => {
     const id = validId(ticketId);
     if (!id) return { error: "That ticket no longer exists." };
 
@@ -417,7 +440,7 @@ const CLOCK_SKEW_MS = 5 * 60_000;
 export async function logReceivedAction(
   formData: FormData
 ): Promise<{ error: string } | { ok: true; id: string; ticket: Ticket | null }> {
-  return withCurrentTenant(async (q) => {
+  return withMail(async (q) => {
     const from = text(formData.get("to"), 120);
     if (!from) return { error: "Say who it was from." };
     const body = multiline(formData.get("body"), 10_000);
@@ -485,7 +508,7 @@ export async function saveDraftAction(draft: {
   subject: string;
   body: string;
 }): Promise<Draft | null> {
-  return withCurrentTenant(async (q) => {
+  return withMail(async (q) => {
     const saved = await saveDraft(q, {
       id: draft.id ? validId(draft.id) : null,
       to: text(draft.to, 320),
@@ -499,7 +522,7 @@ export async function saveDraftAction(draft: {
 
 /** Throw a draft away. Says whether it went, so the list is not told a lie. */
 export async function discardDraftAction(id: string): Promise<boolean> {
-  return withCurrentTenant(async (q) => {
+  return withMail(async (q) => {
     const draftId = validId(id);
     if (!draftId) return false;
     const gone = await discardDraft(q, draftId);

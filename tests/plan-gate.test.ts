@@ -143,6 +143,23 @@ describe("no server action escapes the gate by accident", () => {
   const actionFiles = walk(APP).filter((f) => /^\s*["']use server["']/.test(readFileSync(f, "utf8")));
 
   /**
+   * Local names for `withCurrentTenant` with one door fixed open.
+   *
+   * `inbox/actions.ts` opens the mail door and `pricing/actions.ts` the money
+   * one, each named once at the top of its file rather than repeated at
+   * eighteen call sites — because repeated eighteen times is how one of them
+   * ends up without it, and that one would be an action a bookkeeper silently
+   * cannot use.
+   *
+   * They are found rather than listed, so the third such file is covered the
+   * day it is written instead of failing this suite for doing the right thing.
+   * The gate itself is unchanged: same function, same first statement, same
+   * fail-closed behaviour — only the option is pre-decided.
+   */
+  const gateAliases = (src: string): string[] =>
+    [...src.matchAll(/const (\w+) =[^;]{0,300}?withCurrentTenant\(/g)].map((m) => m[1]);
+
+  /**
    * Actions that resolve the tenant themselves rather than through
    * `withCurrentTenant`, and so are not gated by it. Each needs a reason.
    *
@@ -220,6 +237,10 @@ describe("no server action escapes the gate by accident", () => {
     for (const file of actionFiles) {
       const src = readFileSync(file, "utf8");
       const names = [...src.matchAll(/export async function (\w+)/g)].map((m) => m[1]);
+      const aliases = gateAliases(src);
+      const callsGate = (body: string) =>
+        /withCurrentTenant\(/.test(body) ||
+        aliases.some((a) => new RegExp(`\\b${a}\\s*\\(`).test(body));
 
       for (const name of names) {
         const start = src.indexOf(`export async function ${name}`);
@@ -233,12 +254,10 @@ describe("no server action escapes the gate by accident", () => {
         // and password reset run for somebody who has no account yet, let
         // alone a plan — gating those would lock a customer out of the login
         // page the moment their subscription lapsed.
-        const resolvesTenant =
-          /requireTenant\(\)/.test(body) || /withCurrentTenant\(/.test(body);
+        const resolvesTenant = /requireTenant\(\)/.test(body) || callsGate(body);
         if (!resolvesTenant) continue;
 
-        const gated =
-          /withCurrentTenant\(/.test(body) || /requireActivePlan\(/.test(body);
+        const gated = callsGate(body) || /requireActivePlan\(/.test(body);
         const excused = name in UNGATED;
 
         expect(

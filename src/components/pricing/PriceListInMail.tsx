@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { Truck } from "lucide-react";
-import { useCanWrite } from "@/components/shell/CanWrite";
+import { useCanHandleMoney } from "@/components/shell/Abilities";
 import type { SupplierListInMail } from "@/server/supplier-mail";
 
 /**
@@ -29,7 +29,7 @@ export function PriceListInMail({
   found: SupplierListInMail;
   messageId: string;
 }) {
-  const canWrite = useCanWrite();
+  const canWrite = useCanHandleMoney();
   if (!canWrite) return null;
 
   const rows = found.lines.length;

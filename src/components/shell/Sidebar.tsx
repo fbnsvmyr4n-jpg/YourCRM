@@ -26,6 +26,7 @@ export function Sidebar({
   counts,
   crmAccess,
   moneyAccess,
+  mailAccess,
 }: {
   user: ShellUser;
   collapsed: boolean;
@@ -37,9 +38,11 @@ export function Sidebar({
   crmAccess: boolean;
   /** May this reader open quotations, orders and invoices. */
   moneyAccess: boolean;
+  /** May this reader open the inbox. True for finance; false for IT. */
+  mailAccess: boolean;
 }) {
   const pathname = usePathname();
-  const nav = visibleNav(crmAccess, moneyAccess);
+  const nav = visibleNav(crmAccess, moneyAccess, mailAccess);
   /* Two rows are named by the workspace rather than by this file: the list of
      work and the board of stages. Everything else means the same thing in
      every trade. */

@@ -54,6 +54,20 @@ export default async function PricingPage({
       suppliers,
       prefill: found ? { supplierId: found.supplierId, text: found.text } : null,
     };
+  }, {
+    /*
+       MONEY, not customer records.
+
+       There is not one customer fact on this screen: it is what the business
+       charges and what its suppliers charge. Gating it on customer data kept
+       the finance role out of the one list they need most — reconciling a
+       supplier's invoice against the rate that supplier agreed is the job, and
+       without this they are checking an invoice against nothing.
+
+       IT is still refused, which is right: what the business charges is not
+       part of fixing the machine.
+    */
+    money: true,
   });
 
   return <PricingView items={items} suppliers={suppliers} prefill={prefill} />;
