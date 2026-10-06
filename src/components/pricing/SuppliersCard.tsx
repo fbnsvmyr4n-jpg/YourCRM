@@ -127,6 +127,37 @@ export function SuppliersCard({ suppliers }: { suppliers: Supplier[] }) {
             />
           </label>
 
+          {/*
+             Trust, per supplier.
+
+             Said as what it actually does, not as "automatic updates". It loads
+             the ordinary lists and holds the rest — the first one from a
+             supplier, anything with a line we could not read, and any price
+             that has moved more than a third. Somebody deciding whether to
+             switch this on is deciding how much they trust this merchant's
+             spreadsheet, and they can only weigh that if the limits are on the
+             screen rather than in a file.
+          */}
+          <label
+            className="flex items-start gap-3 rounded-xl px-3.5 py-3"
+            style={{ background: "var(--surface-2)" }}
+          >
+            <input
+              type="checkbox"
+              name="autoLoad"
+              defaultChecked={editing?.autoLoad ?? false}
+              className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--accent)]"
+            />
+            <span className="leading-tight">
+              <span className="block text-sm font-medium">Load their lists for me</span>
+              <span className="mt-0.5 block text-xs text-faint">
+                When they email a price list, load it without asking. Their first
+                list, anything with a line we could not read, and any price that
+                has moved more than a third still wait for you.
+              </span>
+            </span>
+          </label>
+
           <div className="flex justify-end gap-2">
             <button
               type="button"
@@ -169,6 +200,11 @@ export function SuppliersCard({ suppliers }: { suppliers: Supplier[] }) {
                     /* Said plainly. A list nobody has refreshed is the thing
                        this card exists to make visible. */
                     s.listUpdatedOn ? `list loaded ${s.listUpdatedOn}` : "never loaded",
+                    /* On the row, because a supplier whose prices can change
+                       without anybody pressing anything is a different kind of
+                       row, and somebody scanning this list should not have to
+                       open each one to find out which. */
+                    s.autoLoad && "loads itself",
                     s.email,
                   ]
                     .filter(Boolean)

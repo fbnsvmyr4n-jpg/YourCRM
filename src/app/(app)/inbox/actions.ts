@@ -15,6 +15,7 @@ import {
 import { getContact } from "@/server/repos/contacts";
 import { discardDraft, saveDraft, type Draft } from "@/server/repos/drafts";
 import { linkContactByName } from "@/server/link-contact";
+import { autoLoadFromMessage } from "@/server/supplier-auto-load";
 import { requireTenant, withCurrentTenant } from "@/server/tenant-session";
 import type { TenantContext, TenantQuery } from "@/server/tenant";
 import { canSendOn, findOutgoing, setDelivery, type Channel } from "@/server/repos/inbox";
@@ -429,6 +430,33 @@ export async function updateTicketAction(
 const CLOCK_SKEW_MS = 5 * 60_000;
 
 /**
+ * What logging a received message answers, inside the gate.
+ *
+ * Named rather than inferred, and declared out here rather than inside the
+ * function. Inferred, the two branches widen into a shape carrying
+ * `error?: undefined` on the success side and the narrowing afterwards stops
+ * working — which matters, because the refusal the gate can return has to
+ * survive into the second half of that function intact.
+ *
+ * `forPrices` is the message restated as the price-list recogniser wants it,
+ * carried out of the mail door so the list can be loaded behind the money one.
+ */
+type LoggedMessage =
+  | { error: string }
+  | {
+      ok: true;
+      id: string;
+      ticket: Ticket | null;
+      forPrices: {
+        id: string;
+        direction: "received";
+        email: string;
+        subject: string;
+        body: string[];
+      };
+    };
+
+/**
  * Record a message somebody RECEIVED — a WhatsApp on their phone, a call, an
  * email in another mailbox.
  *
@@ -439,8 +467,10 @@ const CLOCK_SKEW_MS = 5 * 60_000;
  */
 export async function logReceivedAction(
   formData: FormData
-): Promise<{ error: string } | { ok: true; id: string; ticket: Ticket | null }> {
-  return withMail(async (q) => {
+): Promise<
+  { error: string } | { ok: true; id: string; ticket: Ticket | null; priceList: string | null }
+> {
+  const logged = await withMail<LoggedMessage>(async (q) => {
     const from = text(formData.get("to"), 120);
     if (!from) return { error: "Say who it was from." };
     const body = multiline(formData.get("body"), 10_000);
@@ -482,8 +512,64 @@ export async function logReceivedAction(
     }
 
     revalidateApp();
-    return { ok: true as const, id: created.id, ticket };
+    return {
+      ok: true as const,
+      id: created.id,
+      ticket,
+      /* Carried out of the mail door so the price list can be loaded behind
+         the money one — see below. */
+      forPrices: {
+        id: created.id,
+        direction: "received" as const,
+        email: looksLikeEmail ? from : "",
+        subject: text(formData.get("subject"), 200),
+        body: body.split("\n"),
+      },
+    };
   });
+
+  if ("error" in logged) return { error: logged.error };
+
+  /*
+     A supplier's price list, loaded without being asked — slice 2b.
+
+     OUTSIDE the transaction above, and through the MONEY door rather than the
+     mail one, for two separate reasons:
+
+       - Recognising a price list in an email is mail work. Writing what this
+         business pays for stone is not, and running it on the inbox's querier
+         would be the money gate widened by proximity to the thing that happened
+         to trigger it.
+
+       - A write refused in there would roll back the message as well. A
+         view-only reader logging what a supplier said must still get their
+         message saved, and the price write is the part that is supposed to
+         fail for them.
+
+     Swallowed on failure for the same reason: the message is the thing the
+     person asked for, and a supplier list that did not load is a card in the
+     inbox, which is the normal state of every message that arrives.
+  */
+  const priceList = await withCurrentTenant(
+    (q) => autoLoadFromMessage(q, logged.forPrices),
+    { money: true }
+  ).catch(() => null);
+
+  return {
+    ok: true as const,
+    id: logged.id,
+    ticket: logged.ticket,
+    priceList:
+      priceList && "loaded" in priceList && priceList.loaded
+        ? `${priceList.supplierName}'s price list was loaded — ${[
+            priceList.result.added && `${priceList.result.added} added`,
+            priceList.result.repriced && `${priceList.result.repriced} repriced`,
+            priceList.result.unchanged && `${priceList.result.unchanged} unchanged`,
+          ]
+            .filter(Boolean)
+            .join(", ")}.`
+        : null,
+  };
 }
 
 /* ------------------------------------------------------------------ */

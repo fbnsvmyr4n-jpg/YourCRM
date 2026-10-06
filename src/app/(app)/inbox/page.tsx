@@ -1,6 +1,10 @@
 import { listMessages, projectOptions, purgeExpiredMessages } from "@/server/repos/inbox";
 import { listDrafts } from "@/server/repos/drafts";
-import { listSuppliers } from "@/server/repos/suppliers";
+import {
+  itemsForAutoLoadSuppliers,
+  listSuppliers,
+  loadsByMessage,
+} from "@/server/repos/suppliers";
 import { contactSummaries } from "@/server/contact-summaries";
 import { listContacts } from "@/server/repos/contacts";
 import { decorateMessage } from "@/server/decorate-message";
@@ -27,7 +31,7 @@ export default async function InboxPage({
   const business = await withSystem((sys) =>
     sys.one<{ name: string }>(`SELECT name FROM sub_accounts WHERE id = $2 AND agency_id = $1`, [ctx.agencyId, ctx.subAccountId])
   );
-  const { messages, contactFor, people, recent, revenueFor, projects, companyFor, tickets, team, templates, drafts, suppliers } =
+  const { messages, contactFor, people, recent, revenueFor, projects, companyFor, tickets, team, templates, drafts, suppliers, priceLoads } =
     await withTenantPage(async (q) => {
     /* Before reading, so nothing expired is listed and then vanishes on the
        next load. There is no scheduler in this app; the bin is emptied by
@@ -152,8 +156,24 @@ export default async function InboxPage({
       templates: await listTemplates(q),
       team: await assignableTeam(q),
       drafts,
-      /* So a message from a merchant can say it carries their price list. */
-      suppliers: await listSuppliers(q),
+      /* So a message from a merchant can say it carries their price list —
+         and, for the ones whose lists load themselves, say why a given list
+         did not. The prices on file are what that judgement is made against,
+         and the card runs the same pure rule the server loads by. */
+      suppliers: await (async () => {
+        const [all, items] = [await listSuppliers(q), await itemsForAutoLoadSuppliers(q)];
+        return all.map((s) => ({
+          id: s.id,
+          name: s.name,
+          email: s.email,
+          autoLoad: s.autoLoad,
+          items: s.autoLoad ? (items[s.id] ?? []) : undefined,
+        }));
+      })(),
+      /* And so one whose list has ALREADY been loaded says that instead of
+         going on offering. With auto-loading on, that is the common case: the
+         machine has loaded it before anybody opens the message. */
+      priceLoads: await loadsByMessage(q),
       messages: rows.map((m) => decorateMessage(m, senders)),
       contactFor,
       people: addressBook,
@@ -196,6 +216,7 @@ export default async function InboxPage({
       team={team}
       drafts={drafts}
       suppliers={suppliers}
+      priceLoads={priceLoads}
       currentUserId={ctx.userId}
       templates={templates}
       me={{ name: user?.name ?? "", business: business?.name ?? "" }}

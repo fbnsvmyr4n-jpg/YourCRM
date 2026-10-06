@@ -14,6 +14,7 @@ import {
   applyPriceList,
   createSupplier,
   deleteSupplier,
+  recordLoad,
   supplierItems,
   updateSupplier,
 } from "@/server/repos/suppliers";
@@ -134,11 +135,30 @@ export async function saveSupplierAction(_prev: FormState, formData: FormData): 
     const name = text(formData.get("name"), 120);
     if (!name.trim()) return { error: "Give the supplier a name." };
 
+    const email = text(formData.get("email"), 320) || null;
+    const autoLoad = formData.get("autoLoad") === "on";
+
+    /*
+       The switch cannot be on without an address to match on.
+
+       `findSupplierList` matches on the ADDRESS and nothing else — a display
+       name that happens to say "Stone Yard" is not a fact about who sent a
+       message. So auto-loading a supplier with no address on file is a setting
+       that can never once fire, and a control that silently does nothing is
+       worse than one that is not offered: somebody turns it on, believes their
+       prices are keeping themselves up to date, and quotes from a list that has
+       not moved in a year.
+    */
+    if (autoLoad && !email) {
+      return { error: "Add the email address their list comes from first — that is what a message is matched against." };
+    }
+
     const input = {
       name,
-      email: text(formData.get("email"), 320) || null,
+      email,
       phone: text(formData.get("phone"), 40) || null,
       notes: multiline(formData.get("notes"), 2000) || null,
+      autoLoad,
     };
 
     const existingId = validId(formData.get("id"));
@@ -228,6 +248,22 @@ export async function applyPriceListAction(_prev: FormState, formData: FormData)
     const { lines, unread } = parsePriceList(pasted);
     const changes = planChanges(lines, await supplierItems(q, supplierId));
     const out = await applyPriceList(q, supplierId, changes, await businessToday(q));
+
+    /*
+       Recorded here too, not only on the automatic path.
+
+       A log that covered the unattended loads alone would answer "did the
+       machine do this" and leave "who did" unanswerable — and when a figure
+       looks wrong, the second is the question actually being asked. The message
+       id travels when the list came from one, which is what stops that message
+       going on offering to load a list it has already loaded.
+    */
+    await recordLoad(q, {
+      supplierId,
+      messageId: validId(formData.get("fromMessage")) || null,
+      userId: q.ctx.userId,
+      result: out,
+    });
 
     logWrite("update", "price_list", { id: supplierId, actor: q.ctx.userId });
     revalidateApp();

@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { Truck } from "lucide-react";
+import { AlertTriangle, Check, Truck } from "lucide-react";
 import { useCanHandleMoney } from "@/components/shell/Abilities";
 import type { SupplierListInMail } from "@/server/supplier-mail";
+import type { PriceListLoad } from "@/data/price-loads";
 
 /**
  * "This looks like Stone Yard's price list."
@@ -25,12 +26,54 @@ import type { SupplierListInMail } from "@/server/supplier-mail";
 export function PriceListInMail({
   found,
   messageId,
+  loaded = null,
 }: {
   found: SupplierListInMail;
   messageId: string;
+  /**
+   * The load this message has already had, if any.
+   *
+   * Without this the card goes on saying "Review and load it" over a list that
+   * is already in the price list — so the obedient thing to do is press it
+   * again, and the screen gives no sign that anything happened the first time.
+   * With automatic loading that is the common case rather than the odd one: the
+   * machine loads it before anybody opens the message.
+   */
+  loaded?: PriceListLoad | null;
 }) {
   const canWrite = useCanHandleMoney();
   if (!canWrite) return null;
+
+  if (loaded) {
+    const did = [
+      loaded.added && `${loaded.added} added`,
+      loaded.repriced && `${loaded.repriced} repriced`,
+      loaded.unchanged && `${loaded.unchanged} unchanged`,
+    ]
+      .filter(Boolean)
+      .join(", ");
+
+    return (
+      <div className="mt-3 rounded-xl px-3.5 py-3" style={{ background: "var(--green-soft)" }}>
+        <p className="flex items-center gap-2 text-sm font-semibold" style={{ color: "var(--green)" }}>
+          <Check className="h-4 w-4 shrink-0" aria-hidden />
+          {loaded.supplierName}&rsquo;s prices were loaded from this
+        </p>
+        <p className="mt-1 text-xs text-muted">
+          {did || "Nothing in it had changed"}
+          {/* WHO, and "nobody" said as itself rather than left blank. A price
+              that moved without anybody pressing anything is exactly the fact
+              somebody needs when a quotation comes out wrong, and a missing
+              name reads as an oversight rather than as an answer. */}
+          {loaded.loadedByName ? ` · loaded by ${loaded.loadedByName}` : " · loaded automatically"}
+          {". "}
+          <Link href="/pricing" className="underline underline-offset-2 hover:text-accent">
+            See the price list
+          </Link>
+        </p>
+      </div>
+    );
+  }
 
   const rows = found.lines.length;
 
@@ -70,6 +113,18 @@ export function PriceListInMail({
           a URL, and the text is then read back from the record rather than
           from something a browser handed over — which is also why a stale or
           hand-edited link cannot smuggle prices in. */}
+      {/* Why this one did not load itself, for a supplier whose lists normally
+          do. Somebody looking at this button with the switch on has exactly one
+          question, and the answer also points them at the line worth staring
+          at. Absent when the switch is off: there is nothing to explain,
+          because nothing was expected. */}
+      {found.heldBecause && (
+        <p className="mt-2 flex items-start gap-1.5 text-xs font-medium" style={{ color: "var(--amber)" }}>
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+          Held for you: {found.heldBecause}.
+        </p>
+      )}
+
       <Link
         href={`/pricing?fromMessage=${encodeURIComponent(messageId)}`}
         className="btn-accent focus-ring mt-2.5 inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold"

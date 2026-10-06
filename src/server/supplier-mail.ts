@@ -1,4 +1,10 @@
-import { parsePriceList, type ParsedLine } from "./price-import";
+import {
+  parsePriceList,
+  planChanges,
+  unattendedVerdict,
+  type ExistingItem,
+  type ParsedLine,
+} from "./price-import";
 
 /**
  * Recognising a supplier's price list in a message that arrived.
@@ -37,7 +43,20 @@ export type MailLike = {
 };
 
 /** Just enough of a supplier to match against. */
-export type SupplierLike = { id: string; name: string; email: string | null };
+export type SupplierLike = {
+  id: string;
+  name: string;
+  email: string | null;
+  /**
+   * Whether their lists load themselves, and what they currently price.
+   *
+   * Both optional, because most callers of `findSupplierList` only want to know
+   * WHOSE list this is. They are carried for the one that also has to explain
+   * why a list was held back — see `heldBecause` below, and `unattendedVerdict`.
+   */
+  autoLoad?: boolean;
+  items?: ExistingItem[];
+};
 
 export type SupplierListInMail = {
   supplierId: string;
@@ -61,6 +80,19 @@ export type SupplierListInMail = {
   unread: number;
   /** Why this was offered, said in the reader's words. */
   because: string;
+  /**
+   * Why it was NOT loaded on its own, for a supplier whose lists otherwise are.
+   *
+   * Null when the switch is off — there is nothing to explain, because nothing
+   * was expected — and null when it would have loaded.
+   *
+   * Said rather than left to be wondered about. Somebody who has turned the
+   * switch on and is looking at a "Review and load it" button has one question,
+   * and "Site labour went up by 89%" both answers it and points them straight
+   * at the line worth staring at. Silence here would make the feature look
+   * arbitrary, and a safeguard nobody understands is one they switch off.
+   */
+  heldBecause: string | null;
 };
 
 /**
@@ -125,6 +157,22 @@ export function findSupplierList(
   const prose = unread.filter((u) => u.reason === "no price on this line").length;
 
   const hinted = SUBJECT_HINT.test(mail.subject);
+
+  /*
+     Computed with the SAME pure function the server loads by, rather than a
+     second rule that agrees with it today. Both run `unattendedVerdict`; if
+     they could disagree, the screen would eventually explain a decision that
+     was not the one taken.
+  */
+  const verdict =
+    supplier.autoLoad && supplier.items
+      ? unattendedVerdict(
+          planChanges(lines, supplier.items),
+          unread.length - prose,
+          supplier.items.length
+        )
+      : null;
+
   return {
     supplierId: supplier.id,
     supplierName: supplier.name,
@@ -137,5 +185,6 @@ export function findSupplierList(
     because: hinted
       ? `From ${supplier.name}, and the subject mentions prices`
       : `From ${supplier.name}`,
+    heldBecause: verdict && !verdict.load ? verdict.because : null,
   };
 }

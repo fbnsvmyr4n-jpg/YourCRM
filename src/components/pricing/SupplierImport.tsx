@@ -46,7 +46,7 @@ export function SupplierImport({
    * then behaves exactly like a paste — same preview, same confirm. The
    * automation removes the typing, not the looking.
    */
-  prefill?: { supplierId: string; text: string } | null;
+  prefill?: { supplierId: string; text: string; messageId?: string | null } | null;
 }) {
   const canWrite = useCanHandleMoney();
   const { format } = useMoney();
@@ -158,6 +158,10 @@ export function SupplierImport({
         <form onSubmit={preview.onSubmit} className="flex flex-wrap items-center gap-2">
           <input type="hidden" name="supplierId" value={supplierId} />
           <input type="hidden" name="pasted" value={pasted} />
+          {/* Which message this came from, so the load is recorded against it
+              and that message stops offering to load it again. Empty for an
+              ordinary paste, which has no message behind it. */}
+          <input type="hidden" name="fromMessage" value={prefill?.messageId ?? ""} />
           <button
             type="submit"
             disabled={preview.pending || !pasted.trim()}
@@ -234,6 +238,7 @@ export function SupplierImport({
             <form onSubmit={apply.onSubmit} className="mt-3 flex flex-wrap items-center gap-2">
               <input type="hidden" name="supplierId" value={supplierId} />
               <input type="hidden" name="pasted" value={pasted} />
+              <input type="hidden" name="fromMessage" value={prefill?.messageId ?? ""} />
               <button
                 type="submit"
                 disabled={apply.pending}

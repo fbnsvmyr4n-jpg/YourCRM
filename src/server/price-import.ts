@@ -271,6 +271,116 @@ export function planChanges(parsed: ParsedLine[], existing: ExistingItem[]): Pri
   });
 }
 
+/* ------------------------------------------------------------------ */
+/* Whether it is safe to apply without a person                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * How far a price may move before somebody should look at it.
+ *
+ * 30%. A supplier's increase is usually under fifteen, so thirty is unusual
+ * enough to be worth five seconds and rare enough not to become noise — and a
+ * warning that fires on every list is a warning nobody reads, which is the
+ * failure this whole mechanism exists to avoid.
+ *
+ * It also catches the one parser mistake that would cost real money without
+ * looking wrong: a misplaced decimal is a factor of ten, nowhere near this
+ * band. R14,500 read as R500 is an error this parser actually made, found by
+ * driving the feature rather than by any test, and it would sail past every
+ * other check in this file.
+ */
+export const MOVE_TOLERANCE = 0.3;
+
+/** May this list be applied without anybody reading it first, and if not, why. */
+export type UnattendedVerdict = { load: true } | { load: false; because: string };
+
+/**
+ * May this list be applied without anybody reading it first?
+ *
+ * ── Why this exists at all ────────────────────────────────────────────────
+ *
+ * `supplier-mail.ts` argues, at length and correctly, that a recognised list
+ * must never write itself: an address can be spoofed, a supplier's own system
+ * can send a draft tariff, and a quote for one job reads exactly like a price
+ * list for all of them. Writing prices nobody looked at, triggered by mail
+ * nobody asked for, is the one failure that quietly costs money on every job
+ * afterwards.
+ *
+ * That argument is about the LOOKING, and it is worth asking what the looking
+ * is for. Three of the four things a person checks are already mechanical: is
+ * this a price list (three priced rows), is it really from them (the address on
+ * their record), and did every line parse. The fourth — are these numbers
+ * plausible — is the only one left to a human, and most of it is arithmetic
+ * against the prices already on file.
+ *
+ * So this is not a switch that turns the safeguard off. It is the safeguard,
+ * done by the machine where it can be, handing back the cases where it cannot.
+ * A list that is held is not refused: it falls back to exactly what happens
+ * today — the card in the inbox, and a person who looks.
+ *
+ * Pure, like everything else here, because "why did it load that without asking
+ * me" has to be a question somebody can sit down and answer.
+ */
+export function unattendedVerdict(
+  changes: PriceChange[],
+  unread: number,
+  /** How many prices this supplier already has on file. */
+  existingCount: number
+): UnattendedVerdict {
+  /*
+     A line that tried to be a price and failed means the list is not shaped the
+     way the parser expected — a new column order, a merged cell, a footnote.
+     What it read around that line is a guess, and a guess is what a person is
+     for.
+  */
+  if (unread > 0) {
+    return { load: false, because: `${unread} line${unread === 1 ? "" : "s"} could not be read` };
+  }
+
+  /*
+     THE FIRST LIST IS NEVER AUTOMATIC.
+
+     With nothing on file there is nothing to compare against, so every check
+     below is vacuous and would pass anything at all. That first load is also
+     the one that matters most, because it sets the baseline every later
+     judgement is made against. Loading it unseen would not be a safeguard that
+     allowed it through — it would be no safeguard, wearing the same face.
+  */
+  if (existingCount === 0) {
+    return {
+      load: false,
+      because: "this is their first list, so there is nothing to compare it against",
+    };
+  }
+
+  for (const change of changes) {
+    if (change.kind !== "changed") continue;
+
+    /* Free is not a price. A row arriving at zero is a column read wrongly far
+       more often than it is a supplier giving something away, and applying it
+       puts a nought into every quotation built from it afterwards. */
+    if (change.line.unitCents === 0) {
+      return { load: false, because: `${change.line.name} came through with no price` };
+    }
+    /* Nothing to measure a move against. It cannot have been zero and legitimate
+       — `applyPriceList` would never have written one — so this is an item that
+       predates the rule, and raising its price is not the suspicious direction. */
+    if (change.fromCents === 0) continue;
+
+    const move = Math.abs(change.line.unitCents - change.fromCents) / change.fromCents;
+    if (move > MOVE_TOLERANCE) {
+      return {
+        load: false,
+        because: `${change.line.name} ${
+          change.line.unitCents > change.fromCents ? "went up" : "came down"
+        } by ${Math.round(move * 100)}%`,
+      };
+    }
+  }
+
+  return { load: true };
+}
+
 /** The one-line summary the confirm button is pressed against. */
 export function describeChanges(changes: PriceChange[], unread: number): string {
   const counts = {

@@ -3379,60 +3379,82 @@ CREATE POLICY message_drafts_tenant_isolation ON message_drafts
   WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
 
 -- ---------------------------------------------------------------------------
--- What the application's own database role may do.
---
--- KEEP THIS THE LAST BLOCK IN THE FILE: `GRANT … ON ALL TABLES` covers only the
--- tables that exist when it runs.
---
--- The app connects as `yourcrm_app`, a role that can read and write rows and do
--- nothing else — it cannot create, alter or drop anything, and above all it
--- cannot bypass row-level security, which is the whole reason it exists (see
--- `checkIsolation` in db.ts: on 20 Aug the app was found connecting as the
--- owner, which Neon creates with BYPASSRLS, and every policy was inert).
---
--- Until 16 Sep 2026 these grants existed ONLY in the production database,
--- typed in by hand. Production was right; the repository could not rebuild it.
--- A restored backup, a staging branch or a new region would have come up with
--- tables the app could not read, and every screen would have failed with
--- "permission denied" — or somebody would have "fixed" it by connecting as
--- the owner, which silently turns tenant isolation off.
---
--- What this block does NOT do is create the role. A login role needs a
--- password, and a password does not belong in a file on GitHub. Create it once
--- per database (Neon console → Roles, or `CREATE ROLE yourcrm_app LOGIN
--- PASSWORD '…' NOSUPERUSER NOBYPASSRLS`), then run `npm run db:migrate`, which
--- applies this and reports if the role is missing.
---
--- Written to match production exactly, as read on 16 Sep: row privileges on
--- every table, USAGE+SELECT on sequences, USAGE (never CREATE) on the schema,
--- and default privileges so a table added by a later migration is readable the
--- moment it exists. The default privileges are scoped IN SCHEMA public because
--- that is the form production holds: a rehearsal inside a rolled-back
--- transaction showed the unscoped form ADDS two database-wide entries beside
--- the existing ones. Scoped, re-running changes nothing.
+-- Loading a supplier's list without being asked.
 -- ---------------------------------------------------------------------------
 
-DO $$
+-- Per supplier, and OFF unless somebody turns it on.
+--
+-- Off is the honest default: it is the behaviour every existing workspace
+-- already has, and a migration that quietly starts writing prices nobody asked
+-- it to write would be the exact failure this feature exists to avoid.
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS auto_load BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- Every time a list was applied, by whom, and what it did.
+--
+-- The price of letting the machine write is being able to answer "why is this
+-- price different from last month". Once a load can happen with nobody
+-- watching, the supplier's `list_updated_on` stamp stops being enough: it says
+-- a list was loaded, not which one, not from where, and not what it changed.
+--
+-- `loaded_by_user_id` NULL is the whole point of that column: it means nobody
+-- pressed anything. That is a different fact from "we cannot remember who", and
+-- it is the first one somebody checks when a quotation comes out wrong.
+CREATE TABLE IF NOT EXISTS price_list_loads (
+  id                 TEXT PRIMARY KEY,
+  sub_account_id     TEXT NOT NULL REFERENCES sub_accounts(id) ON DELETE CASCADE,
+  supplier_id        TEXT NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+
+  -- The message it came from, when it came from one. NULL for a paste.
+  -- ON DELETE SET NULL: binning the email must not erase the fact that its
+  -- prices are in the quotations this business has already sent.
+  message_id         TEXT REFERENCES messages(id) ON DELETE SET NULL,
+
+  -- NULL means nobody pressed anything — see above.
+  loaded_by_user_id  TEXT REFERENCES users(id) ON DELETE SET NULL,
+
+  added              INTEGER NOT NULL DEFAULT 0,
+  repriced           INTEGER NOT NULL DEFAULT 0,
+  unchanged          INTEGER NOT NULL DEFAULT 0,
+
+  loaded_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS price_list_loads_tenant_idx
+  ON price_list_loads (sub_account_id, loaded_at DESC);
+
+-- One load per message, which is both the index that answers "has this message
+-- already been loaded" on every render of it AND the rule that makes loading
+-- idempotent. A double-pressed button, a re-render, two tabs open: all the same
+-- load, and without this the second would apply the same list again and write a
+-- second row claiming it had.
+CREATE UNIQUE INDEX IF NOT EXISTS price_list_loads_once_per_message
+  ON price_list_loads (sub_account_id, message_id) WHERE message_id IS NOT NULL;
+
+ALTER TABLE price_list_loads ENABLE ROW LEVEL SECURITY;
+ALTER TABLE price_list_loads FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS price_list_loads_tenant_isolation ON price_list_loads;
+CREATE POLICY price_list_loads_tenant_isolation ON price_list_loads
+  USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
+  WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
+
+-- A load's supplier belongs to the same workspace as the load. Same shape as
+-- every other cross-tenant guard here: the policy above stops a tenant READING
+-- another's row, and this stops one being POINTED at.
+CREATE OR REPLACE FUNCTION assert_load_supplier_in_tenant() RETURNS TRIGGER AS $$
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'yourcrm_app') THEN
-    RETURN;  -- a local or test database without the role; db:migrate says so
+  IF NOT EXISTS (
+       SELECT 1 FROM suppliers s
+        WHERE s.id = NEW.supplier_id AND s.sub_account_id = NEW.sub_account_id
+     ) THEN
+    RAISE EXCEPTION 'supplier % is not in sub-account %', NEW.supplier_id, NEW.sub_account_id;
   END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
 
-  -- Refuse, rather than grant, to a role that would make every policy inert.
-  -- Granting would "work": every page would load and every tenant would see
-  -- every other tenant's records.
-  IF EXISTS (SELECT 1 FROM pg_roles
-              WHERE rolname = 'yourcrm_app' AND (rolsuper OR rolbypassrls)) THEN
-    RAISE EXCEPTION 'yourcrm_app is a superuser or has BYPASSRLS, so row-level security would not apply to the app. Run: ALTER ROLE yourcrm_app NOSUPERUSER NOBYPASSRLS';
-  END IF;
-
-  GRANT USAGE ON SCHEMA public TO yourcrm_app;
-  REVOKE CREATE ON SCHEMA public FROM yourcrm_app;
-  GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO yourcrm_app;
-  GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO yourcrm_app;
-  ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO yourcrm_app;
-  ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO yourcrm_app;
-END $$;
+DROP TRIGGER IF EXISTS price_list_loads_supplier_in_tenant ON price_list_loads;
+CREATE TRIGGER price_list_loads_supplier_in_tenant
+  BEFORE INSERT OR UPDATE ON price_list_loads
+  FOR EACH ROW EXECUTE FUNCTION assert_load_supplier_in_tenant();
 
 -- ---------------------------------------------------------------------------
 -- What the application's own database role may do.

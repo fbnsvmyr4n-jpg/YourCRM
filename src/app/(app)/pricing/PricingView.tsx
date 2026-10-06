@@ -41,7 +41,7 @@ export function PricingView({
   items: PriceItem[];
   suppliers?: Supplier[];
   /** A list carried here from a supplier's message — see `supplier-mail.ts`. */
-  prefill?: { supplierId: string; text: string } | null;
+  prefill?: { supplierId: string; text: string; messageId?: string | null } | null;
 }) {
   const canWrite = useCanHandleMoney();
   const [query, setQuery] = useState("");

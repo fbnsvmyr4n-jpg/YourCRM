@@ -54,6 +54,9 @@ export const EXPECTED_TABLES = [
   "agent_tool_executions",
   "call_analysis",
   "outbox",
+  /* Who loaded which supplier's list, when, and what it changed — the record
+     that makes an unattended price change answerable. */
+  "price_list_loads",
   "working_hours",
   "booking_links",
   "automations",
@@ -183,6 +186,11 @@ export const EXPECTED_COLUMNS: ReadonlyArray<[string, string]> = [
      it costs them the whole of their job in this product. */
   ["outbox", "discarded_at"],
   ["outbox", "discarded_by_user_id"],
+  /* The per-supplier switch that lets an emailed price list load itself. Read
+     by every price-list screen through the suppliers SELECT, so an unmigrated
+     database does not lose a checkbox — it fails the screen a quotation is
+     built from. */
+  ["suppliers", "auto_load"],
 ];
 
 export type SchemaCheck = {

@@ -57,6 +57,7 @@ import { worthKeeping, type Draft as SavedDraft } from "@/data/drafts";
 import { refused } from "@/server/write-result";
 import { useCanWriteMail } from "@/components/shell/Abilities";
 import { PriceListInMail } from "@/components/pricing/PriceListInMail";
+import type { PriceListLoad } from "@/data/price-loads";
 import { findSupplierList, type SupplierLike } from "@/server/supplier-mail";
 import { discardDraftAction, saveDraftAction } from "./actions";
 import { SwipeToDelete } from "@/components/ui/SwipeToDelete";
@@ -138,6 +139,7 @@ export function InboxView({
   templates = [],
   drafts = [],
   suppliers = [],
+  priceLoads = {},
   me = { name: "", business: "" },
 }: {
   messages: Message[];
@@ -164,6 +166,8 @@ export function InboxView({
   drafts?: SavedDraft[];
   /** Who the workspace buys from, so a merchant's price list can be spotted. */
   suppliers?: SupplierLike[];
+  /** Which messages have already had their price list loaded, by message id. */
+  priceLoads?: Record<string, PriceListLoad>;
   /** Who is writing, for {{my_name}} and {{business_name}}. */
   me?: { name: string; business: string };
 }) {
@@ -730,6 +734,7 @@ export function InboxView({
             companyFor={companyFor}
             ticket={ticketByThread.get(selected.threadId) ?? null}
             suppliers={suppliers}
+            priceLoads={priceLoads}
             team={team}
             currentUserId={currentUserId}
             templates={templates}
@@ -1199,6 +1204,7 @@ function Reader({
   companyFor,
   ticket,
   suppliers,
+  priceLoads,
   team,
   currentUserId,
   templates,
@@ -1214,6 +1220,7 @@ function Reader({
   ticket: Ticket | null;
   /** Who the workspace buys from, for spotting a price list in this message. */
   suppliers: SupplierLike[];
+  priceLoads: Record<string, PriceListLoad>;
   team: { id: string; name: string }[];
   currentUserId: string | null;
   templates: MessageTemplate[];
@@ -1343,7 +1350,13 @@ function Reader({
         {/* A merchant's price list, recognised. Above the subject because it
             is the reason to open this message at all, and the message itself
             is right underneath it either way. */}
-        {priceList && <PriceListInMail found={priceList} messageId={message.id} />}
+        {priceList && (
+          <PriceListInMail
+            found={priceList}
+            messageId={message.id}
+            loaded={priceLoads[message.id] ?? null}
+          />
+        )}
         {/* The category sits with the subject, not in the header row — beside
             the name and the delete button it left no room for either. */}
         {message.category && (

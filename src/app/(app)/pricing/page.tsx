@@ -52,7 +52,12 @@ export default async function PricingPage({
     return {
       items: await listPriceItems(q),
       suppliers,
-      prefill: found ? { supplierId: found.supplierId, text: found.text } : null,
+      /* The message id travels with the text so the load can be recorded
+         against it — which is what lets that message stop offering to load a
+         list it has already loaded. */
+      prefill: found
+        ? { supplierId: found.supplierId, text: found.text, messageId: messageId ?? null }
+        : null,
     };
   }, {
     /*

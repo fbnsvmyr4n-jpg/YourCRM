@@ -210,8 +210,18 @@ describe("every server action is authorised", () => {
              bookkeeper or an admin silently cannot use. Same guard, same first
              statement, same fail-closed behaviour.
           */
-          /^(return |const \w+ = )?await with(Mail|Money|Ops)\(/.test(firstStatement ?? "") ||
-          /^return with(Mail|Money|Ops)\(/.test(firstStatement ?? "") ||
+          /*
+             `<Type>` is allowed between the name and the bracket, and allowing
+             it costs this guard nothing: the property held is that the FIRST
+             statement calls the gate, and a type argument is not a statement.
+             Refused, the only way to keep the check first is to drop the
+             annotation — and `logReceivedAction` needs one, because without it
+             the gate's refusal widens into a shape the narrowing afterwards
+             cannot see. A guard that pushes code into being less correct
+             somewhere else is not holding the line, it is moving it.
+          */
+          /^(return |const \w+ = )?await with(Mail|Money|Ops)(<\w+>)?\(/.test(firstStatement ?? "") ||
+          /^return with(Mail|Money|Ops)(<\w+>)?\(/.test(firstStatement ?? "") ||
           // Settings actions predate `requireUser` and fail closed by returning
           // an error state instead of throwing, which suits their form shape.
           firstStatement === "const me = await getCurrentUser();";
