@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ChevronsLeft, ChevronDown, LogOut } from "lucide-react";
-import { visibleNav } from "./nav";
+import { visibleNav, type NavAccess } from "./nav";
 import { Logo, Wordmark } from "./Logo";
 import { signOutAction } from "@/app/(auth)/actions";
 import { clsx } from "@/lib/clsx";
@@ -24,9 +24,7 @@ export function Sidebar({
   mobileOpen,
   onMobileClose,
   counts,
-  crmAccess,
-  moneyAccess,
-  mailAccess,
+  access,
 }: {
   user: ShellUser;
   collapsed: boolean;
@@ -34,15 +32,12 @@ export function Sidebar({
   mobileOpen: boolean;
   onMobileClose: () => void;
   counts: NavCounts;
-  /** Decided on the server. False for IT and accounts. */
-  crmAccess: boolean;
-  /** May this reader open quotations, orders and invoices. */
-  moneyAccess: boolean;
-  /** May this reader open the inbox. True for finance; false for IT. */
-  mailAccess: boolean;
+  /** Which tiers this reader holds — one object, so no door can be dropped on
+      the way down. See `AppShell`. */
+  access: NavAccess;
 }) {
   const pathname = usePathname();
-  const nav = visibleNav(crmAccess, moneyAccess, mailAccess);
+  const nav = visibleNav(access);
   /* Two rows are named by the workspace rather than by this file: the list of
      work and the board of stages. Everything else means the same thing in
      every trade. */

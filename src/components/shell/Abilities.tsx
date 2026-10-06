@@ -33,6 +33,8 @@ type Abilities = {
   mail: boolean;
   /** May act on money: load a supplier's prices, keep the price list. */
   money: boolean;
+  /** May act on the machine: retry a failed delivery, stop trying one. */
+  ops: boolean;
 };
 
 /*
@@ -41,14 +43,17 @@ type Abilities = {
    session and no role. The database is what stands between anybody and a
    write.
 */
-const AbilitiesContext = createContext<Abilities>({ mail: true, money: true });
+const AbilitiesContext = createContext<Abilities>({ mail: true, money: true, ops: true });
 
 export function AbilitiesProvider({
   mail,
   money,
+  ops,
   children,
 }: Abilities & { children: React.ReactNode }) {
-  return <AbilitiesContext.Provider value={{ mail, money }}>{children}</AbilitiesContext.Provider>;
+  return (
+    <AbilitiesContext.Provider value={{ mail, money, ops }}>{children}</AbilitiesContext.Provider>
+  );
 }
 
 /** May this reader write mail — reply, forward, compose, bin a message. */
@@ -59,4 +64,9 @@ export function useCanWriteMail(): boolean {
 /** May this reader act on money — keep the price list, load a supplier's sheet. */
 export function useCanHandleMoney(): boolean {
   return useContext(AbilitiesContext).money;
+}
+
+/** May this reader act on the machine — retry a failed send, stop trying one. */
+export function useCanRunOps(): boolean {
+  return useContext(AbilitiesContext).ops;
 }

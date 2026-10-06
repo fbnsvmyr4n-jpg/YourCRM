@@ -1,4 +1,5 @@
 import {
+  Activity,
   BarChart3,
   Building2,
   Briefcase,
@@ -63,6 +64,15 @@ export type NavItem = {
    * payment. See `canAccessMail`.
    */
   isMail?: true;
+  /**
+   * How the machine is running. Survives for a reader who holds the OPS tier.
+   *
+   * The row that makes an IT admin's bell mean something. Without it the role
+   * is told a quotation could not be emailed and handed a link to a page their
+   * own tier redirects them away from — which was true of every operational
+   * notification this product sends.
+   */
+  isOps?: true;
   /**
    * Pages that belong under this one, shown nested beneath it.
    *
@@ -148,6 +158,9 @@ export const NAV: NavSection[] = [
       /* The two screens an IT admin or a bookkeeper can actually use: their own
          account, the team, billing — and the help pages, which contain nothing
          at all about anybody's customers. */
+      /* Directly above Settings, because the two together ARE the IT admin's
+         product: what has broken, and the account it broke in. */
+      { label: "System health", href: "/system", icon: Activity, isOps: true },
       { label: "Settings", href: "/settings", icon: Settings, needsCrm: false },
       { label: "Support & FAQs", href: "/support", icon: LifeBuoy, needsCrm: false },
     ],
@@ -165,42 +178,69 @@ export const NAV: NavSection[] = [
  * Sections that empty out are dropped, so a reader without CRM access does not
  * see a "PIPELINE" heading with nothing under it.
  */
-export function visibleNav(
-  crmAccess: boolean,
-  moneyAccess = crmAccess,
-  mailAccess = crmAccess
-): NavSection[] {
-  if (crmAccess) return NAV;
+/** Which tiers this reader holds — the same four doors the server gates on. */
+export type NavAccess = {
+  crm: boolean;
+  money: boolean;
+  mail: boolean;
+  ops: boolean;
+};
 
+/**
+ * May this reader open this row?
+ *
+ * One rule per row, read in the order the flags are declared. A row with no
+ * flag at all is customer data, which is the fail-closed direction and matches
+ * `withTenantPage` — so a page added by somebody who never read this file is
+ * hidden from IT and accounts rather than offered to them.
+ */
+function allowed(item: NavItem, access: NavAccess): boolean {
+  if (item.needsCrm === false) return true;
+  if (item.isOps) return access.ops;
+  if (item.isMoney) return access.money;
+  if (item.isMail) return access.mail;
+  return access.crm;
+}
+
+export function visibleNav(access: NavAccess): NavSection[] {
+  /*
+     EVERY reader is filtered, including one who holds the CRM.
+
+     This used to begin `if (crmAccess) return NAV`, on the reasoning that
+     somebody with customer access sees everything. That stopped being true the
+     moment a row existed that CRM access does not grant: a salesperson holds
+     the customer tier and not the operations one, so the early return would
+     have offered them System health — a page their own tier redirects them
+     away from. Precisely the dead link this whole pass is about, pointed the
+     other way.
+  */
   return NAV.map((section) => ({
     ...section,
     items: section.items.flatMap((item) => {
-      /* Their own account and the help pages: nothing about anybody's
-         customers, so every reader keeps them. */
-      if (item.needsCrm === false) return [{ ...item, children: undefined }];
+      if (allowed(item, access)) {
+        /* Children are asked separately, because a parent granting a child is
+           not a rule anybody wrote down: Quotes is money and Projects is
+           customer work, and a viewer of one is not a viewer of the other. */
+        const children = (item.children ?? []).filter((child) => allowed(child, access));
+        return [{ ...item, children: children.length > 0 ? children : undefined }];
+      }
 
       /*
          A PARENT THEY MAY NOT OPEN, HIDING CHILDREN THEY MAY.
 
-         Projects is customer work, and Quotes and Purchase orders hang beneath
-         it — so a bookkeeper, filtered on the parent, lost the two screens
-         their whole job happens on. The nesting is a convenience for people who
-         have both; for somebody who only has the paperwork it is a locked door
-         with their desk behind it.
+         Projects is customer work, and Quotes, Invoices and Purchase orders
+         hang beneath it — so a bookkeeper, filtered on the parent, lost the
+         three screens their whole job happens on. The nesting is a convenience
+         for people who have both; for somebody who only has the paperwork it is
+         a locked door with their desk behind it.
 
-         So the money children are lifted to the top level instead. They are
+         So the children they hold are lifted to the top level instead. They are
          top-level routes either way — see the note on `children` — so nothing
          moves but where the row is drawn.
       */
-      const money = (item.children ?? []).filter((child) => child.isMoney);
-      if (moneyAccess && money.length > 0) return money.map((child) => ({ ...child }));
-
-      /* And the top-level rows each tier keeps. The price list is money — it
-         holds what the business charges and what its suppliers charge, and not
-         one customer fact — and the inbox is mail. */
-      if (moneyAccess && item.isMoney) return [{ ...item, children: undefined }];
-      if (mailAccess && item.isMail) return [{ ...item, children: undefined }];
-      return [];
+      return (item.children ?? [])
+        .filter((child) => allowed(child, access))
+        .map((child) => ({ ...child }));
     }),
   })).filter((section) => section.items.length > 0);
 }

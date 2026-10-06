@@ -191,7 +191,15 @@ export async function findJob(
   return row ? { status: row.status, attempts: row.attempts, lastError: row.last_error } : null;
 }
 
-/** Jobs that were given up on, for the health check and for a person to read. */
+/**
+ * Jobs that were given up on, for the health check and for a person to read.
+ *
+ * Discarded ones are excluded, because every caller of this is asking "what
+ * needs attention" — the bell, and the count on the health screen. A failure
+ * somebody has already looked at and decided against is not attention owed; it
+ * is a decision made, and leaving it in here would mean the bell could never go
+ * quiet without the record being destroyed.
+ */
 export async function deadJobs(
   q: TenantQuery,
   limit = 20
@@ -203,7 +211,7 @@ export async function deadJobs(
     last_error: string | null;
   }>(
     `SELECT id, handler, attempts, last_error FROM outbox
-      WHERE sub_account_id = $1 AND status = 'dead'
+      WHERE sub_account_id = $1 AND status = 'dead' AND discarded_at IS NULL
       ORDER BY settled_at DESC LIMIT $2`,
     [q.ctx.subAccountId, limit]
   );
@@ -213,4 +221,117 @@ export async function deadJobs(
     attempts: r.attempts,
     lastError: r.last_error,
   }));
+}
+
+/** One abandoned job, as the health screen shows it. */
+export type StuckJob = {
+  id: string;
+  handler: string;
+  attempts: number;
+  lastError: string | null;
+  /** When it was given up on. */
+  settledAt: string | null;
+  /** When somebody decided not to retry it, if they have. */
+  discardedAt: string | null;
+};
+
+/**
+ * Everything that failed, judged and unjudged, newest first.
+ *
+ * Deliberately NOT `deadJobs` with a flag. That function answers "what needs
+ * attention" and is read by the bell; this one answers "what has gone wrong
+ * here", which is a different question with a different audience — somebody
+ * who has opened the health screen on purpose and wants the discarded ones in
+ * view too, because "we decided not to send that" is an answer.
+ *
+ * THE PAYLOAD IS NOT SELECTED. It holds record ids, and the promise this whole
+ * tier rests on is that an IT admin learns a send failed and its reason without
+ * learning anything a customer wrote. The handler name says what kind of thing
+ * it was, which is what somebody fixing a mail domain actually needs.
+ */
+export async function stuckWork(q: TenantQuery, limit = 50): Promise<StuckJob[]> {
+  const rows = await q.rows<{
+    id: string;
+    handler: string;
+    attempts: number;
+    last_error: string | null;
+    settled_at: string | null;
+    discarded_at: string | null;
+  }>(
+    `SELECT id, handler, attempts, last_error, settled_at, discarded_at
+       FROM outbox
+      WHERE sub_account_id = $1 AND status = 'dead'
+      ORDER BY discarded_at IS NOT NULL, settled_at DESC
+      LIMIT $2`,
+    [q.ctx.subAccountId, limit]
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    handler: r.handler,
+    attempts: r.attempts,
+    lastError: r.last_error,
+    settledAt: r.settled_at,
+    discardedAt: r.discarded_at,
+  }));
+}
+
+/**
+ * Put an abandoned job back in the queue.
+ *
+ * The counter goes back to zero, which is the point: the attempts that were
+ * spent were spent against a broken thing, and somebody is pressing this
+ * BECAUSE they have just fixed it. Carrying the old count forward would let
+ * the backoff give up again almost immediately on a system that now works.
+ *
+ * `status = 'dead'` in the WHERE is not belt-and-braces. Without it a double
+ * press would reset a job the worker had already claimed, and the lease that
+ * stops two workers running the same job would be handed back — which is how a
+ * client gets the same quotation twice.
+ */
+export async function retryJob(q: TenantQuery, id: string): Promise<boolean> {
+  const row = await q.one<{ id: string }>(
+    `UPDATE outbox SET
+       status = 'pending', attempts = 0, run_after = now(),
+       last_error = NULL, settled_at = NULL, discarded_at = NULL, discarded_by_user_id = NULL
+      WHERE sub_account_id = $1 AND id = $2 AND status = 'dead'
+      RETURNING id`,
+    [q.ctx.subAccountId, id]
+  );
+  return Boolean(row);
+}
+
+/**
+ * Where one job stands, by its own id.
+ *
+ * For the screen that has just retried it. `findJob` answers the same question
+ * keyed on handler and dedupe key, which is what a document screen holds; the
+ * health screen holds the row itself.
+ */
+export async function jobStatus(
+  q: TenantQuery,
+  id: string
+): Promise<{ status: string; lastError: string | null } | null> {
+  const row = await q.one<{ status: string; last_error: string | null }>(
+    `SELECT status, last_error FROM outbox WHERE sub_account_id = $1 AND id = $2`,
+    [q.ctx.subAccountId, id]
+  );
+  return row ? { status: row.status, lastError: row.last_error } : null;
+}
+
+/**
+ * Decide this one is not going to be retried.
+ *
+ * The row is untouched apart from the stamp — status stays `dead`, the error
+ * stays readable, the attempts stay counted. All that is recorded is that a
+ * named person looked at it, which is the only honest way for the bell to go
+ * quiet.
+ */
+export async function discardJob(q: TenantQuery, id: string, userId: string): Promise<boolean> {
+  const row = await q.one<{ id: string }>(
+    `UPDATE outbox SET discarded_at = now(), discarded_by_user_id = $3
+      WHERE sub_account_id = $1 AND id = $2 AND status = 'dead' AND discarded_at IS NULL
+      RETURNING id`,
+    [q.ctx.subAccountId, id, userId]
+  );
+  return Boolean(row);
 }

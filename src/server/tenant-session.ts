@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { readSessionToken, SESSION_COOKIE } from "./auth";
 import { logDenied } from "./log";
-import { canAccessCrm, canAccessMail, canAccessMoney } from "./permissions";
+import { canAccessCrm, canAccessMail, canAccessMoney, canAccessOps } from "./permissions";
 import { requireActivePlan } from "./plan-gate";
 import { findUserById, type SafeUser } from "./repos/users";
 import { withSystem, withTenant, type TenantContext, type TenantQuery } from "./tenant";
@@ -149,9 +149,71 @@ export async function requireTenant(): Promise<TenantContext> {
  * there is no arrangement of calls that reaches the database having done only
  * half of that.
  */
+/**
+ * Which tier an operation is asking for.
+ *
+ * `crmData: false` means none of them, and still has to be claimed by name.
+ */
+export type TenantDoors = {
+  /** Quotations, purchase orders, invoices, payments, and what things cost. */
+  money?: boolean;
+  /** The inbox, and everything written from it. */
+  mail?: boolean;
+  /** How the machine is running: failed deliveries, the queue, the audit trail. */
+  ops?: boolean;
+  /** Neither customers nor money nor mail — the account's own settings. */
+  crmData?: boolean;
+};
+
+/**
+ * The doors, as data, in the order they are tried.
+ *
+ * ── Why this is a table and not a ternary ─────────────────────────────────
+ *
+ * It was a ternary, written out once in `withCurrentTenant` and again in
+ * `withTenantPage`. Two copies of a rule that have to agree, and they did not:
+ * the mail door was added to one and not the other, so the inbox let a
+ * bookkeeper past its own check and was then refused by the function it handed
+ * the work to. The second copy was found by a person signing in as finance, not
+ * by anything in the suite.
+ *
+ * At three doors it was a nested ternary nobody wanted to read; at four it
+ * would be unreadable twice over. So the rule is written down once and both
+ * entry points ask it. Adding a fifth door is now one row — which is the only
+ * version of this that cannot drift, because there is nowhere for it to drift
+ * TO.
+ *
+ * ORDER MATTERS, and only because an operation naming two doors is a mistake
+ * somebody will make: the first match wins, so the behaviour is defined rather
+ * than whichever branch happened to be written first.
+ */
+const DOORS = [
+  { key: "money", name: "money", may: canAccessMoney },
+  { key: "mail", name: "mail", may: canAccessMail },
+  { key: "ops", name: "operations", may: canAccessOps },
+] as const satisfies ReadonlyArray<{
+  key: keyof TenantDoors;
+  name: string;
+  may: (role: string) => boolean;
+}>;
+
+/**
+ * Which door this operation asked for, and whether this role holds it.
+ *
+ * Customer records unless told otherwise — the fail-closed direction, and the
+ * reason a page written by somebody who has never read this file is hidden from
+ * IT and accounts rather than exposed to them.
+ */
+function doorFor(options: TenantDoors, role: string): { door: string; mayEnter: boolean } {
+  const chosen = DOORS.find((d) => options[d.key]);
+  return chosen
+    ? { door: chosen.name, mayEnter: chosen.may(role) }
+    : { door: "customer-data", mayEnter: canAccessCrm(role) };
+}
+
 export async function withCurrentTenant<T>(
   fn: (q: TenantQuery) => Promise<T>,
-  options: { allowInactive?: boolean; crmData?: boolean; money?: boolean; mail?: boolean; page?: boolean } = {}
+  options: TenantDoors & { allowInactive?: boolean; page?: boolean } = {}
 ): Promise<T> {
   const ctx = await requireTenant();
 
@@ -192,12 +254,7 @@ export async function withCurrentTenant<T>(
      `crmData: false` still means "none of them", and still has to be claimed
      by name.
   */
-  const door = options.money ? "money" : options.mail ? "mail" : "customer-data";
-  const mayEnter = options.money
-    ? canAccessMoney(ctx.role)
-    : options.mail
-      ? canAccessMail(ctx.role)
-      : canAccessCrm(ctx.role);
+  const { door, mayEnter } = doorFor(options, ctx.role);
   if (options.crmData !== false && !mayEnter) {
     logDenied("crm-access", `${ctx.role} attempted a ${door} operation`);
     throw new CrmAccessError();
@@ -271,7 +328,7 @@ export function isReadOnlyRefusal(err: unknown): boolean {
  */
 export async function withTenantPage<T>(
   fn: (q: TenantQuery) => Promise<T>,
-  options: { crmData?: boolean; money?: boolean; mail?: boolean } = {}
+  options: TenantDoors = {}
 ): Promise<T> {
   const user = await currentUser();
   // `redirect` throws a control-flow signal Next understands, so nothing below
@@ -287,11 +344,9 @@ export async function withTenantPage<T>(
    * they go — and it opts out below, which is what stops this bouncing between
    * the two forever.
    */
-  const mayOpen = options.money
-    ? canAccessMoney(user.role)
-    : options.mail
-      ? canAccessMail(user.role)
-      : canAccessCrm(user.role);
+  /* The same table, asked the same way. Not a second copy of the rule — see
+     `DOORS`, and the bug that made it a table. */
+  const { mayEnter: mayOpen } = doorFor(options, user.role);
   if (options.crmData !== false && !mayOpen) {
     redirect("/settings");
   }
@@ -305,17 +360,13 @@ export async function withTenantPage<T>(
    * and the layout runs before any page in the group, so there is no route that
    * skips it.
    */
-  return withCurrentTenant(fn, {
-    allowInactive: true,
-    crmData: options.crmData,
-    money: options.money,
-    /* Every door this function knows about has to be forwarded. Adding one
-       above and forgetting it here means the page checks the right tier, hands
-       off, and is refused by the wrong one — which is precisely what happened:
-       the inbox let a bookkeeper past its own gate and then threw. */
-    mail: options.mail,
-    page: true,
-  });
+  /* SPREAD, never a field-by-field copy. Every door has to reach the delegate:
+     naming them one at a time is how `mail` was added above and forgotten here,
+     so the inbox passed its own check, handed off, and was refused by the wrong
+     tier. Spreading means a door added to `TenantDoors` arrives without anybody
+     remembering — the same reasoning that put the gate at a shared entry point
+     in the first place. */
+  return withCurrentTenant(fn, { ...options, allowInactive: true, page: true });
 }
 
 /** Same, for a page that needs the context rather than a querier. */

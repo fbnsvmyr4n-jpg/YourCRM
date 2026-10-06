@@ -38,14 +38,18 @@ describe("rows with pages under them", () => {
        comes to teach the wrong thing. The two real cases are a bookkeeper
        (money, no CRM) and IT (neither).
     */
-    const forFinance = visibleNav(false, true).flatMap((s) => s.items);
+    const forFinance = visibleNav({ crm: false, money: true, mail: true, ops: false }).flatMap(
+      (s) => s.items
+    );
     expect(forFinance.find((i) => i.href === "/projects")).toBeUndefined();
     /* Lifted to the top instead, so the disclosure is not what stands between
        a bookkeeper and the screens their whole job happens on. */
     expect(forFinance.map((i) => i.href)).toEqual(expect.arrayContaining(["/quotes", "/purchase-orders"]));
     for (const item of forFinance) expect(item.children ?? []).toHaveLength(0);
 
-    const forIt = visibleNav(false, false).flatMap((s) => s.items);
+    const forIt = visibleNav({ crm: false, money: false, mail: false, ops: true }).flatMap(
+      (s) => s.items
+    );
     expect(forIt.map((i) => i.href)).not.toContain("/quotes");
     for (const item of forIt) expect(item.children ?? []).toHaveLength(0);
   });

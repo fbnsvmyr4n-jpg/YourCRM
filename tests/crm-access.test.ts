@@ -159,39 +159,62 @@ describe("nothing routes around the gate", () => {
       "withCurrentTenant no longer defaults to requiring access"
     ).toMatch(/options\.crmData !== false && !mayEnter/);
     /*
-       Three doors now, not two. `mail: true` was added because a bookkeeper's
-       day is made of email — supplier invoices, a client querying a bill,
-       chasing a payment — and asking the customer-records question of them
-       locked the finance role out of its own job.
+       FOUR DOORS, AND ONE DEFINITION OF THEM.
 
-       What is pinned is that the tier is still chosen FROM THE ROLE at this one
-       place, whichever door is asked for.
+       It was a nested ternary, written out once here and again in
+       `withTenantPage`. Two copies of a rule that must agree, and they did not:
+       the mail door was added to one and not the other, so the inbox let a
+       bookkeeper past its own check and was then refused by the function it
+       handed the work to. A person signing in as finance found that; nothing in
+       this suite did.
+
+       So the rule is a table now, and what is pinned is stronger than before —
+       not "the ternary has three branches" but "there is ONE table, every door
+       in it is answered by a permission function, and both entry points ask
+       it". A fifth door is a row, and there is nowhere for it to drift to.
     */
-    expect(session, "the tier is no longer chosen from the role").toMatch(
-      /const mayEnter = options\.money[\s\S]{0,160}canAccessMoney\(ctx\.role\)[\s\S]{0,160}canAccessMail\(ctx\.role\)[\s\S]{0,160}canAccessCrm\(ctx\.role\)/
+    const doors = session.slice(session.indexOf("const DOORS = ["), session.indexOf("function doorFor"));
+    for (const [key, fn] of [
+      ["money", "canAccessMoney"],
+      ["mail", "canAccessMail"],
+      ["ops", "canAccessOps"],
+    ]) {
+      expect(doors, `the ${key} door is not answered by ${fn}`).toMatch(
+        new RegExp(`key: "${key}"[^}]*may: ${fn}`)
+      );
+    }
+    /* And the default — no door named means customer records, which is the
+       fail-closed direction the whole gate rests on. */
+    expect(session, "the default door is no longer customer records").toMatch(
+      /door: "customer-data", mayEnter: canAccessCrm\(role\)/
+    );
+    /* Both entry points ask that one function. Two call sites, one rule. */
+    expect(session, "withCurrentTenant no longer asks the door table").toMatch(
+      /const \{ door, mayEnter \} = doorFor\(options, ctx\.role\)/
+    );
+    expect(session, "withTenantPage no longer asks the door table").toMatch(
+      /const \{ mayEnter: mayOpen \} = doorFor\(options, user\.role\)/
     );
 
     expect(session, "withTenantPage no longer redirects a reader without access").toMatch(
       /options\.crmData !== false && !mayOpen/
     );
-    /* The same three doors, asked the same way, for a PAGE. Pinned separately
-       because `withTenantPage` has already drifted from `withCurrentTenant`
-       once: it forwarded `money` and not `mail`, so the inbox passed its own
-       gate and then threw from the delegate it forwards to. The property held
-       here is the one that matters — whichever door is asked for, the answer
-       comes from the role, at this one place. */
-    expect(session, "the page tier is no longer chosen from the role").toMatch(
-      /const mayOpen = options\.money[\s\S]{0,160}canAccessMoney\(user\.role\)[\s\S]{0,160}canAccessMail\(user\.role\)[\s\S]{0,160}canAccessCrm\(user\.role\)/
-    );
+    /*
+       AND EVERY DOOR REACHES THE DELEGATE, by spreading rather than by naming.
 
-    /* And every door is forwarded to the delegate. This is the regression
-       itself, not a guess at one: a page that opened the mail door and did not
-       pass it on got through its own check and was then refused by the
-       function it hands the work to. */
-    const delegate = session.slice(session.indexOf("return withCurrentTenant(fn, {"));
-    for (const door of ["crmData: options.crmData", "money: options.money", "mail: options.mail"]) {
-      expect(delegate.slice(0, 600), `withTenantPage does not forward ${door}`).toContain(door);
-    }
+       This is the regression itself, not a guess at one: `withTenantPage`
+       copied the options across field by field, `mail` was added above and not
+       here, and a page that opened the mail door got through its own check and
+       was refused by the function it hands the work to.
+
+       A spread is what makes that unrepeatable — a door added to `TenantDoors`
+       arrives without anybody remembering — so the spread is what is pinned,
+       not a list of field names, which would be the same mistake written into
+       the test.
+    */
+    expect(session, "withTenantPage names the doors instead of spreading them").toMatch(
+      /return withCurrentTenant\(fn, \{ \.\.\.options, allowInactive: true, page: true \}\)/
+    );
   });
 
   /**
@@ -229,9 +252,16 @@ describe("nothing routes around the gate", () => {
 describe("the sidebar agrees with the server", () => {
   const nav = readFileSync(join(ROOT, "src", "components", "shell", "nav.ts"), "utf8");
 
+  /* The four doors, as the sidebar asks them. Written out rather than passed
+     as positional booleans, which is what the signature used to take: four of
+     those in a row is a prop somebody hands over in the wrong slot, and the
+     way that shows is a bookkeeper offered the pipeline. */
+  const NOBODY = { crm: false, money: false, mail: false, ops: false };
+  const EVERYTHING = { crm: true, money: true, mail: true, ops: true };
+
   it("hides everything except the account screens", async () => {
     const { visibleNav, NAV } = await import("../src/components/shell/nav");
-    const hrefs = visibleNav(false).flatMap((s) => s.items.map((i) => i.href));
+    const hrefs = visibleNav(NOBODY).flatMap((s) => s.items.map((i) => i.href));
     expect(hrefs.sort()).toEqual(["/settings", "/support"]);
 
     // And the full list is genuinely bigger, so the assertion above is not
@@ -239,14 +269,44 @@ describe("the sidebar agrees with the server", () => {
     expect(NAV.flatMap((s) => s.items).length).toBeGreaterThan(5);
   });
 
-  it("shows everything to somebody with access", async () => {
+  it("shows everything to somebody who holds every tier", async () => {
     const { visibleNav, NAV } = await import("../src/components/shell/nav");
-    expect(visibleNav(true)).toEqual(NAV);
+    expect(visibleNav(EVERYTHING)).toEqual(NAV);
+  });
+
+  /**
+   * CUSTOMER ACCESS IS NOT EVERY ACCESS, and this is the assertion that says so.
+   *
+   * `visibleNav` used to begin `if (crmAccess) return NAV` — everything, to
+   * anybody holding the customer tier. That was true while every row was either
+   * customer data or an account screen, and it stopped being true the moment
+   * System health existed: a salesperson holds the CRM and not the operations
+   * tier, so the shortcut would have offered them a page their own gate
+   * redirects them away from. The same dead link this pass is about, pointed
+   * the other way.
+   */
+  it("does not offer a salesperson the screens that are not theirs", async () => {
+    const { visibleNav } = await import("../src/components/shell/nav");
+    const forSales = visibleNav({ crm: true, money: true, mail: true, ops: false })
+      .flatMap((s) => s.items)
+      .map((i) => i.href);
+    expect(forSales, "a CRM reader was handed the operations screen").not.toContain("/system");
+    expect(forSales, "and lost something that IS theirs").toContain("/contacts");
+  });
+
+  it("gives IT the one screen their own tier opens", async () => {
+    const { visibleNav } = await import("../src/components/shell/nav");
+    const forIt = visibleNav({ crm: false, money: false, mail: false, ops: true })
+      .flatMap((s) => s.items)
+      .map((i) => i.href);
+    /* Before this, an IT admin's entire product was Settings and Support, with
+       a notification badge that never cleared and nothing behind it. */
+    expect(forIt.sort()).toEqual(["/settings", "/support", "/system"]);
   });
 
   it("drops sections that empty out rather than leaving a bare heading", async () => {
     const { visibleNav } = await import("../src/components/shell/nav");
-    for (const section of visibleNav(false)) {
+    for (const section of visibleNav(NOBODY)) {
       expect(section.items.length).toBeGreaterThan(0);
     }
   });

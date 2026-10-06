@@ -1389,11 +1389,24 @@ ALTER TABLE price_items DROP CONSTRAINT IF EXISTS price_items_unit_cents_check;
 ALTER TABLE price_items ADD CONSTRAINT price_items_unit_cents_check
   CHECK (unit_cents >= 0);
 
--- One item per name. Replaced further down by a per-SUPPLIER rule, once the
--- column that makes that possible has been added — this file runs in order,
--- and an index cannot name a column that does not exist yet.
-CREATE UNIQUE INDEX IF NOT EXISTS price_items_name_once
-  ON price_items (sub_account_id, lower(name)) WHERE deleted_at IS NULL;
+-- One item per name, PER SUPPLIER — and the rule is declared further down, at
+-- `price_items_name_once_per_supplier`, because it names `supplier_id` and this
+-- file runs in order: an index cannot name a column that does not exist yet.
+--
+-- NOTHING IS CREATED HERE, and that is the fix for a migration that had stopped
+-- being re-runnable. The superseded per-workspace index was still created at
+-- this line and dropped eighteen hundred lines later, which is fine exactly
+-- once — on a database that has since done the thing the new rule PERMITS, two
+-- suppliers both selling paving stone, the old index cannot be built and the
+-- whole file dies here:
+--
+--   error: could not create unique index "price_items_name_once"
+--   detail: Key (sub_account_id, lower(name))=(…, paving stone) is duplicated.
+--
+-- So the next schema change could not be applied at all, to this or to
+-- production, and the way it announced itself was the dev database refusing to
+-- start. Re-runnability is this file's first promise (see its header) and a
+-- superseded statement left in place is how that promise quietly expires.
 CREATE INDEX IF NOT EXISTS price_items_tenant_idx ON price_items (sub_account_id) WHERE deleted_at IS NULL;
 
 ALTER TABLE price_items ENABLE ROW LEVEL SECURITY;
@@ -1995,6 +2008,20 @@ CREATE INDEX IF NOT EXISTS outbox_ready_idx
 -- index excludes. Without this, the one query a person runs when something has
 -- gone wrong is the one doing a sequential scan.
 CREATE INDEX IF NOT EXISTS outbox_tenant_idx ON outbox (sub_account_id, created_at DESC);
+
+-- When somebody decided this failure was not going to be fixed.
+--
+-- A fourth status would have been the obvious move and is the wrong one: `dead`
+-- is a fact about the job — it was attempted and given up on — and "a person
+-- has seen this and is not retrying it" is a fact about a PERSON. Keeping them
+-- in one column means the day you want to know which failures were judged and
+-- which were merely ignored, the answer has been overwritten.
+--
+-- The row stays either way. The table's own rule is that a job nobody can see
+-- is a job nobody fixes, and a discarded job is one somebody chose not to fix:
+-- it leaves the list that asks for attention and stays readable underneath it.
+ALTER TABLE outbox ADD COLUMN IF NOT EXISTS discarded_at TIMESTAMPTZ;
+ALTER TABLE outbox ADD COLUMN IF NOT EXISTS discarded_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL;
 
 ALTER TABLE outbox ENABLE ROW LEVEL SECURITY;
 ALTER TABLE outbox FORCE ROW LEVEL SECURITY;

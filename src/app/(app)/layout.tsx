@@ -132,10 +132,12 @@ export default async function AppGroupLayout({ children }: { children: React.Rea
       counts={counts}
       /* Presentation only. The refusal lives in `withTenantPage`, which is what
          actually stops an IT admin opening /contacts by typing the URL. Hiding
-         the link keeps the sidebar honest about where they can go. */
-      crmAccess={crmAccess}
-      moneyAccess={moneyAccess}
-      mailAccess={mailAccess}
+         the link keeps the sidebar honest about where they can go.
+
+         One object rather than a door per prop: four booleans threaded through
+         two components in a fixed order is three chances to pass one in the
+         wrong slot. */
+      access={{ crm: crmAccess, money: moneyAccess, mail: mailAccess, ops: opsAccess }}
       currency={currency}
       vocabulary={vocabulary}
     >

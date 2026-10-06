@@ -49,11 +49,14 @@ const GATED = [
 describe("the screens a viewer meets", () => {
   it("all ask whether this reader may write", () => {
     for (const file of GATED) {
-      /* Any of the three: a screen asks the gate that matches its door.
+      /* Any of the four: a screen asks the gate that matches its door.
          `useCanWrite` for customer records, `useCanWriteMail` for the inbox,
-         `useCanHandleMoney` for the price list — see `shell/Abilities`. */
+         `useCanHandleMoney` for the price list, `useCanRunOps` for System
+         health — see `shell/Abilities`. One question per door, because
+         `canWrite` means "may change CUSTOMER records" and using it as "may
+         this person do anything" is what denied a bookkeeper a reply button. */
       expect(read(file), `${file} consults no access gate at all`).toMatch(
-        /use(CanWrite|CanWriteMail|CanHandleMoney)\(\)/
+        /use(CanWrite|CanWriteMail|CanHandleMoney|CanRunOps)\(\)/
       );
     }
   });
@@ -202,7 +205,7 @@ describe("every screen with write controls has been through this pass", () => {
       .filter(Boolean);
 
     const asksSomething = (src: string) =>
-      /use(CanWrite|CanWriteMail|CanHandleMoney|MaySettle)\(\)/.test(src);
+      /use(CanWrite|CanWriteMail|CanHandleMoney|CanRunOps|MaySettle)\(\)/.test(src);
     const ungated = found.filter((f) => !asksSomething(read(f)) && !(f in EXEMPT));
     expect(ungated, `these render a write and neither ask useCanWrite nor give a reason: ${ungated.join(", ")}`).toEqual([]);
   });

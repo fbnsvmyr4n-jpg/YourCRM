@@ -90,8 +90,13 @@ export async function sweep(perWorkspace = 10): Promise<SweepReport> {
      Everything else in this system reports itself: a failed send shows on the
      screen that asked for it, a retry is invisible by design. A job that has
      been given up on is only a row, and the person who needed the email has no
-     reason to go looking. Until there is somewhere in the app to see these,
-     this line in the deployment log is where it surfaces — no ids, no
+     reason to go looking.
+
+     There is somewhere in the app to see these now — System health, under the
+     operations tier, where an admin can read the provider's reason and press
+     Try again. This line stays anyway, and for a different audience: the
+     deployment log is the only place a failure shows when NOBODY has opened the
+     product, which is exactly the hour a scheduled sweep runs in. No ids, no
      addresses, just how many and for whom.
   */
   if (total.dead > 0) {

@@ -355,7 +355,25 @@ export async function listNotifications(q: TenantQuery): Promise<Notification[]>
  * reason the provider gave, never what the document said.
  */
 export async function listOpsNotifications(q: TenantQuery): Promise<Notification[]> {
-  return (await opsEntries(q)).sort((a, b) => b.weight - a.weight);
+  return (await opsEntries(q))
+    /*
+       EVERY ENTRY POINTS AT /system FOR THIS READER, and the rewrite is the
+       whole reason this function is not just `opsEntries`.
+
+       The hrefs below are written for the person whose work it was: a
+       quotation that could not be emailed sends a salesperson to the quote. An
+       IT admin holds none of those tiers, so each one sent them to a page their
+       own gate redirects them away from — and the premise of this feed, written
+       at the top of this file, is that an entry is a way INTO the work rather
+       than a report that work exists. For the one role whose job is "something
+       is broken", it was a wall every time: a red badge that never cleared and
+       nothing to press.
+
+       System health is where that work actually is for them — the failure, its
+       reason, and the button that runs it again.
+    */
+    .map((entry) => ({ ...entry, href: "/system" }))
+    .sort((a, b) => b.weight - a.weight);
 }
 
 /** The shared body, so neither caller can grow a troubles list of its own. */

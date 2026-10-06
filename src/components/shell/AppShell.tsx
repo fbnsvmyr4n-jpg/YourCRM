@@ -13,6 +13,7 @@ import type { NavCounts } from "@/server/nav-counts";
 import type { Notification } from "@/server/notifications";
 import { CommandPalette } from "./CommandPalette";
 import { Sidebar } from "./Sidebar";
+import type { NavAccess } from "./nav";
 import { Topbar } from "./Topbar";
 
 export type ShellUser = { name: string; role: string; initials: string; email: string };
@@ -22,9 +23,7 @@ export function AppShell({
   user,
   notifications,
   counts,
-  crmAccess,
-  moneyAccess,
-  mailAccess,
+  access,
   currency,
   vocabulary,
 }: {
@@ -32,12 +31,18 @@ export function AppShell({
   user: ShellUser;
   notifications: Notification[];
   counts: NavCounts;
-  /** Decided on the server; false for IT and accounts. Presentation only. */
-  crmAccess: boolean;
-  /** Quotations, orders and invoices — true for finance, false for IT. */
-  moneyAccess: boolean;
-  /** The inbox. True for finance, whose day is made of mail; false for IT. */
-  mailAccess: boolean;
+  /**
+   * Which tiers this reader holds, decided on the server. Presentation only —
+   * what actually stops an IT admin opening /contacts is `withTenantPage`.
+   *
+   * ONE OBJECT, not four booleans in a row. They were four, and four of
+   * anything threaded through two components in a fixed order is a prop
+   * somebody passes in the wrong slot — `crmAccess={crmAccess}
+   * moneyAccess={moneyAccess} mailAccess={mailAccess}` is three chances to
+   * silently hand a bookkeeper the pipeline. A fifth door is now a field, which
+   * cannot be mis-ordered and cannot be half-forwarded.
+   */
+  access: NavAccess;
   /** The workspace's currency, for every amount on every page below. */
   currency: CurrencyCode;
   /** What this workspace calls its work — see `data/vocabulary.ts`. */
@@ -57,8 +62,9 @@ export function AppShell({
     {/* One answer per door, so a mail screen asks about mail and a money
         screen asks about money — see `Abilities`. */}
     <AbilitiesProvider
-      mail={mailAccess && !isViewOnly(user.role)}
-      money={moneyAccess && !isViewOnly(user.role)}
+      mail={access.mail && !isViewOnly(user.role)}
+      money={access.money && !isViewOnly(user.role)}
+      ops={access.ops && !isViewOnly(user.role)}
     >
     <VocabularyProvider vocabulary={vocabulary}>
     {/* The `print:` overrides are on the shell, not on the page inside it: the app
@@ -74,9 +80,7 @@ export function AppShell({
         mobileOpen={mobileOpen}
         onMobileClose={() => setMobileOpen(false)}
         counts={counts}
-        crmAccess={crmAccess}
-        moneyAccess={moneyAccess}
-            mailAccess={mailAccess}
+        access={access}
       />
 
       {/* Mobile backdrop */}
@@ -93,7 +97,7 @@ export function AppShell({
           onMenu={() => setMobileOpen(true)}
           user={user}
           notifications={notifications}
-          crmAccess={crmAccess}
+          crmAccess={access.crm}
         />
         {/* `@container` is what lets a page lay itself out against the room it
             actually has. A viewport media query can't see the sidebar, so a

@@ -178,6 +178,11 @@ export const EXPECTED_COLUMNS: ReadonlyArray<[string, string]> = [
   ["documents", "party_contact_id"],
   ["documents", "revision"],
   ["documents", "sent_at"],
+  /* Named in the SELECT behind System health, which is the ONE screen an IT
+     admin opens — so an unmigrated database does not cost that role a column,
+     it costs them the whole of their job in this product. */
+  ["outbox", "discarded_at"],
+  ["outbox", "discarded_by_user_id"],
 ];
 
 export type SchemaCheck = {
