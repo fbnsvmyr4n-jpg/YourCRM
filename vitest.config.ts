@@ -51,9 +51,17 @@ export default defineConfig({
     /**
      * ONE pooled connection, because the test database serves one session.
      *
-     * This is the cause of the `ownership.test.ts` flake — twelve red tests in
-     * a whole file, roughly one run in three, filed as timing since 2026-09-04
-     * and blamed on the hook timeouts above. It is not timing. The suites talk
+     * HALF the cause of the `ownership.test.ts` flake — and this comment said
+     * "the cause" while the file went on failing about three runs in ten, which
+     * is a lesson in itself: a fix that lowers a flake rate without taking it
+     * to zero has not been confirmed, it has been camouflaged. The other half
+     * was `maxConnections: 10` on the socket server in `helpers/pg.ts`, letting
+     * a second client in through a different door. It is 1 now, and
+     * `test-db-port.test.ts` holds it there, with the measurements that
+     * separate the two.
+     *
+     * The flake is twelve red tests in a whole file, filed as timing since
+     * 2026-09-04 and blamed on the hook timeouts above. It is not timing. The suites talk
      * to PGlite through its socket server, which serves EXACTLY ONE session at
      * a time, while `db.ts` defaults the pool to three. So a second connection
      * opens while the first is mid-transaction, the two sessions tread on each

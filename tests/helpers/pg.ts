@@ -118,18 +118,33 @@ export async function startTestDb(): Promise<TestDb> {
       port,
       host: "127.0.0.1",
       /**
-       * The socket server accepts ONE connection by default and resets the
-       * previous one when a second arrives.
+       * ONE connection, because there is one database behind it.
        *
-       * That makes concurrency untestable — and concurrency is exactly what
-       * several of these repositories are written to survive. A test issuing
-       * two simultaneous captures against one deal died with ECONNRESET, which
-       * reads as a flaky harness rather than as a server configured for a
-       * single client. Queries are still serialised inside the one WASM
-       * database, so this changes what can be *attempted*, not what the
-       * database does with it.
+       * This said 10, to make "concurrency testable" — a test issuing two
+       * simultaneous bookings died with ECONNRESET, which read as a flaky
+       * harness rather than as a server configured for a single client. The
+       * reasoning attached to it, that queries are serialised inside the one
+       * WASM database so this only changes what can be *attempted*, is the part
+       * that was wrong: PGlite is a single SESSION, not merely a single engine.
+       * Transaction state, the current role and the wire protocol's own
+       * sequence all belong to that one session, so a second TCP client does
+       * not queue behind the first — it interleaves with it. The symptom is
+       * `Received unexpected commandComplete message from backend`, then
+       * `Client has encountered a connection error and is not queryable`, and
+       * then every remaining test in the file fails at once.
+       *
+       * That is the `ownership.test.ts` flake: roughly three runs in ten,
+       * filed as timing since 2026-09-04, blamed on hook timeouts, then on the
+       * pool size. `PG_POOL_MAX=1` in `vitest.config.ts` was half the fix and
+       * is why the rate fell rather than went to zero — it stops the POOL
+       * opening a second connection, and this stops anything else doing so.
+       *
+       * Nothing is lost. The booking test that prompted the 10 now says in its
+       * own comment that the pool is one connection and its two requests are
+       * serialised before the advisory lock is ever contended — it proves the
+       * outcome, not the lock, and it proved exactly that with 10 as well.
        */
-      maxConnections: 10,
+      maxConnections: 1,
     });
     try {
       await candidate.start();
@@ -156,9 +171,35 @@ export async function startTestDb(): Promise<TestDb> {
 
   return {
     port,
+    /**
+     * Seed over the SOCKET, through the same pool everything else uses.
+     *
+     * This ran `db.exec` directly against the PGlite instance, in process —
+     * a second way into a database that has exactly one session, alongside the
+     * pooled connection the repositories were using. Two paths, one session:
+     * transaction state, the current role and the wire protocol's own sequence
+     * all belong to that session, so a seed landing between a test's statements
+     * desynchronised the connection. `Received unexpected commandComplete
+     * message from backend`, then `Client has encountered a connection error
+     * and is not queryable`, and then the rest of the file.
+     *
+     * It is the last door into the race, and the hardest to see, because
+     * `db.exec` does not look like a connection at all.
+     *
+     * The `RESET ROLE` that used to be here is gone with it: a connection over
+     * the socket arrives as `postgres` with superuser ON — verified rather than
+     * assumed — because `ALTER ROLE postgres SET ROLE app` applies to sessions
+     * PGlite opens for itself, not to the ones the socket server hands out. So
+     * seeding has the privileges it always had, by a route that cannot
+     * interleave with anything.
+     *
+     * Imported lazily, inside the call: at module scope `db.ts` would build its
+     * pool before `DATABASE_URL` above has been set, and point it at whatever
+     * the environment happened to hold.
+     */
     seed: async (sql: string) => {
-      await db.exec("RESET ROLE");
-      await db.exec(sql);
+      const { getPool } = await import("../../src/server/db");
+      await getPool().query(sql);
     },
     stop: async () => {
       await server.stop();

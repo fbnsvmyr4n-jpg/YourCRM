@@ -1,5 +1,4 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { PGlite } from "@electric-sql/pglite";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { startTestDb, type TestDb, TENANT_A, TENANT_B, AGENCY, USER_A } from "./helpers/pg";
@@ -163,19 +162,32 @@ describe("the rule is the database's, not the repository's", () => {
    * the rule true of the data rather than true of one function.
    */
   it("rejects a raw INSERT that names a foreign owner", async () => {
-    const raw = new PGlite();
-    await raw.exec(SCHEMA);
-    await raw.exec(`
-      INSERT INTO agencies (id,name) VALUES ('ag_1','One'),('ag_2','Two');
-      INSERT INTO sub_accounts (id,agency_id,name) VALUES ('s1','ag_1','One HQ'),('s2','ag_2','Two HQ');
-      INSERT INTO users (id,agency_id,sub_account_id,email,password_hash,name,role)
-        VALUES ('outsider','ag_2','s2','x@y.z','x','Outsider','owner');`);
+    /*
+       Raw SQL against THIS database, not a second one.
 
+       This used to stand up an entirely separate PGlite — a whole WASM
+       Postgres, running the whole schema — inside a test, while this file's own
+       instance was serving a live socket connection. Two Postgres instances in
+       one Node process, and the flaky failures clustered on this file: about
+       one run in ten lost it to `Received unexpected commandComplete message
+       from backend`, which is a connection desynchronising while something
+       heavy happens beside it.
+
+       Nothing was gained by the second database. What this test is for is the
+       distinction in the heading — that the rule belongs to the DATA rather
+       than to `assignOwner` — and `db.seed` is raw SQL that never goes near the
+       repository, which is the whole of that distinction. The pristine schema
+       was incidental, and the fixture it needed is already seeded above.
+    */
     await expect(
-      raw.exec(`INSERT INTO deals (id,sub_account_id,owner_user_id,title,stage,source)
-                VALUES ('d','s1','outsider','Theirs','won','other')`)
+      db.seed(`INSERT INTO deals (id, sub_account_id, owner_user_id, title, stage, source)
+               VALUES ('d_raw_foreign', '${TENANT_A}', '${FOREIGN}', 'Theirs', 'won', 'other')`)
     ).rejects.toThrow(/does not belong to sub-account/i);
-    await raw.close();
+
+    /* And nothing landed. The trigger refused the write itself, rather than the
+       row arriving and an error turning up from somewhere else after it. */
+    const left = await inA((q) => q.rows(`SELECT id FROM deals WHERE id = 'd_raw_foreign'`));
+    expect(left).toHaveLength(0);
   });
 
   it("rejects an UPDATE that moves ownership out of the tenant", async () => {
