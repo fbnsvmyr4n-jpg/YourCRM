@@ -53,7 +53,27 @@ export type LeadCard = {
   email: string;
   phone: string;
   location: string;
+  /**
+   * The company this lead works for, as it should be SHOWN.
+   *
+   * Prefers the real `companies` row the contact points at, and falls back to
+   * the free-text column that predates companies being records of their own.
+   * It read only the free text, which has been empty since the backfill — so a
+   * lead working for a company the CRM holds showed a dash.
+   */
   company: string;
+  /**
+   * Whether that name came from a company RECORD rather than the free text.
+   *
+   * Carried because the edit form has to behave differently: a free-text value
+   * is editable there, and a record's name is not — writing it back would put
+   * a second, immediately stale copy of the company's name on the contact, and
+   * the form would appear to accept an edit the card then ignores. A control
+   * that silently does nothing is the thing this whole field was fixed for.
+   */
+  companyFromRecord?: boolean;
+  /** The raw free text, which is what the edit form actually writes. */
+  companyNote?: string;
   status: LeadStatus;
   source: LeadSource;
   /** ISO timestamp of when the lead was captured. Absent on rows created

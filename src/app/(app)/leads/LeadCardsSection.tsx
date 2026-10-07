@@ -5,6 +5,7 @@ import { useCanWrite } from "@/components/shell/CanWrite";
 
 import { useCallback, useMemo } from "react";
 import { useOpenFromQuery } from "@/lib/useOpenFromQuery";
+import { AnchoredMenu } from "@/components/ui/AnchoredMenu";
 import { SortMenu } from "@/components/ui/SortMenu";
 
 import { useState } from "react";
@@ -387,6 +388,7 @@ export function LeadCardsSection({ leads }: { leads: LeadCard[] }) {
               lead={lead}
               menuOpen={openMenu === lead.id}
               onMenuToggle={() => setOpenMenu((v) => (v === lead.id ? null : lead.id))}
+              onMenuClose={() => setOpenMenu(null)}
               onEdit={() => {
                 setOpenMenu(null);
                 setModal(lead);
@@ -397,13 +399,11 @@ export function LeadCardsSection({ leads }: { leads: LeadCard[] }) {
         </div>
       )}
 
-      {/* Click-away catcher. Portalled for the same reason as the dialogs: it
-          has to cover the whole window, including the parts `<main>` doesn't. */}
-      {openMenu && (
-        <Overlay>
-          <div className="fixed inset-0 z-20" onClick={() => setOpenMenu(null)} />
-        </Overlay>
-      )}
+      {/* The shared click-away catcher that used to live here is gone with the
+          menu it was for: `AnchoredMenu` brings its own, in the same portal as
+          the panel, which is the whole reason Edit and Delete work again. A
+          second one at the root would be the same invisible sheet over the same
+          two buttons. */}
       {modal !== null && (
         <LeadModal
           lead={modal === "new" ? undefined : modal}
@@ -426,17 +426,24 @@ function LeadCardItem({
   lead,
   menuOpen,
   onMenuToggle,
+  onMenuClose,
   onEdit,
   onDelete,
 }: {
   lead: LeadCard;
   menuOpen: boolean;
   onMenuToggle: () => void;
+  onMenuClose: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }) {
   /* Closed on a phone, irrelevant on a desktop where the body never hides. */
   const [open, setOpen] = useState(false);
+  /* The button itself is the anchor, held as STATE rather than a ref: the
+     menu is positioned during render, and a ref read there is null on the pass
+     that first opens it — so the panel would have nowhere to hang. Same shape
+     as `SortMenu`. */
+  const [menuButton, setMenuButton] = useState<HTMLButtonElement | null>(null);
   const tone = STATUS_TONE[lead.status] ?? { color: "var(--text-muted)", soft: "var(--raise)" };
   return (
     <div className="card relative p-4 sm:p-5">
@@ -478,20 +485,47 @@ function LeadCardItem({
             )}
           />
         </button>
-        <div className="relative">
-          <button onClick={onMenuToggle} className="focus-ring text-faint transition-colors hover:text-[var(--text)]" aria-label="Lead actions">
+        {/*
+           PORTALLED, with its own click-away — not an absolutely positioned
+           panel inside the card.
+
+           EDIT AND DELETE BOTH DID NOTHING. The menu opened, and the click that
+           should have reached either one closed the menu instead: the shared
+           click-away catcher is portalled to the document root, so its `z-20`
+           is measured there, while the menu's `z-30` was measured inside the
+           card's own stacking context. A portalled layer painted later wins
+           against a higher number scoped to a box further down, so an invisible
+           sheet sat over both items. Nothing looked broken — the menu closed,
+           which is exactly what a click outside it would do.
+
+           `AnchoredMenu` carries its own click-away in the same portal, so the
+           two orderings are decided against each other instead of across two
+           stacking contexts. It also stops the card's `overflow` clipping the
+           panel, which is what it was written for.
+        */}
+        <div>
+          <button
+            ref={setMenuButton}
+            onClick={onMenuToggle}
+            className="focus-ring text-faint transition-colors hover:text-[var(--text)]"
+            aria-label="Lead actions"
+          >
             <MoreHorizontal className="h-5 w-5" />
           </button>
-          {menuOpen && (
-            <div className="absolute right-0 top-7 z-30 w-32 overflow-hidden rounded-xl border border-[var(--border)] py-1 shadow-lg" style={{ background: "var(--panel-solid)" }}>
-              <button onClick={onEdit} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-[var(--raise)]">
-                <Pencil className="h-4 w-4 text-accent" /> Edit
-              </button>
-              <button onClick={onDelete} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red hover:bg-[var(--raise)]">
-                <Trash2 className="h-4 w-4" /> Delete
-              </button>
-            </div>
-          )}
+          <AnchoredMenu anchor={menuButton} open={menuOpen} onClose={onMenuClose} width={144}>
+            <button
+              onClick={onEdit}
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-[var(--raise)]"
+            >
+              <Pencil className="h-4 w-4 text-accent" /> Edit
+            </button>
+            <button
+              onClick={onDelete}
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-red hover:bg-[var(--raise)]"
+            >
+              <Trash2 className="h-4 w-4" /> Delete
+            </button>
+          </AnchoredMenu>
         </div>
       </div>
 
@@ -512,7 +546,12 @@ function LeadCardItem({
       </div>
 
       <div className="mt-4 grid grid-cols-3 gap-2 border-t border-[var(--border)] pt-4">
-        <Field label="Project Info">
+        {/* "Company", because that is what it holds. It was labelled "Project
+            Info" and read a free-text column that has been empty since
+            companies became records of their own — so a lead working for a firm
+            this CRM knows by name showed a dash, with the answer two tables
+            away. */}
+        <Field label="Company">
           <span className="truncate text-accent">{lead.company || "—"}</span>
         </Field>
         {/* `min-w-0` on the flex wrapper is load-bearing: a flex item defaults
@@ -586,7 +625,41 @@ function LeadModal({
             <ModalField name="email" label="Email" type="email" className="sm:col-span-2" defaultValue={value("email", lead?.email)} />
             <ModalField name="phone" label="Phone" defaultValue={value("phone", lead?.phone)} />
             <ModalField name="location" label="Location" defaultValue={value("location", lead?.location)} />
-            <ModalField name="company" label="Company (Project Info)" className="sm:col-span-2" defaultValue={value("company", lead?.company)} />
+            {/*
+               A BOX, or a statement — never a box whose value is ignored.
+
+               This field writes the contact's free-text company column, and the
+               card now prefers the linked company RECORD where there is one. So
+               for a lead already filed under a company, an editable box here
+               would accept a name, save it, and change nothing visible: the
+               record still wins. A control that silently does nothing is
+               precisely the fault this field was being fixed for, so the form
+               says where the name lives instead and sends them to the one
+               screen that can change it.
+
+               Note the default is `companyNote`, the raw text — never the
+               resolved name — so saving an unlinked lead cannot copy a
+               company's name into a second place to go stale.
+            */}
+            {lead?.companyFromRecord ? (
+              <div className="sm:col-span-2">
+                <span className="mb-1.5 block text-xs font-medium text-muted">Company</span>
+                <p className="text-sm">
+                  {lead.company}
+                  <span className="text-faint">
+                    {" "}
+                    — filed under this company. Change it on their contact.
+                  </span>
+                </p>
+              </div>
+            ) : (
+              <ModalField
+                name="company"
+                label="Company"
+                className="sm:col-span-2"
+                defaultValue={value("company", lead?.companyNote)}
+              />
+            )}
             {/* From the shared list, not a copy of it. Written out here, this
                 offered four of the seven sources a deal can carry — so a lead
                 that genuinely came from the website could not be recorded as

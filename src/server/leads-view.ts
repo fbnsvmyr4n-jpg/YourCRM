@@ -96,6 +96,7 @@ type Row = {
   phone: string | null;
   location: string | null;
   info: string | null;
+  company_name: string | null;
   stage: string;
   source: string;
   won_at: Date | null;
@@ -113,9 +114,22 @@ export async function listLeadsWithStatus(q: TenantQuery): Promise<LeadCard[]> {
   const rows = await q.rows<Row>(
     `SELECT DISTINCT ON (c.id)
             c.id AS contact_id, c.first_name, c.last_name, c.email, c.phone,
-            c.location, c.info, d.stage, d.source, d.won_at, d.created_at
+            c.location, c.info, d.stage, d.source, d.won_at, d.created_at,
+            /* The company's real name, from the row the contact points at.
+               The old free-text column is a FALLBACK only — the same order of
+               preference the contacts repository already uses. Without this
+               join the card read the info column, which has been empty since
+               companies
+               became records of their own, so a lead working for "Dube
+               Landscaping" showed a dash while the CRM held the name two
+               tables away. */
+            co.name AS company_name
      FROM contacts c
      JOIN deals d ON d.contact_id = c.id AND d.deleted_at IS NULL AND d.stage <> 'lost'
+     LEFT JOIN companies co
+            ON co.id = c.company_id
+           AND co.sub_account_id = c.sub_account_id
+           AND co.deleted_at IS NULL
      WHERE c.sub_account_id = $1 AND c.deleted_at IS NULL
      /* OPEN work first, then oldest.
 
@@ -138,7 +152,9 @@ export async function listLeadsWithStatus(q: TenantQuery): Promise<LeadCard[]> {
       email: r.email ?? "",
       phone: r.phone ?? "",
       location: r.location ?? "",
-      company: r.info ?? "",
+      company: r.company_name ?? r.info ?? "",
+      companyFromRecord: Boolean(r.company_name),
+      companyNote: r.info ?? "",
       status: statusFor(r.stage, r.won_at ? r.won_at.toISOString() : null),
       // A source the page has no label for is shown as a referral only if it
       // really is one; anything else falls to the closest honest bucket rather
