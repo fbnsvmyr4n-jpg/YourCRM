@@ -362,14 +362,43 @@ body {
  * whole surface, so the header punched a dull rectangle out of the glow, with a
  * hard edge along the bottom and an opaque `box-shadow` extending it upward.
  *
- * This frosts instead of covering: the aurora reads through it, content passing
- * underneath is blurred rather than hidden, and the bottom edge fades out so
- * there is no line to notice. No border, by design.
+ * The answer to that was a frost — `color-mix(var(--bg) 62%, transparent)` over
+ * `backdrop-filter: blur(16px)` — so the aurora read through it and whatever
+ * scrolled underneath was blurred rather than hidden.
  *
- * The filter lives on `::before`, not on the element. `backdrop-filter` makes an
- * element the containing block for `position: fixed` descendants — the trap that
- * once squeezed a full-screen modal into a card. On a childless pseudo-element
- * it cannot capture anything, so this stays safe if a dialog is ever added here.
+ * ── Why that stopped working, and what replaced it ────────────────────────
+ *
+ * THE BLUR NEVER HAPPENED. Measured in the running app rather than reasoned
+ * about: with the tint taken off and the blur left on its own, text scrolling
+ * under this header is perfectly sharp. `backdrop-filter` is a no-op here —
+ * `main` is both the scroll container and an `@container`, and this
+ * pseudo-element never samples it.
+ *
+ * So the only thing ever doing any work was the 62% tint, and a tint DIMS text
+ * without hiding it. A scrolled inbox showed its own message list and its own
+ * message body straight through the category chips and the folder tabs, with
+ * the header's own labels interleaved through both — "Drafts … Received …
+ * Trash" reading across a supplier's price list. Reported with a screenshot;
+ * reproduced at 1066px of content width, scrolled 200px.
+ *
+ * The backing therefore no longer depends on a filter that does nothing. It is
+ * the page colour, fully opaque — and it is only THERE WHEN THERE IS SOMETHING
+ * BEHIND IT. `main` carries `data-scrolled` whenever its scroll position is off
+ * the top, so at rest this is as transparent as the frost was meant to look and
+ * the aurora reads straight through; the moment the page moves, the backing is
+ * solid and nothing comes through it.
+ *
+ * That answers both complaints at once instead of trading one for the other,
+ * and it retires the width guess the inbox was carrying
+ * (`@min-[1100px]:before:hidden`) — a proxy for "nothing scrolls at this size",
+ * which was true until it wasn't.
+ *
+ * The bottom edge still fades, so there is no line to notice. No border, by
+ * design. And the backing stays on `::before` rather than on the element:
+ * `backdrop-filter` makes an element the containing block for `position: fixed`
+ * descendants — the trap that once squeezed a full-screen modal into a card —
+ * so keeping the shape here means re-introducing a filter later cannot bring
+ * that back.
  */
 .sticky-head {
   position: sticky;
@@ -384,12 +413,23 @@ body {
      scrolled content used to show above the header, and downward to give the
      fade somewhere to happen that isn't on top of the controls. */
   inset: -20px -10px -12px;
-  background: color-mix(in srgb, var(--bg) 62%, transparent);
-  backdrop-filter: blur(16px) saturate(160%);
-  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  background: var(--bg);
+  /* Invisible until something is actually behind it — see above. */
+  opacity: 0;
+  transition: opacity 140ms ease;
   mask-image: linear-gradient(to bottom, #000 calc(100% - 16px), transparent);
   -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 16px), transparent);
   pointer-events: none;
+}
+
+main[data-scrolled="true"] .sticky-head::before {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sticky-head::before {
+    transition: none;
+  }
 }
 
 /* Keeps the controls above the frosted layer, which is a positioned sibling. */

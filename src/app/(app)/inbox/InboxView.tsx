@@ -542,7 +542,13 @@ export function InboxView({
           way back is the button above it. */}
       <div
         className={clsx(
-          "sticky-head -mt-1 flex flex-col gap-4 pb-2 pt-1 @min-[1100px]:before:hidden",
+          /* The backing is decided by whether the page is SCROLLED, not by how
+             wide it is — see `.sticky-head` in globals.css. This carried
+             `@min-[1100px]:before:hidden`, a stand-in for "the panes scroll
+             internally at this size, so nothing ever passes under the header".
+             Where that was wrong the header did not merely look over-decorated,
+             it became unreadable. */
+          "sticky-head -mt-1 flex flex-col gap-4 pb-2 pt-1",
           readerOnly && "hidden"
         )}
       >

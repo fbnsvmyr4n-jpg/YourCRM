@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CurrencyProvider } from "@/components/money/CurrencyProvider";
 import { canSettleInvoice, canWrite, isViewOnly } from "@/server/permissions";
 import { CanWriteProvider } from "./CanWrite";
@@ -50,6 +50,47 @@ export function AppShell({
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  /*
+     Whether the page is scrolled, said on the scroller itself.
+
+     A sticky page header has to be see-through at rest — the aurora is painted
+     across the whole surface, and a solid bar at the top of it reads as a slab
+     punched out of the glow — and completely opaque the moment anything is
+     passing underneath it. Those are contradictory unless something knows which
+     of the two is true, and only the scroll position does.
+
+     It was guessed from WIDTH instead (`@min-[1100px]:before:hidden` on the
+     inbox), standing for "the panes scroll internally at this size, so nothing
+     ever goes under the header". That holds at most sizes and not all of them,
+     and where it broke the header became unreadable — the list and the message
+     body showing through the chips and the folder tabs at once.
+
+     Written to the DOM rather than kept in React state: this fires on every
+     scroll frame, and re-rendering the entire application shell on each one is
+     a cost with nothing to show for it. The attribute is the whole output, and
+     CSS is the only reader.
+  */
+  const mainRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const el = mainRef.current;
+    if (!el) return;
+    const sync = () => {
+      /* A couple of pixels of overscroll bounce is not "scrolled". */
+      el.dataset.scrolled = el.scrollTop > 2 ? "true" : "false";
+    };
+    sync();
+    el.addEventListener("scroll", sync, { passive: true });
+    /* The page can also become scrollable without anybody scrolling — a window
+       resize, a pane opening, a list arriving — and `scrollTop` can be left
+       past the new bottom. Neither fires `scroll`. */
+    const observer = new ResizeObserver(sync);
+    observer.observe(el);
+    return () => {
+      el.removeEventListener("scroll", sync);
+      observer.disconnect();
+    };
+  }, []);
 
   return (
     <CurrencyProvider currency={currency}>
@@ -113,7 +154,10 @@ export function AppShell({
             flush against this scroller's edge — where the 3px ring falls outside
             the scrollport and is clipped, so the highlight appears cut on one
             side. Scroll padding reserves room for it. */}
-        <main className="@container flex-1 scroll-p-2 overflow-y-auto px-5 pb-8 pt-1 sm:px-7 print:overflow-visible print:p-0">
+        <main
+          ref={mainRef}
+          className="@container flex-1 scroll-p-2 overflow-y-auto px-5 pb-8 pt-1 sm:px-7 print:overflow-visible print:p-0"
+        >
           {/* Said once, before anything is attempted. The database refuses a
               view-only person's changes regardless; this is so nobody types a
               paragraph first to find out. */}
