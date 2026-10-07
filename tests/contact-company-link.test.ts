@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 import { startTestDb, type TestDb, AGENCY, TENANT_A, TENANT_B, USER_A } from "./helpers/pg";
 import type { TenantContext } from "../src/server/tenant";
 
@@ -150,10 +151,10 @@ describe("the chain from a typed name to the Projects page", () => {
     expect(grouped).toHaveLength(1);
     expect(grouped[0].name).toBe("Stellenbosch Wines");
     expect(grouped[0].live.map((p) => p.title)).toEqual(["Rebuild warehouse"]);
-    expect(await inA((q) => view.countUnfiled(q))).toBe(0);
+    expect(await inA((q) => view.listUnfiled(q))).toHaveLength(0);
   });
 
-  it("COUNTS the work that is not filed, instead of the page claiming there is none", async () => {
+  it("NAMES the work that is not filed, instead of the page claiming there is none", async () => {
     /*
        What the page used to do with these: nothing, silently. It said "No
        projects yet" while the deal sat in the pipeline, and its only offered
@@ -165,7 +166,7 @@ describe("the chain from a typed name to the Projects page", () => {
     await inA((q) => deals.createDeal(q, { title: "Rebuild warehouse", contactId: contact.id }));
 
     expect(view.groupByCompany(await inA((q) => view.listProjects(q)))).toHaveLength(0);
-    expect(await inA((q) => view.countUnfiled(q))).toBe(1);
+    expect(await inA((q) => view.listUnfiled(q))).toHaveLength(1);
   });
 
   it("RE-FILES work that already existed when the contact is filed later", async () => {
@@ -208,7 +209,7 @@ describe("the chain from a typed name to the Projects page", () => {
     const companyId = await fileUnder("Stellenbosch Wines");
     await inA((q) => contacts.bulkSetCompany(q, [contact.id], companyId));
 
-    expect(await inA((q) => view.countUnfiled(q))).toBe(0);
+    expect(await inA((q) => view.listUnfiled(q))).toHaveLength(0);
     expect(
       view.groupByCompany(await inA((q) => view.listProjects(q)))[0]?.live.map((p) => p.id)
     ).toEqual([deal.id]);
@@ -222,10 +223,10 @@ describe("the chain from a typed name to the Projects page", () => {
       contacts.createContact(q, { firstName: "Owen", lastName: "Blake", companyId })
     );
     await inA((q) => deals.createDeal(q, { title: "Rebuild warehouse", contactId: contact.id }));
-    expect(await inA((q) => view.countUnfiled(q))).toBe(0);
+    expect(await inA((q) => view.listUnfiled(q))).toHaveLength(0);
 
     await inA((q) => contacts.updateContact(q, contact.id, { companyId: null }));
-    expect(await inA((q) => view.countUnfiled(q))).toBe(1);
+    expect(await inA((q) => view.listUnfiled(q))).toHaveLength(1);
   });
 
   it("stops counting it once the contact is filed", async () => {
@@ -233,12 +234,12 @@ describe("the chain from a typed name to the Projects page", () => {
       contacts.createContact(q, { firstName: "Owen", lastName: "Blake" })
     );
     await inA((q) => deals.createDeal(q, { title: "Rebuild warehouse", contactId: contact.id }));
-    expect(await inA((q) => view.countUnfiled(q))).toBe(1);
+    expect(await inA((q) => view.listUnfiled(q))).toHaveLength(1);
 
     const companyId = await fileUnder("Stellenbosch Wines");
     await inA((q) => contacts.updateContact(q, contact.id, { companyId }));
 
-    expect(await inA((q) => view.countUnfiled(q))).toBe(0);
+    expect(await inA((q) => view.listUnfiled(q))).toHaveLength(0);
     expect(view.groupByCompany(await inA((q) => view.listProjects(q)))).toHaveLength(1);
   });
 
@@ -247,10 +248,10 @@ describe("the chain from a typed name to the Projects page", () => {
     const deal = await inA((q) =>
       deals.createDeal(q, { title: "Rebuild warehouse", contactId: contact.id })
     );
-    expect(await inA((q) => view.countUnfiled(q))).toBe(1);
+    expect(await inA((q) => view.listUnfiled(q))).toHaveLength(1);
 
     await inA((q) => deals.deleteDeal(q, deal.id));
-    expect(await inA((q) => view.countUnfiled(q))).toBe(0);
+    expect(await inA((q) => view.listUnfiled(q))).toHaveLength(0);
   });
 
   it("counts only this workspace's unfiled work", async () => {
@@ -259,7 +260,75 @@ describe("the chain from a typed name to the Projects page", () => {
     const theirs = await inB((q) => contacts.createContact(q, { firstName: "Someone", lastName: "Else" }));
     await inB((q) => deals.createDeal(q, { title: "Theirs", contactId: theirs.id }));
 
-    expect(await inA((q) => view.countUnfiled(q))).toBe(1);
-    expect(await inB((q) => view.countUnfiled(q))).toBe(1);
+    expect(await inA((q) => view.listUnfiled(q))).toHaveLength(1);
+    expect(await inB((q) => view.listUnfiled(q))).toHaveLength(1);
+  });
+});
+
+/*
+   Found by working the Projects page as a salesperson.
+
+   The sentence "4 deals are not filed under a client" was a LINK TO
+   `/contacts` — every contact in the workspace, with nothing marking which
+   four were meant. The page raised a question and sent the reader somewhere
+   that does not answer it; they then had to work out by hand which contacts
+   had work and no company. Same shape as a notification pointing at a page its
+   own reader cannot open, which this project has now fixed twice.
+*/
+describe("saying WHICH work is unfiled", () => {
+  it("names the deal and whose it is, so the sentence can be acted on", async () => {
+    const contact = await inA((q) =>
+      contacts.createContact(q, { firstName: "Owen", lastName: "Blake" })
+    );
+    await inA((q) => deals.createDeal(q, { title: "Rebuild warehouse", contactId: contact.id }));
+
+    const [row] = await inA((q) => view.listUnfiled(q));
+    expect(row.title).toBe("Rebuild warehouse");
+    expect(row.contactName).toBe("Owen Blake");
+    /* The id is what the row links to: setting THAT contact's company is the
+       fix, so the reader lands on the one that needs it rather than on a list. */
+    expect(row.contactId).toBe(contact.id);
+  });
+
+  it("STILL LISTS A DEAL WITH NO CONTACT AT ALL", async () => {
+    /*
+       One typed straight onto the board. It is just as unfiled, and dropping it
+       from the list would make the count disagree with the rows — which is the
+       bug where a screen says four and shows three, and the reader stops
+       trusting both numbers.
+    */
+    await inA((q) => deals.createDeal(q, { title: "Someone rang about a wall" }));
+
+    const rows = await inA((q) => view.listUnfiled(q));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].contactId).toBeNull();
+    /* Said rather than left blank: "whose is it" is the reader's next question,
+       and an empty cell answers it with a shrug. */
+    expect(rows[0].contactName).toBe("No contact yet");
+  });
+
+  it("is what the page shows, instead of linking to every contact", () => {
+    const view_ = readFileSync(
+      `${process.cwd()}/src/app/(app)/projects/ProjectsView.tsx`,
+      "utf8"
+    );
+    /* The sentence opens the list in place rather than navigating away. */
+    expect(view_).toMatch(/onClick=\{\(\) => setShowUnfiled\(\(v\) => !v\)\}/);
+    /* And each row goes to the one contact that needs the company. */
+    expect(view_).toMatch(/href=\{`\/contacts\?c=\$\{encodeURIComponent\(deal\.contactId\)\}`\}/);
+    /* The vague destination survives in exactly one place: the empty state
+       with nothing to list, where "add a contact" is the honest next step.
+
+       Counted with COMMENTS STRIPPED, because the comment above the button
+       quotes the old markup — and a guard that matches the prose explaining a
+       fix, rather than the fix, is a guard that passes for the wrong reason.
+       The same self-match caught me on the leads menu a day earlier. */
+    const markup = view_.replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(
+      markup.match(/href="\/contacts"/g) ?? [],
+      "a bare link to every contact is back"
+    ).toHaveLength(1);
+    /* And that one is behind the "nothing to list" guard. */
+    expect(markup).toMatch(/\{unfiledCount === 0 && \(\s*<Link\s+href="\/contacts"/);
   });
 });

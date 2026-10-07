@@ -9,7 +9,7 @@ import { useCanWrite } from "@/components/shell/CanWrite";
 import { useVocabulary, useWords } from "@/components/shell/Vocabulary";
 import { stageMeta } from "@/data/pipeline";
 import { useMoney } from "@/components/money/CurrencyProvider";
-import type { CompanyProjects, Project } from "@/server/projects-view";
+import type { CompanyProjects, Project, UnfiledDeal } from "@/server/projects-view";
 
 /**
  * The work, filed under the client it is for.
@@ -41,12 +41,17 @@ export function ProjectsView({
   unfiled,
 }: {
   companies: CompanyProjects[];
-  /** Deals with no company — see `countUnfiled` for why they are counted. */
-  unfiled: number;
+  /** Deals with no company — see `listUnfiled` for why they are NAMED. */
+  unfiled: UnfiledDeal[];
 }) {
   const words = useWords();
   const canWrite = useCanWrite();
   const [query, setQuery] = useState("");
+  /* The sentences below read better with a number, and the list is what the
+     reader does something with. Both come off the same rows, so they cannot
+     disagree about how many there are — which a separate count query could. */
+  const unfiledCount = unfiled.length;
+  const [showUnfiled, setShowUnfiled] = useState(false);
 
   /**
    * Searches company names AND project titles.
@@ -144,10 +149,10 @@ export function ProjectsView({
             */
             <div className="flex flex-col items-start gap-3">
               <p className="text-sm text-muted">
-                {unfiled > 0 ? (
+                {unfiledCount > 0 ? (
                   <>
                     <span className="font-semibold text-[var(--text)]">
-                      {unfiled} {unfiled === 1 ? `${words.one.toLowerCase()} is` : `${words.many.toLowerCase()} are`} not filed under a {words.client.toLowerCase()}
+                      {unfiledCount} {unfiledCount === 1 ? `${words.one.toLowerCase()} is` : `${words.many.toLowerCase()} are`} not filed under a {words.client.toLowerCase()}
                       yet.
                     </span>{" "}
                     Work appears here once its contact has a company — set one on the contact and
@@ -161,20 +166,64 @@ export function ProjectsView({
                   </>
                 )}
               </p>
+              {/*
+                 WHICH ONES, on the screen that says there are some.
+
+                 The button under this used to be "Set a company on the contact"
+                 pointing at `/contacts` — every contact in the workspace, with
+                 nothing saying which of them had the unfiled work. On THIS
+                 branch the page is otherwise empty, so there is no reason to
+                 make somebody go and look: the deals are listed, each beside
+                 the contact whose company would file it.
+              */}
+              {unfiledCount > 0 && (
+                <ul className="flex w-full flex-col gap-1.5">
+                  {unfiled.map((deal) => (
+                    <li
+                      key={deal.id}
+                      className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl px-3.5 py-2.5"
+                      style={{ background: "var(--surface-2)" }}
+                    >
+                      <span className="min-w-0 flex-1 leading-tight">
+                        <span className="block truncate text-sm font-medium">{deal.title}</span>
+                        <span className="block truncate text-xs text-faint">{deal.contactName}</span>
+                      </span>
+                      {deal.contactId ? (
+                        <Link
+                          href={`/contacts?c=${encodeURIComponent(deal.contactId)}`}
+                          className="btn-soft focus-ring shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold text-accent"
+                        >
+                          Set their {words.client.toLowerCase()}
+                        </Link>
+                      ) : (
+                        <span className="shrink-0 text-xs text-faint">
+                          No contact to file it under
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+
               <div className="flex flex-wrap gap-2">
-                <Link
-                  href="/contacts"
-                  className="btn-accent focus-ring flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold"
-                >
-                  <Users className="h-4 w-4" />
-                  {unfiled > 0 ? "Set a company on the contact" : "Add a contact"}
-                </Link>
+                {/* Only where there is nothing to list. With the rows above,
+                    a second button to "the contacts" is the vague version of
+                    what they already have. */}
+                {unfiledCount === 0 && (
+                  <Link
+                    href="/contacts"
+                    className="btn-accent focus-ring flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold"
+                  >
+                    <Users className="h-4 w-4" />
+                    Add a contact
+                  </Link>
+                )}
                 <Link
                   href="/deals"
                   className="btn-soft focus-ring flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-medium text-muted"
                 >
                   <Briefcase className="h-4 w-4" />
-                  {unfiled > 0 ? "See the deals" : "Open a deal"}
+                  {unfiledCount > 0 ? "See the deals" : "Open a deal"}
                 </Link>
               </div>
             </div>
@@ -191,16 +240,80 @@ export function ProjectsView({
               {/* Said here too, not only on the empty state. A page that lists
                   four clients while three deals are missing looks complete,
                   and the reader has no way to know it is not. */}
-              {unfiled > 0 && (
+              {unfiledCount > 0 && (
                 <>
                   {" "}
-                  <Link href="/contacts" className="focus-ring rounded underline text-accent">
-                    {unfiled} {unfiled === 1 ? `${words.one.toLowerCase()} is` : `${words.many.toLowerCase()} are`} not filed under a {words.client.toLowerCase()}
-                  </Link>
+                  {/*
+                     A BUTTON THAT SHOWS THEM, not a link to everybody.
+
+                     This was `<Link href="/contacts">`, so the sentence named a
+                     problem — "4 jobs are not filed under a client" — and sent
+                     the reader to a list of every contact in the workspace with
+                     nothing marking which four were meant. They then had to
+                     work out, by hand, which contacts had work and no company.
+                     The page raised the question and answered it somewhere
+                     else, which is the same shape as a notification pointing at
+                     a page its own reader cannot open.
+
+                     The four are right here, so they are shown here.
+                  */}
+                  <button
+                    type="button"
+                    onClick={() => setShowUnfiled((v) => !v)}
+                    aria-expanded={showUnfiled}
+                    className="focus-ring rounded underline text-accent"
+                  >
+                    {unfiledCount} {unfiledCount === 1 ? `${words.one.toLowerCase()} is` : `${words.many.toLowerCase()} are`} not filed under a {words.client.toLowerCase()}
+                  </button>
                   .
                 </>
               )}
             </p>
+          )}
+
+          {!query.trim() && showUnfiled && unfiledCount > 0 && (
+            <Card>
+              <CardHeader
+                title={`Not filed under a ${words.client.toLowerCase()}`}
+                icon={<Building2 className="h-[18px] w-[18px] text-accent" />}
+                action={<CardMeta value={unfiledCount}>{unfiledCount === 1 ? words.one.toLowerCase() : words.many.toLowerCase()}</CardMeta>}
+              />
+              <p className="mb-3 text-xs text-faint">
+                {/* The fix named once, at the top, rather than repeated on every
+                    row — it is the same step for all of them. */}
+                Work is filed under the company on its contact. Open the contact
+                and set one, and the {words.one.toLowerCase()} moves up into that{" "}
+                {words.client.toLowerCase()}&rsquo;s list.
+              </p>
+              <ul className="flex flex-col gap-1.5">
+                {unfiled.map((deal) => (
+                  <li
+                    key={deal.id}
+                    className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl px-3.5 py-2.5"
+                    style={{ background: "var(--surface-2)" }}
+                  >
+                    <span className="min-w-0 flex-1 leading-tight">
+                      <span className="block truncate text-sm font-medium">{deal.title}</span>
+                      <span className="block truncate text-xs text-faint">{deal.contactName}</span>
+                    </span>
+                    {/* Straight to the contact that needs the company — the one
+                        click the sentence above was asking for. A deal with no
+                        contact at all has nowhere to send them, so it says so
+                        rather than offering a link to nothing. */}
+                    {deal.contactId ? (
+                      <Link
+                        href={`/contacts?c=${encodeURIComponent(deal.contactId)}`}
+                        className="btn-soft focus-ring shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold text-accent"
+                      >
+                        Set their {words.client.toLowerCase()}
+                      </Link>
+                    ) : (
+                      <span className="shrink-0 text-xs text-faint">No contact to file it under</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </Card>
           )}
           {shown.map((company) => (
             <CompanyCard key={company.id} company={company} />

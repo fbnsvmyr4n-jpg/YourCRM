@@ -127,16 +127,52 @@ export async function listProjects(q: TenantQuery): Promise<Row[]> {
  * said "No projects yet" while that work sat in the pipeline, with nothing to
  * suggest it existed or what to do about it.
  *
- * So the rows the join drops are counted and said out loud: a number the screen
- * can act on, instead of an absence it cannot explain.
+ * So the rows the join drops are said out loud, instead of an absence the page
+ * cannot explain.
+ *
+ * NAMED, not counted. This returned a number, and the sentence it fed — "4
+ * deals are not filed under a client" — linked to `/contacts`: a list of
+ * everybody, with nothing marking which four were meant. The page raised a
+ * question and sent the reader somewhere that does not answer it, which is the
+ * same shape as a notification pointing at a page its own reader cannot open.
+ * Each row carries the contact it hangs off, because setting that contact's
+ * company is the fix, and the reader should arrive at the one that needs it.
  */
-export async function countUnfiled(q: TenantQuery): Promise<number> {
-  const row = await q.one<{ n: string }>(
-    `SELECT count(*)::text AS n FROM deals d
-      WHERE d.sub_account_id = $1 AND d.deleted_at IS NULL AND d.company_id IS NULL`,
+export type UnfiledDeal = {
+  id: string;
+  title: string;
+  contactId: string | null;
+  contactName: string;
+};
+
+export async function listUnfiled(q: TenantQuery): Promise<UnfiledDeal[]> {
+  const rows = await q.rows<{
+    id: string;
+    title: string;
+    contact_id: string | null;
+    first_name: string | null;
+    last_name: string | null;
+  }>(
+    `SELECT d.id, d.title, d.contact_id, c.first_name, c.last_name
+       FROM deals d
+       LEFT JOIN contacts c
+         ON c.id = d.contact_id
+        AND c.sub_account_id = d.sub_account_id
+        AND c.deleted_at IS NULL
+      WHERE d.sub_account_id = $1 AND d.deleted_at IS NULL AND d.company_id IS NULL
+      ORDER BY d.created_at DESC`,
     [q.ctx.subAccountId]
   );
-  return Number(row?.n ?? 0);
+  return rows.map((r) => ({
+    id: r.id,
+    title: r.title,
+    contactId: r.contact_id,
+    /* A deal with no contact at all is possible — one typed straight onto the
+       board — and it must still be listed, because it is just as unfiled. Said
+       plainly rather than left blank, since "whose is it" is the next question
+       the reader has. */
+    contactName: `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim() || "No contact yet",
+  }));
 }
 
 /**

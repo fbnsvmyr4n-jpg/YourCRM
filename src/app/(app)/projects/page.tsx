@@ -1,4 +1,4 @@
-import { countUnfiled, groupByCompany, listProjects } from "@/server/projects-view";
+import { groupByCompany, listProjects, listUnfiled } from "@/server/projects-view";
 import { withTenantPage } from "@/server/tenant-session";
 import { ProjectsView } from "./ProjectsView";
 
@@ -12,7 +12,7 @@ export default async function ProjectsPage() {
      and "nothing unfiled" from two different moments and be wrong about both. */
   const { rows, unfiled } = await withTenantPage(async (q) => ({
     rows: await listProjects(q),
-    unfiled: await countUnfiled(q),
+    unfiled: await listUnfiled(q),
   }));
   return <ProjectsView companies={groupByCompany(rows)} unfiled={unfiled} />;
 }
