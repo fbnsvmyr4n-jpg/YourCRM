@@ -167,9 +167,31 @@ describe("the status control", () => {
   });
 
   it("KEEPS A PENDING APPROVAL AS TEXT, never a menu", () => {
-    /* A select showing "draft" over a document awaiting approval threw the
-       approval away the last time this was built. */
-    expect(view).toMatch(/r\.status === "awaiting_approval" \|\| r\.status === "approved" \?/);
+    /*
+       A select showing "draft" over a document awaiting approval threw the
+       approval away the last time this was built.
+
+       `approved` NO LONGER SHARES THIS BRANCH, and the two were only ever
+       lumped together because the menu had no word for either. Awaiting
+       approval means nobody has approved it, and picking its outcome from a
+       menu is how an approval gets skipped — that stays text. Approved means a
+       named person already did, and the document is waiting to reach the
+       client; leaving it out took the menu away and made an approved quotation
+       a dead end. On a workspace with no mail domain — every workspace today —
+       "Send" approves and says nothing was sent, so every quotation landed
+       there with nothing left to press.
+
+       The menu still cannot SET either state: `ROW_STATUSES` excludes both, and
+       the test below holds that. What it can now do is show `approved` as a
+       disabled option, so the select tells the truth and still offers the moves
+       forward.
+    */
+    expect(view).toMatch(/r\.status === "awaiting_approval" \?/);
+    expect(view, "approved is back to being text-only").not.toMatch(
+      /r\.status === "awaiting_approval" \|\| r\.status === "approved" \?/
+    );
+    /* Shown, and not selectable. */
+    expect(view).toMatch(/<option value=\{r\.status\} disabled className="capitalize">/);
   });
 
   it("does not let the menu set an approval state", () => {

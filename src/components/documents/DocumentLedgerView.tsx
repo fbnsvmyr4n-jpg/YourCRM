@@ -442,7 +442,7 @@ export function DocumentLedgerView({
                       </span>
                     )}
                   </p>
-                ) : !canWrite || r.status === "awaiting_approval" || r.status === "approved" ? (
+                ) : !canWrite || r.status === "awaiting_approval" ? (
                   <p className="shrink-0 text-xs @min-[560px]:w-36 @min-[560px]:text-right">
                     <span className="capitalize" style={{ color: STATUS_TONE[r.status] }}>
                       {statusLabel(r.status)}
@@ -454,6 +454,23 @@ export function DocumentLedgerView({
                     <input type="hidden" name="documentId" value={r.id} />
                     <select
                       name="status"
+                      /*
+                         REMOUNTED WHEN THE STATUS CHANGES.
+
+                         `defaultValue` is read once, when the element mounts.
+                         React reuses this same `<select>` across re-renders, so
+                         after a status change the DOM kept whatever was there
+                         before — and once the option list itself changed shape,
+                         it fell back to the first option. Marking Q-1042
+                         accepted left the database saying `accepted` and this
+                         menu saying `Draft`.
+
+                         A screen that disagrees with the database about money
+                         paperwork is worse than one that refuses to change it.
+                         The key makes the element new when the fact is new, so
+                         `defaultValue` is read again.
+                      */
+                      key={r.status}
                       defaultValue={r.status}
                       aria-label={`Status of ${r.number}`}
                       onChange={(e) => e.currentTarget.form?.requestSubmit()}
@@ -461,6 +478,32 @@ export function DocumentLedgerView({
                       className="focus-ring rounded-lg border border-[var(--border)] bg-[var(--panel-solid)] px-2 py-1 text-xs capitalize"
                       style={{ color: STATUS_TONE[r.status] }}
                     >
+                      {/*
+                         THE STATUS IT IS ACTUALLY IN, when the menu has no word
+                         for it.
+
+                         `approved` is not one of the options and must not
+                         become one — a menu that could SET it would let
+                         somebody skip an approval by choosing its outcome. But
+                         leaving it out entirely took the menu away, and an
+                         approved quotation was then a dead end: the client says
+                         yes and there is nothing to press.
+
+                         That is not a corner case today. "Send" on a workspace
+                         without email approves the quotation and says plainly
+                         that nothing was sent — so EVERY quotation lands here
+                         until the mail domain is set up, with the person
+                         expected to send the PDF themselves and then record
+                         that they did.
+
+                         Shown and disabled: the select tells the truth about
+                         where the document is, cannot be used to re-enter the
+                         state, and still offers the moves forward. */}
+                      {!ROW_STATUSES.includes(r.status) && (
+                        <option value={r.status} disabled className="capitalize">
+                          {statusLabel(r.status)}
+                        </option>
+                      )}
                       {ROW_STATUSES.map((v) => (
                         <option key={v} value={v} className="capitalize">
                           {statusLabel(v)}

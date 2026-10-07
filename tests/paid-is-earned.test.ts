@@ -38,7 +38,20 @@ describe("the status menu", () => {
   });
 
   it("will not rewind an invoice that has money recorded against it", () => {
-    expect(actions).toMatch(/'awaiting_approval', 'approved', 'paid'/);
+    /*
+       `paid` is what this test is for, and it is untouched. The predicate
+       alongside it narrowed: `approved` came out of the blanket refusal,
+       because an approved quotation that cannot move is a dead end — and with
+       no mail domain configured, which is every workspace today, "Send"
+       approves without sending, so every quotation reached it.
+
+       It did not become a free-for-all. An approved document may go forward and
+       not back to `draft`, which is the single move that would throw an
+       approval away. `awaiting_approval` and `paid` are refused exactly as
+       before.
+    */
+    expect(actions).toMatch(/AND status NOT IN \('awaiting_approval', 'paid'\)/);
+    expect(actions).toMatch(/AND NOT \(status = 'approved' AND \$3 = 'draft'\)/);
     expect(actions).toMatch(/Correct the payment, not the status/);
   });
 

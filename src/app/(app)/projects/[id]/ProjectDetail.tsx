@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useKeptForm } from "@/lib/use-kept-form";
 import Link from "next/link";
 import {
@@ -201,8 +201,16 @@ export function ProjectDetail({
   retainers?: Retainer[];
   /** Paystack connected, in a currency it takes: invoices get a pay link. */
   paymentsReady?: boolean;
-  /** The active price list, so a hand-typed line can pick a rate. */
-  priceItems: { id: string; name: string; unit: string; unitCents: number }[];
+  /** The active price list, so a hand-typed line can pick a rate. The supplier
+      comes with it: two merchants can price the same thing differently, and a
+      picker that cannot tell them apart fills the wrong rate silently. */
+  priceItems: {
+    id: string;
+    name: string;
+    unit: string;
+    unitCents: number;
+    supplierName: string | null;
+  }[];
   threads: ProjectThread[];
   timeline: ProjectEvent[];
   tasks: ProjectTask[];
@@ -733,7 +741,15 @@ function PeopleGroup({
 
 /* ---------------- documents ---------------- */
 
-type PriceItem = { id: string; name: string; unit: string; unitCents: number };
+/* `supplierName` travels with the rate. Two merchants can price the same thing
+   differently, so the name alone no longer identifies one — see `labelFor`. */
+type PriceItem = {
+  id: string;
+  name: string;
+  unit: string;
+  unitCents: number;
+  supplierName: string | null;
+};
 
 function DocumentsTab({
   dealId,
@@ -1390,6 +1406,47 @@ function LineStageSelect({
 /** Four blank lines. Enough for most quotes, and blanks are dropped on save. */
 const BLANK_LINES = [0, 1, 2, 3];
 
+type PickableItem = { name: string; supplierName: string | null };
+
+/**
+ * Which names are carried by more than one price.
+ *
+ * A name identified a price until the day two suppliers could both sell paving
+ * stone. These are the ones where it no longer does.
+ */
+function duplicatedNames(items: readonly PickableItem[]): Set<string> {
+  const seen = new Set<string>();
+  const twice = new Set<string>();
+  for (const item of items) {
+    const key = item.name.trim().toLowerCase();
+    if (seen.has(key)) twice.add(key);
+    seen.add(key);
+  }
+  return twice;
+}
+
+/**
+ * What a price item is called in the picker.
+ *
+ * Its own name, until the list holds another price under that name — then the
+ * supplier as well, because at that point the name has stopped identifying
+ * anything. The demo list carries paving stone at R450 from nobody in
+ * particular and at R510 from Stone Yard, and the picker offered "Paving stone"
+ * twice with nothing to choose between them.
+ *
+ * Only where it is NEEDED. Hanging the supplier off every row would put
+ * "· Stone Yard" beside forty items that are not ambiguous at all — noise on
+ * the common case to solve the rare one.
+ *
+ * "(no supplier)" is said out loud rather than left blank: a hand-typed rate
+ * beside a merchant's is exactly the pair somebody has to tell apart, and an
+ * empty half of a label reads as a rendering fault rather than as a fact.
+ */
+function labelFor(item: PickableItem, ambiguous: ReadonlySet<string>): string {
+  if (!ambiguous.has(item.name.trim().toLowerCase())) return item.name;
+  return `${item.name} · ${item.supplierName ?? "no supplier"}`;
+}
+
 function DocumentForm({
   dealId,
   priceItems,
@@ -1411,6 +1468,9 @@ function DocumentForm({
   onClearStage?: () => void;
 }) {
   const money = useExactMoney();
+  /* Worked out once per render of the form rather than per keystroke in four
+     rows: the list does not change while the form is open. */
+  const ambiguousNames = useMemo(() => duplicatedNames(priceItems), [priceItems]);
   return (
     <form onSubmit={action} className="mb-4 space-y-3 border-b border-[var(--border)] pb-4">
       <Banner state={state} />
@@ -1467,10 +1527,33 @@ function DocumentForm({
                    placeholder. */
                 list="price-items"
                 onChange={(e) => {
-                  const match = priceItems.find(
-                    (p) => p.name.trim().toLowerCase() === e.target.value.trim().toLowerCase()
+                  const typed = e.target.value.trim().toLowerCase();
+                  /*
+                     Matched on the OPTION, which is unique, not on the name,
+                     which is not.
+
+                     A name stopped identifying a price the day two suppliers
+                     could both sell paving stone — and this did
+                     `priceItems.find(name === typed)`, so FIRST MATCH WON. The
+                     demo list holds paving stone at R450 and at R510: picking
+                     the R510 row filled R450, with nothing on screen to say so
+                     and R60 a square metre quietly wrong on the quotation.
+                  */
+                  const picked = priceItems.find(
+                    (p) => labelFor(p, ambiguousNames).toLowerCase() === typed
                   );
+                  /* Typed by hand rather than picked. Only fill when the name
+                     belongs to exactly one price: with two, there is no way to
+                     know which was meant, and guessing is the bug above. */
+                  const byName = priceItems.filter((p) => p.name.trim().toLowerCase() === typed);
+                  const match = picked ?? (byName.length === 1 ? byName[0] : null);
                   if (!match) return;
+
+                  /* The picked option carries the supplier so it can be told
+                     apart; the LINE carries only the name, because that is what
+                     the client reads on the quotation. */
+                  if (e.target.value !== match.name) e.target.value = match.name;
+
                   /* Fill the rate, and only if the person has not typed one —
                      overwriting a deliberate price with the list price would
                      silently change what a client is charged. */
@@ -1506,7 +1589,7 @@ function DocumentForm({
             agreed rate so nobody retypes a number that already exists. */}
         <datalist id="price-items">
           {priceItems.map((p) => (
-            <option key={p.id} value={p.name}>
+            <option key={p.id} value={labelFor(p, ambiguousNames)}>
               {`${money(p.unitCents)} ${p.unit}`}
             </option>
           ))}

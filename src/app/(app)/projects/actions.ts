@@ -377,11 +377,33 @@ export async function setDocumentStatusAction(
        pending approval, or marking an unsent quote sent. The screen hides the
        control; this is what makes hiding it true, because a server action is a
        public endpoint and the screen is only a suggestion.
+
+       ── Why `approved` is no longer blocked outright ───────────────────────
+
+       The two states are not the same thing and were treated as one. A
+       document AWAITING approval has not been approved: nobody may move it on
+       by picking its outcome, and that stays refused. A document that IS
+       approved has been — `approved_at`, by a named person — and is simply
+       waiting to reach the client.
+
+       Blocking it too made an approved quotation a dead end, which is not a
+       corner case: "Send" on a workspace with no mail domain approves the
+       quotation and says plainly that nothing was sent, so EVERY quotation
+       lands in `approved` until Resend is configured. The client says yes and
+       there is nothing to press — walked end to end as a salesperson, and this
+       is where the walk stopped.
+
+       It may go FORWARD, then, and not back to `draft`: returning an approved
+       document to draft is the one move that throws an approval away, which is
+       exactly what the paragraph above is protecting. The select cannot ask for
+       it either — `approved` is rendered there as a disabled option — but a
+       server action is a public endpoint and the screen is only a suggestion.
     */
     const row = await q.one<{ number: string }>(
       `UPDATE documents SET status = $3, updated_at = now()
         WHERE id = $2 AND sub_account_id = $1 AND deleted_at IS NULL
-          AND status NOT IN ('awaiting_approval', 'approved', 'paid')
+          AND status NOT IN ('awaiting_approval', 'paid')
+          AND NOT (status = 'approved' AND $3 = 'draft')
         RETURNING number`,
       [q.ctx.subAccountId, documentId, status]
     );
@@ -404,6 +426,14 @@ export async function setDocumentStatusAction(
       */
       if (doc.status === "paid") {
         return { error: `${doc.number} has money recorded against it. Correct the payment, not the status.` };
+      }
+      /* Approved, and being asked to go back to draft — the one move left
+         refused above, and a different thing from waiting on an approval. Said
+         as what it would cost rather than as a rule that was broken. */
+      if (doc.status === "approved") {
+        return {
+          error: `${doc.number} is already approved. Moving it back to draft would throw that approval away — cancel it instead, or raise a new one.`,
+        };
       }
       return {
         error: `${doc.number} is waiting on an approval. Approve or discard it in Chat first.`,
