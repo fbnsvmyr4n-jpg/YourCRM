@@ -3457,6 +3457,116 @@ CREATE TRIGGER price_list_loads_supplier_in_tenant
   FOR EACH ROW EXECUTE FUNCTION assert_load_supplier_in_tenant();
 
 -- ---------------------------------------------------------------------------
+-- Stock: what is on the shelf, and every reason it moved.
+-- ---------------------------------------------------------------------------
+
+-- Does this item HAVE a stock level at all?
+--
+-- Off unless somebody says otherwise, and that is the point: a trades business
+-- sells labour as well as materials, and "Site labour: 3 in stock" is not a
+-- fact about anything. Only the rows that are physical goods carry a count, so
+-- the rest of the price list looks exactly as it did.
+ALTER TABLE price_items ADD COLUMN IF NOT EXISTS track_stock BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- WHICH price item this line came from.
+--
+-- The line stores a description, which is what the client reads, and that was
+-- enough until stock. To take something off the shelf you have to know what
+-- left it — and matching the description back to a price item by NAME is the
+-- bug that was fixed on 7 Oct: two suppliers can both sell "Paving stone", at
+-- R450 and at R510, so the name identifies nothing. A quote line built from the
+-- picker now remembers the row it was built from.
+--
+-- Nullable, because most lines are typed by hand and always will be. A line
+-- with no price item is not an error; it is a one-off, and it moves no stock.
+--
+-- ON DELETE SET NULL: removing a price item must not remove the lines citing
+-- it. A quotation sent last month states a rate, and a document that loses its
+-- own lines cannot be explained to the client who received it.
+ALTER TABLE document_lines ADD COLUMN IF NOT EXISTS price_item_id TEXT
+  REFERENCES price_items(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS document_lines_price_item_idx
+  ON document_lines (sub_account_id, price_item_id) WHERE price_item_id IS NOT NULL;
+
+-- Every movement, and never a running total.
+--
+-- Stock on hand is the SUM of this table, worked out when asked. The obvious
+-- alternative — a number on `price_items` that each sale decrements — is a
+-- figure that can disagree with its own history, and once it has drifted there
+-- is nothing to recompute it from. Here the history IS the number: if the two
+-- ever disagree it is because somebody read it wrong, not because the data is
+-- two things at once.
+--
+-- `qty_change` is signed. Goods in are positive, goods out negative, and a
+-- stock take is whatever difference it found. NUMERIC to match
+-- `document_lines.quantity`: half a cubic metre of sand is a real quantity.
+CREATE TABLE IF NOT EXISTS stock_movements (
+  id                TEXT PRIMARY KEY,
+  sub_account_id    TEXT NOT NULL REFERENCES sub_accounts(id) ON DELETE CASCADE,
+  price_item_id     TEXT NOT NULL REFERENCES price_items(id) ON DELETE CASCADE,
+
+  qty_change        NUMERIC(14, 3) NOT NULL,
+
+  -- Why it moved. Said as a word rather than inferred from the sign, because
+  -- "somebody wrote off 4" and "a stock take found 4 fewer" are different
+  -- facts that a negative number cannot tell apart.
+  reason            TEXT NOT NULL
+                      CHECK (reason IN ('received', 'sold', 'returned', 'written_off', 'counted')),
+
+  -- The document it went out on, when it went out on one. Kept so a count can
+  -- be traced to the invoice that moved it, which is the question asked the
+  -- moment a figure looks wrong.
+  document_id       TEXT REFERENCES documents(id) ON DELETE SET NULL,
+  note              TEXT CHECK (note IS NULL OR length(note) <= 500),
+
+  -- NULL means nobody pressed anything: raising an invoice moved this. Same
+  -- reasoning as `price_list_loads.loaded_by_user_id`.
+  moved_by_user_id  TEXT REFERENCES users(id) ON DELETE SET NULL,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS stock_movements_item_idx
+  ON stock_movements (sub_account_id, price_item_id, created_at DESC);
+
+-- One 'sold' movement per line, enforced here rather than hoped for.
+--
+-- Raising an invoice from a quotation, a double-pressed button, a retried
+-- request: all of them are the same sale, and without this the second one takes
+-- the goods off the shelf twice. The line is the natural key — it is the thing
+-- that was sold.
+ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS document_line_id TEXT
+  REFERENCES document_lines(id) ON DELETE SET NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS stock_movements_once_per_line
+  ON stock_movements (sub_account_id, document_line_id)
+  WHERE document_line_id IS NOT NULL AND reason = 'sold';
+
+ALTER TABLE stock_movements ENABLE ROW LEVEL SECURITY;
+ALTER TABLE stock_movements FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS stock_movements_tenant_isolation ON stock_movements;
+CREATE POLICY stock_movements_tenant_isolation ON stock_movements
+  USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
+  WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
+
+-- A movement's item belongs to the same workspace as the movement. Same shape
+-- as every other cross-tenant guard here: the policy above stops a tenant
+-- READING another's row, and this stops one being POINTED at.
+CREATE OR REPLACE FUNCTION assert_stock_item_in_tenant() RETURNS TRIGGER AS $$
+BEGIN
+  IF NOT EXISTS (
+       SELECT 1 FROM price_items p
+        WHERE p.id = NEW.price_item_id AND p.sub_account_id = NEW.sub_account_id
+     ) THEN
+    RAISE EXCEPTION 'price item % is not in sub-account %', NEW.price_item_id, NEW.sub_account_id;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS stock_movements_item_in_tenant ON stock_movements;
+CREATE TRIGGER stock_movements_item_in_tenant
+  BEFORE INSERT OR UPDATE ON stock_movements
+  FOR EACH ROW EXECUTE FUNCTION assert_stock_item_in_tenant();
+
+-- ---------------------------------------------------------------------------
 -- What the application's own database role may do.
 --
 -- KEEP THIS THE LAST BLOCK IN THE FILE: `GRANT … ON ALL TABLES` covers only the

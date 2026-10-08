@@ -9,7 +9,7 @@ import { logWrite } from "@/server/log";
 import { revalidateApp } from "@/server/revalidate";
 import { withCurrentTenant } from "@/server/tenant-session";
 import type { TenantQuery } from "@/server/tenant";
-import { decimal, id as validId, multiline, text } from "@/server/validate";
+import { decimal, id as validId, multiline, pick, text } from "@/server/validate";
 import {
   applyPriceList,
   createSupplier,
@@ -19,6 +19,8 @@ import {
   updateSupplier,
 } from "@/server/repos/suppliers";
 import { businessToday } from "@/server/repos/settings";
+import { recordMovement, stockOnHand } from "@/server/repos/stock";
+import { ADJUSTABLE_REASONS, REASON_DIRECTION, formatQty, type StockReason } from "@/data/stock";
 import {
   describeChanges,
   parsePriceList,
@@ -69,6 +71,7 @@ export async function savePriceItemAction(
       description: multiline(formData.get("description"), 400),
       unit: text(formData.get("unit"), 40),
       unitCents: Math.round(price * 100),
+      trackStock: formData.get("trackStock") === "on",
     });
     if (result.error) return { error: result.error };
 
@@ -277,5 +280,80 @@ export async function applyPriceListAction(_prev: FormState, formData: FormData)
       unread.length && `${unread.length} still unread`,
     ].filter(Boolean);
     return { ok: said.length ? `Loaded — ${said.join(", ")}.` : "Nothing in that list to apply." };
+  });
+}
+
+
+/* ------------------------------------------------------------------ */
+/* Stock                                                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Move stock by hand: goods arrived, something was damaged, a count was taken.
+ *
+ * `sold` is deliberately not offerable. Stock leaves on an invoice, with the
+ * line that took it recorded against the movement — a hand-entered sale would
+ * be a number with no document behind it, and "which sale moved this?" is the
+ * first question anybody asks of a stock figure.
+ *
+ * A STOCK TAKE is the odd one: the person types what is actually on the shelf,
+ * and the movement recorded is the DIFFERENCE. Asking them to work that out
+ * themselves is asking them to do arithmetic the screen already has both halves
+ * of — and the half they would get wrong is the one that matters.
+ */
+export async function adjustStockAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  return withMoney(async (q) => {
+    const priceItemId = validId(formData.get("priceItemId"));
+    if (!priceItemId) return { error: "That item could not be identified." };
+
+    const reason = pick(formData.get("reason"), ADJUSTABLE_REASONS) as StockReason | null;
+    if (!reason) return { error: "Say why the stock moved." };
+
+    const typed = decimal(formData.get("quantity"), 1_000_000, 3);
+    if (typed === null) return { error: "That quantity could not be read as a number." };
+    if (typed < 0) return { error: "Use the reason to say which way it moved, not a minus sign." };
+
+    const item = await q.one<{ name: string; track_stock: boolean }>(
+      `SELECT name, track_stock FROM price_items
+        WHERE id = $2 AND sub_account_id = $1 AND deleted_at IS NULL`,
+      [q.ctx.subAccountId, priceItemId]
+    );
+    if (!item) return { error: "That item no longer exists." };
+    /* Said rather than silently written. An item nobody is counting has no
+       shelf to move things on and off. */
+    if (!item.track_stock) {
+      return { error: `${item.name} is not stock you hold. Tick "I hold this as stock" on the item first.` };
+    }
+
+    const onHand = (await stockOnHand(q))[priceItemId] ?? 0;
+    /* A stock take is the count itself; everything else is an amount. */
+    const qtyChange =
+      reason === "counted"
+        ? Number((typed - onHand).toFixed(3))
+        : REASON_DIRECTION[reason] === "out"
+          ? -typed
+          : typed;
+
+    if (qtyChange === 0) {
+      return reason === "counted"
+        ? { ok: `${item.name} counted — the shelf already said ${formatQty(onHand)}.` }
+        : { error: "Nothing to move." };
+    }
+
+    await recordMovement(q, {
+      priceItemId,
+      qtyChange,
+      reason,
+      note: multiline(formData.get("note"), 500) || null,
+      userId: q.ctx.userId,
+    });
+
+    logWrite("update", "stock", { id: priceItemId, actor: q.ctx.userId });
+    revalidateApp();
+
+    const now = onHand + qtyChange;
+    return {
+      ok: `${item.name}: ${qtyChange > 0 ? "+" : ""}${formatQty(qtyChange)}, now ${formatQty(now)}.`,
+    };
   });
 }

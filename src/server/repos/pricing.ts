@@ -31,6 +31,14 @@ export type PriceItem = {
    * and no way to tell them apart is a worse list than one.
    */
   supplierName: string | null;
+  /**
+   * Whether this item is physical goods with a count on the shelf.
+   *
+   * Off unless somebody turns it on. A trades business sells labour as well as
+   * materials, and "Site labour: 3 in stock" is not a fact about anything — so
+   * the rest of the list looks exactly as it did.
+   */
+  trackStock: boolean;
 };
 
 type Row = {
@@ -41,6 +49,7 @@ type Row = {
   unit_cents: string;
   active: boolean;
   supplier_name: string | null;
+  track_stock: boolean;
 };
 
 const toItem = (r: Row): PriceItem => ({
@@ -51,6 +60,7 @@ const toItem = (r: Row): PriceItem => ({
   unitCents: Number(r.unit_cents),
   active: r.active,
   supplierName: r.supplier_name,
+  trackStock: r.track_stock,
 });
 
 function newId(name: string): string {
@@ -73,7 +83,7 @@ function newId(name: string): string {
 export async function listPriceItems(q: TenantQuery, activeOnly = false): Promise<PriceItem[]> {
   const rows = await q.rows<Row>(
     `SELECT p.id, p.name, p.description, p.unit, p.unit_cents::text, p.active,
-            s.name AS supplier_name
+            p.track_stock, s.name AS supplier_name
        FROM price_items p
        LEFT JOIN suppliers s
          ON s.id = p.supplier_id AND s.sub_account_id = p.sub_account_id AND s.deleted_at IS NULL
@@ -102,6 +112,8 @@ export async function savePriceItem(
     description?: string | null;
     unit?: string | null;
     unitCents: number;
+    /** Physical goods with a count on the shelf. Off unless asked for. */
+    trackStock?: boolean;
   }
 ): Promise<SaveResult> {
   const name = input.name.trim();
@@ -120,16 +132,19 @@ export async function savePriceItem(
       input.id
       ? q.one<Row>(
           `UPDATE price_items
-              SET name = $3, description = $4, unit = $5, unit_cents = $6, updated_at = now()
+              SET name = $3, description = $4, unit = $5, unit_cents = $6,
+                  track_stock = $7, updated_at = now()
             WHERE id = $2 AND sub_account_id = $1 AND deleted_at IS NULL
-            RETURNING id, name, description, unit, unit_cents::text, active`,
-          [q.ctx.subAccountId, input.id, name, description, unit, input.unitCents]
+            RETURNING id, name, description, unit, unit_cents::text, active, track_stock,
+                      NULL::text AS supplier_name`,
+          [q.ctx.subAccountId, input.id, name, description, unit, input.unitCents, input.trackStock ?? false]
         )
       : q.one<Row>(
-          `INSERT INTO price_items (id, sub_account_id, name, description, unit, unit_cents)
-           VALUES ($2, $1, $3, $4, $5, $6)
-           RETURNING id, name, description, unit, unit_cents::text, active`,
-          [q.ctx.subAccountId, newId(name), name, description, unit, input.unitCents]
+          `INSERT INTO price_items (id, sub_account_id, name, description, unit, unit_cents, track_stock)
+           VALUES ($2, $1, $3, $4, $5, $6, $7)
+           RETURNING id, name, description, unit, unit_cents::text, active, track_stock,
+                     NULL::text AS supplier_name`,
+          [q.ctx.subAccountId, newId(name), name, description, unit, input.unitCents, input.trackStock ?? false]
         )
     );
     return row ? { item: toItem(row) } : { error: "That item no longer exists." };

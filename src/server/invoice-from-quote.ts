@@ -1,3 +1,4 @@
+import { takeStockForInvoice } from "./stock-sale";
 import type { TenantQuery } from "./tenant";
 
 /**
@@ -99,9 +100,10 @@ export async function raiseInvoiceFromQuote(
     unit_cents: string;
     position: number;
     project_task_id: string | null;
+    price_item_id: string | null;
   }>(
     `SELECT description, quantity::text AS quantity, unit_cents::text AS unit_cents,
-            position, project_task_id
+            position, project_task_id, price_item_id
        FROM document_lines
       WHERE sub_account_id = $1 AND document_id = $2
       ORDER BY position ASC`,
@@ -129,9 +131,14 @@ export async function raiseInvoiceFromQuote(
     /* The stage link is copied, not recomputed. It is what lets a stage show
        what was billed against it beside what was quoted and committed. */
     await q.rows(
+      /* The price item is copied along with the stage link, and for the same
+         reason: the invoice is the document that bills this work, so it has to
+         know which shelf the goods came off. Recomputing it from the
+         description would mean matching an ambiguous name — two suppliers can
+         both sell "Paving stone". */
       `INSERT INTO document_lines
-         (id, sub_account_id, document_id, description, quantity, unit_cents, position, project_task_id)
-       VALUES ($1, $2, $3, $4, $5::numeric, $6::bigint, $7, $8)`,
+         (id, sub_account_id, document_id, description, quantity, unit_cents, position, project_task_id, price_item_id)
+       VALUES ($1, $2, $3, $4, $5::numeric, $6::bigint, $7, $8, $9)`,
       [
         `dl-${invoiceId}-${i}`,
         q.ctx.subAccountId,
@@ -141,10 +148,16 @@ export async function raiseInvoiceFromQuote(
         line.unit_cents,
         line.position,
         line.project_task_id,
+        line.price_item_id,
       ]
     );
     totalCents += Math.round(Number(line.quantity) * Number(line.unit_cents));
   }
+
+  /* And the goods leave the shelf, because the invoice exists. See
+     `takeStockForInvoice` for why that is the moment rather than sending or
+     payment. */
+  await takeStockForInvoice(q, invoiceId);
 
   return { invoiceId, number, fromQuote: quote.number, totalCents };
 }

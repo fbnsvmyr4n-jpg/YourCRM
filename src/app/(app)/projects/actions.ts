@@ -196,10 +196,26 @@ export async function removeProjectPersonAction(
  */
 function readLines(
   formData: FormData
-): { lines: { description: string; quantity: number; unitCents: number }[] } | { error: string } {
+):
+  | { lines: { description: string; quantity: number; unitCents: number; priceItemId: string | null }[] }
+  | { error: string } {
   const descriptions = formData.getAll("lineDescription").map((v) => text(v, 200));
   const quantities = formData.getAll("lineQuantity");
   const units = formData.getAll("lineUnit");
+  /*
+     WHICH price item this line was built from, when it was picked rather than
+     typed. Carried so stock can be taken off the right shelf.
+
+     Matching the description back to a price item by NAME is not an option:
+     two suppliers can both sell "Paving stone", at R450 and at R510, so the
+     name identifies nothing — the bug fixed on 7 Oct, which would come
+     straight back as goods leaving the wrong row.
+
+     Validated, not trusted. It arrives in a hidden field, so it is read as an
+     id and checked against this workspace's own price list below; anything
+     else becomes null and the line simply moves no stock.
+  */
+  const pickedIds = formData.getAll("linePriceItemId").map((v) => validId(v));
 
   /* A line whose numbers could not be read is refused outright rather than
      quietly priced at zero. A quotation is a document somebody signs. */
@@ -218,6 +234,7 @@ function readLines(
       // only a MISSING quantity falls back to one.
       quantity: decimal(quantities[i], 1_000_000, 3) ?? 1,
       unitCents: Math.round((decimal(units[i], MAX_UNIT_PRICE, 2) ?? 0) * 100),
+      priceItemId: pickedIds[i] || null,
     }))
     .filter((l) => l.description !== "");
 
@@ -333,10 +350,34 @@ export async function createDocumentAction(
     for (const [position, line] of lines.entries()) {
       await q.rows(
         `INSERT INTO document_lines
-           (id, sub_account_id, document_id, description, quantity, unit_cents, position, project_task_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [newId("l"), q.ctx.subAccountId, documentId, line.description, line.quantity, line.unitCents, position, stageId]
+           (id, sub_account_id, document_id, description, quantity, unit_cents, position, project_task_id, price_item_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
+                 /* Only if it really is one of THIS workspace's prices. The id
+                    arrives from a form, and a line pointing at somebody else's
+                    row would move their stock. */
+                 (SELECT p.id FROM price_items p
+                   WHERE p.id = $9 AND p.sub_account_id = $2 AND p.deleted_at IS NULL))`,
+        [
+          newId("l"),
+          q.ctx.subAccountId,
+          documentId,
+          line.description,
+          line.quantity,
+          line.unitCents,
+          position,
+          stageId,
+          line.priceItemId,
+        ]
       );
+    }
+
+    /* An invoice typed by hand takes the goods off the shelf exactly as one
+       raised from a quotation does — the moment chosen is the invoice EXISTING,
+       not the route it arrived by. Lines that were not picked from the price
+       list move nothing; see `takeStockForInvoice`. */
+    if (kind === "invoice") {
+      const { takeStockForInvoice } = await import("@/server/stock-sale");
+      await takeStockForInvoice(q, documentId);
     }
 
     revalidateApp();
@@ -438,6 +479,15 @@ export async function setDocumentStatusAction(
       return {
         error: `${doc.number} is waiting on an approval. Approve or discard it in Chat first.`,
       };
+    }
+
+    /* An invoice that is cancelled is work that is not happening, so the goods
+       are still ours. Recorded as a RETURN rather than by deleting the sale:
+       "sold 40, returned 40" is what happened, and a count that can be
+       rewritten is a count that can be argued with. */
+    if (status === "cancelled") {
+      const { returnStockForInvoice } = await import("@/server/stock-sale");
+      await returnStockForInvoice(q, documentId, q.ctx.userId);
     }
 
     revalidateApp();

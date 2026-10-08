@@ -57,6 +57,10 @@ export const EXPECTED_TABLES = [
   /* Who loaded which supplier's list, when, and what it changed — the record
      that makes an unattended price change answerable. */
   "price_list_loads",
+  /* Every reason stock moved. Stock on hand is the SUM of this, so a database
+     without it does not lose a figure — it loses the only thing the figure is
+     made of. */
+  "stock_movements",
   "working_hours",
   "booking_links",
   "automations",
@@ -191,6 +195,15 @@ export const EXPECTED_COLUMNS: ReadonlyArray<[string, string]> = [
      database does not lose a checkbox — it fails the screen a quotation is
      built from. */
   ["suppliers", "auto_load"],
+  /* Whether an item is physical goods at all. Read by every price-list query,
+     so an unmigrated database breaks the screen a quotation is built from. */
+  ["price_items", "track_stock"],
+  /* Which price item a line came from — what makes stock traceable to the
+     document that moved it, rather than matched back by an ambiguous name. */
+  ["document_lines", "price_item_id"],
+  /* What makes a sale idempotent — the unique index behind it is why raising
+     the same invoice twice takes the goods once. */
+  ["stock_movements", "document_line_id"],
 ];
 
 export type SchemaCheck = {

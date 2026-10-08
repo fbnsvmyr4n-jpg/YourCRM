@@ -10,6 +10,7 @@ import { EyeOff, Pencil, Plus, RotateCcw, Search, Tags, Trash2 } from "lucide-re
 import { Banner } from "@/components/ui/Banner";
 import { Card, CardHeader, CardMeta } from "@/components/ui/Card";
 import { clsx } from "@/lib/clsx";
+import { formatQty } from "@/data/stock";
 import { useFormDisclosure } from "@/lib/form-disclosure";
 import { useMoney } from "@/components/money/CurrencyProvider";
 import type { PriceItem } from "@/server/repos/pricing";
@@ -35,10 +36,13 @@ import {
 
 export function PricingView({
   items,
+  stock = {},
   suppliers = [],
   prefill = null,
 }: {
   items: PriceItem[];
+  /** How many of each tracked item are on the shelf, by item id. */
+  stock?: Record<string, number>;
   suppliers?: Supplier[];
   /** A list carried here from a supplier's message — see `supplier-mail.ts`. */
   prefill?: { supplierId: string; text: string; messageId?: string | null } | null;
@@ -140,6 +144,34 @@ export function PricingView({
                 className="field-input resize-y"
               />
             </label>
+
+            {/*
+               Goods, or work.
+
+               Off unless asked for, because most of this list is neither
+               counted nor countable: a trades business sells labour as well as
+               materials, and "Site labour: 3 in stock" is not a fact about
+               anything. Ticking it is what gives the row a shelf — after that
+               an invoice takes from it, and a delivery puts back.
+            */}
+            <label
+              className="flex items-start gap-3 rounded-xl px-3.5 py-3"
+              style={{ background: "var(--surface-2)" }}
+            >
+              <input
+                type="checkbox"
+                name="trackStock"
+                defaultChecked={editing?.trackStock ?? false}
+                className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--accent)]"
+              />
+              <span className="leading-tight">
+                <span className="block text-sm font-medium">I hold this as stock</span>
+                <span className="mt-0.5 block text-xs text-faint">
+                  For goods you keep, not work you do. Raising an invoice for it
+                  takes it off the shelf; receiving a delivery puts it back.
+                </span>
+              </span>
+            </label>
             <div className="flex justify-end gap-2">
               <button
                 type="button"
@@ -201,6 +233,7 @@ export function PricingView({
           <Group
             title="On the list"
             items={live}
+            stock={stock}
             onEdit={setEditing}
             onToggle={toggle}
             onRemove={remove}
@@ -212,6 +245,7 @@ export function PricingView({
           <Group
             title="Withdrawn"
             items={withdrawn}
+            stock={stock}
             onEdit={setEditing}
             onToggle={toggle}
             onRemove={remove}
@@ -230,9 +264,12 @@ function Group({
   onToggle,
   onRemove,
   busy,
+  stock,
 }: {
   title: string;
   items: PriceItem[];
+  /** On the shelf, by item id. Absent means nothing has moved yet. */
+  stock: Record<string, number>;
   onEdit: (item: PriceItem) => void;
   onToggle: React.FormEventHandler<HTMLFormElement>;
   onRemove: React.FormEventHandler<HTMLFormElement>;
@@ -292,6 +329,33 @@ function Group({
                 </span>
                 <span className="block text-[11px] text-faint">{item.unit}</span>
               </span>
+
+              {/*
+                 What is on the shelf, for the rows that have one.
+
+                 Absent from everything else, which is most of the list — an
+                 item nobody counts has no count, and a dash in that column
+                 would read as a figure the product failed to work out rather
+                 than one that does not exist.
+
+                 None left is said in words and coloured, because it is the one
+                 state that changes what somebody does next: quoting it means
+                 buying it first.
+              */}
+              {item.trackStock && (
+                <span
+                  className="shrink-0 rounded-lg px-2 py-1 text-right text-[11px] font-semibold leading-tight"
+                  style={
+                    (stock[item.id] ?? 0) <= 0
+                      ? { background: "var(--red-soft)", color: "var(--red)" }
+                      : { background: "var(--raise)", color: "var(--text-muted)" }
+                  }
+                >
+                  {(stock[item.id] ?? 0) <= 0
+                    ? "None left"
+                    : `${formatQty(stock[item.id] ?? 0)} in stock`}
+                </span>
+              )}
 
               {canWrite && (
               <>

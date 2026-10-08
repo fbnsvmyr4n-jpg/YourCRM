@@ -1336,6 +1336,11 @@ function DocumentRow({
             <select
               id={`status-${scope}`}
               name="status"
+              /* Remounted when the status changes. `defaultValue` is read once
+                 at mount and React reuses the element, so after a change this
+                 kept showing the word it opened with — the database saying one
+                 thing and the menu another. Same fix as the ledger's. */
+              key={doc.status}
               defaultValue={doc.status}
               disabled={busy}
               className="focus-ring rounded-lg px-2.5 py-1.5 text-xs font-semibold capitalize disabled:opacity-60"
@@ -1493,6 +1498,20 @@ function DocumentForm({
      the same one that gets submitted: this box cannot show a figure the save
      would disagree with.
   */
+  /*
+     WHICH PRICE ITEM EACH ROW CAME FROM, in state rather than in the DOM.
+
+     This was a hidden input written imperatively by the picker, and it did not
+     survive: React resets an uncontrolled hidden field's value on re-render,
+     and the running total below re-renders on every keystroke. So the rate
+     filled correctly, the link was wiped a frame later, and the invoice took
+     stock off nothing. The two features only collide when both exist — found
+     by raising an invoice and watching the shelf not move.
+
+     Keyed by row index, which is stable: the four rows are fixed.
+  */
+  const [lineItems, setLineItems] = useState<Record<number, string>>({});
+
   const [running, setRunning] = useState<{
     subtotalCents: number;
     lines: number;
@@ -1607,6 +1626,18 @@ function DocumentForm({
                      know which was meant, and guessing is the bug above. */
                   const byName = priceItems.filter((p) => p.name.trim().toLowerCase() === typed);
                   const match = picked ?? (byName.length === 1 ? byName[0] : null);
+
+                  /*
+                     RE-ESTABLISHED on every keystroke, never left behind.
+
+                     Pick "Paving stone", then edit the text to "Paving stone
+                     offcuts", and a link kept from the earlier pick would take
+                     paving stone off the shelf for a line that no longer says
+                     paving stone. It is only true while the description still
+                     matches the row it came from.
+                  */
+                  setLineItems((prev) => ({ ...prev, [i]: match?.id ?? "" }));
+
                   if (!match) return;
 
                   /* The picked option carries the supplier so it can be told
@@ -1623,6 +1654,21 @@ function DocumentForm({
                   const qty = row?.querySelector<HTMLInputElement>('input[name="lineQuantity"]');
                   if (qty && !qty.value) qty.value = "1";
                 }}
+              />
+              {/* Which price item this line was built from, when it was picked
+                  from the list. Empty for a line somebody typed, which is most
+                  of them — a one-off line is not an error, it simply moves no
+                  stock. The server checks the id against this workspace's own
+                  prices before storing it.
+
+                  CONTROLLED, not written into the DOM: React resets an
+                  uncontrolled hidden field on re-render, and the total below
+                  re-renders on every keystroke. */}
+              <input
+                type="hidden"
+                name="linePriceItemId"
+                value={lineItems[i] ?? ""}
+                readOnly
               />
               <input
                 name="lineQuantity"
