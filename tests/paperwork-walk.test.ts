@@ -59,6 +59,35 @@ describe("picking a rate off the price list", () => {
   });
 });
 
+describe("the total on the form that is writing the quotation", () => {
+  /*
+     The form had none. A quotation was typed line by line, saved, and only then
+     did a figure appear — so the one number the client cares about, and the one
+     the person writing it is working towards, was the one thing they could not
+     see until it was too late to adjust.
+  */
+  it("USES THE SAME VAT RULE the finished document does", () => {
+    /* Not a second implementation of the same sum. `vatBreakdown` is what the
+       printed sheet, the emailed copy and the pay page all ask, so the form and
+       the document agree by construction. */
+    expect(projectDetail).toMatch(/vatBreakdown\(subtotalCents, vat\.rateBp, vat\.inclusive\)/);
+  });
+
+  it("reads the FORM, so it cannot show a figure the save disagrees with", () => {
+    /* The rows are uncontrolled — the price-list picker writes a rate straight
+       into a row's inputs — so a mirrored copy in state would have to be told
+       about that too. One source of truth, and it is the one submitted. */
+    expect(projectDetail).toMatch(/onInput=\{\(e\) => retotal\(e\.currentTarget\)\}/);
+    expect(projectDetail).toMatch(/form\.querySelectorAll<HTMLInputElement>\('input\[name="lineQuantity"\]'\)/);
+  });
+
+  it("rounds per line, the way the server stores them", () => {
+    /* Summing in floats and rounding once at the end is how a form ends up a
+       cent away from the document it just saved. */
+    expect(projectDetail).toMatch(/subtotalCents \+= Math\.round\(qty \* unit \* 100\);/);
+  });
+});
+
 describe("a quotation that has been approved", () => {
   /*
      "Send" on a workspace with no mail domain approves the quotation and says,

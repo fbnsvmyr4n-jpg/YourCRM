@@ -20,6 +20,7 @@ import {
   Users,
 } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
+import { rateLabel, vatBreakdown } from "@/server/vat";
 import { Banner } from "@/components/ui/Banner";
 import { Card, CardHeader, CardMeta } from "@/components/ui/Card";
 import { TimeAgo } from "@/components/ui/TimeAgo";
@@ -181,6 +182,7 @@ export function ProjectDetail({
   retainers = [],
   paymentsReady = false,
   priceItems,
+  vat,
   threads,
   timeline,
   tasks,
@@ -211,6 +213,8 @@ export function ProjectDetail({
     unitCents: number;
     supplierName: string | null;
   }[];
+  /** The workspace's tax rule, so a form can show the total the document will. */
+  vat: { rateBp: number; inclusive: boolean };
   threads: ProjectThread[];
   timeline: ProjectEvent[];
   tasks: ProjectTask[];
@@ -298,6 +302,7 @@ export function ProjectDetail({
               dealId={header.id}
               documents={documents}
               priceItems={priceItems}
+              vat={vat}
               tasks={tasks}
               today={today}
             />
@@ -755,12 +760,15 @@ function DocumentsTab({
   dealId,
   documents,
   priceItems,
+  vat,
   tasks,
   today,
 }: {
   dealId: string;
   documents: ProjectDocument[];
   priceItems: PriceItem[];
+  /** The workspace's tax rule, so the form totals the way the document will. */
+  vat: { rateBp: number; inclusive: boolean };
   /** The business's own today, for the payment box's date. */
   today: string;
   /** The job's plan, so documents can be arranged and filed by stage. */
@@ -896,6 +904,7 @@ function DocumentsTab({
             key={formKey}
             dealId={dealId}
             priceItems={priceItems}
+            vat={vat}
             onSubmit={create}
             pending={creating}
             state={createState}
@@ -1450,6 +1459,7 @@ function labelFor(item: PickableItem, ambiguous: ReadonlySet<string>): string {
 function DocumentForm({
   dealId,
   priceItems,
+  vat,
   onSubmit: action,
   pending,
   state,
@@ -1459,6 +1469,8 @@ function DocumentForm({
 }: {
   dealId: string;
   priceItems: PriceItem[];
+  /** The workspace's tax rule — the same one the finished document uses. */
+  vat: { rateBp: number; inclusive: boolean };
   onSubmit: React.FormEventHandler<HTMLFormElement>;
   pending: boolean;
   state: FormState;
@@ -1471,8 +1483,56 @@ function DocumentForm({
   /* Worked out once per render of the form rather than per keystroke in four
      rows: the list does not change while the form is open. */
   const ambiguousNames = useMemo(() => duplicatedNames(priceItems), [priceItems]);
+
+  /*
+     The running total, read off the FORM rather than kept beside it.
+
+     The four rows are uncontrolled — the price-list picker writes a rate
+     straight into a row's inputs, and a controlled mirror would have to be told
+     about that too. Reading the form on input is one source of truth, and it is
+     the same one that gets submitted: this box cannot show a figure the save
+     would disagree with.
+  */
+  const [running, setRunning] = useState<{
+    subtotalCents: number;
+    lines: number;
+    breakdown: ReturnType<typeof vatBreakdown>;
+  }>({ subtotalCents: 0, lines: 0, breakdown: null });
+
+  const retotal = (form: HTMLFormElement | null) => {
+    if (!form) return;
+    const qtys = form.querySelectorAll<HTMLInputElement>('input[name="lineQuantity"]');
+    const units = form.querySelectorAll<HTMLInputElement>('input[name="lineUnit"]');
+    const descs = form.querySelectorAll<HTMLInputElement>('input[name="lineDescription"]');
+    let subtotalCents = 0;
+    let lines = 0;
+    for (let i = 0; i < qtys.length; i++) {
+      /* A line counts when it says something. A description with no figures is
+         still a line somebody is writing, and showing the total jump only once
+         they reach the price column reads as the box being broken. */
+      const described = (descs[i]?.value ?? "").trim() !== "";
+      const qty = Number(qtys[i]?.value);
+      const unit = Number(units[i]?.value);
+      if (!described && !qtys[i]?.value && !units[i]?.value) continue;
+      lines += 1;
+      if (!Number.isFinite(qty) || !Number.isFinite(unit)) continue;
+      /* Rounded per line, exactly as the server does when it stores them, so
+         the box cannot be a cent out from the saved document. */
+      subtotalCents += Math.round(qty * unit * 100);
+    }
+    setRunning({
+      subtotalCents,
+      lines,
+      breakdown: vatBreakdown(subtotalCents, vat.rateBp, vat.inclusive),
+    });
+  };
   return (
-    <form onSubmit={action} className="mb-4 space-y-3 border-b border-[var(--border)] pb-4">
+    <form
+      onSubmit={action}
+      /* One listener for all four rows, on the element the figures live in. */
+      onInput={(e) => retotal(e.currentTarget)}
+      className="mb-4 space-y-3 border-b border-[var(--border)] pb-4"
+    >
       <Banner state={state} />
       <input type="hidden" name="dealId" value={dealId} />
       {stage && (
@@ -1599,6 +1659,51 @@ function DocumentForm({
             ? "Start typing to pick from the price list — the rate fills itself. Leave a line blank to skip it."
             : "Leave a line blank to skip it. The total is worked out from quantity × unit price."}
         </p>
+
+        {/*
+           WHAT THIS COMES TO, while it is being written.
+
+           The form had no total. A quotation was typed line by line, saved, and
+           only then did a figure appear — so the one number the client cares
+           about, and the one the person writing it is working towards, was the
+           one thing they could not see. Walked as a salesperson: four lines in,
+           the only way to know whether the quote was near R25,000 was mental
+           arithmetic or saving it to find out.
+
+           It uses `vatBreakdown`, which is what the printed sheet, the emailed
+           copy and the pay page all use — so this agrees with the document by
+           construction rather than by both doing the same sum. The subtotal is
+           shown even at a zero rate, because the lines adding up is the fact;
+           the tax lines simply have nothing to say.
+        */}
+        <div
+          className="mt-3 flex flex-col gap-1 rounded-xl px-3.5 py-3 text-sm"
+          style={{ background: "var(--surface-2)" }}
+        >
+          <span className="flex items-baseline justify-between gap-3 text-muted">
+            <span className="text-xs">{running.breakdown ? "Subtotal" : "Total"}</span>
+            <span className="tabular-nums">{money(running.subtotalCents)}</span>
+          </span>
+          {running.breakdown && (
+            <>
+              <span className="flex items-baseline justify-between gap-3 text-muted">
+                <span className="text-xs">
+                  {vat.inclusive ? "Includes VAT at" : "VAT at"} {rateLabel(running.breakdown.rateBp)}
+                </span>
+                <span className="tabular-nums">{money(running.breakdown.vatCents)}</span>
+              </span>
+              <span className="flex items-baseline justify-between gap-3 border-t border-[var(--border)] pt-1 font-semibold">
+                <span className="text-xs">Total</span>
+                <span className="tabular-nums">{money(running.breakdown.grossCents)}</span>
+              </span>
+            </>
+          )}
+          {running.lines === 0 && (
+            <span className="text-xs text-faint">
+              Nothing on it yet — add a line above and this follows along.
+            </span>
+          )}
+        </div>
       </div>
 
       <label className="block">

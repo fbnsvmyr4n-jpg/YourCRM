@@ -64,6 +64,13 @@ export default async function ProjectPage({
       /* So a hand-typed document can pick from the price list instead of
          retyping a rate. Active only: a withdrawn rate must not be offered. */
       priceItems: await listPriceItems(q, true),
+      /* The tax rule, so the form building a quotation can show the same total
+         the finished document will. `getSettings` is memoised per transaction,
+         so asking again here costs nothing. */
+      vat: await (async () => {
+        const settings = await getSettings(q);
+        return { rateBp: settings.vatRateBp, inclusive: settings.pricesIncludeVat };
+      })(),
       threads: await projectThreads(q, id),
       timeline: await projectTimeline(q, id),
       tasks: await listTasks(q, id),
@@ -128,6 +135,7 @@ export default async function ProjectPage({
       retainers={data.retainers}
       paymentsReady={data.paymentsReady}
       priceItems={data.priceItems}
+      vat={data.vat}
       threads={data.threads}
       timeline={data.timeline}
       tasks={data.tasks}
