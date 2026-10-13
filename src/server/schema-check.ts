@@ -61,6 +61,9 @@ export const EXPECTED_TABLES = [
      without it does not lose a figure — it loses the only thing the figure is
      made of. */
   "stock_movements",
+  /* The purchase slip that puts stock on the shelf, and its lines. */
+  "goods_received",
+  "goods_received_lines",
   "working_hours",
   "booking_links",
   "automations",
@@ -204,6 +207,8 @@ export const EXPECTED_COLUMNS: ReadonlyArray<[string, string]> = [
   /* What makes a sale idempotent — the unique index behind it is why raising
      the same invoice twice takes the goods once. */
   ["stock_movements", "document_line_id"],
+  /* The delivery line that put stock on — what makes receiving idempotent. */
+  ["stock_movements", "received_line_id"],
 ];
 
 export type SchemaCheck = {

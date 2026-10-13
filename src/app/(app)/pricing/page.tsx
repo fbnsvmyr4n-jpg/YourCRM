@@ -4,6 +4,8 @@ import { getMessage } from "@/server/repos/inbox";
 import { getContact } from "@/server/repos/contacts";
 import { findSupplierList } from "@/server/supplier-mail";
 import { stockOnHand } from "@/server/repos/stock";
+import { listReceived } from "@/server/repos/goods-received";
+import { businessToday } from "@/server/repos/settings";
 import { id as validId } from "@/server/validate";
 import { withTenantPage } from "@/server/tenant-session";
 import { PricingView } from "./PricingView";
@@ -19,7 +21,7 @@ export default async function PricingPage({
 }) {
   const { fromMessage } = await searchParams;
 
-  const { items, suppliers, prefill, stock } = await withTenantPage(async (q) => {
+  const { items, suppliers, prefill, stock, received, today } = await withTenantPage(async (q) => {
     const suppliers = await listSuppliers(q);
 
     /*
@@ -55,6 +57,11 @@ export default async function PricingPage({
       /* One query for the whole list. Items with no movements are absent
          rather than zero — see `stockOnHand`. */
       stock: await stockOnHand(q),
+      /* What has arrived lately, so the shelf is explicable both ways. */
+      received: await listReceived(q),
+      /* The business's own day for the delivery date — a slip typed at 01:00
+         in Johannesburg must not be dated yesterday. */
+      today: await businessToday(q),
       suppliers,
       /* The message id travels with the text so the load can be recorded
          against it — which is what lets that message stop offering to load a
@@ -79,5 +86,14 @@ export default async function PricingPage({
     money: true,
   });
 
-  return <PricingView items={items} suppliers={suppliers} prefill={prefill} stock={stock} />;
+  return (
+    <PricingView
+      items={items}
+      suppliers={suppliers}
+      prefill={prefill}
+      stock={stock}
+      received={received}
+      today={today}
+    />
+  );
 }

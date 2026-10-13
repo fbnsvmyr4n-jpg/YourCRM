@@ -3567,6 +3567,120 @@ CREATE TRIGGER stock_movements_item_in_tenant
   FOR EACH ROW EXECUTE FUNCTION assert_stock_item_in_tenant();
 
 -- ---------------------------------------------------------------------------
+-- Goods received: the purchase slip that puts stock on the shelf.
+-- ---------------------------------------------------------------------------
+--
+-- ── Why this is not a fourth `documents` kind ──────────────────────────────
+--
+-- It was the obvious move: a delivery note is a document, and `documents`
+-- already brings numbering, lines, a party, a status and a printable sheet.
+-- `documents.deal_id` is NOT NULL, and that is the problem. A quotation and an
+-- invoice are about a job; a purchase order is raised for one. A delivery into
+-- the yard is about a SUPPLIER and nothing else — the stone arrives, it goes on
+-- the shelf, and which job it will be used on is not known and may be several.
+--
+-- So the choice was to weaken a constraint every project query leans on, or to
+-- write a job onto a record that has none. Both are worse than a small table
+-- that says what is true.
+CREATE TABLE IF NOT EXISTS goods_received (
+  id                  TEXT PRIMARY KEY,
+  sub_account_id      TEXT NOT NULL REFERENCES sub_accounts(id) ON DELETE CASCADE,
+  supplier_id         TEXT NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+
+  -- THEIR number, off their delivery note, so the two can be matched when the
+  -- supplier's invoice arrives and disagrees. Optional: plenty of deliveries
+  -- come with a scribble, and refusing to record one for want of a reference
+  -- is how stock stops being recorded at all.
+  reference           TEXT CHECK (reference IS NULL OR length(reference) <= 80),
+
+  -- The business's own day, not a timestamp: "it came on the 8th" is the fact,
+  -- and it must not shift by a day for a yard in Johannesburg.
+  received_on         DATE NOT NULL,
+  note                TEXT CHECK (note IS NULL OR length(note) <= 2000),
+
+  received_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS goods_received_tenant_idx
+  ON goods_received (sub_account_id, received_on DESC);
+
+-- What arrived, line by line.
+--
+-- `price_item_id` is NOT NULL here, unlike on a document line. A delivery note
+-- exists to move stock, and a line that names no item moves none — it would be
+-- a row that looks like a record of goods and is not one.
+CREATE TABLE IF NOT EXISTS goods_received_lines (
+  id                 TEXT PRIMARY KEY,
+  sub_account_id     TEXT NOT NULL REFERENCES sub_accounts(id) ON DELETE CASCADE,
+  goods_received_id  TEXT NOT NULL REFERENCES goods_received(id) ON DELETE CASCADE,
+  price_item_id      TEXT NOT NULL REFERENCES price_items(id) ON DELETE CASCADE,
+
+  quantity           NUMERIC(14, 3) NOT NULL CHECK (quantity > 0),
+  position           INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS goods_received_lines_idx
+  ON goods_received_lines (sub_account_id, goods_received_id, position);
+
+-- The movement this line caused, so a delivery moves the goods ONCE.
+-- Same shape and same reasoning as `document_line_id` for a sale.
+ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS received_line_id TEXT
+  REFERENCES goods_received_lines(id) ON DELETE SET NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS stock_movements_once_per_received_line
+  ON stock_movements (sub_account_id, received_line_id)
+  WHERE received_line_id IS NOT NULL;
+
+ALTER TABLE goods_received ENABLE ROW LEVEL SECURITY;
+ALTER TABLE goods_received FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS goods_received_tenant_isolation ON goods_received;
+CREATE POLICY goods_received_tenant_isolation ON goods_received
+  USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
+  WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
+
+ALTER TABLE goods_received_lines ENABLE ROW LEVEL SECURITY;
+ALTER TABLE goods_received_lines FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS goods_received_lines_tenant_isolation ON goods_received_lines;
+CREATE POLICY goods_received_lines_tenant_isolation ON goods_received_lines
+  USING (sub_account_id = current_setting('app.sub_account_id', TRUE))
+  WITH CHECK (sub_account_id = current_setting('app.sub_account_id', TRUE));
+
+-- A slip's supplier, and a line's item, belong to the same workspace as the
+-- row pointing at them. The policies above stop a tenant READING another's
+-- rows; these stop one being POINTED at.
+CREATE OR REPLACE FUNCTION assert_received_supplier_in_tenant() RETURNS TRIGGER AS $$
+BEGIN
+  IF NOT EXISTS (
+       SELECT 1 FROM suppliers s
+        WHERE s.id = NEW.supplier_id AND s.sub_account_id = NEW.sub_account_id
+     ) THEN
+    RAISE EXCEPTION 'supplier % is not in sub-account %', NEW.supplier_id, NEW.sub_account_id;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS goods_received_supplier_in_tenant ON goods_received;
+CREATE TRIGGER goods_received_supplier_in_tenant
+  BEFORE INSERT OR UPDATE ON goods_received
+  FOR EACH ROW EXECUTE FUNCTION assert_received_supplier_in_tenant();
+
+CREATE OR REPLACE FUNCTION assert_received_line_item_in_tenant() RETURNS TRIGGER AS $$
+BEGIN
+  IF NOT EXISTS (
+       SELECT 1 FROM price_items p
+        WHERE p.id = NEW.price_item_id AND p.sub_account_id = NEW.sub_account_id
+     ) THEN
+    RAISE EXCEPTION 'price item % is not in sub-account %', NEW.price_item_id, NEW.sub_account_id;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS goods_received_lines_item_in_tenant ON goods_received_lines;
+CREATE TRIGGER goods_received_lines_item_in_tenant
+  BEFORE INSERT OR UPDATE ON goods_received_lines
+  FOR EACH ROW EXECUTE FUNCTION assert_received_line_item_in_tenant();
+
+-- ---------------------------------------------------------------------------
 -- What the application's own database role may do.
 --
 -- KEEP THIS THE LAST BLOCK IN THE FILE: `GRANT … ON ALL TABLES` covers only the

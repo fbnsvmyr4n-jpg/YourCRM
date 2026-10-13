@@ -55,6 +55,8 @@ export async function recordMovement(
     reason: StockReason;
     documentId?: string | null;
     documentLineId?: string | null;
+    /** The delivery line that put these goods on, for the same reason. */
+    receivedLineId?: string | null;
     note?: string | null;
     /** Null for a movement nobody pressed a button for. */
     userId: string | null;
@@ -65,8 +67,9 @@ export async function recordMovement(
 
   const rows = await q.rows<{ id: string }>(
     `INSERT INTO stock_movements
-       (id, sub_account_id, price_item_id, qty_change, reason, document_id, document_line_id, note, moved_by_user_id)
-     VALUES ($2, $1, $3, $4, $5, $6, $7, $8, $9)
+       (id, sub_account_id, price_item_id, qty_change, reason, document_id, document_line_id,
+        received_line_id, note, moved_by_user_id)
+     VALUES ($2, $1, $3, $4, $5, $6, $7, $8, $9, $10)
      ON CONFLICT DO NOTHING
      RETURNING id`,
     [
@@ -77,6 +80,7 @@ export async function recordMovement(
       input.reason,
       input.documentId ?? null,
       input.documentLineId ?? null,
+      input.receivedLineId ?? null,
       input.note?.trim() || null,
       input.userId,
     ]

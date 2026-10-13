@@ -3,6 +3,8 @@
 import { useMemo, useState } from "react";
 import { SuppliersCard } from "@/components/pricing/SuppliersCard";
 import { SupplierImport } from "@/components/pricing/SupplierImport";
+import { ReceiveGoods } from "@/components/pricing/ReceiveGoods";
+import type { GoodsReceived } from "@/data/goods-received";
 import type { Supplier } from "@/server/repos/suppliers";
 import { useCanHandleMoney } from "@/components/shell/Abilities";
 import { useKeptForm } from "@/lib/use-kept-form";
@@ -37,12 +39,18 @@ import {
 export function PricingView({
   items,
   stock = {},
+  received = [],
+  today = "",
   suppliers = [],
   prefill = null,
 }: {
   items: PriceItem[];
   /** How many of each tracked item are on the shelf, by item id. */
   stock?: Record<string, number>;
+  /** Deliveries already recorded, newest first. */
+  received?: GoodsReceived[];
+  /** The business's own today, for a delivery's date. */
+  today?: string;
   suppliers?: Supplier[];
   /** A list carried here from a supplier's message — see `supplier-mail.ts`. */
   prefill?: { supplierId: string; text: string; messageId?: string | null } | null;
@@ -103,6 +111,17 @@ export function PricingView({
           Above the list itself, because loading a supplier's sheet is how most
           of these rows get here — typing one by hand is the exception. */}
       <SuppliersCard suppliers={suppliers} />
+      {/* Goods arriving, directly under who they arrive from. Without this the
+          shelf only ever falls, and a figure that can only fall is one people
+          stop believing. */}
+      <ReceiveGoods
+        suppliers={suppliers}
+        items={items
+          .filter((i) => i.trackStock && i.active)
+          .map((i) => ({ id: i.id, name: i.name, unit: i.unit, supplierName: i.supplierName }))}
+        received={received}
+        today={today}
+      />
       <SupplierImport suppliers={suppliers} prefill={prefill} />
 
       {formOpen && (

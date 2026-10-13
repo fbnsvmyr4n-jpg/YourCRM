@@ -20,6 +20,7 @@ import {
 } from "@/server/repos/suppliers";
 import { businessToday } from "@/server/repos/settings";
 import { recordMovement, stockOnHand } from "@/server/repos/stock";
+import { receiveGoods } from "@/server/repos/goods-received";
 import { ADJUSTABLE_REASONS, REASON_DIRECTION, formatQty, type StockReason } from "@/data/stock";
 import {
   describeChanges,
@@ -354,6 +355,58 @@ export async function adjustStockAction(_prev: FormState, formData: FormData): P
     const now = onHand + qtyChange;
     return {
       ok: `${item.name}: ${qtyChange > 0 ? "+" : ""}${formatQty(qtyChange)}, now ${formatQty(now)}.`,
+    };
+  });
+}
+
+
+/**
+ * Record a delivery: goods arriving from a supplier, onto the shelf.
+ *
+ * The counterpart to a sale and the half that makes the stock figure
+ * trustworthy rather than a number that only ever falls. Saving the slip IS
+ * the movement — a delivery somebody typed and did not post is a delivery that
+ * will not be posted, and the shelf would be short with the explanation one
+ * screen away.
+ */
+export async function receiveGoodsAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  return withMoney(async (q) => {
+    const supplierId = validId(formData.get("supplierId"));
+    if (!supplierId) return { error: "Say who delivered it." };
+
+    const receivedOn = text(formData.get("receivedOn"), 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(receivedOn)) return { error: "Give the day it arrived." };
+
+    /* Read in pairs, the way the rows are drawn. A line with an item and no
+       quantity is somebody mid-typing, not an error — it is dropped. A
+       quantity with no item is the opposite and is also dropped, because
+       there is no shelf to put it on. */
+    const itemIds = formData.getAll("receivedItemId").map((v) => validId(v));
+    const quantities = formData.getAll("receivedQuantity");
+    const lines: { priceItemId: string; quantity: number }[] = [];
+    for (let i = 0; i < itemIds.length; i++) {
+      const priceItemId = itemIds[i];
+      if (!priceItemId) continue;
+      const quantity = decimal(quantities[i], 1_000_000, 3);
+      if (quantity === null) return { error: "A quantity could not be read as a number." };
+      if (quantity <= 0) continue;
+      lines.push({ priceItemId, quantity });
+    }
+
+    const result = await receiveGoods(q, {
+      supplierId,
+      reference: text(formData.get("reference"), 80) || null,
+      receivedOn,
+      note: multiline(formData.get("note"), 2000) || null,
+      lines,
+      userId: q.ctx.userId,
+    });
+    if ("error" in result) return { error: result.error };
+
+    logWrite("create", "goods_received", { id: result.id, actor: q.ctx.userId });
+    revalidateApp();
+    return {
+      ok: `Delivery recorded — ${result.moved} ${result.moved === 1 ? "item" : "items"} on the shelf.`,
     };
   });
 }
