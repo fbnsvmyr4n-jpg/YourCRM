@@ -186,7 +186,11 @@ describe("the status control", () => {
        disabled option, so the select tells the truth and still offers the moves
        forward.
     */
-    expect(view).toMatch(/r\.status === "awaiting_approval" \?/);
+    /* The branch is matched by what it ASKS, not by its whole text: it has
+       since grown a third condition (an issued credit note is finished too),
+       and a guard pinned to the full line fails on a change that leaves the
+       rule it protects exactly as it was. */
+    expect(view).toMatch(/!mayChangeStatus \|\| r\.status === "awaiting_approval"/);
     expect(view, "approved is back to being text-only").not.toMatch(
       /r\.status === "awaiting_approval" \|\| r\.status === "approved" \?/
     );

@@ -56,6 +56,35 @@ export const REASON_DIRECTION: Record<StockReason, "in" | "out" | "either"> = {
 };
 
 /**
+ * What happened to the goods on a credit note.
+ *
+ * Asked, never inferred. The same credit note means "two pallets came back to
+ * the yard" and "I knocked R5,000 off and they kept everything" — opposite
+ * facts about the shelf, and nothing in the document tells them apart.
+ *
+ * `none` is first because it is the DEFAULT, and the default is the answer
+ * whose mistake is survivable: stock put back that never arrived is a shelf
+ * claiming materials nobody can find, which gets quoted against and fails a
+ * job. Stock not put back that did arrive is one unnecessary purchase order,
+ * which a stock take corrects. Reasoning in full in `server/stock-credit.ts`.
+ */
+export const DISPOSITIONS = ["none", "resellable", "damaged"] as const;
+export type Disposition = (typeof DISPOSITIONS)[number];
+
+/**
+ * How each answer reads where somebody chooses it.
+ *
+ * Written as what the press DOES rather than as a category, because the control
+ * carrying these is the one that issues the credit note — so each says both
+ * halves of what is about to happen.
+ */
+export const DISPOSITION_LABEL: Record<Disposition, string> = {
+  none: "Issue — nothing comes back",
+  resellable: "Issue — goods back on the shelf",
+  damaged: "Issue — goods back, damaged",
+};
+
+/**
  * How a quantity reads on screen.
  *
  * Quantities are NUMERIC(14,3) because half a cubic metre of sand is a real

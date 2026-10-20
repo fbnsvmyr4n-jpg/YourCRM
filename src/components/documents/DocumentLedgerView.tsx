@@ -10,6 +10,7 @@ import { useFormDisclosure } from "@/lib/form-disclosure";
 import { useKeptForm } from "@/lib/use-kept-form";
 import { useCanWrite } from "@/components/shell/CanWrite";
 import { useMaySettle } from "@/components/shell/MaySettle";
+import { DISPOSITIONS, DISPOSITION_LABEL } from "@/data/stock";
 import { RecordPayment } from "@/components/documents/RecordPayment";
 import { useMoney } from "@/components/money/CurrencyProvider";
 import type { DocumentStatus } from "@/server/repos/projects";
@@ -221,6 +222,17 @@ export function DocumentLedgerView({
      status control on this screen asked for a tier they correctly do not hold.
   */
   const isCredit = copy.kind === "credit_note";
+  /*
+     AN ISSUED CREDIT NOTE IS FINISHED, so it shows its status as a word.
+
+     You cannot un-give somebody a document they are holding. Their copy says
+     they owe R17,250 less, and nothing pressed here reaches it — so the menu
+     would only offer two ways to make this screen disagree with the client:
+     cancelling it, and the one that looks like tidying rather than undoing,
+     moving it back to draft. The server refuses both; this is why the control
+     is not there to press.
+  */
+  const issuedCredit = (row: LedgerRow) => isCredit && row.status !== "draft";
   const docStatus = useKeptForm<FormState>(setDocumentStatusAction, undefined);
   const creditStatus = useKeptForm<FormState>(setCreditNoteStatusAction, undefined);
   const status = isCredit ? creditStatus : docStatus;
@@ -505,7 +517,7 @@ export function DocumentLedgerView({
                       </span>
                     )}
                   </p>
-                ) : !mayChangeStatus || r.status === "awaiting_approval" ? (
+                ) : !mayChangeStatus || r.status === "awaiting_approval" || issuedCredit(r) ? (
                   <p className="shrink-0 text-xs @min-[560px]:w-36 @min-[560px]:text-right">
                     <span className="capitalize" style={{ color: STATUS_TONE[r.status] }}>
                       {statusLabel(r.status)}
@@ -515,6 +527,41 @@ export function DocumentLedgerView({
                 ) : (
                   <form onSubmit={status.onSubmit} className="flex shrink-0 items-center gap-1.5 @min-[560px]:w-36 @min-[560px]:justify-end">
                     <input type="hidden" name="documentId" value={r.id} />
+                    {/*
+                       WHERE THE GOODS WENT — asked only when there are goods.
+
+                       A credit note cannot say by itself whether two pallets
+                       came back to the yard or the client kept everything and
+                       the bill was reduced. Those are opposite facts about the
+                       shelf, so the person issuing it is asked rather than
+                       guessed at.
+
+                       It sits BEFORE the status control, because it has to be
+                       answered before "Issue" is pressed — both post together,
+                       so whatever is showing here is what travels. And it
+                       defaults to "nothing comes back", which means the way to
+                       get this wrong by not noticing is the safe way: a shelf
+                       that understates costs a purchase order, while one
+                       claiming stock nobody can find costs a job.
+
+                       Gone once it is issued: there is nothing left to decide,
+                       and the movements are already written.
+                    */}
+                    {isCredit && r.hasStock && r.status === "draft" && (
+                      <select
+                        name="disposition"
+                        defaultValue="none"
+                        aria-label={`Where the goods on ${r.number} went`}
+                        disabled={status.pending}
+                        className="focus-ring rounded-lg border border-[var(--border)] bg-[var(--panel-solid)] px-2 py-1 text-xs"
+                      >
+                        {DISPOSITIONS.map((d) => (
+                          <option key={d} value={d}>
+                            {DISPOSITION_LABEL[d]}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                     <select
                       name="status"
                       /*

@@ -111,7 +111,10 @@ describe("a quotation that has been approved", () => {
     /* The two were treated as one state and are not. Awaiting approval means
        nobody has approved it, and picking its outcome from a menu is how an
        approval gets skipped. Approved means a named person already did. */
-    expect(ledger).toMatch(/\) : !mayChangeStatus \|\| r\.status === "awaiting_approval" \? \(/);
+    expect(ledger).toMatch(/\) : !mayChangeStatus \|\| r\.status === "awaiting_approval"/);
+    /* And `approved` is still NOT in that branch, which is the half that made
+       a quotation a dead end when the two were treated as one state. */
+    expect(ledger).not.toMatch(/r\.status === "awaiting_approval" \|\| r\.status === "approved"/);
   });
 
   it("may move FORWARD on the server, and never back to draft", () => {

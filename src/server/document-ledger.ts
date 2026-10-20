@@ -45,6 +45,15 @@ export type LedgerRow = {
   dueCents: number;
   /** Taken back by credit notes. Shown so an outstanding figure is explicable. */
   creditedCents: number;
+  /**
+   * Whether this document holds goods somebody counts.
+   *
+   * Only read on a credit note, where it decides whether issuing has to ask
+   * where the goods went. A credit note for labour, or for an overcharge on a
+   * service, has nothing to ask about — and a question with only one sensible
+   * answer is one people learn to click through without reading.
+   */
+  hasStock: boolean;
 };
 
 export type Ledger = {
@@ -95,6 +104,7 @@ export async function documentLedger(q: TenantQuery, kind: DocumentKind): Promis
     line_count: string;
     total_cents: string;
     received_cents: string;
+    has_stock: boolean;
   }>(
     `SELECT d.id, d.number, d.status, d.party,
             d.issued_on::text AS issued_on, d.sent_at, d.notes,
@@ -102,7 +112,20 @@ export async function documentLedger(q: TenantQuery, kind: DocumentKind): Promis
             d.deal_id AS project_id, deal.title AS project_title, deal.number AS project_number,
             COALESCE(lines.n, 0)::text AS line_count,
             COALESCE(lines.total, 0)::bigint::text AS total_cents,
-            COALESCE(paid.received, 0)::bigint::text AS received_cents
+            COALESCE(paid.received, 0)::bigint::text AS received_cents,
+            /* Whether this document holds goods somebody counts — which is
+               what decides if issuing it has to ask where they went. Asked of
+               the price item rather than the line, because only an item
+               PICKED from the list has a shelf: a hand-typed line could match
+               two suppliers' "Paving stone" and guessing is worse than not
+               asking. */
+            EXISTS (
+              SELECT 1 FROM document_lines l2
+               JOIN price_items pi
+                 ON pi.id = l2.price_item_id AND pi.sub_account_id = l2.sub_account_id
+               WHERE l2.sub_account_id = d.sub_account_id AND l2.document_id = d.id
+                 AND pi.track_stock = TRUE AND pi.deleted_at IS NULL
+            ) AS has_stock
        FROM documents d
        JOIN deals deal
          ON deal.id = d.deal_id AND deal.sub_account_id = d.sub_account_id
@@ -195,6 +218,7 @@ export async function documentLedger(q: TenantQuery, kind: DocumentKind): Promis
       receivedCents,
       dueCents,
       creditedCents,
+      hasStock: r.has_stock,
     };
   });
 

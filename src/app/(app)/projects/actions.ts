@@ -9,6 +9,7 @@ import { requireTenant, withCurrentTenant } from "@/server/tenant-session";
 import { email as validEmail, count, decimal, id as validId, multiline, pick, text } from "@/server/validate";
 import { recordManualPayment } from "@/server/repos/payments";
 import { PAYMENT_METHODS } from "@/data/payment-methods";
+import { DISPOSITIONS } from "@/data/stock";
 import { businessToday, getSettings } from "@/server/repos/settings";
 import { formatMoney } from "@/lib/money";
 
@@ -897,15 +898,44 @@ export async function setCreditNoteStatusAction(
   return withCurrentTenant(async (q) => {
     const documentId = validId(formData.get("documentId"));
     const status = pick(formData.get("status"), ["draft", "sent", "cancelled"] as const);
+    /* What happened to the goods, asked only where there are goods. Absent
+       means nothing came back, which is the default and the safe direction —
+       see `server/stock-credit.ts`. */
+    const disposition = pick(formData.get("disposition"), DISPOSITIONS) ?? "none";
     if (!documentId) return { error: "That credit note could not be identified." };
     if (!status) return { error: "Choose a status." };
 
-    const note = await q.one<{ number: string }>(
-      `SELECT number FROM documents
+    const note = await q.one<{ number: string; status: string }>(
+      `SELECT number, status FROM documents
         WHERE sub_account_id = $1 AND id = $2 AND kind = 'credit_note' AND deleted_at IS NULL`,
       [q.ctx.subAccountId, documentId]
     );
     if (!note) return { error: "That credit note no longer exists." };
+
+    /*
+       A CREDIT NOTE THE CLIENT ALREADY HAS CANNOT BE CALLED OFF.
+
+       The same rule that refuses an approved quotation back to draft, and for
+       the same reason: you cannot un-give somebody a document they are holding.
+       Their copy says they owe R17,250 less, and a status change here would not
+       reach it — the two would simply disagree, with this side looking right.
+
+       Back to DRAFT is refused for the same reason, and it is the one that
+       would be reached for: it looks like tidying rather than undoing, and it
+       quietly puts the full amount back on what the client owes.
+
+       It also keeps the shelf honest. Issuing can put goods back; un-issuing
+       would have to take them off again, and there is no honest word for that
+       movement — the goods did not sell, were not written off, and were not
+       counted. Rather than invent one, the transition is refused and the answer
+       is the one a bookkeeper would actually give.
+    */
+    const alreadyIssued = note.status !== "draft";
+    if (alreadyIssued && status !== note.status) {
+      return {
+        error: `${note.number} has already been issued to the client. Raise a new invoice to charge it back — changing it here would not change their copy.`,
+      };
+    }
 
     await q.rows(
       `UPDATE documents SET status = $3, updated_at = NOW()
@@ -913,15 +943,47 @@ export async function setCreditNoteStatusAction(
       [q.ctx.subAccountId, documentId, status]
     );
 
+    /* The goods move at the moment it is ISSUED, mirroring the sale: stock
+       leaves when an invoice is raised, so it comes back when the credit note
+       that undoes it is given out. Only on the way in to `sent` — re-issuing
+       something already issued moves nothing, and the unique index behind the
+       line says so a second time. */
+    let items = 0;
+    if (status === "sent" && !alreadyIssued) {
+      const { restockForCreditNote } = await import("@/server/stock-credit");
+      ({ items } = await restockForCreditNote(q, documentId, disposition, q.ctx.userId));
+    }
+
     logWrite("update", "credit_note", { id: documentId, actor: q.ctx.userId });
     revalidateApp();
-    /* Said as what it does to the bill rather than as a word. "Sent" is the
-       status; what the bookkeeper needs to read back is that the client now
-       owes less — that is the whole reason they pressed it. */
+
+    /*
+       Said as what it does to the bill and the shelf, rather than as a word.
+       "Sent" is the status; what the bookkeeper needs to read back is that the
+       client owes less and where the goods went.
+
+       The stock half is reported from what was actually WRITTEN, never from
+       what was asked for: a movement can fail quietly, and a screen that claims
+       it anyway is how a count stops being trusted.
+
+       ITEMS, never a quantity. The first version counted movement rows and
+       said "1 back on the shelf" when twenty paving stones had come back — a
+       true number read as the wrong fact, which is the worst kind. Quantities
+       cannot be added across items either, 20 m² and 3 days being 23 of
+       nothing, so the honest unit here is the line.
+    */
+    const n = items === 1 ? "1 item" : `${items} items`;
+    const stockSaid =
+      items === 0
+        ? ""
+        : disposition === "damaged"
+          ? ` Stock for ${n} came back and was written off as damaged.`
+          : ` Stock for ${n} is back on the shelf.`;
+
     return {
       ok:
         status === "sent"
-          ? `${note.number} issued — it now comes off what the client owes.`
+          ? `${note.number} issued — it now comes off what the client owes.${stockSaid}`
           : status === "cancelled"
             ? `${note.number} called off. Nothing comes off the bill.`
             : `${note.number} is back to a draft, so it reduces nothing yet.`,

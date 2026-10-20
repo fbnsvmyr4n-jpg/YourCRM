@@ -3539,6 +3539,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS stock_movements_once_per_line
   ON stock_movements (sub_account_id, document_line_id)
   WHERE document_line_id IS NOT NULL AND reason = 'sold';
 
+-- And one movement of each KIND per credit-note line: the same rule pointed
+-- the other way. Issuing a credit note puts goods back, and issuing it twice
+-- must not put them back twice.
+--
+-- Keyed on the reason as well as the line, because damaged goods coming back
+-- are TWO facts about one line — they came back, and they were written off —
+-- and both belong in the history. One row of each, never two of either.
+CREATE UNIQUE INDEX IF NOT EXISTS stock_movements_once_per_credit_line
+  ON stock_movements (sub_account_id, document_line_id, reason)
+  WHERE document_line_id IS NOT NULL AND reason IN ('returned', 'written_off');
+
 ALTER TABLE stock_movements ENABLE ROW LEVEL SECURITY;
 ALTER TABLE stock_movements FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS stock_movements_tenant_isolation ON stock_movements;
