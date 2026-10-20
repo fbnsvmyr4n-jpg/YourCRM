@@ -1,6 +1,7 @@
 import type { DocumentKind, DocumentStatus } from "./repos/projects";
 import { getSettings } from "./repos/settings";
-import { payableCents } from "./vat";
+import { owedCents } from "./vat";
+import { creditedForMany } from "./repos/credits";
 import { orderCounts, quoteCounts } from "./stage-money";
 import type { TenantQuery } from "./tenant";
 
@@ -42,6 +43,8 @@ export type LedgerRow = {
   /** What has arrived against it, and what is owed. Invoices only; 0 elsewhere. */
   receivedCents: number;
   dueCents: number;
+  /** Taken back by credit notes. Shown so an outstanding figure is explicable. */
+  creditedCents: number;
 };
 
 export type Ledger = {
@@ -67,6 +70,12 @@ export function documentCounts(kind: DocumentKind, status: DocumentStatus): bool
      has the money arrived. Not "does it count as revenue" — that is the
      quotation's job and `stage-money` answers it there. */
   if (kind === "invoice") return status === "paid";
+  /* A credit note counts once it has been GIVEN to the client, which is the
+     moment it starts reducing what they owe — the same set `repos/credits`
+     sums. A draft is somebody part-way through typing. */
+  if (kind === "credit_note") {
+    return status === "approved" || status === "sent" || status === "accepted" || status === "paid";
+  }
   return false;
 }
 
@@ -128,13 +137,24 @@ export async function documentLedger(q: TenantQuery, kind: DocumentKind): Promis
      settles. */
   const { vatRateBp, pricesIncludeVat } = await getSettings(q);
 
+  /* What has been taken back off each invoice. One query for the whole ledger;
+     asked per row it would be forty round trips to answer a question that is
+     almost always "nothing". */
+  const credited =
+    kind === "invoice" ? await creditedForMany(q, rows.map((r) => r.id)) : {};
+
   let countedCents = 0;
   let notCountedCents = 0;
   const mapped = rows.map((r) => {
     const totalCents = Number(r.total_cents);
     const counts = documentCounts(kind, r.status);
     const receivedCents = Number(r.received_cents);
-    const dueCents = kind === "invoice" ? payableCents(totalCents, vatRateBp, pricesIncludeVat) : 0;
+    const creditedCents = credited[r.id] ?? 0;
+    /* Net of credits: what the client must actually pay. The same `owedCents`
+       the settle rule uses, so this screen cannot show a figure the rule would
+       disagree with. */
+    const dueCents =
+      kind === "invoice" ? owedCents(totalCents, vatRateBp, pricesIncludeVat, creditedCents) : 0;
 
     if (kind === "invoice") {
       /*
@@ -174,6 +194,7 @@ export async function documentLedger(q: TenantQuery, kind: DocumentKind): Promis
       counts,
       receivedCents,
       dueCents,
+      creditedCents,
     };
   });
 
@@ -248,6 +269,18 @@ export const LEDGERS = {
     blurb: "What clients owe you, and what they have paid.",
     countedBlurb: "Money actually recorded against an invoice.",
     notCountedBlurb: "Still owed on invoices that have not been called off.",
+  },
+  credit_note: {
+    kind: "credit_note" as const,
+    prefix: "CN",
+    title: "Credit notes",
+    one: "credit note",
+    countedLabel: "Credited",
+    notCountedLabel: "Not issued yet",
+    partyLabel: "Client",
+    blurb: "What you have taken back off a client's bill.",
+    countedBlurb: "Given to the client, and off what they owe.",
+    notCountedBlurb: "Drafted and not yet issued, so still owed in full.",
   },
   purchase_order: {
     kind: "purchase_order" as const,

@@ -3,7 +3,8 @@ import type { SystemQuery, TenantQuery } from "../tenant";
 import { decryptSecret, encryptSecret } from "../secrets";
 import { addDays } from "../retainer-rules";
 import { checkKeyShape, verifySecretKey, type Verified } from "../paystack";
-import { payableCents } from "../vat";
+import { owedCents } from "../vat";
+import { creditedFor } from "./credits";
 import { wallClockToInstant } from "@/lib/zoned";
 import type { PaymentMethod } from "@/data/payment-methods";
 import { getSettings } from "./settings";
@@ -224,11 +225,29 @@ async function settle(
      the moment the pre-tax amount arrived: 15% short, marked settled, with
      nothing on any screen saying money was still outstanding. One function
      answers this for the pay page, the email, the printed sheet and this write
-     — `payableCents` in server/vat.ts — so none of them can drift.
+     — `owedCents` in server/vat.ts, built on `payableCents` — so none of them
+     can drift.
   */
   const settings = await getSettings(q);
-  const due = payableCents(total, settings.vatRateBp, settings.pricesIncludeVat);
-  const covered = received >= due;
+  /*
+     Net of credits, because a credit note is money the client no longer owes.
+
+     Compared against the gross instead, an invoice part-credited and then paid
+     in full would sit unsettled for ever: the client has paid everything they
+     were asked for, the chase task keeps firing, and nothing on any screen
+     explains the gap. `owedCents` is the one definition — the ledger, the
+     project screen and the pay page all ask it too.
+  */
+  const credited = await creditedFor(q, invoice.id);
+  const due = owedCents(total, settings.vatRateBp, settings.pricesIncludeVat, credited);
+  /*
+     Settled by MONEY, never by a credit alone.
+
+     An invoice cleared entirely by crediting it has not been paid, and marking
+     it so would put revenue on the books that nobody received. It is left
+     where it is, and the ledger shows it as credited — see `DocumentLedgerView`.
+  */
+  const covered = received > 0 && received >= due;
   if (covered) {
     await q.rows(
       `UPDATE documents SET status = 'paid', updated_at = now() WHERE sub_account_id = $1 AND id = $2`,

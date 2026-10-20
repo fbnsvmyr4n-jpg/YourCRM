@@ -9,12 +9,15 @@ import { clsx } from "@/lib/clsx";
 import { useFormDisclosure } from "@/lib/form-disclosure";
 import { useKeptForm } from "@/lib/use-kept-form";
 import { useCanWrite } from "@/components/shell/CanWrite";
+import { useMaySettle } from "@/components/shell/MaySettle";
 import { RecordPayment } from "@/components/documents/RecordPayment";
 import { useMoney } from "@/components/money/CurrencyProvider";
 import type { DocumentStatus } from "@/server/repos/projects";
 import type { LedgerRow } from "@/server/document-ledger";
 import {
   createDocumentAction,
+  raiseCreditNoteAction,
+  setCreditNoteStatusAction,
   setDocumentStatusAction,
   updateDocumentAction,
 } from "@/app/(app)/projects/actions";
@@ -49,7 +52,9 @@ export type Ledger = {
 };
 
 export type LedgerCopy = {
-  kind: "quote" | "purchase_order" | "invoice";
+  /* Written out rather than `DocumentKind`, because this is the set of kinds
+     that HAVE a ledger screen — adding a kind should not silently imply one. */
+  kind: "quote" | "purchase_order" | "invoice" | "credit_note";
   title: string;
   /** "quotation" / "purchase order", for sentences. */
   one: string;
@@ -133,6 +138,20 @@ const ROW_STATUSES: readonly DocumentStatus[] = [
   "cancelled",
 ];
 
+/**
+ * What a credit note's menu offers, which is not what a quotation's does.
+ *
+ * A credit note is not accepted or declined by anybody — it is given, or it is
+ * not. `sent` is the moment it starts coming off what the client owes (see
+ * `repos/credits`, where that is one of the issued statuses), and `cancelled`
+ * is changing your mind before it went.
+ *
+ * Offering a quotation's five here would have put "Declined" on a document the
+ * client has no say over, and a bookkeeper picking it would have quietly left
+ * the credit not counting with no word on the screen saying so.
+ */
+const CREDIT_STATUSES: readonly DocumentStatus[] = ["draft", "sent", "cancelled"];
+
 const SENDABLE_QUOTE: readonly DocumentStatus[] = ["draft", "awaiting_approval", "approved"];
 
 /**
@@ -171,6 +190,17 @@ export function DocumentLedgerView({
   const money = (cents: number) => format(cents, "exact");
   const [query, setQuery] = useState("");
   const canWrite = useCanWrite();
+  /*
+     Taking money back is the bookkeeper's, not the salesperson's.
+
+     `canWrite` means "may change CUSTOMER records" and is correctly false for
+     finance — so gating Credit on it hid the control from the one role whose
+     job it is, which is the same mistake that once denied them a reply button
+     and a price list. A credit note changes what a client owes and what this
+     business earned: the same decision as confirming money arrived, so the
+     same gate as `RecordPayment`.
+  */
+  const mayCredit = useMaySettle();
 
   const form = useKeptForm<FormState>(createDocumentAction, undefined);
   /* One form per kind, chosen once rather than per row: a quotation needs
@@ -179,8 +209,23 @@ export function DocumentLedgerView({
   const sendQuote = useKeptForm<FormState>(sendMyQuoteAction, undefined);
   const sendOrder = useKeptForm<FormState>(sendOrderAction, undefined);
   const send = copy.kind === "quote" ? sendQuote : sendOrder;
-  const status = useKeptForm<FormState>(setDocumentStatusAction, undefined);
   const edit = useKeptForm<FormState>(updateDocumentAction, undefined);
+  const credit = useKeptForm<FormState>(raiseCreditNoteAction, undefined);
+
+  /*
+     TWO STATUS ACTIONS, CHOSEN BY KIND — because they go through two doors.
+
+     Issuing a credit note is the bookkeeper's, gated on money; moving a
+     quotation along is the salesperson's, gated on customer access. Finance
+     could raise a credit note and then had nothing to press, because the only
+     status control on this screen asked for a tier they correctly do not hold.
+  */
+  const isCredit = copy.kind === "credit_note";
+  const docStatus = useKeptForm<FormState>(setDocumentStatusAction, undefined);
+  const creditStatus = useKeptForm<FormState>(setCreditNoteStatusAction, undefined);
+  const status = isCredit ? creditStatus : docStatus;
+  const mayChangeStatus = isCredit ? mayCredit : canWrite;
+  const statusChoices = isCredit ? CREDIT_STATUSES : ROW_STATUSES;
 
   /* Which row is open for editing, and the lines fetched for it. Null while
      they are still coming, so the form is not drawn half-populated — a line
@@ -337,6 +382,15 @@ export function DocumentLedgerView({
           </div>
         )}
 
+        {/* Raising a credit note creates a second document and changes what the
+            client owes, so it says which one and what to do next rather than
+            redrawing silently. */}
+        {credit.state && (
+          <div className="mb-4">
+            <Banner state={credit.state} />
+          </div>
+        )}
+
         {ledger.rows.length === 0 ? (
           <p className="py-10 text-center text-sm text-faint">
             {projects.length === 0
@@ -441,8 +495,17 @@ export function DocumentLedgerView({
                         {money(r.receivedCents)} of {money(r.dueCents)}
                       </span>
                     )}
+                    {/* Said on the row, because an outstanding figure smaller
+                        than the invoice total is otherwise unexplainable — and
+                        an unexplainable figure is one a bookkeeper stops
+                        trusting. */}
+                    {r.creditedCents > 0 && (
+                      <span className="block text-[11px]" style={{ color: "var(--amber)" }}>
+                        {money(r.creditedCents)} credited
+                      </span>
+                    )}
                   </p>
-                ) : !canWrite || r.status === "awaiting_approval" ? (
+                ) : !mayChangeStatus || r.status === "awaiting_approval" ? (
                   <p className="shrink-0 text-xs @min-[560px]:w-36 @min-[560px]:text-right">
                     <span className="capitalize" style={{ color: STATUS_TONE[r.status] }}>
                       {statusLabel(r.status)}
@@ -499,12 +562,12 @@ export function DocumentLedgerView({
                          Shown and disabled: the select tells the truth about
                          where the document is, cannot be used to re-enter the
                          state, and still offers the moves forward. */}
-                      {!ROW_STATUSES.includes(r.status) && (
+                      {!statusChoices.includes(r.status) && (
                         <option value={r.status} disabled className="capitalize">
                           {statusLabel(r.status)}
                         </option>
                       )}
-                      {ROW_STATUSES.map((v) => (
+                      {statusChoices.map((v) => (
                         <option key={v} value={v} className="capitalize">
                           {statusLabel(v)}
                         </option>
@@ -515,6 +578,32 @@ export function DocumentLedgerView({
                     )}
                   </form>
                 )}
+
+                {/*
+                   Taking back part of a bill.
+
+                   Offered on an invoice the client already has — a draft is
+                   changed directly, and `raiseCreditNote` refuses one. It sits
+                   here rather than on the job because correcting a bill is the
+                   bookkeeper's work, and this is their screen.
+                */}
+                {copy.kind === "invoice" &&
+                  mayCredit &&
+                  r.status !== "draft" &&
+                  r.status !== "cancelled" && (
+                    <form onSubmit={credit.onSubmit} className="shrink-0">
+                      <input type="hidden" name="invoiceId" value={r.id} />
+                      <button
+                        type="submit"
+                        disabled={credit.pending}
+                        className="focus-ring rounded-lg px-2.5 py-1 text-xs font-semibold disabled:opacity-60"
+                        style={{ color: "var(--amber)" }}
+                        title={`Raise a credit note against ${r.number}`}
+                      >
+                        {credit.pending ? "Raising…" : "Credit"}
+                      </button>
+                    </form>
+                  )}
 
                 {/* Where a bookkeeper actually does their job.
 

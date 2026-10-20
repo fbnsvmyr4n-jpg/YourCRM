@@ -7,6 +7,7 @@ import {
   ClipboardList,
   FileText,
   Receipt,
+  ReceiptText,
   Handshake,
   Headphones,
   Home,
@@ -119,6 +120,11 @@ export const NAV: NavSection[] = [
              finance role cannot go. */
           { label: "Invoices", href: "/invoices", icon: Receipt, isMoney: true },
           { label: "Purchase orders", href: "/purchase-orders", icon: ClipboardList, isMoney: true },
+          /* Taking money back. Its own row because the bookkeeper who raises a
+             credit note has to be able to reach the document afterwards, and
+             the job screen — where every other document can be opened — is the
+             one place `canAccessCrm` keeps them out of. */
+          { label: "Credit notes", href: "/credit-notes", icon: ReceiptText, isMoney: true },
         ],
       },
       /* Its own row at last.

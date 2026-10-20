@@ -99,7 +99,11 @@ describe("a quotation that has been approved", () => {
      there is nothing to press. The walk stopped here.
   */
   it("SHOWS ITS REAL STATUS in the menu, disabled rather than absent", () => {
-    expect(ledger).toMatch(/\{!ROW_STATUSES\.includes\(r\.status\) && \(/);
+    /* Asked of `statusChoices` — whichever list this ledger offers — rather
+       than of `ROW_STATUSES` by name. A credit note offers a shorter list, and
+       a rule written against one ledger's constant stops protecting the other
+       the moment a second list exists. */
+    expect(ledger).toMatch(/\{!statusChoices\.includes\(r\.status\) && \(/);
     expect(ledger).toMatch(/<option value=\{r\.status\} disabled className="capitalize">/);
   });
 
@@ -107,7 +111,7 @@ describe("a quotation that has been approved", () => {
     /* The two were treated as one state and are not. Awaiting approval means
        nobody has approved it, and picking its outcome from a menu is how an
        approval gets skipped. Approved means a named person already did. */
-    expect(ledger).toMatch(/\) : !canWrite \|\| r\.status === "awaiting_approval" \? \(/);
+    expect(ledger).toMatch(/\) : !mayChangeStatus \|\| r\.status === "awaiting_approval" \? \(/);
   });
 
   it("may move FORWARD on the server, and never back to draft", () => {

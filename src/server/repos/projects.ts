@@ -1,7 +1,8 @@
 import type { TenantQuery } from "../tenant";
 import type { Stage } from "./deals";
 import { getSettings } from "./settings";
-import { payableCents } from "../vat";
+import { owedCents } from "../vat";
+import { creditedForMany } from "./credits";
 
 /**
  * One project, and everything hanging off it.
@@ -184,7 +185,7 @@ export const LIVE_PROJECT_STAGES = ["prospect", "discovery", "demo", "won", "del
 
 /* ---------------- quotations and purchase orders ---------------- */
 
-export type DocumentKind = "quote" | "purchase_order" | "invoice";
+export type DocumentKind = "quote" | "purchase_order" | "invoice" | "credit_note";
 export type DocumentStatus =
   | "draft"
   /* An agent drafted it and nobody has said yes yet, then: a person has, and it
@@ -328,6 +329,10 @@ export async function projectDocuments(
     paid.set(row.document_id, Number(row.received));
   }
 
+  /* What has been taken back off each of this job's invoices. One query for
+     the whole job, like the payments above. */
+  const credited = await creditedForMany(q, docs.map((d) => d.id));
+
   const byDoc = new Map<string, DocumentLine[]>();
   for (const l of lines) {
     const line: DocumentLine = {
@@ -364,7 +369,10 @@ export async function projectDocuments(
       lines: docLines,
       totalCents,
       receivedCents: paid.get(d.id) ?? 0,
-      dueCents: payableCents(totalCents, vatRateBp, pricesIncludeVat),
+      /* Net of credits — the same `owedCents` the settle rule and the ledger
+         use, so the job screen cannot disagree with either about what is left
+         to pay. */
+      dueCents: owedCents(totalCents, vatRateBp, pricesIncludeVat, credited[d.id] ?? 0),
     };
   });
 }

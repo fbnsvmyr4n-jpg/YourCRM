@@ -23,10 +23,19 @@ import type { Quote } from "@/server/repos/quotes";
  * tax document — that is an addition to Settings, not to this file.
  */
 
+/*
+   What the document calls itself, at the top, where the client reads it.
+
+   `Record<string, string>` with a fallback of "Document", so a kind added
+   without a line here still prints — and prints something useless. A credit
+   note headed "Document" is a correction the client cannot file, so a new kind
+   belongs here the day it exists.
+*/
 const KIND_TITLE: Record<string, string> = {
   quote: "Quotation",
   purchase_order: "Purchase order",
   invoice: "Invoice",
+  credit_note: "Credit note",
 };
 
 const MONTHS = [

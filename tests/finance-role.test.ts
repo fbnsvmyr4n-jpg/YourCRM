@@ -111,10 +111,15 @@ describe("the figures on it", () => {
     );
   });
 
-  it("owes against what the client OWES, VAT included", () => {
-    /* The same `payableCents` the webhook settles by, so the figure on this
-       screen is the figure that settles. */
-    expect(read("src/server/document-ledger.ts")).toMatch(/payableCents\(totalCents, vatRateBp, pricesIncludeVat\)/);
+  it("owes against what the client OWES — VAT included, credits taken off", () => {
+    /* The same function the webhook settles by, so the figure on this screen is
+       the figure that settles. It is `owedCents` now rather than
+       `payableCents`: a credit note is money the client no longer owes, and a
+       bookkeeper's outstanding column that ignored one would be chasing people
+       for amounts that had already been taken back. */
+    expect(read("src/server/document-ledger.ts")).toMatch(
+      /owedCents\(totalCents, vatRateBp, pricesIncludeVat, creditedCents\)/
+    );
   });
 
   it("says what it means in its own words, rather than a quote's", () => {
@@ -150,13 +155,34 @@ describe("the quote and purchase-order ledgers", () => {
     */
     expect(view).toMatch(/\{canWrite && r\.status === "draft" && \(/);
     expect(view).toMatch(/\{canWrite && \(copy\.kind === "quote" \? SENDABLE_QUOTE : SENDABLE_ORDER\)/);
-    expect(view).toMatch(/\) : !canWrite \|\| r\.status === "awaiting_approval"/);
+    expect(view).toMatch(/\) : !mayChangeStatus \|\| r\.status === "awaiting_approval"/);
+  });
+
+  it("CHOOSE THAT GATE BY KIND, and a quotation's is still customer access", () => {
+    /*
+       The status control is the one place on this screen where the right
+       ability depends on WHICH ledger is being read, because the two go
+       through different doors on the server: moving a quotation along is
+       `setDocumentStatusAction` behind customer access, and issuing a credit
+       note is `setCreditNoteStatusAction` behind money.
+
+       Pinned as the whole choice rather than as one spelling. Written as a
+       bare `!canWrite` this guard passed while finance — who correctly fail
+       `canWrite` — could raise a credit note and then had nothing to press.
+       Written as a bare `!mayCredit` it would hand a bookkeeper every
+       quotation in the workspace. Both halves, or it pins neither.
+    */
+    expect(view).toMatch(/const isCredit = copy\.kind === "credit_note";/);
+    expect(view).toMatch(/const mayChangeStatus = isCredit \? mayCredit : canWrite;/);
+    expect(view).toMatch(/const mayCredit = useMaySettle\(\);/);
   });
 
   it("still show the status, because that is information", () => {
     /* The rule this whole pass keeps meeting from the other side: hiding a
        write must not blind the reader. The menu goes; the word stays. */
-    const textBranch = view.slice(view.indexOf(') : !canWrite || r.status === "awaiting_approval"'));
+    const textBranch = view.slice(
+      view.indexOf(') : !mayChangeStatus || r.status === "awaiting_approval"')
+    );
     expect(textBranch.slice(0, 400)).toMatch(/\{statusLabel\(r\.status\)\}/);
   });
 });

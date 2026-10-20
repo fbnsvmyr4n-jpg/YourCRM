@@ -102,6 +102,35 @@ export function payableCents(totalCents: number, rateBp: number, inclusive: bool
 }
 
 /**
+ * What is STILL owed, once credits are taken off.
+ *
+ * `payableCents` answers what the invoice says. This answers what the client
+ * must actually pay, which stops being the same number the moment a credit
+ * note exists — an overcharge corrected, goods returned, work billed and not
+ * done.
+ *
+ * It exists as its own function for exactly the reason `payableCents` does.
+ * Four places already work out what an invoice owes: the ledger, the project
+ * screen, the public pay page and the rule that settles it. If each subtracted
+ * credits itself, a client could be shown one figure on the pay page and
+ * another on their invoice — and the one that settles would be a third. One
+ * definition, four callers.
+ *
+ * Floored at zero. Crediting more than was invoiced is a mistake somebody
+ * should be told about rather than a negative demand sent to a client, and the
+ * screens refuse it before it gets here.
+ */
+export function owedCents(
+  totalCents: number,
+  rateBp: number,
+  inclusive: boolean,
+  creditedCents = 0
+): number {
+  const payable = payableCents(totalCents, rateBp, inclusive);
+  return Math.max(0, payable - Math.max(0, Math.round(creditedCents)));
+}
+
+/**
  * Integer division, rounded half away from zero.
  *
  * `Math.round` rounds half UP, which sends −0.5 to −0 rather than −1 — so a

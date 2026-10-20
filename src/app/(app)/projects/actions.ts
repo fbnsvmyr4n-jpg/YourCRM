@@ -845,6 +845,91 @@ export async function raiseInvoiceAction(_prev: FormState, formData: FormData): 
 }
 
 /**
+ * Take back part of a bill.
+ *
+ * Raised from the invoice it credits, with that invoice's own lines copied in
+ * so the correction cites the same descriptions and the same rates. It is a
+ * draft: nothing comes off what the client owes until it is issued.
+ *
+ * THE MONEY DOOR, not the default one. `withCurrentTenant` asks for customer
+ * records unless told otherwise, which is the right default and the wrong one
+ * here: a credit note is money paperwork raised by the bookkeeper, and finance
+ * holds no customer tier. Left on the default this threw `CrmAccessError` the
+ * first time a finance user pressed it — the screen said "something went
+ * wrong" for a permission working exactly as designed.
+ */
+export async function raiseCreditNoteAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  return withCurrentTenant(async (q) => {
+    const invoiceId = validId(formData.get("invoiceId"));
+    if (!invoiceId) return { error: "That invoice could not be identified." };
+
+    const { raiseCreditNote } = await import("@/server/credit-note");
+    const result = await raiseCreditNote(q, invoiceId);
+    if ("error" in result) return { error: result.error };
+
+    logWrite("create", "credit_note", { id: result.creditNoteId, actor: q.ctx.userId });
+    revalidateApp();
+    return {
+      ok: `${result.number} raised against ${result.forInvoice}, with its lines copied in. Take off what is not being credited, then issue it.`,
+    };
+  }, { money: true });
+}
+
+/**
+ * Issue a credit note, or call one off.
+ *
+ * Its own action because of the door. `setDocumentStatusAction` asks for
+ * customer access — right for a quotation, wrong here: finance holds the money
+ * tier and not the CRM one, so the role that can RAISE a credit note could not
+ * issue it. The document sat as a draft reducing nothing, with no control on
+ * the screen to move it, which is the same dead end the Credit button itself
+ * had one commit ago.
+ *
+ * Narrow on purpose. It refuses anything that is not a credit note, so the
+ * money door never becomes a second way to move a quotation along; and the two
+ * statuses beyond `draft` are the only ones that mean anything here — given to
+ * the client, or called off before it was.
+ */
+export async function setCreditNoteStatusAction(
+  _prev: FormState,
+  formData: FormData
+): Promise<FormState> {
+  return withCurrentTenant(async (q) => {
+    const documentId = validId(formData.get("documentId"));
+    const status = pick(formData.get("status"), ["draft", "sent", "cancelled"] as const);
+    if (!documentId) return { error: "That credit note could not be identified." };
+    if (!status) return { error: "Choose a status." };
+
+    const note = await q.one<{ number: string }>(
+      `SELECT number FROM documents
+        WHERE sub_account_id = $1 AND id = $2 AND kind = 'credit_note' AND deleted_at IS NULL`,
+      [q.ctx.subAccountId, documentId]
+    );
+    if (!note) return { error: "That credit note no longer exists." };
+
+    await q.rows(
+      `UPDATE documents SET status = $3, updated_at = NOW()
+        WHERE sub_account_id = $1 AND id = $2 AND kind = 'credit_note'`,
+      [q.ctx.subAccountId, documentId, status]
+    );
+
+    logWrite("update", "credit_note", { id: documentId, actor: q.ctx.userId });
+    revalidateApp();
+    /* Said as what it does to the bill rather than as a word. "Sent" is the
+       status; what the bookkeeper needs to read back is that the client now
+       owes less — that is the whole reason they pressed it. */
+    return {
+      ok:
+        status === "sent"
+          ? `${note.number} issued — it now comes off what the client owes.`
+          : status === "cancelled"
+            ? `${note.number} called off. Nothing comes off the bill.`
+            : `${note.number} is back to a draft, so it reduces nothing yet.`,
+    };
+  }, { money: true });
+}
+
+/**
  * Send an invoice to the client.
  *
  * Queued rather than sent inline, like a quotation: a demand for payment that

@@ -3681,6 +3681,39 @@ CREATE TRIGGER goods_received_lines_item_in_tenant
   FOR EACH ROW EXECUTE FUNCTION assert_received_line_item_in_tenant();
 
 -- ---------------------------------------------------------------------------
+-- Credit notes: taking back part of a bill.
+-- ---------------------------------------------------------------------------
+--
+-- A FOURTH `documents` KIND, where goods received deliberately was not.
+--
+-- The test is whose record it is. A delivery into the yard is about a supplier
+-- and belongs to no job, which is why it could not live in a table whose
+-- `deal_id` is NOT NULL. A credit note is the opposite: it is addressed to the
+-- client, it credits one of their invoices, and that invoice already belongs to
+-- a job. Everything `documents` brings — a number, lines, a party, a printable
+-- sheet, the status machinery — is wanted here, and nothing has to be bent for
+-- it to fit.
+ALTER TABLE documents DROP CONSTRAINT IF EXISTS documents_kind_check;
+ALTER TABLE documents ADD CONSTRAINT documents_kind_check
+  CHECK (kind IN ('quote', 'purchase_order', 'invoice', 'credit_note'));
+
+-- WHICH invoice this credits.
+--
+-- Required in practice and not by the column, because the constraint cannot
+-- say "only when kind = credit_note" without also saying "never otherwise" —
+-- and a CHECK across two columns here would have to be rewritten every time a
+-- kind is added. The action refuses a credit note without one.
+--
+-- ON DELETE SET NULL rather than CASCADE: a credit note is a document the
+-- client has, and it does not stop existing because the invoice it refers to
+-- was removed. Orphaned it still reads as "R2,400 credited", which is true.
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS credits_document_id TEXT
+  REFERENCES documents(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS documents_credits_idx
+  ON documents (sub_account_id, credits_document_id)
+  WHERE credits_document_id IS NOT NULL AND deleted_at IS NULL;
+
+-- ---------------------------------------------------------------------------
 -- What the application's own database role may do.
 --
 -- KEEP THIS THE LAST BLOCK IN THE FILE: `GRANT … ON ALL TABLES` covers only the

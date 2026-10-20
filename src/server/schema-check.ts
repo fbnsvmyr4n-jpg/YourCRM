@@ -209,6 +209,9 @@ export const EXPECTED_COLUMNS: ReadonlyArray<[string, string]> = [
   ["stock_movements", "document_line_id"],
   /* The delivery line that put stock on — what makes receiving idempotent. */
   ["stock_movements", "received_line_id"],
+  /* Which invoice a credit note takes back part of. Read wherever an invoice's
+     outstanding figure is worked out, which is four screens. */
+  ["documents", "credits_document_id"],
 ];
 
 export type SchemaCheck = {

@@ -13,7 +13,8 @@ import {
 } from "../repos/payments";
 import { initializeTransaction, paystackTakes, verifyTransaction } from "../paystack";
 import { appUrl } from "../billing/stripe";
-import { payableCents, vatBreakdown } from "../vat";
+import { owedCents, vatBreakdown } from "../vat";
+import { creditedFor } from "../repos/credits";
 import type { CurrencyCode } from "@/lib/money";
 import { logWrite } from "../log";
 
@@ -79,10 +80,15 @@ export async function loadPayPage(token: string): Promise<PayPage> {
        undercharge every invoice by the rate, silently, with the shortfall only
        appearing in a VAT return. One function decides this for the printed
        sheet, the email, this page and the card charge, so the four cannot
-       drift apart: `payableCents` in server/vat.ts.
+       drift apart: `owedCents` in server/vat.ts, which is `payableCents` less
+       whatever has been credited back.
     */
     const vat = vatBreakdown(invoice.totalCents, settings.vatRateBp, settings.pricesIncludeVat);
-    const due = payableCents(invoice.totalCents, settings.vatRateBp, settings.pricesIncludeVat);
+    /* Net of credits. A client who was credited and then shown the gross would
+       be asked for money they no longer owe — on the one page that takes a
+       card. */
+    const credited = await creditedFor(q, invoice.id);
+    const due = owedCents(invoice.totalCents, settings.vatRateBp, settings.pricesIncludeVat, credited);
     const outstanding = Math.max(0, due - received);
 
     let state: "payable" | "paid" | "unavailable" = "payable";

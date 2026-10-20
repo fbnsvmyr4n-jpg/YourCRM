@@ -163,12 +163,32 @@ describe("a business that charges no VAT", () => {
 });
 
 describe("one answer, in every place that states it", () => {
-  it("THE SETTLEMENT AND THE PAY PAGE BOTH ASK `payableCents`", () => {
-    /* Not two copies of the same `if`. The four surfaces a client meets — the
+  it("THE SETTLEMENT AND THE PAY PAGE BOTH ASK THE SAME FUNCTION", () => {
+    /*
+       Not two copies of the same `if`. The four surfaces a client meets — the
        printed sheet, the emailed copy, the pay page and the card charge — are
-       only consistent because they share one function. */
-    expect(read("../src/server/repos/payments.ts")).toMatch(/payableCents\(/);
-    expect(read("../src/server/pay/pay.ts")).toMatch(/payableCents\(/);
+       only consistent because they share one function.
+
+       That function is now `owedCents`, which is `payableCents` less whatever
+       has been credited back. The property is unchanged and the reason for it
+       is stronger: a credit note moves what is owed, so four places subtracting
+       it themselves would be four chances to show a client a figure the rule
+       that settles would disagree with.
+    */
+    expect(read("../src/server/repos/payments.ts")).toMatch(/owedCents\(/);
+    expect(read("../src/server/pay/pay.ts")).toMatch(/owedCents\(/);
+    /* And the two screens that state the same number. */
+    expect(read("../src/server/document-ledger.ts")).toMatch(/owedCents\(/);
+    expect(read("../src/server/repos/projects.ts")).toMatch(/owedCents\(/);
+  });
+
+  it("every one of them nets off CREDITS, from the same query", () => {
+    /* Four different shapes of load — one row, one job, one ledger, one token —
+       and one definition of how much has been taken back. */
+    expect(read("../src/server/repos/payments.ts")).toMatch(/creditedFor\(q, invoice\.id\)/);
+    expect(read("../src/server/pay/pay.ts")).toMatch(/creditedFor\(q, invoice\.id\)/);
+    expect(read("../src/server/document-ledger.ts")).toMatch(/creditedForMany\(/);
+    expect(read("../src/server/repos/projects.ts")).toMatch(/creditedForMany\(/);
   });
 
   it("the emailed copy carries the same split as the sheet", () => {
