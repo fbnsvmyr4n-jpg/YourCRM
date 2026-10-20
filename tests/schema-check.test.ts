@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { EXPECTED_COLUMNS, EXPECTED_TABLES } from "../src/server/schema-check";
+import { EXPECTED_COLUMNS, EXPECTED_INDEXES, EXPECTED_TABLES } from "../src/server/schema-check";
 import { startTestDb, type TestDb } from "./helpers/pg";
 
 /**
@@ -25,6 +25,12 @@ const declaredTables = [...SCHEMA.matchAll(/CREATE TABLE IF NOT EXISTS (\w+)/g)]
 const declaredColumns = [
   ...SCHEMA.matchAll(/ALTER TABLE (\w+) ADD COLUMN IF NOT EXISTS (\w+)/g),
 ].map((m) => [m[1], m[2]] as [string, string]);
+/* An index dropped later in the file is superseded, not expected — the
+   database must NOT have it. */
+const droppedIndexes = new Set([...SCHEMA.matchAll(/DROP INDEX IF EXISTS (\w+)/gi)].map((m) => m[1]));
+const declaredIndexes = [...SCHEMA.matchAll(/CREATE (?:UNIQUE )?INDEX IF NOT EXISTS (\w+)/gi)]
+  .map((m) => m[1])
+  .filter((n) => !droppedIndexes.has(n));
 
 describe("the drift detector has not drifted", () => {
   it("reads the schema (a suite matching nothing proves nothing)", () => {
@@ -69,6 +75,37 @@ describe("the drift detector has not drifted", () => {
     }
   });
 
+  it("expects every index the schema creates", () => {
+    /*
+       Added after a dry run said "Up to date" against a production database
+       missing `stock_movements_once_per_credit_line`. Many of these indexes are
+       how this product makes something happen ONCE — a sale, a delivery, a
+       credit note, a price-list load — so a missing one does not slow anything
+       down. It lets the thing happen twice, silently.
+    */
+    expect(declaredIndexes.length, "no indexes found — the detector is broken").toBeGreaterThan(50);
+    const listed = new Set<string>(EXPECTED_INDEXES);
+    const missing = declaredIndexes.filter((i) => !listed.has(i));
+    expect(
+      missing,
+      `schema.sql creates ${missing.join(", ")}, which the health check does not look for`
+    ).toEqual([]);
+  });
+
+  it("expects no index the schema does not create, or drops", () => {
+    /* A dropped index left on the list would make the check permanently
+       STALE on a correctly migrated database, which trains everybody to
+       ignore it — and `price_items_name_once` is exactly that case. */
+    const declared = new Set(declaredIndexes);
+    const extra = EXPECTED_INDEXES.filter((i) => !declared.has(i));
+    expect(extra, `the health check expects ${extra.join(", ")}, which schema.sql does not leave in place`).toEqual([]);
+    expect(EXPECTED_INDEXES).not.toContain("price_items_name_once");
+  });
+
+  it("lists each index once", () => {
+    expect(new Set(EXPECTED_INDEXES).size).toBe(EXPECTED_INDEXES.length);
+  });
+
   it("lists no column the schema does not add", () => {
     const declared = new Set(declaredColumns.map(([t, c]) => `${t}.${c}`));
     for (const [table, column] of EXPECTED_COLUMNS) {
@@ -106,6 +143,7 @@ describe("the check actually reports a stale database", () => {
     const result = await checkSchema();
     expect(result.missingTables).toEqual([]);
     expect(result.missingColumns).toEqual([]);
+    expect(result.missingIndexes).toEqual([]);
     expect(result.ok).toBe(true);
   });
 
@@ -126,6 +164,46 @@ describe("the check actually reports a stale database", () => {
     expect(result.ok, "a database missing a column reported as up to date").toBe(false);
     expect(result.missingColumns).toContain("agencies.billing_synced_at");
     await db.seed(SCHEMA);
+  });
+
+  it("NAMES A MISSING INDEX WHEN EVERY TABLE AND COLUMN IS THERE", async () => {
+    /*
+       The exact production state of 20 Oct 2026: all tables, all columns, and
+       the unique index that stops a credit note restocking twice absent. The
+       check said "the database matches this build". This is the case it must
+       now refuse to call ok.
+    */
+    await db.seed(`DROP INDEX IF EXISTS stock_movements_once_per_credit_line`);
+    const result = await checkSchema();
+    expect(result.missingTables).toEqual([]);
+    expect(result.missingColumns).toEqual([]);
+    expect(result.ok, "a database missing an index reported as up to date").toBe(false);
+    expect(result.missingIndexes).toEqual(["stock_movements_once_per_credit_line"]);
+    await db.seed(SCHEMA);
+  });
+});
+
+describe("the migration script sees indexes too", () => {
+  /* The dry run is what somebody reads before deciding to push. It said
+     "Up to date" while the index was missing, so it is the other half of the
+     fix — and it parses the file rather than reading the list, so it is
+     checked separately. */
+  const script = readFileSync(join(__dirname, "..", "scripts", "db-migrate.ts"), "utf8");
+
+  it("reports missing indexes", () => {
+    expect(script).toMatch(/FROM pg_indexes WHERE schemaname = 'public'/);
+    expect(script).toMatch(/Missing indexes: /);
+  });
+
+  it("does not call a database up to date while an index is missing", () => {
+    expect(script).toMatch(
+      /missingTables\.length === 0 && missingColumns\.length === 0 && missingIndexes\.length === 0/
+    );
+  });
+
+  it("does not expect an index the schema later drops", () => {
+    expect(script).toMatch(/DROP INDEX IF EXISTS/);
+    expect(script).toMatch(/!dropped\.has\(name\)/);
   });
 });
 

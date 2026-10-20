@@ -214,8 +214,122 @@ export const EXPECTED_COLUMNS: ReadonlyArray<[string, string]> = [
   ["documents", "credits_document_id"],
 ];
 
+/**
+ * Every index `schema.sql` creates, as of this build.
+ *
+ * Added on 20 Oct 2026, after the dry run reported "Up to date" against a
+ * production database that was missing `stock_movements_once_per_credit_line`.
+ * The check looked at tables and columns only, so an index was invisible to it
+ * — and many of these are not about speed at all. A UNIQUE index is how this
+ * product makes things happen ONCE: a sale takes the goods once, a delivery
+ * puts them on once, a credit note puts them back once, a supplier's email
+ * loads its price list once. Missing one of those does not slow anything down;
+ * it silently lets the thing happen twice, and nothing anywhere would say so.
+ *
+ * ALL of them rather than the unique ones, because choosing which matter is the
+ * hand-picked list that drifts. Pinned against the file in both directions by
+ * `tests/schema-check.test.ts`, so a new index absent from this list fails the
+ * suite rather than shipping unwatched.
+ */
+export const EXPECTED_INDEXES = [
+  "sub_accounts_agency_idx",
+  "sub_accounts_one_primary",
+  "users_agency_idx",
+  "users_email_unique",
+  "contacts_tenant_idx",
+  "contacts_owner_idx",
+  "deals_tenant_idx",
+  "deals_stage_idx",
+  "deals_split_idx",
+  "deals_source_idx",
+  "companies_tenant_idx",
+  "meetings_tenant_idx",
+  "messages_tenant_idx",
+  "activities_entity_idx",
+  "calls_tenant_idx",
+  "chat_messages_tenant_idx",
+  "password_resets_user_idx",
+  "password_resets_expiry_idx",
+  "login_attempts_lock_idx",
+  "voice_sessions_stale_idx",
+  "stripe_events_agency_idx",
+  "deals_lost_at_idx",
+  "agencies_referral_code_key",
+  "referral_credits_agency_idx",
+  "referral_credits_invoice_key",
+  "usage_events_tenant_idx",
+  "usage_events_kind_idx",
+  "users_directory_idx",
+  "deals_company_idx",
+  "project_people_user_once",
+  "project_people_contact_once",
+  "project_people_deal_idx",
+  "documents_number_once",
+  "documents_deal_idx",
+  "document_lines_doc_idx",
+  "messages_thread_idx",
+  "messages_deal_idx",
+  "price_items_tenant_idx",
+  "project_tasks_deal_idx",
+  "project_task_deps_once",
+  "project_task_deps_tenant_idx",
+  "project_task_deps_upstream_idx",
+  "workspace_holidays_once",
+  "workspace_holidays_tenant_idx",
+  "booking_links_slug",
+  "booking_links_tenant_idx",
+  "agent_tool_executions_once",
+  "agent_tool_executions_call_idx",
+  "call_analysis_tenant_idx",
+  "outbox_dedupe_key",
+  "outbox_ready_idx",
+  "outbox_tenant_idx",
+  "document_lines_task_idx",
+  "messages_delivery_idx",
+  "automations_tenant_idx",
+  "automation_runs_tenant_idx",
+  "custom_fields_label_once",
+  "custom_fields_tenant_idx",
+  "custom_field_values_contact_once",
+  "custom_field_values_deal_once",
+  "custom_field_values_tenant_idx",
+  "todos_open_idx",
+  "todos_contact_idx",
+  "todos_deal_idx",
+  "tags_name_once",
+  "contact_tags_tag_idx",
+  "contact_views_name_once",
+  "tickets_thread_once",
+  "tickets_queue_idx",
+  "retainers_due_idx",
+  "retainers_deal_idx",
+  "documents_retainer_period_once",
+  "documents_pay_token_once",
+  "invoice_payments_reference_once",
+  "invoice_payments_document_idx",
+  "todos_source_once",
+  "message_templates_name_once",
+  "audit_events_tenant_idx",
+  "deals_number_once",
+  "suppliers_tenant_idx",
+  "price_items_supplier_idx",
+  "price_items_name_once_per_supplier",
+  "message_drafts_mine_idx",
+  "price_list_loads_tenant_idx",
+  "price_list_loads_once_per_message",
+  "document_lines_price_item_idx",
+  "stock_movements_item_idx",
+  "stock_movements_once_per_line",
+  "stock_movements_once_per_credit_line",
+  "goods_received_tenant_idx",
+  "goods_received_lines_idx",
+  "stock_movements_once_per_received_line",
+  "documents_credits_idx",
+] as const;
+
 export type SchemaCheck = {
   ok: boolean;
   missingTables: string[];
   missingColumns: string[];
+  missingIndexes: string[];
 };

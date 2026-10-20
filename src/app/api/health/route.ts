@@ -126,6 +126,7 @@ export async function GET() {
               : `STALE: run \`npm run db:migrate\` — missing ${[
                   ...schema.missingTables,
                   ...schema.missingColumns,
+                  ...schema.missingIndexes.map((i) => `index ${i}`),
                 ].join(", ")}`,
         billing: !billingOn
           ? "not configured — plans cannot be changed (STRIPE_SECRET_KEY unset)"

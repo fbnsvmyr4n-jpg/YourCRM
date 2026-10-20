@@ -1,5 +1,5 @@
 import { Pool } from "pg";
-import { EXPECTED_COLUMNS, EXPECTED_TABLES, type SchemaCheck } from "./schema-check";
+import { EXPECTED_COLUMNS, EXPECTED_INDEXES, EXPECTED_TABLES, type SchemaCheck } from "./schema-check";
 
 /**
  * Postgres-backed storage.
@@ -62,10 +62,26 @@ export async function checkSchema(): Promise<SchemaCheck> {
     }
   }
 
+  /*
+     Indexes too, asked whatever else is missing.
+
+     Not gated on the tables being present, unlike the columns: a missing table
+     takes its indexes with it, and naming them adds nothing — but an index
+     missing from a table that IS there is the case this exists for, and it
+     must not hide behind an unrelated gap. See `EXPECTED_INDEXES` for why an
+     index is a correctness fact here and not a performance one.
+  */
+  const idx = await getPool().query<{ indexname: string }>(
+    `SELECT indexname FROM pg_indexes WHERE schemaname = 'public'`
+  );
+  const indexed = new Set(idx.rows.map((r) => r.indexname));
+  const missingIndexes = EXPECTED_INDEXES.filter((i) => !indexed.has(i));
+
   return {
-    ok: missingTables.length === 0 && missingColumns.length === 0,
+    ok: missingTables.length === 0 && missingColumns.length === 0 && missingIndexes.length === 0,
     missingTables: [...missingTables],
     missingColumns,
+    missingIndexes: [...missingIndexes],
   };
 }
 

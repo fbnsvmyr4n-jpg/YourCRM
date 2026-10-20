@@ -29,12 +29,20 @@ const SCHEMA = readFileSync(join(process.cwd(), "src", "server", "schema.sql"), 
 const dryRun = process.argv.includes("--dry-run");
 
 /** Every table and column the schema file declares. */
-function declared(sql: string): { tables: string[]; columns: string[] } {
+function declared(sql: string): { tables: string[]; columns: string[]; indexes: string[] } {
   const tables = [...sql.matchAll(/CREATE TABLE IF NOT EXISTS (\w+)/g)].map((m) => m[1]);
   const columns = [...sql.matchAll(/ALTER TABLE (\w+) ADD COLUMN IF NOT EXISTS (\w+)/g)].map(
     (m) => `${m[1]}.${m[2]}`
   );
-  return { tables, columns };
+  /* Indexes, because a dry run that cannot see them said "Up to date" on
+     20 Oct 2026 against a production database missing the unique index that
+     stops a credit note restocking twice. An index dropped later in the file
+     is superseded, not expected. */
+  const dropped = new Set([...sql.matchAll(/DROP INDEX IF EXISTS (\w+)/gi)].map((m) => m[1]));
+  const indexes = [...sql.matchAll(/CREATE (?:UNIQUE )?INDEX IF NOT EXISTS (\w+)/gi)]
+    .map((m) => m[1])
+    .filter((name) => !dropped.has(name));
+  return { tables, columns, indexes };
 }
 
 async function main() {
@@ -63,7 +71,7 @@ async function main() {
   });
   await client.connect();
 
-  const { tables, columns } = declared(SCHEMA);
+  const { tables, columns, indexes } = declared(SCHEMA);
 
   const present = await client.query<{ table_name: string }>(
     `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'`
@@ -82,11 +90,20 @@ async function main() {
     if (found.rowCount === 0) missingColumns.push(spec);
   }
 
-  if (missingTables.length === 0 && missingColumns.length === 0) {
-    console.log(`Up to date — all ${tables.length} tables present.`);
+  const presentIdx = await client.query<{ indexname: string }>(
+    `SELECT indexname FROM pg_indexes WHERE schemaname = 'public'`
+  );
+  const haveIdx = new Set(presentIdx.rows.map((r) => r.indexname));
+  const missingIndexes = indexes.filter((i) => !haveIdx.has(i));
+
+  if (missingTables.length === 0 && missingColumns.length === 0 && missingIndexes.length === 0) {
+    console.log(
+      `Up to date — all ${tables.length} tables and ${indexes.length} indexes present.`
+    );
   } else {
     if (missingTables.length) console.log(`Missing tables:  ${missingTables.join(", ")}`);
     if (missingColumns.length) console.log(`Missing columns: ${missingColumns.join(", ")}`);
+    if (missingIndexes.length) console.log(`Missing indexes: ${missingIndexes.join(", ")}`);
   }
 
   if (dryRun) {
