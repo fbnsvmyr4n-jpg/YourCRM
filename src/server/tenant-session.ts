@@ -340,15 +340,19 @@ export async function withTenantPage<T>(
    *
    * Same reasoning as the plan gate: throwing renders an error boundary, which
    * tells an IT admin the product is broken when the truth is that this screen
-   * is not theirs. Settings is where their work actually is, so that is where
-   * they go — and it opts out below, which is what stops this bouncing between
-   * the two forever.
+   * is not theirs. So they go HOME — which since 20 Oct 2026 is a page of
+   * their own, chosen by the same tiers. It used to be Settings, back when
+   * finance and IT had no home.
+   *
+   * Cannot loop. `/` never asks a door the reader lacks: it picks the home the
+   * reader's tier opens, and for a role it does not recognise it goes to
+   * Settings, which opts out below.
    */
   /* The same table, asked the same way. Not a second copy of the rule — see
      `DOORS`, and the bug that made it a table. */
   const { mayEnter: mayOpen } = doorFor(options, user.role);
   if (options.crmData !== false && !mayOpen) {
-    redirect("/settings");
+    redirect("/");
   }
 
   /**

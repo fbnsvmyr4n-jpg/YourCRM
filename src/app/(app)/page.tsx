@@ -11,7 +11,7 @@ import { listContacts } from "@/server/repos/contacts";
 import { listDeals } from "@/server/repos/deals";
 import { listMeetings } from "@/server/repos/meetings";
 import { listMessages, unreadCount } from "@/server/repos/inbox";
-import { canWrite } from "@/server/permissions";
+import { canAccessCrm, canAccessMail, canAccessMoney, canAccessOps, canWrite } from "@/server/permissions";
 import { getSettings } from "@/server/repos/settings";
 import { dueForUser } from "@/server/repos/todos";
 import { formatMoney, type CurrencyCode } from "@/lib/money";
@@ -19,8 +19,86 @@ import { DateTimeBar } from "./DateTimeBar";
 import { MobileSection } from "./MobileSection";
 import { instantToWallClock } from "@/lib/zoned";
 import { currentUser, withTenantPage } from "@/server/tenant-session";
+import { withSystem } from "@/server/tenant";
+import { redirect } from "next/navigation";
+import { businessToday } from "@/server/repos/settings";
+import { financeHome, itHomeAgency, itHomeTenant } from "@/server/role-home";
+import { FinanceHome } from "@/components/home/FinanceHome";
+import { ItHome } from "@/components/home/ItHome";
 
 export const dynamic = "force-dynamic";
+
+/**
+ * The home for a reader without customer access: finance, or IT.
+ *
+ * Money first, because an owner-like role holding money and operations would
+ * want the cash — but no such role exists today, so the order only matters for
+ * a role added later. Neither: Settings, which every role may open, so an
+ * unrecognised role still lands somewhere rather than in a redirect loop.
+ */
+async function RoleHomePage({ user }: { user: NonNullable<Awaited<ReturnType<typeof currentUser>>> }) {
+  const firstName = user.name.split(" ")[0] || "there";
+  const now = new Date();
+
+  const clock = (timeZone: string) => {
+    const hour = Number(instantToWallClock(now.toISOString(), timeZone)?.time.slice(0, 2) ?? now.getUTCHours());
+    return {
+      hello: greeting(hour),
+      weekday: now.toLocaleDateString("en-GB", { weekday: "long", timeZone }),
+      date: now.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone }),
+      month: now.toLocaleDateString("en-GB", { month: "long", timeZone }),
+    };
+  };
+
+  if (canAccessMoney(user.role)) {
+    const { data, currency, timeZone } = await withTenantPage(
+      async (q) => {
+        const settings = await getSettings(q);
+        const timeZone = settings.timeZone || "UTC";
+        return {
+          currency: settings.currency,
+          timeZone,
+          data: await financeHome(q, {
+            today: await businessToday(q),
+            timeZone,
+            mayReadMail: canAccessMail(user.role),
+          }),
+        };
+      },
+      { money: true }
+    );
+    const c = clock(timeZone);
+    return (
+      <div className="mx-auto flex max-w-[1500px] animate-fade-up flex-col gap-5">
+        <DateTimeBar timeZone={timeZone} initialWeekday={c.weekday} initialDate={c.date} />
+        <FinanceHome data={data} currency={currency} greeting={c.hello} name={firstName} monthName={c.month} timeZone={timeZone} />
+      </div>
+    );
+  }
+
+  if (canAccessOps(user.role)) {
+    const { tenant, timeZone } = await withTenantPage(
+      async (q) => {
+        const settings = await getSettings(q);
+        return { timeZone: settings.timeZone || "UTC", tenant: await itHomeTenant(q) };
+      },
+      { ops: true }
+    );
+    /* Separately, never nested: people and sign-in attempts are agency tables
+       read through a system query, and the dev database serves one session at
+       a time — a system query opened inside a tenant one waits for itself. */
+    const agency = await withSystem((q) => itHomeAgency(q, user.agencyId));
+    const c = clock(timeZone);
+    return (
+      <div className="mx-auto flex max-w-[1500px] animate-fade-up flex-col gap-5">
+        <DateTimeBar timeZone={timeZone} initialWeekday={c.weekday} initialDate={c.date} />
+        <ItHome tenant={tenant} agency={agency} greeting={c.hello} name={firstName} timeZone={timeZone} />
+      </div>
+    );
+  }
+
+  redirect("/settings");
+}
 
 function greeting(hour: number) {
   if (hour < 12) return "Good morning";
@@ -41,6 +119,21 @@ function relativeDay(iso: string, now: Date) {
 
 export default async function DashboardPage() {
   const me = await currentUser();
+
+  /*
+     ONE ADDRESS, A HOME FOR EACH KIND OF WORK.
+
+     This page is the sales dashboard, and every figure on it is customer work.
+     Finance and IT correctly cannot see that, so until now `/` sent them to
+     Settings — their first screen on signing in was their own profile.
+
+     Chosen by the same tier functions the server gates on, so a role cannot be
+     shown a home whose data it would then be refused. A role holding the
+     customer tier keeps this dashboard exactly as it was.
+  */
+  if (me && !canAccessCrm(me.role)) {
+    return <RoleHomePage user={me} />;
+  }
 
   const { contacts, meetingsToday, unread, wonDeals, revenueSeries, feed, report, followUps, upcoming, timeZone, myTasks, currency } =
     await withTenantPage(async (q) => {

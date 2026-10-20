@@ -28,6 +28,8 @@ export type LedgerRow = {
   /** Who it is for: the client on a quotation, the supplier on an order. */
   party: string | null;
   issuedOn: string | null;
+  /** When the client is due to have paid. Invoices only, and only if set. */
+  dueOn: string | null;
   sentAt: string | null;
   projectId: string;
   projectTitle: string;
@@ -95,6 +97,7 @@ export async function documentLedger(q: TenantQuery, kind: DocumentKind): Promis
     status: DocumentStatus;
     party: string | null;
     issued_on: string | null;
+    due_on: string | null;
     sent_at: Date | null;
     notes: string | null;
     party_email: string | null;
@@ -107,7 +110,7 @@ export async function documentLedger(q: TenantQuery, kind: DocumentKind): Promis
     has_stock: boolean;
   }>(
     `SELECT d.id, d.number, d.status, d.party,
-            d.issued_on::text AS issued_on, d.sent_at, d.notes,
+            d.issued_on::text AS issued_on, d.due_on::text AS due_on, d.sent_at, d.notes,
             COALESCE(d.party_email, c.email) AS party_email,
             d.deal_id AS project_id, deal.title AS project_title, deal.number AS project_number,
             COALESCE(lines.n, 0)::text AS line_count,
@@ -192,9 +195,19 @@ export async function documentLedger(q: TenantQuery, kind: DocumentKind): Promis
          So this asks the payments. Received is what has arrived; outstanding
          is what is still owed on anything not called off. The two always
          reconcile with the list, because they are made of the same numbers.
+
+         ── And not on a DRAFT ─────────────────────────────────────────────
+         A draft invoice is one the client has never been sent, so nothing on
+         it is owed yet. Counting drafts put a figure under "Outstanding" that
+         was, on the dev workspace, entirely one unsent invoice — R25,840.50 a
+         bookkeeper would read as money owed to the business, none of which
+         was. The finance home surfaces drafts separately, as work waiting to
+         go out, which is what they are.
       */
       countedCents += receivedCents;
-      if (r.status !== "cancelled") notCountedCents += Math.max(0, dueCents - receivedCents);
+      if (r.status !== "cancelled" && r.status !== "draft") {
+        notCountedCents += Math.max(0, dueCents - receivedCents);
+      }
     } else if (counts) {
       countedCents += totalCents;
     } else {
@@ -206,6 +219,7 @@ export async function documentLedger(q: TenantQuery, kind: DocumentKind): Promis
       status: r.status,
       party: r.party,
       issuedOn: r.issued_on,
+      dueOn: r.due_on,
       sentAt: r.sent_at ? r.sent_at.toISOString() : null,
       projectId: r.project_id,
       projectTitle: r.project_title,
@@ -292,7 +306,7 @@ export const LEDGERS = {
     partyLabel: "Client",
     blurb: "What clients owe you, and what they have paid.",
     countedBlurb: "Money actually recorded against an invoice.",
-    notCountedBlurb: "Still owed on invoices that have not been called off.",
+    notCountedBlurb: "Still owed on invoices the client has been sent.",
   },
   credit_note: {
     kind: "credit_note" as const,

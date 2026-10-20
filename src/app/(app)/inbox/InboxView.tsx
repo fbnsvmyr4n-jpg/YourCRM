@@ -265,12 +265,18 @@ export function InboxView({
     useCallback(
       (carried: Record<string, string>) => {
         const to = carried.to?.trim();
-        if (to && !draftHasWriting) save({ ...draft, to });
+        /* A subject can arrive too — "INV-1002 — payment overdue" from the
+           finance home's chase list — and follows the same rule as the
+           address: it never overwrites somebody's unsent writing. */
+        const subject = carried.subject?.trim();
+        if ((to || subject) && !draftHasWriting) {
+          save({ ...draft, ...(to ? { to } : {}), ...(subject ? { subject } : {}) });
+        }
         setComposeOpen(true);
       },
       [draft, draftHasWriting, save]
     ),
-    ["to"]
+    ["to", "subject"]
   );
   const [busy, setBusy] = useState(false);
   /**

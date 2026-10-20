@@ -93,7 +93,11 @@ export type NavSection = {
 
 export const NAV: NavSection[] = [
   {
-    items: [{ label: "Home", href: "/", icon: Home }],
+    /* Every role's, since 20 Oct 2026. `/` chooses the home by tier — the
+       sales dashboard, the finance home, or IT's — so this row is never a
+       door into data the reader cannot see. Before that, finance and IT had
+       no Home row at all and signed in to Settings. */
+    items: [{ label: "Home", href: "/", icon: Home, needsCrm: false }],
   },
   {
     heading: "Communication",

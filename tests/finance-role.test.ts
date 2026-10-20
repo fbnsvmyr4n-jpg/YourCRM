@@ -107,8 +107,18 @@ describe("the figures on it", () => {
     const ledger = read("src/server/document-ledger.ts");
     expect(ledger).toMatch(/countedCents \+= receivedCents;/);
     expect(ledger).toMatch(
-      /if \(r\.status !== "cancelled"\) notCountedCents \+= Math\.max\(0, dueCents - receivedCents\);/
+      /if \(r\.status !== "cancelled" && r\.status !== "draft"\) \{\s*notCountedCents \+= Math\.max\(0, dueCents - receivedCents\);/
     );
+  });
+
+  it("DOES NOT CALL A DRAFT OUTSTANDING — the client has never been sent it", () => {
+    /*
+       On the dev workspace the whole Outstanding figure, R25,840.50, was one
+       unsent draft. A bookkeeper reads that as money owed to the business; none
+       of it was. Drafts are work waiting to go out, and the finance home shows
+       them as exactly that.
+    */
+    expect(LEDGERS.invoice.notCountedBlurb).toBe("Still owed on invoices the client has been sent.");
   });
 
   it("owes against what the client OWES — VAT included, credits taken off", () => {

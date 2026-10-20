@@ -262,7 +262,9 @@ describe("the sidebar agrees with the server", () => {
   it("hides everything except the account screens", async () => {
     const { visibleNav, NAV } = await import("../src/components/shell/nav");
     const hrefs = visibleNav(NOBODY).flatMap((s) => s.items.map((i) => i.href));
-    expect(hrefs.sort()).toEqual(["/settings", "/support"]);
+    /* Home is among them since 20 Oct 2026: `/` picks a home by tier, so it is
+       never a door into data the reader cannot see. */
+    expect(hrefs.sort()).toEqual(["/", "/settings", "/support"]);
 
     // And the full list is genuinely bigger, so the assertion above is not
     // passing because the nav happens to be tiny.
@@ -301,7 +303,7 @@ describe("the sidebar agrees with the server", () => {
       .map((i) => i.href);
     /* Before this, an IT admin's entire product was Settings and Support, with
        a notification badge that never cleared and nothing behind it. */
-    expect(forIt.sort()).toEqual(["/settings", "/support", "/system"]);
+    expect(forIt.sort()).toEqual(["/", "/settings", "/support", "/system"]);
   });
 
   it("drops sections that empty out rather than leaving a bare heading", async () => {
@@ -311,12 +313,21 @@ describe("the sidebar agrees with the server", () => {
     }
   });
 
-  it("a new page is hidden by default rather than exposed", () => {
+  it("a new page is hidden by default rather than exposed", async () => {
     // `needsCrm` is absent on everything that shows customer records, and only
-    // the two account screens say `needsCrm: false`. Written the other way round
-    // — an opt-IN flag — a page added without the flag would be visible to IT.
-    const exemptions = [...nav.matchAll(/needsCrm:\s*false/g)].length;
-    expect(exemptions, "more screens are exempt than the two account ones").toBe(2);
+    // the screens every role may open say `needsCrm: false`. Written the other
+    // way round — an opt-IN flag — a page added without the flag would be
+    // visible to IT.
+    //
+    // NAMED rather than counted. A count of three passes if somebody swaps one
+    // exempt screen for another; the list does not.
+    const { NAV } = await import("../src/components/shell/nav");
+    const exempt = NAV.flatMap((s) => s.items)
+      .filter((i) => i.needsCrm === false)
+      .map((i) => i.href)
+      .sort();
+    expect(exempt, "a screen was exempted from the customer-data rule").toEqual(["/", "/settings", "/support"]);
+    expect([...nav.matchAll(/needsCrm:\s*false/g)].length).toBe(3);
   });
 });
 
