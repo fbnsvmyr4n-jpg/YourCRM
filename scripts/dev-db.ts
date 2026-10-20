@@ -3,6 +3,7 @@ import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { hashPassword } from "../src/server/auth";
+import { oneReadyForQueryPerSync } from "./pglite-wire";
 
 /**
  * A local Postgres for development.
@@ -76,6 +77,12 @@ async function main() {
     );
     console.log(`seeded ${DEMO.email} / ${DEMO.password}`);
   }
+
+  // After the in-process schema and seed above, before the socket server
+  // serves anyone. Without it, one failed parameterised statement — a
+  // duplicate tag or saved-view name — desynchronises the app's connection
+  // until a restart. See pglite-wire.ts for the whole story.
+  oneReadyForQueryPerSync(db);
 
   const server = new PGLiteSocketServer({
     db,

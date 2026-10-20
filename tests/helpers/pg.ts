@@ -2,6 +2,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { oneReadyForQueryPerSync } from "../../scripts/pglite-wire";
 
 /**
  * A throwaway Postgres for repository tests, shaped like production.
@@ -67,6 +68,9 @@ export async function startTestDb(): Promise<TestDb> {
     INSERT INTO users (id, agency_id, sub_account_id, email, password_hash, name, role) VALUES
       ('${USER_A}', '${AGENCY}', '${TENANT_A}', 'a@test.local', 'x', 'Tester A', 'owner');
   `);
+
+  // After the in-process setup above, before the socket server: see pglite-wire.ts.
+  oneReadyForQueryPerSync(db);
 
   /**
    * A free port, found by retrying rather than by hoping — and taken from a
